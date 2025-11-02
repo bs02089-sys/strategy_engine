@@ -15,3 +15,6 @@ __pycache__/
 .idea/shelf/
 .idea/workspace.xml
 .idea/httpRequests/
+
+# local virtualenv used for vectorbt/testing
+vbt_312/
