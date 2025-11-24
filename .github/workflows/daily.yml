@@ -1,0 +1,28 @@
+name: USD/KRW 200SMA Hunter
+
+on:
+  schedule:
+    - cron: '0 0 * * *'   # Every day at 09:00 KST (UTC 00:00)
+  workflow_dispatch:
+
+jobs:
+  hunt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+          
+      - name: Install dependencies
+        run: |
+          pip install yfinance pandas python-dotenv requests
+          
+      - name: Create .env file
+        run: |
+          echo "DISCORD_WEBHOOK=${{ secrets.DISCORD_WEBHOOK }}" > .env
+          
+      - name: Run Dollar Hunter
+        run: python dollar_hunter.py
