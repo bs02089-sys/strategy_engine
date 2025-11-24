@@ -1,26 +1,15 @@
-# USD/KRW 200SMA Hunter
+# USD/KRW 200SMA Hunter (달러담으러)
 
-Daily alert bot that notifies you via Discord when USD/KRW falls **below the 200-day moving average** – the exact level professional FX dealers watch to accumulate dollars cheaply.
+"달러가 쌀 때만 담자!" 라는 생각으로 시작한 프로젝트
 
-## Why 200-day SMA?
-- Institutional "cheap dollar" line
-- Historically, buying below 200SMA → almost 100% profitable over 1–2 years
-- Simple, robust, one-rule strategy
+## 한국어 버전 (감성 100%)
+→ [`달러담으러.py`](달러담으러.py)  
+매일 아침 실행하면 "담아!" vs "대기" 귀엽게 알려줍니다
 
-## Setup (2 minutes)
+## English / Production version
+→ [`dollar_hunter.py`](dollar_hunter.py)  
+GitHub Actions + Discord webhook + .env support  
+매일 자동으로 디스코드 알림 전송
 
-1. Create a Discord webhook → copy URL
-2. GitHub Repo → Settings → Secrets → Add `DISCORD_WEBHOOK`
-3. Enable GitHub Actions → done!
-
-Bot runs **every day at 9:00 AM KST** automatically.
-
-## Sample Alerts
-
-**Normal day**  
-USD/KRW: 1,476 KRW → 67 KRW (4.7%) above SMA200 → Wait
-
-**HUNTING DAY**  
-@everyone DOLLAR HUNTING TIME!! USD/KRW just dropped to 1,405 KRW (below 200SMA!)
-
-Happy dollar hunting! 
+## 왜 200일선인가?
+외환 딜러들이 실제로 달러를 쌀 때 담는 기준선입니다.
