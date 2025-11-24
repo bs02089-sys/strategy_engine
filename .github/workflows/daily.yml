@@ -21,8 +21,7 @@ jobs:
           pip install yfinance pandas python-dotenv requests
           
       - name: Create .env file
-        run: |
-          echo "DISCORD_WEBHOOK=${{ secrets.DISCORD_WEBHOOK }}" > .env
+        run: echo "DISCORD_WEBHOOK=${{ secrets.DISCORD_WEBHOOK }}" > .env
           
       - name: Run Dollar Hunter
         run: python dollar_hunter.py
