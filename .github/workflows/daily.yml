@@ -1,4 +1,4 @@
-name: USD/KRW 200SMA Hunter
+name: dollar_buy_alert
 
 on:
   schedule:
@@ -21,7 +21,7 @@ jobs:
           pip install yfinance pandas python-dotenv requests
           
       - name: Create .env file
-        run: echo "DISCORD_WEBHOOK=${{ secrets.DISCORD_WEBHOOK }}" > .env
+        run: echo "DISCORD_WEBHOOK_URL=${{ secrets.DISCORD_WEBHOOK_URL }}" > .env
           
-      - name: Run Dollar Hunter
-        run: python dollar_hunter.py
+      - name: Run dollar_buy_alert
+        run: python dollar_buy_alert.py
