@@ -9,12 +9,17 @@ import yfinance as yf
 import numpy as np
 import requests
 import subprocess
+import os
+from dotenv import load_dotenv
 
 # ===== 기본 설정 =====
 regular_invest = 330000        # 정기 적립식 금액
 extra_invest_unit = 167000     # 추가 매수 단위 금액
 current_rate = 1469.07         # 오늘 환율 (예시)
-discord_webhook_url = "YOUR_DISCORD_WEBHOOK_URL"  # 디스코드 웹훅 URL
+
+# 환경 변수 불러오기 (.env에서 디스코드 웹훅 주소 가져오기)
+load_dotenv()
+discord_webhook_url = os.getenv("DISCORD_WEBHOOK_URL")
 
 # ===== 날짜 관련 함수 =====
 def get_third_thursday(year: int, month: int) -> datetime.date:
@@ -66,14 +71,19 @@ def investment_plan(date: datetime.date, rate: float, thresholds: list):
 
 # ===== 디스코드 알림 =====
 def send_discord_alert(message: str):
-    if discord_webhook_url.startswith("http"):
+    if discord_webhook_url and discord_webhook_url.startswith("http"):
         data = {"content": message}
         requests.post(discord_webhook_url, json=data)
+
+# ===== 로그 기록 =====
+def write_log(message: str):
+    with open("log.txt", "a", encoding="utf-8") as f:
+        f.write(message + "\n")
 
 # ===== 깃허브 자동 푸시 =====
 def git_push(commit_message="Auto update SmartFXAllocator log"):
     try:
-        subprocess.run(["git", "add", "."], check=True)
+        subprocess.run(["git", "add", "log.txt"], check=True)
         subprocess.run(["git", "commit", "-m", commit_message], check=True)
         subprocess.run(["git", "push"], check=True)
         print("✅ GitHub 자동 푸시 완료")
@@ -118,6 +128,9 @@ print("===================================")
 # 디스코드 알림 전송
 alert_message = f"📢 SmartFXAllocator 알림: {today} | 총 매수 금액 {plan_today['total']}원"
 send_discord_alert(alert_message)
+
+# 로그 기록 추가
+write_log(alert_message)
 
 # 깃허브 자동 푸시
 git_push(f"SmartFXAllocator update {today}")
