@@ -1,4 +1,44 @@
+# 환경 설정
 .env
+.idea/
+.vscode/
+
+# Python 캐시 및 빌드
 __pycache__/
-*.pyc
+*.py[cod]
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+*.log
+
+# OS별 시스템 파일
 .DS_Store
+Thumbs.db
+
+# 가상환경 폴더
+venv/
+env/
+.vbt_312/
+vbt_312/
+
+# Jupyter Notebook 체크포인트
+.ipynb_checkpoints/
+
+# 데이터 파일
+*.sqlite3
+*.db
+*.pkl
+*.csv
+*.tsv
+
+# 테스트/백테스트 결과물
+*.bak
+*.out
+*.tmp
+*.npy
+*.npz
+
+# 기타
+log.txt
