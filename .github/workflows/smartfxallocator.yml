@@ -36,7 +36,7 @@ jobs:
           if [ -f log.txt ]; then
             git add log.txt
             git commit -m "Auto update log"
-            git push https://x-access-token:${{ secrets.DATA_REPO_TOKEN }}@github.com/USERNAME/SmartFXAllocator.git main
+            git push https://x-access-token:${{ secrets.DATA_REPO_TOKEN }}@github.com/bs02089-sys/DCA-Investment.git main
           else
             echo "log.txt not found, skipping commit."
           fi
