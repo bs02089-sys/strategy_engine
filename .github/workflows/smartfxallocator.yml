@@ -1,8 +1,8 @@
-name: dollar_buy_alert
+name: SmartFXAllocator
 
 on:
   schedule:
-    - cron: '0 0 * * *'   # Every day at 09:00 KST (UTC 00:00)
+    - cron: '30 14 * * *'   # Every day at 23:30 KST (UTC 14:30)
   workflow_dispatch:
 
 jobs:
@@ -23,5 +23,5 @@ jobs:
       - name: Create .env file
         run: echo "DISCORD_WEBHOOK_URL=${{ secrets.DISCORD_WEBHOOK_URL }}" > .env
           
-      - name: Run dollar_buy_alert
-        run: python dollar_buy_alert.py
+      - name: Run SmartFXAllocator
+        run: python SmartFXAllocator.py
