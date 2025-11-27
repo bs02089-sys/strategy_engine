@@ -2,26 +2,29 @@ name: SmartFXAllocator
 
 on:
   schedule:
-    - cron: '30 14 * * *'   # Every day at 23:30 KST (UTC 14:30)
+    - cron: '30 14 * * *'   # 매일 23:30 KST (UTC 14:30)
   workflow_dispatch:
 
 jobs:
   hunt:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
-      
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.12'
-          
+
       - name: Install dependencies
         run: |
-          pip install yfinance pandas python-dotenv requests
-          
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
       - name: Create .env file
         run: echo "DISCORD_WEBHOOK_URL=${{ secrets.DISCORD_WEBHOOK_URL }}" > .env
-          
+
       - name: Run SmartFXAllocator
         run: python SmartFXAllocator.py
