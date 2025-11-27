@@ -29,10 +29,14 @@ jobs:
       - name: Run SmartFXAllocator
         run: python SmartFXAllocator.py
 
-      - name: Commit and Push log
+      - name: Commit and Push log (if exists)
         run: |
           git config --global user.name "SeanBot"
           git config --global user.email "your-email@example.com"
-          git add log.txt
-          git commit -m "Auto update log"
-          git push https://x-access-token:${{ secrets.DATA_REPO_TOKEN }}@github.com/USERNAME/SmartFXAllocator.git main
+          if [ -f log.txt ]; then
+            git add log.txt
+            git commit -m "Auto update log"
+            git push https://x-access-token:${{ secrets.DATA_REPO_TOKEN }}@github.com/USERNAME/SmartFXAllocator.git main
+          else
+            echo "log.txt not found, skipping commit."
+          fi
