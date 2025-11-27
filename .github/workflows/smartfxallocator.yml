@@ -28,3 +28,11 @@ jobs:
 
       - name: Run SmartFXAllocator
         run: python SmartFXAllocator.py
+
+      - name: Commit and Push log
+        run: |
+          git config --global user.name "SeanBot"
+          git config --global user.email "your-email@example.com"
+          git add log.txt
+          git commit -m "Auto update log"
+          git push https://x-access-token:${{ secrets.DATA_REPO_TOKEN }}@github.com/USERNAME/SmartFXAllocator.git main
