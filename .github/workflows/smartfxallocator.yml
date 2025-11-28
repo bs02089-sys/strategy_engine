@@ -1,0 +1,40 @@
+name: SmartFXAllocator Automation
+
+on:
+  schedule:
+    # 매일 오전 9시 (KST → 0시 UTC)
+    - cron: '0 0 * * *'
+    # 매일 오후 11시 30분 (KST → 14시 30분 UTC)
+    - cron: '30 14 * * *'
+  workflow_dispatch:      # 수동 실행도 가능
+
+jobs:
+  run-smartfxallocator:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install yfinance numpy python-dotenv requests
+
+      - name: Run SmartFXAllocator
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          python SmartFXAllocator.py
+
+      - name: Push log updates
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add log.txt
+          git commit -m "SmartFXAllocator auto update $(date +'%Y-%m-%d')"
+          git push
