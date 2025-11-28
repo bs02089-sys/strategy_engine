@@ -1,4 +1,4 @@
-# SmartFXAllocator
+# smartfxallocator
 # 환율 변동성 기반 정기 적립식 (전일 기준환율 자동 반영, 알림/출력 단일화)
 # 작성자: Copilot
 
