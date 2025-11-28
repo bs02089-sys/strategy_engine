@@ -2,10 +2,10 @@ name: smartfxallocator automation
 
 on:
   schedule:
-    # 매일 오전 9시 (KST → 0시 UTC)
-    - cron: '0 0 * * *'
-    # 매일 오후 11시 30분 (KST → 14시 30분 UTC)
-    - cron: '30 14 * * *'
+    # 매월 1일 0시 UTC → 한국시간 오전 9시 (월간 Ping)
+    - cron: '0 0 1 * *'
+    # 매월 셋째 주 목요일 0시 UTC → 한국시간 오전 9시 (정기 적립식 매수일)
+    - cron: '0 0 15-21 * 4'
   workflow_dispatch:      # 수동 실행도 가능
 
 permissions:
