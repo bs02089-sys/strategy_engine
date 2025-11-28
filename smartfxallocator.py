@@ -1,5 +1,5 @@
-# smartfxallocator
-# 환율 변동성 기반 정기 적립식 (전일 기준환율 자동 반영, 알림/출력 단일화)
+# smartfxallocator.py
+# 환율 변동성 기반 정기 적립식 (셋째 주 목요일 + 월간 Ping 알림)
 # 작성자: Copilot
 
 import os
@@ -10,7 +10,6 @@ import yfinance as yf
 import numpy as np
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
-import subprocess
 
 # ==============================
 # 환경 설정
@@ -88,21 +87,6 @@ def investment_plan(date: datetime.date, rate: float, thresholds: list):
         plan["note"] = "정기 적립식 아님"
     return plan
 
-def write_log(message: str):
-    """로그 파일 기록"""
-    with open("log.txt", "a", encoding="utf-8") as f:
-        f.write(message + "\n")
-
-def git_push(commit_message="SmartFXAllocator update"):
-    """GitHub 자동 푸시"""
-    try:
-        subprocess.run(["git", "add", "log.txt"], check=True)
-        subprocess.run(["git", "commit", "-m", commit_message], check=True)
-        subprocess.run(["git", "push"], check=True)
-        print("✅ GitHub 자동 푸시 완료")
-    except subprocess.CalledProcessError as e:
-        print("❌ GitHub 푸시 실패:", e)
-
 # ==============================
 # 메인 로직
 # ==============================
@@ -114,30 +98,8 @@ def main():
     current_rate, thresholds = get_rates()
     plan_today = investment_plan(today, current_rate, thresholds)
 
-    next_month = today.month + 1 if today.month < 12 else 1
-    next_year = today.year if today.month < 12 else today.year + 1
-    next_third_thursday = get_third_thursday(next_year, next_month)
-
-    # 콘솔 출력
-    print("========================================")
-    print("💱 [SmartFXAllocator]")
-    print(f"📅 오늘 날짜: {today}")
-    print(f"💵 전일 기준환율: {current_rate}")
-    print(f"📝 오늘 매수 여부: {plan_today['note']}")
-    print(f"💰 오늘 매수 금액: {plan_today['regular']}원")
-    print(f"➕ 추가 증액: {plan_today['extra']}원")
-    if plan_today["extra_notes"]:
-        print("⚡ 충족된 기준:")
-        for note in plan_today["extra_notes"]:
-            print(f"- {note}")
-    else:
-        print("⚠️ 오늘 추가 증액 없음")
-    print(f"💳 총 매수 금액: {plan_today['total']}원")
-    print(f"📅 다음 매수일: {next_third_thursday}")
-    print("========================================\n")
-
-    # Discord 알림
-    if plan_today["total"] > 0:
+    # 셋째 주 목요일일 때만 알림
+    if is_third_thursday(today):
         alert_message = (
             f"📢 SmartFXAllocator 알림\n"
             f"📅 {now_str} (KST)\n"
@@ -145,19 +107,9 @@ def main():
             f"💰 총 매수 금액: {plan_today['total']}원\n"
             f"📝 {plan_today['note']}"
         )
-    else:
-        alert_message = (
-            f"📢 SmartFXAllocator 알림\n"
-            f"📅 {now_str} (KST)\n"
-            f"💵 전일 기준환율: {current_rate}\n"
-            f"⚠️ 오늘은 매수 신호 없음"
-        )
+        send_discord(alert_message)
 
-    send_discord(alert_message)
-    write_log(alert_message)
-    git_push(f"SmartFXAllocator update {today}")  # ✅ 자동 푸시 실행
-
-    # 월간 Ping
+    # 월간 Ping (매월 1일)
     if today.day == 1:
         send_discord(f"✅ Monthly Ping: 시스템 정상 작동 중 ({now_str})")
 
