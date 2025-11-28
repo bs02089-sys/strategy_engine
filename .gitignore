@@ -1,7 +1,0 @@
-.env
-.vbt_312/
-vbt_312/
-.idea/
-__pycache__/
-*.pyc
-.DS_Store
