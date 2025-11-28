@@ -10,6 +10,7 @@ import yfinance as yf
 import numpy as np
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
+import subprocess
 
 # ==============================
 # 환경 설정
@@ -87,6 +88,21 @@ def investment_plan(date: datetime.date, rate: float, thresholds: list):
         plan["note"] = "정기 적립식 아님"
     return plan
 
+def write_log(message: str):
+    """로그 파일 기록"""
+    with open("log.txt", "a", encoding="utf-8") as f:
+        f.write(message + "\n")
+
+def git_push(commit_message="SmartFXAllocator update"):
+    """GitHub 자동 푸시"""
+    try:
+        subprocess.run(["git", "add", "log.txt"], check=True)
+        subprocess.run(["git", "commit", "-m", commit_message], check=True)
+        subprocess.run(["git", "push"], check=True)
+        print("✅ GitHub 자동 푸시 완료")
+    except subprocess.CalledProcessError as e:
+        print("❌ GitHub 푸시 실패:", e)
+
 # ==============================
 # 메인 로직
 # ==============================
@@ -138,6 +154,8 @@ def main():
         )
 
     send_discord(alert_message)
+    write_log(alert_message)
+    git_push(f"SmartFXAllocator update {today}")  # ✅ 자동 푸시 실행
 
     # 월간 Ping
     if today.day == 1:
