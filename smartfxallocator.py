@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 # 환경 설정
 # ==============================
 load_dotenv()
-WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
+WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK")
 regular_invest = 500000  # 정기 적립식 기본 금액
 
 # ==============================
