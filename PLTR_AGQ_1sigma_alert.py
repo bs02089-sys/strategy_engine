@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 from scipy.optimize import minimize, minimize_scalar
 
 # ==================== 설정 ====================
-TICKERS = ["TQQQ", "UGL"]
+TICKERS = ["PLTR", "AGQ"]
 TEST_LOOKBACK_DAYS = 252 * 5
 FEES = 0.00065
 
