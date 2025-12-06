@@ -187,6 +187,10 @@ def build_alert_messages():
 
     return "\n\n".join(messages)
 
+    # 월간 Ping (매월 1일)
+    if today.day == 1:
+        send_discord(f"✅ Monthly Ping: 시스템 정상 작동 중 ({now_str})")
+        
 # ==================== 실행 ====================
 if __name__ == "__main__":
     final_message = build_alert_messages()
