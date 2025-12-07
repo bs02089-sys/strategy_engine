@@ -7,12 +7,13 @@ import subprocess
 from dotenv import load_dotenv
 from datetime import timedelta
 from zoneinfo import ZoneInfo
-from scipy.optimize import minimize, minimize_scalar
+from scipy.optimize import minimize  # 포트폴리오 비중(MDD) 최적화용
 
 # ==================== 설정 ====================
 TICKERS = ["PLTR", "AGQ"]
 TEST_LOOKBACK_DAYS = 252 * 5
 FEES = 0.00065
+K_FIXED = 10.0  # TP 고정 k 값
 
 # ==================== .env 로드 ====================
 load_dotenv()
@@ -45,27 +46,29 @@ close, daily_return = load_data()
 
 # ==================== 지표 계산 ====================
 def portfolio_metrics(port_curve: pd.Series):
-    years = len(port_curve) / 252
-    cagr = port_curve.iloc[-1] ** (1 / years) - 1
-    mdd = (port_curve / port_curve.cummax() - 1).min()
+    if port_curve is None or len(port_curve) == 0:
+        return {"CAGR": np.nan, "MDD": np.nan, "Sharpe": np.nan}
+    years = max(len(port_curve), 1) / 252.0
+    cagr = port_curve.iloc[-1] ** (1.0 / years) - 1.0
+    mdd = float((port_curve / port_curve.cummax() - 1.0).min())
     daily = port_curve.pct_change().dropna()
-    sharpe = (daily.mean() / daily.std()) * np.sqrt(252) if daily.std() != 0 else np.nan
+    sharpe = (daily.mean() / daily.std()) * np.sqrt(252.0) if daily.std() != 0 else np.nan
     return {"CAGR": cagr, "MDD": mdd, "Sharpe": sharpe}
 
 # ==================== 목표 비중 (MDD 기준) ====================
 def optimize_weights_mdd(returns: pd.DataFrame):
     def objective(weights):
         port_ret = (returns * weights).sum(axis=1)
-        curve = (1 + port_ret).cumprod()
-        mdd = (curve / curve.cummax() - 1).min()
+        curve = (1.0 + port_ret).cumprod()
+        mdd = (curve / curve.cummax() - 1.0).min()
         return abs(mdd)
     cons = {'type': 'eq', 'fun': lambda w: np.sum(w) - 1}
     bounds = [(0, 1)] * len(TICKERS)
-    init_guess = [0.5] * len(TICKERS)
+    init_guess = [1.0 / len(TICKERS)] * len(TICKERS)
     result = minimize(objective, init_guess, bounds=bounds, constraints=cons)
     return dict(zip(TICKERS, result.x))
 
-# ==================== σ 및 거래횟수 계산 ====================
+# ==================== σ 및 거래횟수 계산 (분리 로직) ====================
 def calc_sigma_and_trades(returns: pd.DataFrame):
     sigma = {}
     trades = {}
@@ -73,74 +76,24 @@ def calc_sigma_and_trades(returns: pd.DataFrame):
         if t not in returns.columns or returns[t].empty:
             sigma[t], trades[t] = np.nan, 0
             continue
-        sigma[t] = returns[t].tail(252).std()
-        total_events = (returns[t] < -sigma[t]).sum()
-        trades[t] = total_events / 5
+        rr = returns[t].dropna()
+        # 알림용: 최근 1년 σ
+        sigma[t] = float(rr.tail(252).std())
+        # 과거 이벤트용: 롤링 σ로 -σ 이벤트 카운트 → 연평균 환산
+        vol_roll = rr.rolling(252, min_periods=120).std()
+        ret_5y = rr.tail(252 * 5)
+        vol_5y = vol_roll.reindex(ret_5y.index)
+        mask = (~ret_5y.isna()) & (~vol_5y.isna()) & (vol_5y > 0) & (ret_5y <= -vol_5y)
+        total_events = int(mask.sum())
+        if len(ret_5y) > 1:
+            years = (ret_5y.index[-1] - ret_5y.index[0]).days / 365.25
+        else:
+            years = 0
+        annual_events = total_events / years if years > 0 else 0.0
+        trades[t] = int(round(annual_events))
     return sigma, trades
 
-# ==================== TP 백테스트 ====================
-def backtest_sigma_multiplier(symbol: str, tp_multiplier: float,
-                              start_ts: pd.Timestamp, end_ts: pd.Timestamp) -> pd.DataFrame:
-    mask = (daily_return.index >= start_ts) & (daily_return.index <= end_ts)
-    ret_slice = daily_return.loc[mask, symbol].sort_index()
-    px_slice = close[symbol].reindex(ret_slice.index).astype(float)
-
-    dates = ret_slice.index.to_numpy()
-    ret_arr = ret_slice.to_numpy(dtype=float)
-    price_arr = px_slice.to_numpy(dtype=float)
-
-    trades = []
-    sigma_1y = daily_return[symbol].tail(252).std()
-    if sigma_1y is None or np.isnan(sigma_1y) or sigma_1y <= 0:
-        return pd.DataFrame(columns=["entry_date", "exit_date", "ret_pct"])
-
-    tp_pct = tp_multiplier * sigma_1y * 100.0
-    n = len(dates)
-    i = 0
-    while i < n:
-        if ret_arr[i] >= -sigma_1y:
-            i += 1
-            continue
-        entry_idx = i
-        entry_date = pd.Timestamp(dates[entry_idx])
-        entry_px = price_arr[entry_idx]
-        exit_idx = None
-        j = entry_idx + 1
-        while j < n:
-            p2 = price_arr[j]
-            ret_pct = (p2 / entry_px - 1.0) * 100.0
-            if ret_pct >= tp_pct:
-                exit_idx = j
-                break
-            j += 1
-        if exit_idx is not None:
-            exit_date = pd.Timestamp(dates[exit_idx])
-            exit_px = price_arr[exit_idx]
-            trades.append({
-                "entry_date": entry_date,
-                "exit_date": exit_date,
-                "ret_pct": (exit_px / entry_px - 1.0) * 100.0
-            })
-            i = exit_idx + 1
-        else:
-            i = entry_idx + 1
-    return pd.DataFrame(trades)
-
-# ==================== k 최적화 ====================
-def optimize_k(symbol: str, k_bounds=(1.0, 10.0)) -> float:
-    start_ts = daily_return.index.max() - pd.Timedelta(days=252 * 5)
-    end_ts = daily_return.index.max()
-    def objective(k):
-        df = backtest_sigma_multiplier(symbol, tp_multiplier=k, start_ts=start_ts, end_ts=end_ts)
-        if df.empty:
-            return 1e6
-        curve = (1.0 + df["ret_pct"] / 100.0).cumprod()
-        mdd = (curve / curve.cummax() - 1).min()
-        return abs(mdd)
-    res = minimize_scalar(objective, bounds=k_bounds, method="bounded")
-    return float(res.x)
-
-# ==================== 현재 값 추출 ====================
+# ==================== 최신 값 추출 ====================
 def get_latest_values(symbol: str):
     try:
         ret_today = float(daily_return[symbol].iloc[-1])
@@ -152,7 +105,9 @@ def get_latest_values(symbol: str):
 # ==================== 메시지 생성 ====================
 def build_alert_messages():
     sigma, trades = calc_sigma_and_trades(daily_return)
+    # 목표 비중(MDD) 최적화는 과거 수익률로 계산
     tw_mdd = optimize_weights_mdd(daily_return[TICKERS])
+
     now_kst = pd.Timestamp.now(tz=ZoneInfo("Asia/Seoul")).strftime("%Y-%m-%d %H:%M:%S")
     messages = []
 
@@ -161,43 +116,50 @@ def build_alert_messages():
             messages.append(f"❌ {symbol} 데이터 누락으로 분석 불가")
             continue
 
-        k_mdd = optimize_k(symbol)
-        tp_mdd_pct = k_mdd * sigma[symbol] * 100.0
         ret_today, current_price = get_latest_values(symbol)
         if ret_today is None or current_price is None:
             messages.append(f"❌ {symbol} 현재 값 추출 실패")
             continue
 
+        # 알림 조건: 최근 1년 σ 고정값
         condition_met = ret_today <= -sigma[symbol]
         ret_str = f"+{ret_today*100:.2f}%" if ret_today > 0 else f"{ret_today*100:.2f}%"
-        sigma_down = current_price * (1 - sigma[symbol])
+        sigma_down = current_price * (1.0 - sigma[symbol])
+
+        # TP 퍼센트: 고정 k 적용
+        tp_pct = K_FIXED * sigma[symbol] * 100.0
 
         message = (
             f"📉 [{symbol} 매수 신호 체크]\n"
             f"알림 발생 시각: {now_kst}\n"
             f"목표 비중(MDD): {tw_mdd[symbol]*100:.2f}%\n"
             f"1시그마 값: {sigma[symbol]*100:.2f}% (도달가격: ${sigma_down:.2f})\n"
-            f"최근 5년 평균 거래횟수: {int(trades[symbol])}\n"
+            f"최근 5년 평균 거래횟수(롤링): {trades[symbol]}회/년\n"
             f"현재 가격: ${current_price:.2f}\n"
             f"전일 대비: {ret_str}\n"
             f"매수 조건 충족: {'✅ Yes' if condition_met else '❌ No'}\n"
-            f"최적화 TP(MDD): {tp_mdd_pct:.2f}%"
+            f"TP (고정 k={K_FIXED}): {tp_pct:.2f}%"
         )
         messages.append(message)
 
     return "\n\n".join(messages)
 
-    # 월간 Ping (매월 1일)
-    if today.day == 1:
-        send_discord(f"✅ Monthly Ping: 시스템 정상 작동 중 ({now_str})")
-        
+# ==================== 월간 Ping (선택) ====================
+def monthly_ping():
+    now_kst = pd.Timestamp.now(tz=ZoneInfo("Asia/Seoul"))
+    if now_kst.day == 1:
+        send_discord_message(f"✅ Monthly Ping: 시스템 정상 작동 중 ({now_kst.strftime('%Y-%m-%d %H:%M:%S')})")
+
 # ==================== 실행 ====================
 if __name__ == "__main__":
     final_message = build_alert_messages()
     print(final_message)
     send_discord_message(final_message)
+    # 필요 시 월간 핑 활성화
+    # monthly_ping()
 
     # 자동 푸시 (원하면 주석 해제)
-    # subprocess.run(["git", "add", "TQQQ_UGL_1sigma_alert.py"], check=True)
-    # subprocess.run(["git", "commit", "-m", "Auto update alert script"], check=True)
+    # import subprocess
+    # subprocess.run(["git", "add", "PLTR_AGQ_1sigma_alert.py"], check=True)
+    # subprocess.run(["git", "commit", "-m", "Auto update alert script (separated logic)"], check=True)
     # subprocess.run(["git", "push", "origin", "main"], check=True)
