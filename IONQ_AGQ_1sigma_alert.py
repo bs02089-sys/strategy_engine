@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 from scipy.optimize import minimize  # 포트폴리오 비중(MDD) 최적화용
 
 # ==================== 설정 ====================
-TICKERS = ["PLTR", "AGQ"]
+TICKERS = ["IONQ", "AGQ"]
 TEST_LOOKBACK_DAYS = 252 * 5
 FEES = 0.00065
 K_FIXED = 10.0  # TP 고정 k 값
