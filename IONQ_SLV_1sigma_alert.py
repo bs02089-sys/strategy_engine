@@ -38,37 +38,24 @@ def load_data():
     start_date = (ny_now - timedelta(days=TEST_LOOKBACK_DAYS + 7)).date()
     end_date = (ny_now + timedelta(days=1)).date()
     data = yf.download(TICKERS, start=start_date, end=end_date, auto_adjust=True, progress=False)["Close"]
-    close = data.dropna()
-    daily_return = close.pct_change().dropna()
+
+    # 티커 컬럼 강제 유지
+    close = data.reindex(columns=TICKERS)
+
+    # 데일리 리턴 계산 (빈 방지: fillna(0))
+    daily_return = close.pct_change().fillna(0)
+
+    # 최소 2행 이상 확보 (없으면 더미 데이터 추가)
+    if daily_return.empty or len(daily_return) < 2:
+        today = pd.Timestamp.now().normalize()
+        daily_return = pd.DataFrame({t: [0.0] for t in TICKERS}, index=[today])
+        close = pd.DataFrame({t: [0.0] for t in TICKERS}, index=[today])
+
     return close, daily_return
 
 close, daily_return = load_data()
 
-# ==================== 지표 계산 ====================
-def portfolio_metrics(port_curve: pd.Series):
-    if port_curve is None or len(port_curve) == 0:
-        return {"CAGR": np.nan, "MDD": np.nan, "Sharpe": np.nan}
-    years = max(len(port_curve), 1) / 252.0
-    cagr = port_curve.iloc[-1] ** (1.0 / years) - 1.0
-    mdd = float((port_curve / port_curve.cummax() - 1.0).min())
-    daily = port_curve.pct_change().dropna()
-    sharpe = (daily.mean() / daily.std()) * np.sqrt(252.0) if daily.std() != 0 else np.nan
-    return {"CAGR": cagr, "MDD": mdd, "Sharpe": sharpe}
-
-# ==================== 목표 비중 (MDD 기준) ====================
-def optimize_weights_mdd(returns: pd.DataFrame):
-    def objective(weights):
-        port_ret = (returns * weights).sum(axis=1)
-        curve = (1.0 + port_ret).cumprod()
-        mdd = (curve / curve.cummax() - 1.0).min()
-        return abs(mdd)
-    cons = {'type': 'eq', 'fun': lambda w: np.sum(w) - 1}
-    bounds = [(0, 1)] * len(TICKERS)
-    init_guess = [1.0 / len(TICKERS)] * len(TICKERS)
-    result = minimize(objective, init_guess, bounds=bounds, constraints=cons)
-    return dict(zip(TICKERS, result.x))
-
-# ==================== σ 및 거래횟수 계산 (분리 로직) ====================
+# ==================== σ 및 거래횟수 계산 ====================
 def calc_sigma_and_trades(returns: pd.DataFrame):
     sigma = {}
     trades = {}
@@ -77,9 +64,7 @@ def calc_sigma_and_trades(returns: pd.DataFrame):
             sigma[t], trades[t] = np.nan, 0
             continue
         rr = returns[t].dropna()
-        # 알림용: 최근 1년 σ
         sigma[t] = float(rr.tail(252).std())
-        # 과거 이벤트용: 롤링 σ로 -σ 이벤트 카운트 → 연평균 환산
         vol_roll = rr.rolling(252, min_periods=120).std()
         ret_5y = rr.tail(252 * 5)
         vol_5y = vol_roll.reindex(ret_5y.index)
@@ -105,9 +90,6 @@ def get_latest_values(symbol: str):
 # ==================== 메시지 생성 ====================
 def build_alert_messages():
     sigma, trades = calc_sigma_and_trades(daily_return)
-    # 목표 비중(MDD) 최적화는 과거 수익률로 계산
-    tw_mdd = optimize_weights_mdd(daily_return[TICKERS])
-
     now_kst = pd.Timestamp.now(tz=ZoneInfo("Asia/Seoul")).strftime("%Y-%m-%d %H:%M:%S")
     messages = []
 
@@ -121,18 +103,14 @@ def build_alert_messages():
             messages.append(f"❌ {symbol} 현재 값 추출 실패")
             continue
 
-        # 알림 조건: 최근 1년 σ 고정값
         condition_met = ret_today <= -sigma[symbol]
         ret_str = f"+{ret_today*100:.2f}%" if ret_today > 0 else f"{ret_today*100:.2f}%"
         sigma_down = current_price * (1.0 - sigma[symbol])
-
-        # TP 퍼센트: 고정 k 적용
         tp_pct = K_FIXED * sigma[symbol] * 100.0
 
         message = (
             f"📉 [{symbol} 매수 신호 체크]\n"
             f"알림 발생 시각: {now_kst}\n"
-            f"목표 비중(MDD): {tw_mdd[symbol]*100:.2f}%\n"
             f"1시그마 값: {sigma[symbol]*100:.2f}% (도달가격: ${sigma_down:.2f})\n"
             f"최근 5년 평균 거래횟수(롤링): {trades[symbol]}회/년\n"
             f"현재 가격: ${current_price:.2f}\n"
