@@ -9,6 +9,9 @@ permissions:
 
 env:
   DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+  
+# 실행 기록 보존 기간 설정 (일 단위)
+retention-days: 7
 
 jobs:
   run-alert:
