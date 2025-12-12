@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 from scipy.optimize import minimize  # 포트폴리오 비중(MDD) 최적화용
 
 # ==================== 설정 ====================
-TICKERS = ["SLV"]
+TICKERS = ["TQQQ"]
 TEST_LOOKBACK_DAYS = 252 * 5
 FEES = 0.00065
 K_FIXED = 10.0  # TP 고정 k 값
@@ -34,7 +34,7 @@ def send_discord_message(content: str):
 
 # ==================== 데이터 로딩 ====================
 def load_data():
-    ny_now = pd.Timestamp.now(tz=ZoneInfo("America/New_York")).normalize().tz_localize(None)
+    ny_now = pd.Timestamp.now(tz=ZoneInfo("Asia/Seoul")).normalize().tz_localize(None)
     start_date = (ny_now - timedelta(days=TEST_LOOKBACK_DAYS + 7)).date()
     end_date = (ny_now + timedelta(days=1)).date()
     data = yf.download(TICKERS, start=start_date, end=end_date, auto_adjust=True, progress=False)["Close"]
@@ -111,7 +111,7 @@ def build_alert_messages():
         message = (
             f"📉 [{symbol} 매수 신호 체크]\n"
             f"알림 발생 시각: {now_kst}\n"
-            f"1시그마 값: {sigma[symbol]*100:.2f}% (도달가격: ${sigma_down:.2f})\n"
+            f"1시그마: {sigma[symbol]*100:.2f}% (도달가격: ${sigma_down:.2f})\n"
             f"최근 5년 평균 거래횟수(롤링): {trades[symbol]}회/년\n"
             f"현재 가격: ${current_price:.2f}\n"
             f"전일 대비: {ret_str}\n"
