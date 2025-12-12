@@ -28,7 +28,7 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run auto push alert script
-        run: python IONQ_SLV_1sigma_alert.py
+        run: python SLV_1sigma_alert.py
 
       - name: Commit and push changes
         run: |
