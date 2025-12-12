@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 from scipy.optimize import minimize  # 포트폴리오 비중(MDD) 최적화용
 
 # ==================== 설정 ====================
-TICKERS = ["IONQ", "SLV"]
+TICKERS = ["SLV"]
 TEST_LOOKBACK_DAYS = 252 * 5
 FEES = 0.00065
 K_FIXED = 10.0  # TP 고정 k 값
@@ -135,7 +135,6 @@ if __name__ == "__main__":
     send_discord_message(final_message)
     # 필요 시 월간 핑 활성화
     # monthly_ping()
-
     # 자동 푸시 (원하면 주석 해제)
     # import subprocess
     # subprocess.run(["git", "add", "IONQ_SLV_1sigma_alert.py"], check=True)
