@@ -13,7 +13,6 @@ env:
 jobs:
   run-alert:
     runs-on: ubuntu-latest
-    retention-days: 7 # 실행 기록 보존 기간 설정 (일 단위)
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
