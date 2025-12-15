@@ -36,12 +36,13 @@ jobs:
 
       - name: Commit and push changes
         run: |
-            git config --global user.name "github-actions[bot]"
-            git config --global user.email "github-actions[bot]@users.noreply.github.com"
-            git add .
-            if git diff --cached --quiet; then
-                  echo "✅ No changes to commit. Skipping push."
-            else
-                  echo "🔍 Changes detected. Committing..."
-                  git commit -m "Auto update alert script"
-                  git push
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add .
+          if git diff --cached --quiet; then
+            echo "✅ No changes to commit. Skipping push."
+          else
+            echo "🔍 Changes detected. Committing..."
+            git commit -m "Auto update alert script"
+            git push
+          fi
