@@ -1,9 +1,12 @@
 name: auto push alert script
 
 on:
-  schedule:
-    - cron: "30 20 * * 2-6"
   workflow_dispatch:
+    inputs:
+      environment:
+        description: '실행할 환경'
+        required: true
+        default: 'production'
   
 permissions:
   contents: write
