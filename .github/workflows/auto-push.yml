@@ -1,6 +1,7 @@
 name: auto push alert script
 
 on:
+  workflow_dispatch:
   schedule:
     - cron: "30 20 * * 2-6"
 
