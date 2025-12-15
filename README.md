@@ -1,11 +1,11 @@
-# TQQQ_1sigma_alert
+# QLD_1sigma_alert
 
-📉 ** TQQQ 1시그마 기반 매수 신호 알림 시스템**
+📉 ** QLD 1시그마 기반 매수 신호 알림 시스템**
 
-이 프로젝트는 `yfinance` 데이터를 활용하여 TQQQ 종목의 **1시그마(σ) 변동성 기준 매수 신호**를 체크하고, 결과를 **콘솔 출력 및 디스코드 알림(Webhook)**으로 전송합니다.
+이 프로젝트는 `yfinance` 데이터를 활용하여 QLD 종목의 **1시그마(σ) 변동성 기준 매수 신호**를 체크하고, 결과를 **콘솔 출력 및 디스코드 알림(Webhook)**으로 전송합니다.
 
 ## 🚀 주요 기능
-- TQQQ 종목의 최근 1년 σ(표준편차) 계산
+- QLD 종목의 최근 1년 σ(표준편차) 계산
 - σ 기반 매수 조건 충족 여부 체크
 - 최적화된 TP(목표 수익률) 자동 계산
 - 최근 1년 거래 횟수 집계
@@ -26,4 +26,4 @@
    DISCORD_WEBHOOK=https://discord.com/api/webhooks/xxxx/yyyy
 
 4. 실행 방법
-   python TQQQ_1sigma_alert.py
+   python QLD_1sigma_alert.py
