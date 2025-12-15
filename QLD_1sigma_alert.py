@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 from scipy.optimize import minimize  # 포트폴리오 비중(MDD) 최적화용
 
 # ==================== 설정 ====================
-TICKERS = ["TQQQ"]
+TICKERS = ["QLD"]
 TEST_LOOKBACK_DAYS = 252 * 5
 FEES = 0.00065
 K_FIXED = 10.0  # TP 고정 k 값
@@ -137,6 +137,6 @@ if __name__ == "__main__":
     # monthly_ping()
     # 자동 푸시 (원하면 주석 해제)
     # import subprocess
-    # subprocess.run(["git", "add", "IONQ_SLV_1sigma_alert.py"], check=True)
+    # subprocess.run(["git", "add", "QLD_1sigma_alert.py"], check=True)
     # subprocess.run(["git", "commit", "-m", "Auto update alert script (separated logic)"], check=True)
     # subprocess.run(["git", "push", "origin", "main"], check=True)
