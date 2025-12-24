@@ -10,8 +10,8 @@ from zoneinfo import ZoneInfo
 from scipy.optimize import minimize  # 포트폴리오 비중(MDD) 최적화용
 
 # ==================== 설정 ====================
-TICKERS = ["QLD"]
-TEST_LOOKBACK_DAYS = 252 * 5
+TICKERS = ["SOXL"]
+TEST_LOOKBACK_DAYS = 252
 FEES = 0.00065
 K_FIXED = 10.0  # TP 고정 k 값
 
@@ -66,12 +66,12 @@ def calc_sigma_and_trades(returns: pd.DataFrame):
         rr = returns[t].dropna()
         sigma[t] = float(rr.tail(252).std())
         vol_roll = rr.rolling(252, min_periods=120).std()
-        ret_5y = rr.tail(252 * 5)
-        vol_5y = vol_roll.reindex(ret_5y.index)
-        mask = (~ret_5y.isna()) & (~vol_5y.isna()) & (vol_5y > 0) & (ret_5y <= -vol_5y)
+        ret_1y = rr.tail(252 * 1)
+        vol_1y = vol_roll.reindex(ret_1y.index)
+        mask = (~ret_1y.isna()) & (~vol_1y.isna()) & (vol_1y > 0) & (ret_1y <= -vol_1y)
         total_events = int(mask.sum())
-        if len(ret_5y) > 1:
-            years = (ret_5y.index[-1] - ret_5y.index[0]).days / 365.25
+        if len(ret_1y) > 1:
+            years = (ret_1y.index[-1] - ret_1y.index[0]).days / 365.25
         else:
             years = 0
         annual_events = total_events / years if years > 0 else 0.0
@@ -112,7 +112,7 @@ def build_alert_messages():
             f"📉 [{symbol} 매수 신호 체크]\n"
             f"알림 발생 시각: {now_kst}\n"
             f"1시그마: {sigma[symbol]*100:.2f}% (도달가격: ${sigma_down:.2f})\n"
-            f"최근 5년 평균 거래횟수(롤링): {trades[symbol]}회/년\n"
+            f"최근 1년 평균 거래횟수(롤링): {trades[symbol]}회/년\n"
             f"현재 가격: ${current_price:.2f}\n"
             f"전일 대비: {ret_str}\n"
             f"매수 조건 충족: {'✅ Yes' if condition_met else '❌ No'}\n"
