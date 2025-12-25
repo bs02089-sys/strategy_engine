@@ -9,9 +9,9 @@ from zoneinfo import ZoneInfo
 
 # ==================== 설정 ====================
 TICKERS = ["SOXL"]
-LOOKBACK_DAYS = 252
+LOOKBACK_TRADING_DAYS = 252   # CNBC 방식: 최근 252 거래일
 FEES = 0.00065
-K_FIXED = 2.0  # TP 고정 k 값 (현실적으로 낮춤)
+K_FIXED = 2.0
 
 # ==================== .env 로드 ====================
 load_dotenv()
@@ -33,63 +33,35 @@ def send_discord_message(content: str):
 # ==================== 데이터 로딩 ====================
 def load_data():
     ny_now = pd.Timestamp.now(tz=ZoneInfo("Asia/Seoul")).normalize().tz_localize(None)
-    start_date = (ny_now - timedelta(days=LOOKBACK_DAYS + 7)).date()
+    start_date = (ny_now - timedelta(days=LOOKBACK_TRADING_DAYS + 50)).date()  # 버퍼 포함
     end_date = (ny_now + timedelta(days=1)).date()
-    data = yf.download(TICKERS, start=start_date, end=end_date, auto_adjust=True, progress=False)["Close"]
+    data = yf.download(TICKERS, start=start_date, end=end_date, auto_adjust=True, progress=False)
+    close = data["Close"].reindex(columns=TICKERS)
+    return close
 
-    close = data.reindex(columns=TICKERS)
-    daily_return = close.pct_change()
+close = load_data()
 
-    if daily_return.empty or len(daily_return) < 2:
-        today = pd.Timestamp.now().normalize()
-        daily_return = pd.DataFrame({t: [np.nan] for t in TICKERS}, index=[today])
-        close = pd.DataFrame({t: [np.nan] for t in TICKERS}, index=[today])
-
-    return close, daily_return
-
-close, daily_return = load_data()
-
-# ==================== σ 및 거래횟수 계산 ====================
-def calc_sigma_and_trades(returns: pd.DataFrame):
-    sigma = {}
-    trades = {}
-    for t in TICKERS:
-        if t not in returns.columns or returns[t].dropna().empty:
-            sigma[t], trades[t] = np.nan, 0
-            continue
-        rr = returns[t].dropna()
-
-        # 롤링 σ (백테스트와 동일)
-        vol_roll = rr.rolling(252, min_periods=120).std()
-        sigma_val = vol_roll.iloc[-1] if len(vol_roll) > 0 else np.nan
-        sigma[t] = float(sigma_val) if pd.notna(sigma_val) else np.nan
-
-        # 1년치 이벤트 횟수 계산
-        ret_1y = rr.tail(252)
-        vol_1y = vol_roll.reindex(ret_1y.index)
-        mask = (~ret_1y.isna()) & (~vol_1y.isna()) & (vol_1y > 0) & (ret_1y <= -vol_1y)
-        total_events = int(mask.sum())
-
-        if len(ret_1y) > 1:
-            years = (ret_1y.index[-1] - ret_1y.index[0]).days / 365.25
-        else:
-            years = 0
-        annual_events = total_events / years if years > 0 else 0.0
-        trades[t] = int(round(annual_events))
-    return sigma, trades
+# ==================== CNBC 방식 σ 계산 ====================
+def compute_sigma(close_series: pd.Series):
+    returns = close_series.pct_change().dropna()
+    if len(returns) >= LOOKBACK_TRADING_DAYS:
+        sigma = returns.tail(LOOKBACK_TRADING_DAYS).std()
+    else:
+        sigma = returns.std()
+    sigma = float(sigma)
+    return sigma if not np.isnan(sigma) else None
 
 # ==================== 전일 종가와 현재가 추출 ====================
 def get_prev_and_current_price(symbol: str):
     s = close[symbol].dropna()
     if len(s) < 2:
         return None, None
-    prev_close = float(s.iloc[-2])
-    current_price = float(s.iloc[-1])
+    prev_close = s.iloc[-2].item()
+    current_price = s.iloc[-1].item()
     return prev_close, current_price
 
 # ==================== 메시지 생성 ====================
 def build_alert_messages():
-    sigma, trades = calc_sigma_and_trades(daily_return)
     now_kst = pd.Timestamp.now(tz=ZoneInfo("Asia/Seoul")).strftime("%Y-%m-%d %H:%M:%S")
     messages = []
 
@@ -99,25 +71,33 @@ def build_alert_messages():
             continue
 
         prev_close, current_price = get_prev_and_current_price(symbol)
-        if prev_close is None or current_price is None or np.isnan(sigma[symbol]):
+        sigma = compute_sigma(close[symbol])
+        if prev_close is None or current_price is None or sigma is None:
             messages.append(f"❌ {symbol} 현재 값 추출 실패 또는 σ 계산 불가")
             continue
 
+        sigma2 = 2 * sigma
+        sigma_down_price = prev_close * (1.0 - sigma)
+        sigma2_down_price = prev_close * (1.0 - sigma2)
+
+        # 오늘 수익률
         ret_today = (current_price / prev_close) - 1.0
-        condition_met = ret_today <= -sigma[symbol]
         ret_str = f"+{ret_today*100:.2f}%" if ret_today > 0 else f"{ret_today*100:.2f}%"
-        sigma_down_price = prev_close * (1.0 - sigma[symbol])
-        tp_pct = K_FIXED * sigma[symbol] * 100.0
+
+        # 매수 조건
+        cond_1sigma = current_price <= sigma_down_price
+        cond_2sigma = current_price <= sigma2_down_price
+        tp_pct = K_FIXED * sigma * 100.0
 
         message = (
             f"📉 [{symbol} 매수 신호 체크]\n"
             f"알림 발생 시각: {now_kst}\n"
-            f"1σ (롤링): {sigma[symbol]*100:.2f}% (도달가격: ${sigma_down_price:.2f})\n"
-            f"최근 1년 이벤트 횟수(롤링): {trades[symbol]}회/년\n"
+            f"1σ: {sigma*100:.2f}% (도달가격: ${sigma_down_price:.2f})\n"
+            f"2σ: {sigma2*100:.2f}% (도달가격: ${sigma2_down_price:.2f})\n"
             f"전일 종가: ${prev_close:.2f}\n"
             f"현재 가격: ${current_price:.2f}\n"
             f"전일 대비: {ret_str}\n"
-            f"매수 조건 충족: {'✅ Yes' if condition_met else '❌ No'}\n"
+            f"매수 조건 충족: {'✅ 2σ' if cond_2sigma else ('✅ 1σ' if cond_1sigma else '❌ No')}\n"
             f"TP (고정 k={K_FIXED}): {tp_pct:.2f}%"
         )
         messages.append(message)
