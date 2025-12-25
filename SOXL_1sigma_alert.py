@@ -33,35 +33,39 @@ def send_discord_message(content: str):
 # ==================== 데이터 로딩 ====================
 def load_data():
     now = pd.Timestamp.now(tz=ZoneInfo("Asia/Seoul")).normalize().tz_localize(None)
-    start_date = (now - timedelta(days=LOOKBACK_TRADING_DAYS + 50)).date()
+    # 252일 + 여유분 확보
+    start_date = (now - timedelta(days=LOOKBACK_TRADING_DAYS + 150)).date()
     end_date = (now + timedelta(days=1)).date()
     data = yf.download(TICKERS, start=start_date, end=end_date, auto_adjust=True, progress=False)
-    close = data["Close"].reindex(columns=TICKERS)
+    close = data["Close"].reindex(columns=TICKERS).dropna(how="all")
     return close
 
 close = load_data()
 
-# ==================== σ 계산 ====================
+# ==================== σ 계산 (오늘 제외) ====================
 def compute_sigma(close_series: pd.Series, window: int = LOOKBACK_TRADING_DAYS) -> float | None:
     """
     오늘을 제외하고, 전일까지 window 거래일 기준으로 σ(표준편차)를 계산합니다.
     """
-    returns = close_series.pct_change().dropna()
-    if len(returns) <= window:
+    s = pd.Series(close_series).dropna()
+    returns = s.pct_change().dropna()
+
+    # 오늘 제외 → 최소 window+1개 필요
+    if len(returns) < window + 1:
         return None
 
-    # 마지막 리턴(오늘)을 제외하고, 전일까지 window 거래일 사용
     sigma = returns.iloc[-window-1:-1].std()
-
-    return float(sigma) if not np.isnan(sigma) else None
+    return float(sigma) if np.isfinite(sigma) else None
 
 # ==================== 전일 종가와 현재가 ====================
 def get_prev_and_current_price(symbol: str):
     s = close[symbol].dropna()
     if len(s) < 2:
         return None, None
-    prev_close = s.iloc[-2].item()
-    current_price = s.iloc[-1].item()
+    prev_close = s.iloc[-2]
+    current_price = s.iloc[-1]
+    prev_close = prev_close.item() if hasattr(prev_close, "item") else float(prev_close)
+    current_price = current_price.item() if hasattr(current_price, "item") else float(current_price)
     return prev_close, current_price
 
 # ==================== 메시지 생성 ====================
@@ -77,7 +81,7 @@ def build_alert_messages():
         prev_close, current_price = get_prev_and_current_price(symbol)
         sigma = compute_sigma(close[symbol])
         if prev_close is None or current_price is None or sigma is None:
-            messages.append(f"❌ {symbol} σ 계산 불가")
+            messages.append(f"❌ {symbol} 시그마 계산 불가 (데이터 부족)")
             continue
 
         sigma2 = 2 * sigma
@@ -91,7 +95,7 @@ def build_alert_messages():
         message = (
             f"📉 [{symbol} 매수 신호 체크]\n"
             f"알림 발생 시각: {now_kst}\n"
-            f"1σ: {sigma*100:.2f}% (도달가격: ${threshold_1:.2f})\n"
+            f"1σ (전일까지 252일): {sigma*100:.2f}% (도달가격: ${threshold_1:.2f})\n"
             f"2σ: {sigma2*100:.2f}% (도달가격: ${threshold_2:.2f})\n"
             f"전일 종가: ${prev_close:.2f}\n"
             f"현재 가격: ${current_price:.2f}\n"
