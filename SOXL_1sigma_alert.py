@@ -22,7 +22,8 @@ def send_discord_message(content: str):
     if not WEBHOOK_URL:
         raise RuntimeError("❌ Webhook URL이 설정되지 않았습니다.")
     try:
-        resp = requests.post(WEBHOOK_URL, json={"content": content}, timeout=10)
+        # @everyone 멘션을 자동으로 붙여서 모바일에서도 푸시 알림 발생
+        resp = requests.post(WEBHOOK_URL, json={"content": f"@everyone {content}"}, timeout=10)
         if resp.status_code in (200, 204):
             print("✅ 디스코드 알림 전송 성공")
         else:
