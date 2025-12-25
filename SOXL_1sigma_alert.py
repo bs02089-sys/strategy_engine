@@ -3,17 +3,15 @@ import pandas as pd
 import numpy as np
 import yfinance as yf
 import requests
-import subprocess
 from dotenv import load_dotenv
 from datetime import timedelta
 from zoneinfo import ZoneInfo
-from scipy.optimize import minimize  # 포트폴리오 비중(MDD) 최적화용
 
 # ==================== 설정 ====================
 TICKERS = ["SOXL"]
 TEST_LOOKBACK_DAYS = 252
 FEES = 0.00065
-K_FIXED = 10.0  # TP 고정 k 값
+K_FIXED = 2.0  # TP 고정 k 값 (현실적으로 낮춤)
 
 # ==================== .env 로드 ====================
 load_dotenv()
@@ -39,17 +37,13 @@ def load_data():
     end_date = (ny_now + timedelta(days=1)).date()
     data = yf.download(TICKERS, start=start_date, end=end_date, auto_adjust=True, progress=False)["Close"]
 
-    # 티커 컬럼 강제 유지
     close = data.reindex(columns=TICKERS)
+    daily_return = close.pct_change()  # fillna(0) 제거 → 결측은 dropna로 처리
 
-    # 데일리 리턴 계산 (빈 방지: fillna(0))
-    daily_return = close.pct_change().fillna(0)
-
-    # 최소 2행 이상 확보 (없으면 더미 데이터 추가)
     if daily_return.empty or len(daily_return) < 2:
         today = pd.Timestamp.now().normalize()
-        daily_return = pd.DataFrame({t: [0.0] for t in TICKERS}, index=[today])
-        close = pd.DataFrame({t: [0.0] for t in TICKERS}, index=[today])
+        daily_return = pd.DataFrame({t: [np.nan] for t in TICKERS}, index=[today])
+        close = pd.DataFrame({t: [np.nan] for t in TICKERS}, index=[today])
 
     return close, daily_return
 
@@ -60,13 +54,13 @@ def calc_sigma_and_trades(returns: pd.DataFrame):
     sigma = {}
     trades = {}
     for t in TICKERS:
-        if t not in returns.columns or returns[t].empty:
+        if t not in returns.columns or returns[t].dropna().empty:
             sigma[t], trades[t] = np.nan, 0
             continue
         rr = returns[t].dropna()
         sigma[t] = float(rr.tail(252).std())
         vol_roll = rr.rolling(252, min_periods=120).std()
-        ret_1y = rr.tail(252 * 1)
+        ret_1y = rr.tail(252)
         vol_1y = vol_roll.reindex(ret_1y.index)
         mask = (~ret_1y.isna()) & (~vol_1y.isna()) & (vol_1y > 0) & (ret_1y <= -vol_1y)
         total_events = int(mask.sum())
@@ -78,14 +72,14 @@ def calc_sigma_and_trades(returns: pd.DataFrame):
         trades[t] = int(round(annual_events))
     return sigma, trades
 
-# ==================== 최신 값 추출 ====================
-def get_latest_values(symbol: str):
-    try:
-        ret_today = float(daily_return[symbol].iloc[-1])
-        current_price = float(close[symbol].iloc[-1])
-        return ret_today, current_price
-    except (IndexError, KeyError):
+# ==================== 전일 종가와 현재가 추출 ====================
+def get_prev_and_current_price(symbol: str):
+    s = close[symbol].dropna()
+    if len(s) < 2:
         return None, None
+    prev_close = float(s.iloc[-2])
+    current_price = float(s.iloc[-1])
+    return prev_close, current_price
 
 # ==================== 메시지 생성 ====================
 def build_alert_messages():
@@ -94,25 +88,34 @@ def build_alert_messages():
     messages = []
 
     for symbol in TICKERS:
-        if symbol not in daily_return.columns or daily_return[symbol].empty:
+        if symbol not in close.columns or close[symbol].dropna().empty:
             messages.append(f"❌ {symbol} 데이터 누락으로 분석 불가")
             continue
 
-        ret_today, current_price = get_latest_values(symbol)
-        if ret_today is None or current_price is None:
-            messages.append(f"❌ {symbol} 현재 값 추출 실패")
+        prev_close, current_price = get_prev_and_current_price(symbol)
+        if prev_close is None or current_price is None or np.isnan(sigma[symbol]):
+            messages.append(f"❌ {symbol} 현재 값 추출 실패 또는 σ 계산 불가")
             continue
 
+        # 전일 대비 수익률
+        ret_today = (current_price / prev_close) - 1.0
+
+        # 매수 조건: 전일 대비 수익률이 -σ 이하
         condition_met = ret_today <= -sigma[symbol]
+
         ret_str = f"+{ret_today*100:.2f}%" if ret_today > 0 else f"{ret_today*100:.2f}%"
-        sigma_down = current_price * (1.0 - sigma[symbol])
+
+        # 도달가격: 전일 종가 기준 σ 하락선 (참고용 표시)
+        sigma_down_price = prev_close * (1.0 - sigma[symbol])
+
         tp_pct = K_FIXED * sigma[symbol] * 100.0
 
         message = (
             f"📉 [{symbol} 매수 신호 체크]\n"
             f"알림 발생 시각: {now_kst}\n"
-            f"1시그마: {sigma[symbol]*100:.2f}% (도달가격: ${sigma_down:.2f})\n"
+            f"1시그마: {sigma[symbol]*100:.2f}% (도달가격: ${sigma_down_price:.2f})\n"
             f"최근 1년 평균 거래횟수(롤링): {trades[symbol]}회/년\n"
+            f"전일 종가: ${prev_close:.2f}\n"
             f"현재 가격: ${current_price:.2f}\n"
             f"전일 대비: {ret_str}\n"
             f"매수 조건 충족: {'✅ Yes' if condition_met else '❌ No'}\n"
@@ -122,10 +125,10 @@ def build_alert_messages():
 
     return "\n\n".join(messages)
 
-# ==================== 월간 Ping (선택) ====================
+# ==================== 월간 Ping ====================
 def monthly_ping():
     now_kst = pd.Timestamp.now(tz=ZoneInfo("Asia/Seoul"))
-    if now_kst.day == 1:
+    if now_kst.day == 1:  # 매월 1일에만 실행
         send_discord_message(f"✅ Monthly Ping: 시스템 정상 작동 중 ({now_kst.strftime('%Y-%m-%d %H:%M:%S')})")
 
 # ==================== 실행 ====================
@@ -133,10 +136,4 @@ if __name__ == "__main__":
     final_message = build_alert_messages()
     print(final_message)
     send_discord_message(final_message)
-    # 필요 시 월간 핑 활성화
-    # monthly_ping()
-    # 자동 푸시 (원하면 주석 해제)
-    # import subprocess
-    # subprocess.run(["git", "add", "QLD_1sigma_alert.py"], check=True)
-    # subprocess.run(["git", "commit", "-m", "Auto update alert script (separated logic)"], check=True)
-    # subprocess.run(["git", "push", "origin", "main"], check=True)
+    monthly_ping()  # 월간 핑 실행
