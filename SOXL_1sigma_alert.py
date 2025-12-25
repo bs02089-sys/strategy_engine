@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 
 # ==================== 설정 ====================
 TICKERS = ["SOXL"]
-TEST_LOOKBACK_DAYS = 252
+LOOKBACK_DAYS = 252
 FEES = 0.00065
 K_FIXED = 2.0  # TP 고정 k 값 (현실적으로 낮춤)
 
@@ -22,7 +22,6 @@ def send_discord_message(content: str):
     if not WEBHOOK_URL:
         raise RuntimeError("❌ Webhook URL이 설정되지 않았습니다.")
     try:
-        # @everyone 멘션을 자동으로 붙여서 모바일에서도 푸시 알림 발생
         resp = requests.post(WEBHOOK_URL, json={"content": f"@everyone {content}"}, timeout=10)
         if resp.status_code in (200, 204):
             print("✅ 디스코드 알림 전송 성공")
@@ -34,12 +33,12 @@ def send_discord_message(content: str):
 # ==================== 데이터 로딩 ====================
 def load_data():
     ny_now = pd.Timestamp.now(tz=ZoneInfo("Asia/Seoul")).normalize().tz_localize(None)
-    start_date = (ny_now - timedelta(days=TEST_LOOKBACK_DAYS + 7)).date()
+    start_date = (ny_now - timedelta(days=LOOKBACK_DAYS + 7)).date()
     end_date = (ny_now + timedelta(days=1)).date()
     data = yf.download(TICKERS, start=start_date, end=end_date, auto_adjust=True, progress=False)["Close"]
 
     close = data.reindex(columns=TICKERS)
-    daily_return = close.pct_change()  # fillna(0) 제거 → 결측은 dropna로 처리
+    daily_return = close.pct_change()
 
     if daily_return.empty or len(daily_return) < 2:
         today = pd.Timestamp.now().normalize()
@@ -59,12 +58,18 @@ def calc_sigma_and_trades(returns: pd.DataFrame):
             sigma[t], trades[t] = np.nan, 0
             continue
         rr = returns[t].dropna()
-        sigma[t] = float(rr.tail(252).std())
+
+        # 롤링 σ (백테스트와 동일)
         vol_roll = rr.rolling(252, min_periods=120).std()
+        sigma_val = vol_roll.iloc[-1] if len(vol_roll) > 0 else np.nan
+        sigma[t] = float(sigma_val) if pd.notna(sigma_val) else np.nan
+
+        # 1년치 이벤트 횟수 계산
         ret_1y = rr.tail(252)
         vol_1y = vol_roll.reindex(ret_1y.index)
         mask = (~ret_1y.isna()) & (~vol_1y.isna()) & (vol_1y > 0) & (ret_1y <= -vol_1y)
         total_events = int(mask.sum())
+
         if len(ret_1y) > 1:
             years = (ret_1y.index[-1] - ret_1y.index[0]).days / 365.25
         else:
@@ -98,24 +103,17 @@ def build_alert_messages():
             messages.append(f"❌ {symbol} 현재 값 추출 실패 또는 σ 계산 불가")
             continue
 
-        # 전일 대비 수익률
         ret_today = (current_price / prev_close) - 1.0
-
-        # 매수 조건: 전일 대비 수익률이 -σ 이하
         condition_met = ret_today <= -sigma[symbol]
-
         ret_str = f"+{ret_today*100:.2f}%" if ret_today > 0 else f"{ret_today*100:.2f}%"
-
-        # 도달가격: 전일 종가 기준 σ 하락선 (참고용 표시)
         sigma_down_price = prev_close * (1.0 - sigma[symbol])
-
         tp_pct = K_FIXED * sigma[symbol] * 100.0
 
         message = (
             f"📉 [{symbol} 매수 신호 체크]\n"
             f"알림 발생 시각: {now_kst}\n"
-            f"1시그마: {sigma[symbol]*100:.2f}% (도달가격: ${sigma_down_price:.2f})\n"
-            f"최근 1년 평균 거래횟수(롤링): {trades[symbol]}회/년\n"
+            f"1σ (롤링): {sigma[symbol]*100:.2f}% (도달가격: ${sigma_down_price:.2f})\n"
+            f"최근 1년 이벤트 횟수(롤링): {trades[symbol]}회/년\n"
             f"전일 종가: ${prev_close:.2f}\n"
             f"현재 가격: ${current_price:.2f}\n"
             f"전일 대비: {ret_str}\n"
@@ -129,7 +127,7 @@ def build_alert_messages():
 # ==================== 월간 Ping ====================
 def monthly_ping():
     now_kst = pd.Timestamp.now(tz=ZoneInfo("Asia/Seoul"))
-    if now_kst.day == 1:  # 매월 1일에만 실행
+    if now_kst.day == 1:
         send_discord_message(f"✅ Monthly Ping: 시스템 정상 작동 중 ({now_kst.strftime('%Y-%m-%d %H:%M:%S')})")
 
 # ==================== 실행 ====================
@@ -137,4 +135,4 @@ if __name__ == "__main__":
     final_message = build_alert_messages()
     print(final_message)
     send_discord_message(final_message)
-    monthly_ping()  # 월간 핑 실행
+    monthly_ping()
