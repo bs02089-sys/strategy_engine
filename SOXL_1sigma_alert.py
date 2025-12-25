@@ -42,12 +42,13 @@ def load_data():
 close = load_data()
 
 # ==================== σ 계산 ====================
-def compute_sigma(close_series: pd.Series):
+def compute_sigma_prev(close_series: pd.Series):
     returns = close_series.pct_change().dropna()
-    if len(returns) >= LOOKBACK_TRADING_DAYS:
-        sigma = returns.tail(LOOKBACK_TRADING_DAYS).std()
+    if len(returns) >= LOOKBACK_TRADING_DAYS + 1:
+        # 오늘 제외, 전일까지 252거래일 사용
+        sigma = returns.iloc[-LOOKBACK_TRADING_DAYS-1:-1].std()
     else:
-        sigma = returns.std()
+        sigma = returns.iloc[:-1].std()
     return float(sigma) if not np.isnan(sigma) else None
 
 # ==================== 전일 종가와 현재가 ====================
