@@ -10,8 +10,7 @@ from zoneinfo import ZoneInfo
 # ==================== 설정 ====================
 TICKERS = ["TQQQ", "SOXL"]
 LOOKBACK_TRADING_DAYS = 252
-FEES = 0.00065
-FORWARD_DAYS = 30   
+FEES = 0.00065  # 현재 알림에는 사용하지 않지만 유지
 
 # ==================== .env 로드 ====================
 load_dotenv()
@@ -41,7 +40,7 @@ def load_data():
 
 close = load_data()
 
-# ==================== σ 계산 ====================
+# ==================== σ 계산 (오늘 제외) ====================
 def compute_sigma(close_series: pd.Series, window: int = LOOKBACK_TRADING_DAYS) -> float | None:
     s = pd.Series(close_series).dropna()
     returns = s.pct_change().dropna()
@@ -49,66 +48,6 @@ def compute_sigma(close_series: pd.Series, window: int = LOOKBACK_TRADING_DAYS) 
         return None
     sigma = returns.iloc[-window-1:-1].std()
     return float(sigma) if np.isfinite(sigma) else None
-
-# ==================== 최적 TP 계산 (최근 1년 롤링, 그리드 탐색) ====================
-def _find_signals_and_forward_path(series: pd.Series,
-                                   lookback_window: int = 252,
-                                   forward_days: int = 30) -> list[dict]:
-    s = series.dropna()
-    high = s  # 고가 데이터가 없으므로 종가로 대체
-    events = []
-    returns = s.pct_change().dropna()
-    for i in range(lookback_window + 1, len(s) - 1):
-        sigma = returns.iloc[i - lookback_window - 1:i - 1].std()
-        if not np.isfinite(sigma) or sigma <= 0:
-            continue
-        prev_close = s.iloc[i - 1]
-        today_close = s.iloc[i]
-        threshold_2 = prev_close * (1 - 2 * sigma)
-        if today_close <= threshold_2:
-            j_end = min(i + 1 + forward_days, len(s))
-            forward_high = high.iloc[i + 1:j_end]
-            events.append({
-                "date": s.index[i],
-                "entry": today_close,
-                "prev_close": prev_close,
-                "sigma": float(sigma),
-                "forward_high": forward_high.values,
-            })
-    return events
-
-def optimize_tp_fixed_pct_for_symbol(close_series: pd.Series,
-                                     tp_grid: np.ndarray | None = None,
-                                     lookback_window: int = 252,
-                                     forward_days: int = 30,
-                                     fees: float = 0.00065) -> float | None:
-    s = close_series.last("365D").dropna()
-    if len(s) < lookback_window + 30:
-        return None
-    if tp_grid is None:
-        tp_grid = np.round(np.arange(0.02, 0.2001, 0.005), 3)  # 2% ~ 20%
-    events = _find_signals_and_forward_path(s, lookback_window=lookback_window, forward_days=forward_days)
-    if not events:
-        return None
-    best_tp, best_score = None, -np.inf
-    for tp in tp_grid:
-        total_return = 0.0
-        trades = 0
-        for ev in events:
-            entry = ev["entry"]
-            f_high = ev["forward_high"]
-            tp_price = entry * (1 + tp)
-            if np.any(f_high >= tp_price):
-                pnl = tp - 2 * fees
-            else:
-                # forward 마지막 종가로 청산
-                exit_price = f_high[-1] if len(f_high) > 0 else entry
-                pnl = (exit_price / entry - 1.0) - 2 * fees
-            total_return += pnl
-            trades += 1
-        if total_return > best_score:
-            best_score, best_tp = total_return, tp
-    return float(best_tp) if best_tp is not None else None
 
 # ==================== 전일 종가와 현재가 ====================
 def get_prev_and_current_price(symbol: str):
@@ -125,25 +64,29 @@ def get_prev_and_current_price(symbol: str):
 def build_alert_messages():
     now_kst = pd.Timestamp.now(tz=ZoneInfo("Asia/Seoul")).strftime("%Y-%m-%d %H:%M:%S")
     messages = []
+
     for symbol in TICKERS:
         if symbol not in close.columns or close[symbol].dropna().empty:
             messages.append(f"❌ {symbol} 데이터 누락으로 분석 불가")
             continue
+
         prev_close, current_price = get_prev_and_current_price(symbol)
         sigma = compute_sigma(close[symbol])
         if prev_close is None or current_price is None or sigma is None:
             messages.append(f"❌ {symbol} 시그마 계산 불가 (데이터 부족)")
             continue
+
+        # 2σ 기준
         sigma2 = 2 * sigma
         threshold_2 = prev_close * (1 - sigma2)
+
+        # 오늘 수익률
         ret_today = (current_price / prev_close) - 1.0
         ret_str = f"+{ret_today*100:.2f}%" if ret_today > 0 else f"{ret_today*100:.2f}%"
+
+        # 매수 조건
         buy_signal = current_price <= threshold_2
-        optimal_tp = optimize_tp_fixed_pct_for_symbol(close[symbol],
-                                                      lookback_window=LOOKBACK_TRADING_DAYS,
-                                                      forward_days=FORWARD_DAYS,
-                                                      fees=FEES)
-        tp_text = f"{optimal_tp*100:.2f}%" if optimal_tp else "❌ 계산 불가"
+
         message = (
             f"📉 [{symbol} 매수 신호 체크]\n"
             f"알림 발생 시각: {now_kst}\n"
@@ -151,10 +94,10 @@ def build_alert_messages():
             f"전일 종가: ${prev_close:.2f}\n"
             f"현재 가격: ${current_price:.2f}\n"
             f"전일 대비: {ret_str}\n"
-            f"매수 조건 충족: {'✅ 2σ' if buy_signal else '❌ No'}\n"
-            f"최적 TP (최근 1년 롤링): {tp_text}"
+            f"매수 조건 충족: {'✅ 2σ' if buy_signal else '❌ No'}"
         )
         messages.append(message)
+
     return "\n\n".join(messages)
 
 # ==================== 월간 Ping ====================
