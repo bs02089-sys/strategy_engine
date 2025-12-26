@@ -8,8 +8,8 @@ from datetime import timedelta
 from zoneinfo import ZoneInfo
 
 # ==================== 설정 ====================
-TICKERS = ["SOXL"]
-LOOKBACK_TRADING_DAYS = 252   # 방송과 동일: 최근 252거래일
+TICKERS = ["TQQQ", "SOXL"]   # 여러 종목 동시에 체크
+LOOKBACK_TRADING_DAYS = 252
 FEES = 0.00065
 K_FIXED = 2.0
 
@@ -33,7 +33,6 @@ def send_discord_message(content: str):
 # ==================== 데이터 로딩 ====================
 def load_data():
     now = pd.Timestamp.now(tz=ZoneInfo("Asia/Seoul")).normalize().tz_localize(None)
-    # 252일 + 여유분 확보
     start_date = (now - timedelta(days=LOOKBACK_TRADING_DAYS + 150)).date()
     end_date = (now + timedelta(days=1)).date()
     data = yf.download(TICKERS, start=start_date, end=end_date, auto_adjust=True, progress=False)
@@ -44,16 +43,10 @@ close = load_data()
 
 # ==================== σ 계산 (오늘 제외) ====================
 def compute_sigma(close_series: pd.Series, window: int = LOOKBACK_TRADING_DAYS) -> float | None:
-    """
-    오늘을 제외하고, 전일까지 window 거래일 기준으로 σ(표준편차)를 계산합니다.
-    """
     s = pd.Series(close_series).dropna()
     returns = s.pct_change().dropna()
-
-    # 오늘 제외 → 최소 window+1개 필요
     if len(returns) < window + 1:
         return None
-
     sigma = returns.iloc[-window-1:-1].std()
     return float(sigma) if np.isfinite(sigma) else None
 
@@ -85,7 +78,6 @@ def build_alert_messages():
             continue
 
         sigma2 = 2 * sigma
-        threshold_1 = prev_close * (1 - sigma)
         threshold_2 = prev_close * (1 - sigma2)
 
         ret_today = (current_price / prev_close) - 1.0
@@ -95,12 +87,11 @@ def build_alert_messages():
         message = (
             f"📉 [{symbol} 매수 신호 체크]\n"
             f"알림 발생 시각: {now_kst}\n"
-            f"1σ (전일까지 252일): {sigma*100:.2f}% (도달가격: ${threshold_1:.2f})\n"
-            f"2σ: {sigma2*100:.2f}% (도달가격: ${threshold_2:.2f})\n"
+            f"2σ (전일까지 252일): {sigma2*100:.2f}% (도달가격: ${threshold_2:.2f})\n"
             f"전일 종가: ${prev_close:.2f}\n"
             f"현재 가격: ${current_price:.2f}\n"
             f"전일 대비: {ret_str}\n"
-            f"매수 조건 충족: {'✅ 2σ' if current_price <= threshold_2 else ('✅ 1σ' if current_price <= threshold_1 else '❌ No')}\n"
+            f"매수 조건 충족: {'✅ 2σ' if current_price <= threshold_2 else '❌ No'}\n"
             f"TP (고정 k={K_FIXED}): {tp_pct:.2f}%"
         )
         messages.append(message)
