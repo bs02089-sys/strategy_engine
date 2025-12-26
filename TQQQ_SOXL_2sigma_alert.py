@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 TICKERS = ["TQQQ", "SOXL"]
 LOOKBACK_TRADING_DAYS = 252
 FEES = 0.00065
+FORWARD_DAYS = 30   
 
 # ==================== .env 로드 ====================
 load_dotenv()
@@ -52,7 +53,7 @@ def compute_sigma(close_series: pd.Series, window: int = LOOKBACK_TRADING_DAYS) 
 # ==================== 최적 TP 계산 (최근 1년 롤링, 그리드 탐색) ====================
 def _find_signals_and_forward_path(series: pd.Series,
                                    lookback_window: int = 252,
-                                   forward_days: int = 20) -> list[dict]:
+                                   forward_days: int = 30) -> list[dict]:
     s = series.dropna()
     high = s  # 고가 데이터가 없으므로 종가로 대체
     events = []
@@ -79,13 +80,13 @@ def _find_signals_and_forward_path(series: pd.Series,
 def optimize_tp_fixed_pct_for_symbol(close_series: pd.Series,
                                      tp_grid: np.ndarray | None = None,
                                      lookback_window: int = 252,
-                                     forward_days: int = 20,
+                                     forward_days: int = 30,
                                      fees: float = 0.00065) -> float | None:
     s = close_series.last("365D").dropna()
     if len(s) < lookback_window + 30:
         return None
     if tp_grid is None:
-        tp_grid = np.round(np.arange(0.02, 0.2001, 0.005), 3)  # 2% ~ 20% 후보
+        tp_grid = np.round(np.arange(0.02, 0.2001, 0.005), 3)  # 2% ~ 20%
     events = _find_signals_and_forward_path(s, lookback_window=lookback_window, forward_days=forward_days)
     if not events:
         return None
@@ -97,11 +98,14 @@ def optimize_tp_fixed_pct_for_symbol(close_series: pd.Series,
             entry = ev["entry"]
             f_high = ev["forward_high"]
             tp_price = entry * (1 + tp)
-            hit = np.any(f_high >= tp_price)
-            if hit:
+            if np.any(f_high >= tp_price):
                 pnl = tp - 2 * fees
-                total_return += pnl
-                trades += 1
+            else:
+                # forward 마지막 종가로 청산
+                exit_price = f_high[-1] if len(f_high) > 0 else entry
+                pnl = (exit_price / entry - 1.0) - 2 * fees
+            total_return += pnl
+            trades += 1
         if total_return > best_score:
             best_score, best_tp = total_return, tp
     return float(best_tp) if best_tp is not None else None
@@ -135,7 +139,10 @@ def build_alert_messages():
         ret_today = (current_price / prev_close) - 1.0
         ret_str = f"+{ret_today*100:.2f}%" if ret_today > 0 else f"{ret_today*100:.2f}%"
         buy_signal = current_price <= threshold_2
-        optimal_tp = optimize_tp_fixed_pct_for_symbol(close[symbol], lookback_window=LOOKBACK_TRADING_DAYS, forward_days=20, fees=FEES)
+        optimal_tp = optimize_tp_fixed_pct_for_symbol(close[symbol],
+                                                      lookback_window=LOOKBACK_TRADING_DAYS,
+                                                      forward_days=FORWARD_DAYS,
+                                                      fees=FEES)
         tp_text = f"{optimal_tp*100:.2f}%" if optimal_tp else "❌ 계산 불가"
         message = (
             f"📉 [{symbol} 매수 신호 체크]\n"
