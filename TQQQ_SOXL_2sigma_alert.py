@@ -6,12 +6,12 @@ import requests
 from dotenv import load_dotenv
 from datetime import timedelta
 from zoneinfo import ZoneInfo
+from scipy.optimize import minimize
 
 # ==================== 설정 ====================
-TICKERS = ["TQQQ", "SOXL"]   # 여러 종목 동시에 체크
+TICKERS = ["TQQQ", "SOXL"]
 LOOKBACK_TRADING_DAYS = 252
 FEES = 0.00065
-K_FIXED = 2.0
 
 # ==================== .env 로드 ====================
 load_dotenv()
@@ -41,7 +41,7 @@ def load_data():
 
 close = load_data()
 
-# ==================== σ 계산 (오늘 제외) ====================
+# ==================== σ 계산 ====================
 def compute_sigma(close_series: pd.Series, window: int = LOOKBACK_TRADING_DAYS) -> float | None:
     s = pd.Series(close_series).dropna()
     returns = s.pct_change().dropna()
@@ -49,6 +49,28 @@ def compute_sigma(close_series: pd.Series, window: int = LOOKBACK_TRADING_DAYS) 
         return None
     sigma = returns.iloc[-window-1:-1].std()
     return float(sigma) if np.isfinite(sigma) else None
+
+# ==================== 최적 TP 계산 (최근 1년 롤링) ====================
+def optimize_tp(symbol: str, close_series: pd.Series) -> float | None:
+    s = close_series.last("365D").dropna()
+    if len(s) < 30:
+        return None
+
+    def backtest(tp_pct):
+        total_return = 0
+        sigma = s.pct_change().dropna().std()
+        prev_close = s.iloc[-2]
+        current_price = s.iloc[-1]
+        threshold_2 = prev_close * (1 - 2*sigma)
+        if current_price <= threshold_2:
+            entry = current_price
+            tp_price = entry * (1 + tp_pct)
+            if s.max() >= tp_price:
+                total_return += tp_pct
+        return -total_return  # minimize → 음수 반환
+
+    res = minimize(backtest, x0=0.05, bounds=[(0.01, 0.20)])
+    return float(res.x[0]) if res.success else None
 
 # ==================== 전일 종가와 현재가 ====================
 def get_prev_and_current_price(symbol: str):
@@ -77,12 +99,20 @@ def build_alert_messages():
             messages.append(f"❌ {symbol} 시그마 계산 불가 (데이터 부족)")
             continue
 
+        # 2σ 기준
         sigma2 = 2 * sigma
         threshold_2 = prev_close * (1 - sigma2)
 
+        # 오늘 수익률
         ret_today = (current_price / prev_close) - 1.0
         ret_str = f"+{ret_today*100:.2f}%" if ret_today > 0 else f"{ret_today*100:.2f}%"
-        tp_pct = K_FIXED * sigma * 100.0
+
+        # 매수 조건
+        buy_signal = current_price <= threshold_2
+
+        # 최적 TP 계산
+        optimal_tp = optimize_tp(symbol, close[symbol])
+        tp_text = f"{optimal_tp*100:.2f}%" if optimal_tp else "❌ 계산 불가"
 
         message = (
             f"📉 [{symbol} 매수 신호 체크]\n"
@@ -91,8 +121,8 @@ def build_alert_messages():
             f"전일 종가: ${prev_close:.2f}\n"
             f"현재 가격: ${current_price:.2f}\n"
             f"전일 대비: {ret_str}\n"
-            f"매수 조건 충족: {'✅ 2σ' if current_price <= threshold_2 else '❌ No'}\n"
-            f"TP (고정 k={K_FIXED}): {tp_pct:.2f}%"
+            f"매수 조건 충족: {'✅ 2σ' if buy_signal else '❌ No'}\n"
+            f"최적 TP (최근 1년 롤링): {tp_text}"
         )
         messages.append(message)
 
