@@ -8,9 +8,8 @@ from datetime import timedelta
 from zoneinfo import ZoneInfo
 
 # ==================== 설정 ====================
-TICKERS = ["TQQQ", "SOXL"]
+TICKERS = ["TQQQ", "SOXL", "QLD"]
 LOOKBACK_TRADING_DAYS = 252
-FEES = 0.00065  # 현재 알림에는 사용하지 않지만 유지
 TIMEZONE = ZoneInfo("Asia/Seoul")
 
 # ==================== .env 로드 ====================
@@ -40,10 +39,6 @@ def send_discord_message(content: str):
 
 # ==================== 데이터 로딩 ====================
 def load_data_multi(tickers: list[str]) -> pd.DataFrame:
-    """
-    기본적으로 모든 티커를 한번에 다운로드.
-    누락된 티커가 있으면 개별 재다운로드로 보강.
-    """
     now_date = kst_now_naive_date()
     start_date = (pd.Timestamp(now_date) - timedelta(days=LOOKBACK_TRADING_DAYS + 150)).date()
     end_date = (pd.Timestamp(now_date) + timedelta(days=1)).date()
