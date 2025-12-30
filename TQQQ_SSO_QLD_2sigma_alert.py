@@ -8,7 +8,7 @@ from datetime import timedelta
 from zoneinfo import ZoneInfo
 
 # ==================== 설정 ====================
-TICKERS = ["TQQQ", "SOXL", "QLD"]
+TICKERS = ["TQQQ", "SSO", "QLD"]
 LOOKBACK_TRADING_DAYS = 252
 TIMEZONE = ZoneInfo("Asia/Seoul")
 
