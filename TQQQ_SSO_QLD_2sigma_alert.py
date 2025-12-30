@@ -18,11 +18,15 @@ WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK")
 
 # ==================== 유틸 ====================
 def kst_now_naive_date():
-    # KST 현재 날짜(naive) 계산
     return pd.Timestamp.now(tz=TIMEZONE).normalize().tz_localize(None).date()
 
 def kst_now_str():
     return pd.Timestamp.now(tz=TIMEZONE).strftime("%Y-%m-%d %H:%M:%S")
+
+def is_us_market_open_now() -> bool:
+    now_kst = pd.Timestamp.now(tz=TIMEZONE)
+    now_et = now_kst.tz_convert("America/New_York")
+    return now_et.time() >= pd.Timestamp("09:30").time() and now_et.time() <= pd.Timestamp("16:00").time()
 
 # ==================== 디스코드 알림 ====================
 def send_discord_message(content: str):
@@ -44,16 +48,13 @@ def load_data_multi(tickers: list[str]) -> pd.DataFrame:
     end_date = (pd.Timestamp(now_date) + timedelta(days=1)).date()
 
     data = yf.download(tickers, start=start_date, end=end_date, auto_adjust=True, progress=False)
-    # 멀티다운로드는 컬럼이 MultiIndex일 수 있음
     if isinstance(data.columns, pd.MultiIndex):
         close = data["Close"].reindex(columns=tickers)
     else:
-        # 단일 티커만 반환되는 경우
         close = data.reindex(columns=["Close"])
-        close.columns = tickers[:1]  # 안전하게 이름 매칭 (단일 티커 케이스)
+        close.columns = tickers[:1]
     close = close.dropna(how="all")
 
-    # 누락된 심볼 보강 (개별 다운로드)
     for sym in tickers:
         if sym not in close.columns or close[sym].dropna().empty:
             print(f"⚠️ {sym} 멀티 다운로드 누락. 개별 재다운로드 시도.")
@@ -63,7 +64,6 @@ def load_data_multi(tickers: list[str]) -> pd.DataFrame:
             else:
                 print(f"❌ {sym} 개별 재다운로드 실패 또는 데이터 없음.")
 
-    # 컬럼 순서 정렬
     close = close.reindex(columns=tickers)
     return close
 
@@ -76,11 +76,30 @@ close = load_data()
 def compute_sigma(close_series: pd.Series, window: int = LOOKBACK_TRADING_DAYS) -> float | None:
     s = pd.Series(close_series).dropna()
     returns = s.pct_change().dropna()
-    # 전일까지의 returns를 기준으로 윈도우 확보
     if len(returns) < window + 1:
         return None
     sigma = returns.iloc[-window-1:-1].std()
     return float(sigma) if np.isfinite(sigma) else None
+
+# ==================== 현재가 조회 ====================
+def get_current_price(symbol: str) -> float | None:
+    try:
+        tk = yf.Ticker(symbol)
+        lp = getattr(getattr(tk, "fast_info", None), "last_price", None)
+        if lp is not None and np.isfinite(lp) and lp > 0:
+            return float(lp)
+        hist = tk.history(period="1d", interval="1m", auto_adjust=True)
+        if isinstance(hist, pd.DataFrame) and not hist.empty:
+            last_row = hist.iloc[-1]
+            for col in ["Close", "Adj Close", "Open"]:
+                if col in hist.columns and pd.notnull(last_row.get(col)):
+                    val = float(last_row.get(col))
+                    if np.isfinite(val) and val > 0:
+                        return val
+        return None
+    except Exception as e:
+        print(f"⚠️ {symbol} 현재가 조회 실패: {e}")
+        return None
 
 # ==================== 전일 종가와 현재가 ====================
 def get_prev_and_current_price(symbol: str) -> tuple[float | None, float | None]:
@@ -89,8 +108,15 @@ def get_prev_and_current_price(symbol: str) -> tuple[float | None, float | None]
     s = close[symbol].dropna()
     if len(s) < 2:
         return None, None
-    prev_close = float(s.iloc[-2])
-    current_price = float(s.iloc[-1])
+    prev_close = float(s.iloc[-2])  # 전일 종가
+
+    if is_us_market_open_now():
+        current_price = get_current_price(symbol)
+        if current_price is None:
+            current_price = float(s.iloc[-1])  # fallback
+    else:
+        current_price = prev_close  # 정규장 이전은 전일 종가로 표시
+
     return prev_close, current_price
 
 # ==================== 메시지 생성 ====================
@@ -99,7 +125,6 @@ def build_alert_messages() -> str:
     messages: list[str] = []
 
     for symbol in TICKERS:
-        # 데이터 존재 체크
         if symbol not in close.columns or close[symbol].dropna().empty:
             messages.append(f"❌ {symbol} 데이터 누락으로 분석 불가")
             continue
@@ -111,15 +136,11 @@ def build_alert_messages() -> str:
             messages.append(f"❌ {symbol} 시그마 계산 불가 (데이터 부족)")
             continue
 
-        # 2σ 기준
         sigma2 = 2.0 * sigma
         threshold_2 = prev_close * (1.0 - sigma2)
 
-        # 오늘 수익률
         ret_today = (current_price / prev_close) - 1.0
         ret_str = f"+{ret_today * 100:.2f}%" if ret_today > 0 else f"{ret_today * 100:.2f}%"
-
-        # 매수 조건
         buy_signal = current_price <= threshold_2
 
         message = (
