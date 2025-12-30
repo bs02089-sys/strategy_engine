@@ -4,29 +4,28 @@ import numpy as np
 import yfinance as yf
 import requests
 from dotenv import load_dotenv
-from datetime import timedelta
 from zoneinfo import ZoneInfo
 
 # ==================== 설정 ====================
 TICKERS = ["TQQQ", "SSO", "QLD"]
 LOOKBACK_TRADING_DAYS = 252
 TIMEZONE = ZoneInfo("Asia/Seoul")
+ET = ZoneInfo("America/New_York")
 
 # ==================== .env 로드 ====================
 load_dotenv()
 WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK")
 
 # ==================== 유틸 ====================
-def kst_now_naive_date():
-    return pd.Timestamp.now(tz=TIMEZONE).normalize().tz_localize(None).date()
-
 def kst_now_str():
     return pd.Timestamp.now(tz=TIMEZONE).strftime("%Y-%m-%d %H:%M:%S")
 
+def now_et():
+    return pd.Timestamp.now(tz=ET)
+
 def is_us_market_open_now() -> bool:
-    now_kst = pd.Timestamp.now(tz=TIMEZONE)
-    now_et = now_kst.tz_convert("America/New_York")
-    return now_et.time() >= pd.Timestamp("09:30").time() and now_et.time() <= pd.Timestamp("16:00").time()
+    nyt = now_et().time()
+    return nyt >= pd.Timestamp("09:30").time() and nyt <= pd.Timestamp("16:00").time()
 
 # ==================== 디스코드 알림 ====================
 def send_discord_message(content: str):
@@ -41,97 +40,70 @@ def send_discord_message(content: str):
     except Exception as e:
         print(f"❌ 디스코드 알림 예외: {e}")
 
-# ==================== 데이터 로딩 ====================
-def load_data_multi(tickers: list[str]) -> pd.DataFrame:
-    now_date = kst_now_naive_date()
-    start_date = (pd.Timestamp(now_date) - timedelta(days=LOOKBACK_TRADING_DAYS + 150)).date()
-    end_date = (pd.Timestamp(now_date) + timedelta(days=1)).date()
+# ==================== σ 계산용 과거 종가 ====================
+def load_close_series(symbol: str) -> pd.Series:
+    df = yf.download(symbol, period="3y", auto_adjust=True, progress=False)
+    if "Close" in df.columns:
+        s = df["Close"]
+        if isinstance(s, pd.DataFrame):
+            s = s.iloc[:, 0]
+        return s.dropna()
+    return pd.Series(dtype=float)
 
-    data = yf.download(tickers, start=start_date, end=end_date, auto_adjust=True, progress=False)
-    if isinstance(data.columns, pd.MultiIndex):
-        close = data["Close"].reindex(columns=tickers)
-    else:
-        close = data.reindex(columns=["Close"])
-        close.columns = tickers[:1]
-    close = close.dropna(how="all")
+close_map: dict[str, pd.Series] = {sym: load_close_series(sym) for sym in TICKERS}
 
-    for sym in tickers:
-        if sym not in close.columns or close[sym].dropna().empty:
-            print(f"⚠️ {sym} 멀티 다운로드 누락. 개별 재다운로드 시도.")
-            solo = yf.download(sym, start=start_date, end=end_date, auto_adjust=True, progress=False)
-            if "Close" in solo.columns and not solo["Close"].dropna().empty:
-                close[sym] = solo["Close"]
-            else:
-                print(f"❌ {sym} 개별 재다운로드 실패 또는 데이터 없음.")
-
-    close = close.reindex(columns=tickers)
-    return close
-
-def load_data() -> pd.DataFrame:
-    return load_data_multi(TICKERS)
-
-close = load_data()
-
-# ==================== σ 계산 (오늘 제외) ====================
+# ==================== σ 계산 (오늘 포함 252일) ====================
 def compute_sigma(close_series: pd.Series, window: int = LOOKBACK_TRADING_DAYS) -> float | None:
-    s = pd.Series(close_series).dropna()
+    s = close_series.dropna()
     returns = s.pct_change().dropna()
-    if len(returns) < window + 1:
+    if len(returns) < window:
         return None
-    # 오늘 제외 252일
-    sigma = returns.iloc[-window-1:-1].std()
+    sigma = returns.iloc[-window:].std()
     return float(sigma) if np.isfinite(sigma) else None
 
-# ==================== 가격 조회 ====================
-def get_prev_close(symbol: str) -> float | None:
-    """전일 공식 종가 우선 사용 (fast_info.previous_close), 실패 시 시계열 폴백."""
+# ==================== 전일 종가 (ET 기준) ====================
+def get_previous_close_et(symbol: str) -> float | None:
     try:
         tk = yf.Ticker(symbol)
-        pc = getattr(getattr(tk, "fast_info", None), "previous_close", None)
-        if pc is not None and np.isfinite(pc) and pc > 0:
-            return float(pc)
+        h = tk.history(period="10d", interval="1d", auto_adjust=False)
+        if not isinstance(h, pd.DataFrame) or h.empty or "Close" not in h.columns:
+            return None
+        h = h.tz_localize(ET) if h.index.tz is None else h.tz_convert(ET)
+        h = h.dropna(subset=["Close"])
+        if h.empty:
+            return None
+
+        last_idx = h.index[-1]
+        last_date = last_idx.date()
+        today_et = now_et().date()
+
+        if is_us_market_open_now() and last_date == today_et:
+            if len(h) < 2:
+                return None
+            return float(h["Close"].iloc[-2])
+        else:
+            return float(h["Close"].iloc[-1])
     except Exception as e:
-        print(f"⚠️ {symbol} previous_close 조회 실패: {e}")
+        print(f"⚠️ {symbol} 전일 종가 추출 실패: {e}")
+        return None
 
-    # 폴백: 시계열의 가장 최근 종가를 전일로 간주
-    if symbol in close.columns:
-        s = close[symbol].dropna()
-        if len(s) >= 1:
-            return float(s.iloc[-1])
-    return None
-
-def get_current_price_live(symbol: str) -> float | None:
-    """장중 실시간/당일 현재가 조회."""
+# ==================== 현재가 (장중 실시간, 장외 전일 종가) ====================
+def get_current_price(symbol: str, prev_close: float) -> float:
+    if not is_us_market_open_now():
+        return prev_close
     try:
         tk = yf.Ticker(symbol)
         lp = getattr(getattr(tk, "fast_info", None), "last_price", None)
         if lp is not None and np.isfinite(lp) and lp > 0:
             return float(lp)
-        hist = tk.history(period="1d", interval="1m", auto_adjust=True)
-        if isinstance(hist, pd.DataFrame) and not hist.empty:
-            last_row = hist.iloc[-1]
-            for col in ["Close", "Adj Close", "Open"]:
-                if col in hist.columns and pd.notnull(last_row.get(col)):
-                    val = float(last_row.get(col))
-                    if np.isfinite(val) and val > 0:
-                        return val
+        hist = tk.history(period="1d", interval="1m", auto_adjust=False)
+        if isinstance(hist, pd.DataFrame) and not hist.empty and "Close" in hist.columns:
+            v = float(hist["Close"].dropna().iloc[-1])
+            if np.isfinite(v) and v > 0:
+                return v
     except Exception as e:
         print(f"⚠️ {symbol} 현재가 조회 실패: {e}")
-    return None
-
-def get_prev_and_current_price(symbol: str) -> tuple[float | None, float | None]:
-    prev_close = get_prev_close(symbol)
-    if prev_close is None:
-        return None, None
-
-    if is_us_market_open_now():
-        current_price = get_current_price_live(symbol)
-        if current_price is None:
-            current_price = prev_close  # 실패 시 전일 종가로 폴백
-    else:
-        current_price = prev_close  # 정규장 이전에는 전일 종가 표시
-
-    return prev_close, current_price
+    return prev_close
 
 # ==================== 메시지 생성 ====================
 def build_alert_messages() -> str:
@@ -139,16 +111,13 @@ def build_alert_messages() -> str:
     messages: list[str] = []
 
     for symbol in TICKERS:
-        if symbol not in close.columns or close[symbol].dropna().empty:
-            # 데이터가 일부 비어 있어도 previous_close는 따로 가져올 수 있으므로, 완전 누락인 경우만 표시
-            pass
-
-        prev_close, current_price = get_prev_and_current_price(symbol)
-        sigma = compute_sigma(close.get(symbol, pd.Series(dtype=float)))
-
-        if prev_close is None or current_price is None or sigma is None:
+        prev_close = get_previous_close_et(symbol)
+        sigma = compute_sigma(close_map.get(symbol, pd.Series(dtype=float)))
+        if prev_close is None or sigma is None:
             messages.append(f"❌ {symbol} 시그마/가격 계산 불가 (데이터 부족)")
             continue
+
+        current_price = get_current_price(symbol, prev_close)
 
         sigma2 = 2.0 * sigma
         threshold_2 = prev_close * (1.0 - sigma2)
@@ -160,10 +129,10 @@ def build_alert_messages() -> str:
         message = (
             f"📉 [{symbol} 매수 신호 체크]\n"
             f"알림 발생 시각: {now_kst}\n"
-            f"2σ (전일까지 {LOOKBACK_TRADING_DAYS}일): {sigma2 * 100:.2f}% (도달가격: ${threshold_2:.2f})\n"
+            f"2σ (오늘 포함 {LOOKBACK_TRADING_DAYS}일): {sigma2 * 100:.2f}% (도달가격: ${threshold_2:.2f})\n"
             f"전일 종가: ${prev_close:.2f}\n"
             f"현재 가격: ${current_price:.2f}\n"
-            f"전일 대비: {ret_today * 100:.2f}%\n"
+            f"전일 대비: {ret_str}\n"
             f"매수 조건 충족: {'✅ 2σ' if buy_signal else '❌ No'}"
         )
         messages.append(message)
