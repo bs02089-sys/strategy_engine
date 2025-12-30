@@ -34,7 +34,7 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run auto push alert script
-        run: python TQQQ_SOXL_2sigma_alert.py
+        run: python TQQQ_SOXL_QLD_2sigma_alert.py
 
       - name: Commit and push changes
         run: |
