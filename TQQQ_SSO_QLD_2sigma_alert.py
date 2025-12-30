@@ -78,11 +78,30 @@ def compute_sigma(close_series: pd.Series, window: int = LOOKBACK_TRADING_DAYS) 
     returns = s.pct_change().dropna()
     if len(returns) < window + 1:
         return None
+    # 오늘 제외 252일
     sigma = returns.iloc[-window-1:-1].std()
     return float(sigma) if np.isfinite(sigma) else None
 
-# ==================== 현재가 조회 ====================
-def get_current_price(symbol: str) -> float | None:
+# ==================== 가격 조회 ====================
+def get_prev_close(symbol: str) -> float | None:
+    """전일 공식 종가 우선 사용 (fast_info.previous_close), 실패 시 시계열 폴백."""
+    try:
+        tk = yf.Ticker(symbol)
+        pc = getattr(getattr(tk, "fast_info", None), "previous_close", None)
+        if pc is not None and np.isfinite(pc) and pc > 0:
+            return float(pc)
+    except Exception as e:
+        print(f"⚠️ {symbol} previous_close 조회 실패: {e}")
+
+    # 폴백: 시계열의 가장 최근 종가를 전일로 간주
+    if symbol in close.columns:
+        s = close[symbol].dropna()
+        if len(s) >= 1:
+            return float(s.iloc[-1])
+    return None
+
+def get_current_price_live(symbol: str) -> float | None:
+    """장중 실시간/당일 현재가 조회."""
     try:
         tk = yf.Ticker(symbol)
         lp = getattr(getattr(tk, "fast_info", None), "last_price", None)
@@ -96,28 +115,21 @@ def get_current_price(symbol: str) -> float | None:
                     val = float(last_row.get(col))
                     if np.isfinite(val) and val > 0:
                         return val
-        return None
     except Exception as e:
         print(f"⚠️ {symbol} 현재가 조회 실패: {e}")
-        return None
+    return None
 
-# ==================== 전일 종가와 현재가 ====================
 def get_prev_and_current_price(symbol: str) -> tuple[float | None, float | None]:
-    if symbol not in close.columns:
+    prev_close = get_prev_close(symbol)
+    if prev_close is None:
         return None, None
-    s = close[symbol].dropna()
-    if len(s) < 1:
-        return None, None
-
-    # 전일 종가 = 가장 최근 종가
-    prev_close = float(s.iloc[-1])
 
     if is_us_market_open_now():
-        current_price = get_current_price(symbol)
+        current_price = get_current_price_live(symbol)
         if current_price is None:
-            current_price = prev_close  # fallback
+            current_price = prev_close  # 실패 시 전일 종가로 폴백
     else:
-        current_price = prev_close  # 장외에는 전일 종가로 표시
+        current_price = prev_close  # 정규장 이전에는 전일 종가 표시
 
     return prev_close, current_price
 
@@ -128,14 +140,14 @@ def build_alert_messages() -> str:
 
     for symbol in TICKERS:
         if symbol not in close.columns or close[symbol].dropna().empty:
-            messages.append(f"❌ {symbol} 데이터 누락으로 분석 불가")
-            continue
+            # 데이터가 일부 비어 있어도 previous_close는 따로 가져올 수 있으므로, 완전 누락인 경우만 표시
+            pass
 
         prev_close, current_price = get_prev_and_current_price(symbol)
-        sigma = compute_sigma(close[symbol])
+        sigma = compute_sigma(close.get(symbol, pd.Series(dtype=float)))
 
         if prev_close is None or current_price is None or sigma is None:
-            messages.append(f"❌ {symbol} 시그마 계산 불가 (데이터 부족)")
+            messages.append(f"❌ {symbol} 시그마/가격 계산 불가 (데이터 부족)")
             continue
 
         sigma2 = 2.0 * sigma
@@ -151,7 +163,7 @@ def build_alert_messages() -> str:
             f"2σ (전일까지 {LOOKBACK_TRADING_DAYS}일): {sigma2 * 100:.2f}% (도달가격: ${threshold_2:.2f})\n"
             f"전일 종가: ${prev_close:.2f}\n"
             f"현재 가격: ${current_price:.2f}\n"
-            f"전일 대비: {ret_str}\n"
+            f"전일 대비: {ret_today * 100:.2f}%\n"
             f"매수 조건 충족: {'✅ 2σ' if buy_signal else '❌ No'}"
         )
         messages.append(message)
