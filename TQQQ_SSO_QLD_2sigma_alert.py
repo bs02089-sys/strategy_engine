@@ -106,16 +106,18 @@ def get_prev_and_current_price(symbol: str) -> tuple[float | None, float | None]
     if symbol not in close.columns:
         return None, None
     s = close[symbol].dropna()
-    if len(s) < 2:
+    if len(s) < 1:
         return None, None
-    prev_close = float(s.iloc[-2])  # 전일 종가
+
+    # 전일 종가 = 가장 최근 종가
+    prev_close = float(s.iloc[-1])
 
     if is_us_market_open_now():
         current_price = get_current_price(symbol)
         if current_price is None:
-            current_price = float(s.iloc[-1])  # fallback
+            current_price = prev_close  # fallback
     else:
-        current_price = prev_close  # 정규장 이전은 전일 종가로 표시
+        current_price = prev_close  # 장외에는 전일 종가로 표시
 
     return prev_close, current_price
 
