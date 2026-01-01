@@ -2,7 +2,7 @@ name: auto push alert script
 
 on:
   schedule:
-    - cron: "30 13 * * 1-5"
+    - cron: "20 14 * * 1-5"
   workflow_dispatch:
     inputs:
       environment:
