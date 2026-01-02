@@ -87,24 +87,6 @@ def get_previous_close_et(symbol: str) -> float | None:
         print(f"⚠️ {symbol} 전일 종가 추출 실패: {e}")
         return None
 
-# ==================== 현재가 (장중 실시간, 장외 전일 종가) ====================
-def get_current_price(symbol: str, prev_close: float) -> float:
-    if not is_us_market_open_now():
-        return prev_close
-    try:
-        tk = yf.Ticker(symbol)
-        lp = getattr(getattr(tk, "fast_info", None), "last_price", None)
-        if lp is not None and np.isfinite(lp) and lp > 0:
-            return float(lp)
-        hist = tk.history(period="1d", interval="1m", auto_adjust=False)
-        if isinstance(hist, pd.DataFrame) and not hist.empty and "Close" in hist.columns:
-            v = float(hist["Close"].dropna().iloc[-1])
-            if np.isfinite(v) and v > 0:
-                return v
-    except Exception as e:
-        print(f"⚠️ {symbol} 현재가 조회 실패: {e}")
-    return prev_close
-
 # ==================== 메시지 생성 ====================
 def build_alert_messages() -> str:
     now_kst = kst_now_str()
@@ -116,27 +98,16 @@ def build_alert_messages() -> str:
         if prev_close is None or sigma is None:
             messages.append(f"❌ {symbol} 시그마/가격 계산 불가 (데이터 부족)")
             continue
-
-        current_price = get_current_price(symbol, prev_close)
-
         sigma2 = 2.0 * sigma
         threshold_2 = prev_close * (1.0 - sigma2)
-
-        ret_today = (current_price / prev_close) - 1.0
-        ret_str = f"+{ret_today * 100:.2f}%" if ret_today > 0 else f"{ret_today * 100:.2f}%"
-        buy_signal = current_price <= threshold_2
-
         message = (
-            f"📉 [{symbol} 매수 신호 체크]\n"
+            f"📉 [{symbol} 매수 신호]\n"
             f"알림 발생 시각: {now_kst}\n"
-            f"2σ (오늘 포함 {LOOKBACK_TRADING_DAYS}일): {sigma2 * 100:.2f}% (도달가격: ${threshold_2:.2f})\n"
             f"전일 종가: ${prev_close:.2f}\n"
-            f"현재 가격: ${current_price:.2f}\n"
-            f"전일 대비: {ret_str}\n"
-            f"매수 조건 충족: {'✅ 2σ' if buy_signal else '❌ No'}"
+            f"2σ {sigma2 * 100:.2f}% "
+            f"도달 가격: ${threshold_2:.2f}\n"
         )
         messages.append(message)
-
     return "\n\n".join(messages)
 
 # ==================== 월간 Ping ====================
