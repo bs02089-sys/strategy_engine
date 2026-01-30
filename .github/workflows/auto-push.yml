@@ -3,19 +3,7 @@ name: auto push alert script
 on:
   schedule:
     - cron: "0 10 * * 1-5"
-
   workflow_dispatch:
-    inputs:
-      environment:
-        description: '실행할 환경'
-        required: true
-        default: 'production'
-
-permissions:
-  contents: write
-
-env:
-  DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
 
 jobs:
   run-alert:
@@ -33,6 +21,16 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+
+      - name: Wait until 19:00 KST
+        run: |
+          TARGET=$(date -d "today 10:00 UTC" +%s)
+          NOW=$(date +%s)
+          SLEEP=$((TARGET - NOW))
+          if [ $SLEEP -gt 0 ]; then
+            echo "Sleeping $SLEEP seconds until 19:00 KST..."
+            sleep $SLEEP
+          fi
 
       - name: Run auto push alert script
         run: python TQQQ_SOXL_QLD_2sigma_alert.py
