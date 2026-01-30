@@ -5,6 +5,9 @@ on:
     - cron: "0 10 * * 1-5"   # 평일 UTC 10시 → KST 오후 7시
   workflow_dispatch:
 
+env:
+  DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+
 jobs:
   run-alert:
     runs-on: ubuntu-latest
