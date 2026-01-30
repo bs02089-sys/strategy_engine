@@ -19,8 +19,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # 수동 실행 시에도 오후 7시까지 대기
-      - run: |
+      # 자동 실행일 때만 오후 7시까지 대기
+      - if: github.event_name == 'schedule'
+        run: |
           TARGET=$(date -d "today 10:00 UTC" +%s)
           NOW=$(date +%s)
           SLEEP=$((TARGET - NOW))
