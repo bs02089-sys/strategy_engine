@@ -2,48 +2,34 @@ name: auto push alert script
 
 on:
   schedule:
-    - cron: "0 10 * * 1-5"
+    - cron: "0 10 * * 1-5"   # 평일 UTC 10시 → KST 오후 7시
   workflow_dispatch:
 
 jobs:
   run-alert:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - uses: actions/setup-python@v4
         with:
           python-version: "3.12"
 
-      - name: Install dependencies
-        run: |
+      - run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Wait until 19:00 KST
-        run: |
+      # 수동 실행 시에도 오후 7시까지 대기
+      - run: |
           TARGET=$(date -d "today 10:00 UTC" +%s)
           NOW=$(date +%s)
           SLEEP=$((TARGET - NOW))
-          if [ $SLEEP -gt 0 ]; then
-            echo "Sleeping $SLEEP seconds until 19:00 KST..."
-            sleep $SLEEP
-          fi
+          [ $SLEEP -gt 0 ] && sleep $SLEEP
 
-      - name: Run auto push alert script
-        run: python TQQQ_SOXL_QLD_2sigma_alert.py
+      - run: python TQQQ_SOXL_QLD_2sigma_alert.py
 
-      - name: Commit and push changes
-        run: |
+      - run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add .
-          if git diff --cached --quiet; then
-            echo "✅ No changes to commit. Skipping push."
-          else
-            echo "🔍 Changes detected. Committing..."
-            git commit -m "Auto update alert script"
-            git push
-          fi
+          git diff --cached --quiet || git commit -m "Auto update alert script" && git push
