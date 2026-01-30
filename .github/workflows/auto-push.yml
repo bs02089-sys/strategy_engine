@@ -8,6 +8,9 @@ on:
 env:
   DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
 
+permissions:
+  contents: write
+
 jobs:
   run-alert:
     runs-on: ubuntu-latest
@@ -32,8 +35,10 @@ jobs:
 
       - run: python TQQQ_SOXL_QLD_2sigma_alert.py
 
-      - run: |
+      - name: Commit and push changes
+        run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
           git add .
           git diff --cached --quiet || git commit -m "Auto update alert script" && git push
