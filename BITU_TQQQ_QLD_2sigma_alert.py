@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 from zoneinfo import ZoneInfo
 
 # ==================== 설정 ====================
-TICKERS = ["TQQQ", "SOXL", "QLD"]
+TICKERS = ["BITU", "TQQQ", "QLD"]
 LOOKBACK_TRADING_DAYS = 252
 TIMEZONE = ZoneInfo("Asia/Seoul")
 ET = ZoneInfo("America/New_York")
