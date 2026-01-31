@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 from zoneinfo import ZoneInfo
 
 # ==================== 설정 ====================
-TICKERS = ["BITU", "TQQQ", "QLD"]
+TICKERS = ["BITU", "SOXL"]   
 LOOKBACK_TRADING_DAYS = 252
 TIMEZONE = ZoneInfo("Asia/Seoul")
 ET = ZoneInfo("America/New_York")
@@ -98,14 +98,14 @@ def build_alert_messages() -> str:
         if prev_close is None or sigma is None:
             messages.append(f"❌ {symbol} 시그마/가격 계산 불가 (데이터 부족)")
             continue
-        sigma2 = 2.0 * sigma
-        threshold_2 = prev_close * (1.0 - sigma2)
+        # 1σ 기준으로 수정
+        threshold_1 = prev_close * (1.0 - sigma)
         message = (
             f"📉 [{symbol} 매수 신호]\n"
             f"알림 발생 시각: {now_kst}\n"
             f"전일 종가: ${prev_close:.2f}\n"
-            f"2σ {sigma2 * 100:.2f}% "
-            f"도달 가격: ${threshold_2:.2f}\n"
+            f"1σ {sigma * 100:.2f}% "
+            f"도달 가격: ${threshold_1:.2f}\n"
         )
         messages.append(message)
     return "\n\n".join(messages)
