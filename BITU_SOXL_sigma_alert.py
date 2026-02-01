@@ -34,7 +34,7 @@ def send_discord_message(content: str):
     try:
         resp = requests.post(WEBHOOK_URL, json={"content": f"@everyone {content}"}, timeout=10)
         if resp.status_code in (200, 204):
-            print("✅ 디스코드 알림 전송 성공")
+            pass  # 성공 시 콘솔에 출력하지 않음
         else:
             print(f"❌ 디스코드 알림 실패: {resp.status_code} / {resp.text}")
     except Exception as e:
@@ -98,17 +98,20 @@ def build_alert_messages() -> str:
         if prev_close is None or sigma is None:
             messages.append(f"❌ {symbol} 시그마/가격 계산 불가 (데이터 부족)")
             continue
-        # 1σ 기준으로 수정
+        # 1σ,2σ 기준
         threshold_1 = prev_close * (1.0 - sigma)
+        threshold_2 = prev_close * (1.0 - 2 * sigma)
         message = (
             f"📉 [{symbol} 매수 신호]\n"
             f"알림 발생 시각: {now_kst}\n"
             f"전일 종가: ${prev_close:.2f}\n"
-            f"1σ {sigma * 100:.2f}% "
-            f"도달 가격: ${threshold_1:.2f}\n"
+            f"1σ {sigma * 100:.2f}% 도달 가격: ${threshold_1:.2f}\n"
+            f"2σ {2 * sigma * 100:.2f}% 도달 가격: ${threshold_2:.2f}"
         )
         messages.append(message)
-    return "\n\n".join(messages)
+    
+    # 메시지 사이에 한 줄만 띄우기 (줄바꿈 2개 → 1개로 조정)
+    return "\n".join(messages)
 
 # ==================== 월간 Ping ====================
 def monthly_ping():
