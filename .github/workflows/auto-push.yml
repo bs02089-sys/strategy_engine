@@ -33,7 +33,7 @@ jobs:
           SLEEP=$((TARGET - NOW))
           [ $SLEEP -gt 0 ] && sleep $SLEEP
 
-      - run: python BITU_SOXL__sigma_alert.py
+      - run: python BITU_SOXL_sigma_alert.py
 
       - name: Commit and push changes
         run: |
