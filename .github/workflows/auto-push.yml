@@ -28,12 +28,12 @@ jobs:
       # 자동 실행일 때만 오후 7시까지 대기
       - if: github.event_name == 'schedule'
         run: |
-          TARGET=$(date -d "today 10:00 UTC" +%s)
+          TARGET=$(TZ=UTC date -d "10:00" +%s)
           NOW=$(date +%s)
           SLEEP=$((TARGET - NOW))
           [ $SLEEP -gt 0 ] && sleep $SLEEP
 
-      - run: python BITU_SOXL_1sigma_alert.py
+      - run: python BITU_SOXL__sigma_alert.py
 
       - name: Commit and push changes
         run: |
