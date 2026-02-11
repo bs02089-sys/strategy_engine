@@ -28,9 +28,11 @@ jobs:
       # 자동 실행일 때만 오후 7시까지 대기
       - if: github.event_name == 'schedule'
         run: |
-          TARGET=$(TZ=UTC date -d "10:00" +%s)
+          TODAY=$(date -u +%Y-%m-%d)
+          TARGET=$(date -d "$TODAY 10:00 UTC" +%s)
           NOW=$(date +%s)
           SLEEP=$((TARGET - NOW))
+          echo "Sleeping for $SLEEP seconds until 10:00 UTC..."
           [ $SLEEP -gt 0 ] && sleep $SLEEP
 
       - run: python BITU_SOXL_sigma_alert.py
