@@ -32,8 +32,12 @@ jobs:
           TARGET=$(date -d "$TODAY 10:00 UTC" +%s)
           NOW=$(date +%s)
           SLEEP=$((TARGET - NOW))
-          echo "Sleeping for $SLEEP seconds until 10:00 UTC..."
-          [ $SLEEP -gt 0 ] && sleep $SLEEP
+          if [ $SLEEP -gt 0 ]; then
+            echo "Sleeping for $SLEEP seconds until 10:00 UTC..."
+            sleep $SLEEP
+          else
+            echo "Already past 10:00 UTC, skipping sleep."
+          fi
 
       - run: python BITU_SOXL_sigma_alert.py
 
