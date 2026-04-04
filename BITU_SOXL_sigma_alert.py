@@ -33,9 +33,7 @@ def send_discord_message(content: str):
         raise RuntimeError("❌ Webhook URL이 설정되지 않았습니다.")
     try:
         resp = requests.post(WEBHOOK_URL, json={"content": f"@everyone {content}"}, timeout=10)
-        if resp.status_code in (200, 204):
-            pass  # 성공 시 콘솔에 출력하지 않음
-        else:
+        if resp.status_code not in (200, 204):
             print(f"❌ 디스코드 알림 실패: {resp.status_code} / {resp.text}")
     except Exception as e:
         print(f"❌ 디스코드 알림 예외: {e}")
@@ -52,10 +50,11 @@ def load_close_series(symbol: str) -> pd.Series:
 
 close_map: dict[str, pd.Series] = {sym: load_close_series(sym) for sym in TICKERS}
 
-# ==================== σ 계산 (오늘 포함 252일) ====================
+# ==================== σ 계산 (로그수익률 기반) ====================
 def compute_sigma(close_series: pd.Series, window: int = LOOKBACK_TRADING_DAYS) -> float | None:
     s = close_series.dropna()
-    returns = s.pct_change().dropna()
+    # 로그수익률로 변경
+    returns = np.log(s / s.shift(1)).dropna()
     if len(returns) < window:
         return None
     sigma = returns.iloc[-window:].std()
@@ -98,7 +97,6 @@ def build_alert_messages() -> str:
         if prev_close is None or sigma is None:
             messages.append(f"❌ {symbol} 시그마/가격 계산 불가 (데이터 부족)")
             continue
-        # 1σ,2σ 기준
         threshold_1 = prev_close * (1.0 - sigma)
         threshold_2 = prev_close * (1.0 - 2 * sigma)
         message = (
@@ -110,7 +108,6 @@ def build_alert_messages() -> str:
         )
         messages.append(message)
     
-    # 메시지 사이에 한 줄만 띄우기 (줄바꿈 2개 → 1개로 조정)
     return "\n".join(messages)
 
 # ==================== 월간 Ping ====================
