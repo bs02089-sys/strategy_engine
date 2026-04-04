@@ -15,10 +15,8 @@ jobs:
   run-alert:
     runs-on: ubuntu-latest
     steps:
-      # 최신 checkout 액션 (Node.js 22 지원)
+      # 메이저 버전만 지정 → 최신 릴리스 자동 반영
       - uses: actions/checkout@v4
-
-      # 최신 setup-python 액션 (Node.js 22 지원)
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
