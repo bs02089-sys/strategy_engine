@@ -1,13 +1,13 @@
 import os
 import numpy as np
-import yfinance as yf
 import requests
+import time
 from datetime import datetime, timedelta
-from dotenv import load_dotenv   
+from dotenv import load_dotenv
 
-# ==================== .env 로드 (로컬용) ====================
-load_dotenv()                    
+load_dotenv()
 WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK")
+POLYGON_API_KEY = os.getenv("POLYGON_API_KEY")
 
 TICKERS = ["BITU", "SOXL"]
 LOOKBACK_DAYS = 252
@@ -20,9 +20,7 @@ def kst_now_str():
 def send_discord(content: str):
     if not WEBHOOK_URL:
         print("⚠️ DISCORD_WEBHOOK이 설정되지 않았습니다.")
-        print("   → .env 파일에 DISCORD_WEBHOOK을 제대로 입력했는지 확인하세요.")
-        return False
-    
+        return
     try:
         requests.post(
             WEBHOOK_URL,
@@ -30,50 +28,81 @@ def send_discord(content: str):
             timeout=15,
             headers={"Content-Type": "application/json"}
         )
-        print("✅ Discord로 메시지 전송 완료")
-        return True
+        print("✅ Discord 전송 완료")
     except Exception as e:
         print(f"❌ Discord 전송 실패: {e}")
-        return False
 
-
+# ==================== Polygon 데이터 가져오기 ====================
 def get_sigma_and_prev_close(symbol: str):
-    try:
-        print(f"📥 {symbol} 데이터 다운로드 시도...")
-        
-        df = yf.download(
-            symbol,
-            period="3y",
-            interval="1d",
-            progress=False,
-            auto_adjust=True,
-            timeout=30,
-            threads=False,
-            repair=True
-        )
-        
-        print(f"   → 다운로드 완료: {len(df)} rows")
-        
-        if df.empty or len(df) < LOOKBACK_DAYS + 30:
-            print(f"   ❌ {symbol}: 데이터 부족")
-            return None, None
-
-        closes = df['Close'].values
-        log_returns = np.log(closes[1:] / closes[:-1])
-        sigma = float(np.std(log_returns[-LOOKBACK_DAYS:]))
-        prev_close = float(closes[-1])
-        
-        print(f"   ✅ {symbol} 성공 | 종가: {prev_close:.2f} | σ: {sigma*100:.2f}%")
-        return sigma, prev_close
-        
-    except Exception as e:
-        print(f"   ❌ {symbol} 오류: {e}")
+    if not POLYGON_API_KEY:
+        print(f"❌ {symbol}: POLYGON_API_KEY가 .env에 없습니다.")
         return None, None
+
+    for attempt in range(3):
+        try:
+            print(f"📥 {symbol} Polygon 데이터 요청 중... ({attempt+1}/3)")
+            
+            # 최근 3년치 일봉 데이터 요청
+            end_date = datetime.now().strftime("%Y-%m-%d")
+            start_date = (datetime.now() - timedelta(days=1100)).strftime("%Y-%m-%d")
+            
+            url = f"https://api.polygon.io/v2/aggs/ticker/{symbol}/range/1/day/{start_date}/{end_date}"
+            
+            params = {
+                "adjusted": "true",
+                "sort": "asc",
+                "limit": 50000
+            }
+            
+            headers = {"Authorization": f"Bearer {POLYGON_API_KEY}"}
+            
+            resp = requests.get(url, params=params, headers=headers, timeout=30)
+            
+            if resp.status_code != 200:
+                print(f"   HTTP {resp.status_code}: {resp.text[:200]}")
+                time.sleep(8)
+                continue
+                
+            data = resp.json()
+            
+            if "results" not in data or not data["results"]:
+                print(f"   ❌ 결과 없음")
+                time.sleep(5)
+                continue
+                
+            results = data["results"]
+            print(f"   → {len(results)} 개 데이터 수신")
+            
+            # 종가 추출
+            closes = np.array([bar["c"] for bar in results])
+            
+            if len(closes) < LOOKBACK_DAYS + 30:
+                print(f"   ❌ 데이터 부족 ({len(closes)} rows)")
+                return None, None
+                
+            # 로그 수익률 기반 sigma 계산
+            log_returns = np.log(closes[1:] / closes[:-1])
+            sigma = float(np.std(log_returns[-LOOKBACK_DAYS:]))
+            prev_close = float(closes[-1])
+            
+            print(f"   ✅ {symbol} 성공 | 종가: {prev_close:.2f} | σ: {sigma*100:.2f}%")
+            return sigma, prev_close
+            
+        except Exception as e:
+            print(f"   시도 {attempt+1} 실패: {e}")
+            time.sleep(10)
+    
+    print(f"   ❌ {symbol} 최종 실패")
+    return None, None
 
 
 # ==================== 메인 ====================
 def main():
-    print(f"🚀 Sigma Alert 시작 - {kst_now_str()}\n")
+    if not POLYGON_API_KEY:
+        print("❌ POLYGON_API_KEY가 설정되지 않았습니다. .env 파일을 확인하세요.")
+        return
+        
+    print(f"🚀 Polygon Sigma Alert 시작 - {kst_now_str()}\n")
     
     messages = []
     
@@ -97,7 +126,7 @@ def main():
         messages.append(msg)
 
     final_msg = "\n\n".join(messages)
-    print("\n" + "="*60)
+    print("="*60)
     print(final_msg)
     print("="*60 + "\n")
     
