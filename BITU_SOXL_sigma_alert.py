@@ -1,124 +1,111 @@
 import os
-import pandas as pd
+import json
 import numpy as np
 import yfinance as yf
 import requests
-from dotenv import load_dotenv
+from datetime import datetime
 from zoneinfo import ZoneInfo
+from dotenv import load_dotenv
 
 # ==================== 설정 ====================
-TICKERS = ["BITU", "SOXL"]   
-LOOKBACK_TRADING_DAYS = 252
-TIMEZONE = ZoneInfo("Asia/Seoul")
-ET = ZoneInfo("America/New_York")
-
-# ==================== .env 로드 ====================
 load_dotenv()
 WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK")
 
+TICKERS = ["BITU", "SOXL"]
+LOOKBACK_DAYS = 252
+KST = ZoneInfo("Asia/Seoul")
+
+# yfinance 조용히 만들기
+yf.utils.get_yf_logger().setLevel(40)   # ERROR 이상만
+
 # ==================== 유틸 ====================
 def kst_now_str():
-    return pd.Timestamp.now(tz=TIMEZONE).strftime("%Y-%m-%d %H:%M:%S")
+    return datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S")
 
-def now_et():
-    return pd.Timestamp.now(tz=ET)
-
-def is_us_market_open_now() -> bool:
-    nyt = now_et().time()
-    return nyt >= pd.Timestamp("09:30").time() and nyt <= pd.Timestamp("16:00").time()
-
-# ==================== 디스코드 알림 ====================
-def send_discord_message(content: str):
+def send_discord(content: str):
     if not WEBHOOK_URL:
-        raise RuntimeError("❌ Webhook URL이 설정되지 않았습니다.")
+        print("WEBHOOK_URL 미설정")
+        return
     try:
-        resp = requests.post(WEBHOOK_URL, json={"content": f"@everyone {content}"}, timeout=10)
-        if resp.status_code not in (200, 204):
-            print(f"❌ 디스코드 알림 실패: {resp.status_code} / {resp.text}")
+        requests.post(
+            WEBHOOK_URL,
+            json={"content": f"@everyone {content}"},
+            timeout=10,
+            headers={"Content-Type": "application/json"}
+        )
     except Exception as e:
-        print(f"❌ 디스코드 알림 예외: {e}")
+        print(f"Discord 전송 실패: {e}")
 
-# ==================== σ 계산용 과거 종가 ====================
-def load_close_series(symbol: str) -> pd.Series:
-    df = yf.download(symbol, period="3y", auto_adjust=True, progress=False)
-    if "Close" in df.columns:
-        s = df["Close"]
-        if isinstance(s, pd.DataFrame):
-            s = s.iloc[:, 0]
-        return s.dropna()
-    return pd.Series(dtype=float)
-
-close_map: dict[str, pd.Series] = {sym: load_close_series(sym) for sym in TICKERS}
-
-# ==================== σ 계산 (로그수익률 기반) ====================
-def compute_sigma(close_series: pd.Series, window: int = LOOKBACK_TRADING_DAYS) -> float | None:
-    s = close_series.dropna()
-    # 로그수익률로 변경
-    returns = np.log(s / s.shift(1)).dropna()
-    if len(returns) < window:
-        return None
-    sigma = returns.iloc[-window:].std()
-    return float(sigma) if np.isfinite(sigma) else None
-
-# ==================== 전일 종가 (ET 기준) ====================
-def get_previous_close_et(symbol: str) -> float | None:
+# ==================== 데이터 가져오기 ====================
+def get_sigma_and_prev_close(symbol: str):
     try:
-        tk = yf.Ticker(symbol)
-        h = tk.history(period="10d", interval="1d", auto_adjust=False)
-        if not isinstance(h, pd.DataFrame) or h.empty or "Close" not in h.columns:
-            return None
-        h = h.tz_localize(ET) if h.index.tz is None else h.tz_convert(ET)
-        h = h.dropna(subset=["Close"])
-        if h.empty:
-            return None
+        # 3년치 데이터 한 번에 가져오기
+        df = yf.download(
+            symbol, 
+            period="3y", 
+            progress=False, 
+            auto_adjust=True,
+            timeout=15
+        )
+        
+        if df.empty or len(df) < LOOKBACK_DAYS + 10:
+            return None, None
 
-        last_idx = h.index[-1]
-        last_date = last_idx.date()
-        today_et = now_et().date()
-
-        if is_us_market_open_now() and last_date == today_et:
-            if len(h) < 2:
-                return None
-            return float(h["Close"].iloc[-2])
-        else:
-            return float(h["Close"].iloc[-1])
+        closes = df['Close'].values  # numpy array로 바로 변환
+        
+        # 로그 수익률
+        log_returns = np.log(closes[1:] / closes[:-1])
+        
+        # 최근 252일 표준편차 (연율화는 안 함 → 일별 sigma)
+        sigma = float(np.std(log_returns[-LOOKBACK_DAYS:]))
+        
+        prev_close = float(closes[-1])
+        
+        return sigma, prev_close
+        
     except Exception as e:
-        print(f"⚠️ {symbol} 전일 종가 추출 실패: {e}")
-        return None
+        print(f"{symbol} 데이터 오류: {e}")
+        return None, None
 
-# ==================== 메시지 생성 ====================
-def build_alert_messages() -> str:
+
+# ==================== 메인 ====================
+def main():
+    messages = []
     now_kst = kst_now_str()
-    messages: list[str] = []
+    alert_count = 0
 
     for symbol in TICKERS:
-        prev_close = get_previous_close_et(symbol)
-        sigma = compute_sigma(close_map.get(symbol, pd.Series(dtype=float)))
-        if prev_close is None or sigma is None:
-            messages.append(f"❌ {symbol} 시그마/가격 계산 불가 (데이터 부족)")
+        sigma, prev_close = get_sigma_and_prev_close(symbol)
+        
+        if sigma is None or prev_close is None:
+            messages.append(f"❌ {symbol}: 데이터 로드 실패")
             continue
-        threshold_1 = prev_close * (1.0 - sigma)
-        threshold_2 = prev_close * (1.0 - 2 * sigma)
-        message = (
+
+        thresh_1 = prev_close * (1 - sigma)      # 1σ 하방
+        thresh_2 = prev_close * (1 - 2 * sigma)  # 2σ 하방
+
+        msg = (
             f"📉 [{symbol} 매수 신호]\n"
-            f"알림 발생 시각: {now_kst}\n"
+            f"발생 시각: {now_kst}\n"
             f"전일 종가: ${prev_close:.2f}\n"
-            f"1σ {sigma * 100:.2f}% 도달 가격: ${threshold_1:.2f}\n"
-            f"2σ {2 * sigma * 100:.2f}% 도달 가격: ${threshold_2:.2f}"
+            f"1σ ({sigma*100:.2f}%) 가격: ${thresh_1:.2f}\n"
+            f"2σ ({2*sigma*100:.2f}%) 가격: ${thresh_2:.2f}"
         )
-        messages.append(message)
-    
-    return "\n".join(messages)
+        messages.append(msg)
+        alert_count += 1
 
-# ==================== 월간 Ping ====================
-def monthly_ping():
-    now_kst = pd.Timestamp.now(tz=TIMEZONE)
-    if now_kst.day == 1:
-        send_discord_message(f"✅ Monthly Ping: 시스템 정상 작동 중 ({now_kst.strftime('%Y-%m-%d %H:%M:%S')})")
+    # 실제 알림 보내기
+    if messages:
+        final_msg = "\n\n".join(messages)
+        print(final_msg)
+        send_discord(final_msg)
+    else:
+        print("오늘은 모든 종목 데이터 정상")
 
-# ==================== 실행 ====================
+    # 월 1일 핑
+    if datetime.now(KST).day == 1:
+        send_discord(f"✅ Monthly Ping: 시스템 정상 작동 ({now_kst})")
+
+
 if __name__ == "__main__":
-    final_message = build_alert_messages()
-    print(final_message)
-    send_discord_message(final_message)
-    monthly_ping()
+    main()
