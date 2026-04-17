@@ -26,7 +26,7 @@ jobs:
       - name: Run Sigma Alert Script
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-        run: python sigma_alert.py     # ← 당신의 실제 파일명으로 변경하세요
+        run: python BITU_SOXL_sigma_alert.py     # ← 당신의 실제 파일명으로 변경하세요
 
       - name: Notify if failed
         if: failure()
