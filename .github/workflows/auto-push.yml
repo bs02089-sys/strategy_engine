@@ -1,50 +1,36 @@
-name: auto push alert script
+name: Daily Sigma Alert
 
 on:
   schedule:
-    - cron: "0 10 * * 1-5"   # 평일 UTC 10시 → KST 오후 7시
-  workflow_dispatch:
-
-env:
-  DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-
-permissions:
-  contents: write
+    - cron: '0 10 * * *'        # 매일 한국시간 오후 7시 (UTC 10:00)
+  workflow_dispatch:           # 수동으로도 실행 가능
 
 jobs:
-  run-alert:
+  run-sigma-alert:
     runs-on: ubuntu-latest
+    
     steps:
-      # 메이저 버전만 지정 → 최신 릴리스 자동 반영
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: '3.11'
+          cache: 'pip'
 
-      - run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-      # 자동 실행일 때만 오후 7시까지 대기
-      - if: github.event_name == 'schedule'
+      - name: Install dependencies
         run: |
-          TODAY=$(date -u +%Y-%m-%d)
-          TARGET=$(date -d "$TODAY 10:00 UTC" +%s)
-          NOW=$(date +%s)
-          SLEEP=$((TARGET - NOW))
-          if [ $SLEEP -gt 0 ]; then
-            echo "Sleeping for $SLEEP seconds until 10:00 UTC..."
-            sleep $SLEEP
-          else
-            echo "Already past 10:00 UTC, skipping sleep."
-          fi
+          pip install yfinance numpy requests python-dotenv
 
-      - run: python BITU_SOXL_sigma_alert.py
+      - name: Run Sigma Alert Script
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        run: python sigma_alert.py     # ← 당신의 실제 파일명으로 변경하세요
 
-      - name: Commit and push changes
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
-          git add .
-          git diff --cached --quiet || git commit -m "Auto update alert script" && git push
+      - name: Notify if failed
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            console.log("❌ Sigma Alert 실행 실패")
