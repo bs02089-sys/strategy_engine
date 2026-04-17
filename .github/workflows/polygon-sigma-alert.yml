@@ -2,8 +2,8 @@ name: Daily Sigma Alert (Polygon)
 
 on:
   schedule:
-    - cron: '0 10 * * *'        # 매일 한국시간 오후 7시 (UTC 10:00)
-  workflow_dispatch:            # 수동 실행 가능
+    - cron: '0 10 * * *'
+  workflow_dispatch:
 
 jobs:
   run-sigma-alert:
@@ -20,15 +20,10 @@ jobs:
           cache: 'pip'
 
       - name: Install dependencies
-        run: |
-          pip install numpy requests python-dotenv
+        run: pip install numpy requests python-dotenv
 
       - name: Run Polygon Sigma Alert
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
         run: python BITU_SOXL_sigma_alert.py
-
-      - name: Notify if failed
-        if: failure()
-        run: echo "❌ Sigma Alert Job Failed"
