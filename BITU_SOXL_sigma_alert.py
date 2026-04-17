@@ -3,26 +3,24 @@ import numpy as np
 import yfinance as yf
 import requests
 from datetime import datetime
-from zoneinfo import ZoneInfo
 
 # ==================== 설정 ====================
-WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK")   # .env 대신 GitHub Secret에서 직접 읽음
+WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK")
 
 TICKERS = ["BITU", "SOXL"]
 LOOKBACK_DAYS = 252
-KST = ZoneInfo("Asia/Seoul")
-
-# yfinance 로그 최소화
-yf.utils.get_yf_logger().setLevel(40)
 
 # ==================== 유틸 ====================
 def kst_now_str():
-    return datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S")
+    # tzinfo 없이 단순 KST (UTC+9) 사용 → zoneinfo 문제 회피
+    now = datetime.utcnow()
+    kst = now.replace(tzinfo=None) + timedelta(hours=9)
+    return kst.strftime("%Y-%m-%d %H:%M:%S")
 
 def send_discord(content: str):
     if not WEBHOOK_URL:
-        print("❌ DISCORD_WEBHOOK secret이 설정되지 않았습니다.")
-        return False
+        print("❌ DISCORD_WEBHOOK secret이 없습니다.")
+        return
     try:
         requests.post(
             WEBHOOK_URL,
@@ -30,25 +28,28 @@ def send_discord(content: str):
             timeout=15,
             headers={"Content-Type": "application/json"}
         )
-        return True
+        print("Discord 전송 완료")
     except Exception as e:
         print(f"Discord 전송 실패: {e}")
-        return False
 
-
+# ==================== 데이터 가져오기 ====================
 def get_sigma_and_prev_close(symbol: str):
     try:
+        print(f"{symbol} 데이터 다운로드 시작...")
+        
         df = yf.download(
-            symbol, 
-            period="3y", 
-            progress=False, 
-            auto_adjust=True, 
-            timeout=20,
-            threads=False   # GitHub Actions에서 안정성 ↑
+            symbol,
+            period="3y",
+            progress=False,
+            auto_adjust=True,
+            timeout=25,
+            threads=False
         )
         
+        print(f"{symbol} 데이터 로드 완료: {len(df)} rows")
+        
         if df.empty or len(df) < LOOKBACK_DAYS + 30:
-            print(f"{symbol}: 데이터 부족 (rows: {len(df)})")
+            print(f"{symbol}: 데이터 부족")
             return None, None
 
         closes = df['Close'].values
@@ -59,7 +60,7 @@ def get_sigma_and_prev_close(symbol: str):
         return sigma, prev_close
         
     except Exception as e:
-        print(f"{symbol} 데이터 다운로드 실패: {e}")
+        print(f"{symbol} 오류 발생: {e}")
         return None, None
 
 
@@ -89,15 +90,13 @@ def main():
         messages.append(msg)
 
     final_msg = "\n\n".join(messages)
-    print(final_msg)
+    print("\n" + final_msg + "\n")
     
-    if messages:
-        send_discord(final_msg)
-    else:
-        send_discord("⚠️ 모든 종목 데이터 로드 실패")
+    send_discord(final_msg)
 
     print("✅ 스크립트 실행 완료")
 
 
 if __name__ == "__main__":
+    from datetime import timedelta   # 여기서 import
     main()
