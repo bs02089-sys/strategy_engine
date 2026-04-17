@@ -3,20 +3,26 @@ import numpy as np
 import yfinance as yf
 import requests
 from datetime import datetime, timedelta
+from dotenv import load_dotenv   
 
+# ==================== .env 로드 (로컬용) ====================
+load_dotenv()                    
 WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK")
 
 TICKERS = ["BITU", "SOXL"]
 LOOKBACK_DAYS = 252
 
+# ==================== 유틸 ====================
 def kst_now_str():
     now = datetime.utcnow() + timedelta(hours=9)
     return now.strftime("%Y-%m-%d %H:%M:%S")
 
 def send_discord(content: str):
     if not WEBHOOK_URL:
-        print("❌ DISCORD_WEBHOOK secret 없음")
-        return
+        print("⚠️ DISCORD_WEBHOOK이 설정되지 않았습니다.")
+        print("   → .env 파일에 DISCORD_WEBHOOK을 제대로 입력했는지 확인하세요.")
+        return False
+    
     try:
         requests.post(
             WEBHOOK_URL,
@@ -24,15 +30,17 @@ def send_discord(content: str):
             timeout=15,
             headers={"Content-Type": "application/json"}
         )
-        print("✅ Discord 전송 완료")
+        print("✅ Discord로 메시지 전송 완료")
+        return True
     except Exception as e:
-        print(f"Discord 전송 실패: {e}")
+        print(f"❌ Discord 전송 실패: {e}")
+        return False
+
 
 def get_sigma_and_prev_close(symbol: str):
     try:
         print(f"📥 {symbol} 데이터 다운로드 시도...")
         
-        # 더 안정적으로 가져오기 위한 옵션 추가
         df = yf.download(
             symbol,
             period="3y",
@@ -41,11 +49,10 @@ def get_sigma_and_prev_close(symbol: str):
             auto_adjust=True,
             timeout=30,
             threads=False,
-            repair=True,           # 새로 추가
-            keepna=True
+            repair=True
         )
         
-        print(f"   → 다운로드 완료: {len(df)} rows, 마지막 날짜: {df.index[-1] if not df.empty else 'None'}")
+        print(f"   → 다운로드 완료: {len(df)} rows")
         
         if df.empty or len(df) < LOOKBACK_DAYS + 30:
             print(f"   ❌ {symbol}: 데이터 부족")
@@ -56,14 +63,15 @@ def get_sigma_and_prev_close(symbol: str):
         sigma = float(np.std(log_returns[-LOOKBACK_DAYS:]))
         prev_close = float(closes[-1])
         
-        print(f"   ✅ {symbol} 성공 | Prev Close: {prev_close:.2f} | Sigma: {sigma*100:.2f}%")
+        print(f"   ✅ {symbol} 성공 | 종가: {prev_close:.2f} | σ: {sigma*100:.2f}%")
         return sigma, prev_close
         
     except Exception as e:
-        print(f"   ❌ {symbol} 예외 발생: {e}")
+        print(f"   ❌ {symbol} 오류: {e}")
         return None, None
 
 
+# ==================== 메인 ====================
 def main():
     print(f"🚀 Sigma Alert 시작 - {kst_now_str()}\n")
     
@@ -83,14 +91,18 @@ def main():
             f"📉 **{symbol} 매수 지정가 추천**\n"
             f"📅 {kst_now_str()} (KST)\n"
             f"전일 종가: `${prev_close:.2f}`\n"
-            f"1σ 가격: `${thresh_1:.2f}`\n"
-            f"2σ 가격: `${thresh_2:.2f}`"
+            f"1σ 가격: `${thresh_1:.2f}` ← 추천 지정가\n"
+            f"2σ 가격: `${thresh_2:.2f}` ← 강력 매수 지정가"
         )
         messages.append(msg)
 
     final_msg = "\n\n".join(messages)
+    print("\n" + "="*60)
     print(final_msg)
+    print("="*60 + "\n")
+    
     send_discord(final_msg)
+
 
 if __name__ == "__main__":
     main()
