@@ -2,8 +2,8 @@ name: Daily Sigma Alert
 
 on:
   schedule:
-    - cron: '0 10 * * *'        # 매일 한국시간 오후 7시 (UTC 10:00)
-  workflow_dispatch:           # 수동으로도 실행 가능
+    - cron: '0 10 * * *'    # 한국시간 오후 7시
+  workflow_dispatch:
 
 jobs:
   run-sigma-alert:
@@ -21,16 +21,13 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install yfinance numpy requests python-dotenv
+          pip install yfinance numpy requests python-dotenv tzdata
 
       - name: Run Sigma Alert Script
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-        run: python BITU_SOXL_sigma_alert.py     # ← 당신의 실제 파일명으로 변경하세요
+        run: python BITU_SOXL_sigma_alert.py
 
       - name: Notify if failed
         if: failure()
-        uses: actions/github-script@v7
-        with:
-          script: |
-            console.log("❌ Sigma Alert 실행 실패")
+        run: echo "❌ Job failed with exit code 2"
