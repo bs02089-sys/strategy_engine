@@ -1,5 +1,5 @@
 yfinance
-pandas
+numpy
 requests
 python-dotenv
-scipy
+tzdata
