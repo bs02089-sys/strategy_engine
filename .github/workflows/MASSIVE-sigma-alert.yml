@@ -1,4 +1,4 @@
-name: Daily Sigma Alert (Polygon)
+name: Daily Sigma Alert (MASSIVE)
 
 on:
   schedule:
@@ -22,8 +22,8 @@ jobs:
       - name: Install dependencies
         run: pip install numpy requests python-dotenv
 
-      - name: Run Polygon Sigma Alert
+      - name: Run MASSIVE Sigma Alert
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
-        run: python BITU_SOXL_sigma_alert.py
+          MASSIVE_API_KEY: ${{ secrets.MASSIVE_API_KEY }}
+        run: python BITU_IONQ_sigma_alert.py
