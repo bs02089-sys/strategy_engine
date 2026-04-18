@@ -7,9 +7,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK")
-POLYGON_API_KEY = os.getenv("POLYGON_API_KEY")
+MASSIVE_API_KEY = os.getenv("MASSIVE_API_KEY")   
 
-TICKERS = ["BITU", "SOXL"]
+TICKERS = ["BITU", "IONQ"]
 LOOKBACK_DAYS = 252
 
 # ==================== 유틸 ====================
@@ -32,15 +32,15 @@ def send_discord(content: str):
     except Exception as e:
         print(f"❌ Discord 전송 실패: {e}")
 
-# ==================== Polygon 데이터 가져오기 ====================
+# ==================== Massive API 데이터 가져오기 ====================
 def get_sigma_and_prev_close(symbol: str):
-    if not POLYGON_API_KEY:
-        print(f"❌ {symbol}: POLYGON_API_KEY가 .env에 없습니다.")
+    if not MASSIVE_API_KEY:
+        print(f"❌ {symbol}: MASSIVE_API_KEY가 .env에 없습니다.")
         return None, None
 
     for attempt in range(3):
         try:
-            print(f"📥 {symbol} Polygon 데이터 요청 중... ({attempt+1}/3)")
+            print(f"📥 {symbol} Massive API 데이터 요청 중... ({attempt+1}/3)")
             
             # 최근 3년치 일봉 데이터 요청
             end_date = datetime.now().strftime("%Y-%m-%d")
@@ -54,7 +54,7 @@ def get_sigma_and_prev_close(symbol: str):
                 "limit": 50000
             }
             
-            headers = {"Authorization": f"Bearer {POLYGON_API_KEY}"}
+            headers = {"Authorization": f"Bearer {MASSIVE_API_KEY}"}
             
             resp = requests.get(url, params=params, headers=headers, timeout=30)
             
@@ -95,14 +95,13 @@ def get_sigma_and_prev_close(symbol: str):
     print(f"   ❌ {symbol} 최종 실패")
     return None, None
 
-
 # ==================== 메인 ====================
 def main():
-    if not POLYGON_API_KEY:
-        print("❌ POLYGON_API_KEY가 설정되지 않았습니다. .env 파일을 확인하세요.")
+    if not MASSIVE_API_KEY:
+        print("❌ MASSIVE_API_KEY가 설정되지 않았습니다. .env 파일을 확인하세요.")
         return
         
-    print(f"🚀 Polygon Sigma Alert 시작 - {kst_now_str()}\n")
+    print(f"🚀 Massive API Sigma Alert 시작 - {kst_now_str()}\n")
     
     messages = []
     
