@@ -9,7 +9,7 @@ load_dotenv()
 WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK")
 MASSIVE_API_KEY = os.getenv("MASSIVE_API_KEY")   
 
-TICKERS = ["BITU", "IONQ"]
+TICKERS = ["TQQQ", "SOXL"]
 LOOKBACK_DAYS = 252
 
 # ==================== 유틸 ====================
@@ -130,7 +130,6 @@ def main():
     print("="*60 + "\n")
     
     send_discord(final_msg)
-
 
 if __name__ == "__main__":
     main()
