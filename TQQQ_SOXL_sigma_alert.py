@@ -1,135 +1,72 @@
 import os
 import numpy as np
 import requests
-import time
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
+import yfinance as yf
 
+# 환경변수 로드
 load_dotenv()
 WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK")
 MASSIVE_API_KEY = os.getenv("MASSIVE_API_KEY")   
 
-TICKERS = ["TQQQ", "SOXL"]
-LOOKBACK_DAYS = 252
+# 설정값
+TICKERS = ["SOXL"]   # 여러 종목을 넣을 수 있음
+SIGMA_FIXED = 0.083  # 불 마켓일 때 사용할 고정 σ 값 (8.3%)
 
 # ==================== 유틸 ====================
 def kst_now_str():
-    now = datetime.utcnow() + timedelta(hours=9)
+    """한국 표준시 현재 시각 문자열"""
+    now = datetime.now() + timedelta(hours=9)
     return now.strftime("%Y-%m-%d %H:%M:%S")
 
 def send_discord(content: str):
+    """Discord 웹훅으로 메시지 전송"""
     if not WEBHOOK_URL:
         print("⚠️ DISCORD_WEBHOOK이 설정되지 않았습니다.")
         return
     try:
-        requests.post(
-            WEBHOOK_URL,
-            json={"content": f"@everyone {content}"},
-            timeout=15,
-            headers={"Content-Type": "application/json"}
-        )
-        print("✅ Discord 전송 완료")
+        requests.post(WEBHOOK_URL, json={"content": content})
     except Exception as e:
-        print(f"❌ Discord 전송 실패: {e}")
+        print(f"⚠️ Discord 전송 실패: {e}")
 
-# ==================== Massive API 데이터 가져오기 ====================
-def get_sigma_and_prev_close(symbol: str):
-    if not MASSIVE_API_KEY:
-        print(f"❌ {symbol}: MASSIVE_API_KEY가 .env에 없습니다.")
-        return None, None
+# ==================== 시그마 계산 로직 ====================
+def get_sigma_and_levels(ticker):
+    """불 마켓 여부 판정 후 σ 값과 -1σ, -2σ 가격 계산"""
+    df = yf.download(ticker, period="3y", auto_adjust=True, progress=False)
+    close = df["Close"].dropna().astype(float)
 
-    for attempt in range(3):
-        try:
-            print(f"📥 {symbol} Massive API 데이터 요청 중... ({attempt+1}/3)")
-            
-            # 최근 3년치 일봉 데이터 요청
-            end_date = datetime.now().strftime("%Y-%m-%d")
-            start_date = (datetime.now() - timedelta(days=1100)).strftime("%Y-%m-%d")
-            
-            url = f"https://api.polygon.io/v2/aggs/ticker/{symbol}/range/1/day/{start_date}/{end_date}"
-            
-            params = {
-                "adjusted": "true",
-                "sort": "asc",
-                "limit": 50000
-            }
-            
-            headers = {"Authorization": f"Bearer {MASSIVE_API_KEY}"}
-            
-            resp = requests.get(url, params=params, headers=headers, timeout=30)
-            
-            if resp.status_code != 200:
-                print(f"   HTTP {resp.status_code}: {resp.text[:200]}")
-                time.sleep(8)
-                continue
-                
-            data = resp.json()
-            
-            if "results" not in data or not data["results"]:
-                print(f"   ❌ 결과 없음")
-                time.sleep(5)
-                continue
-                
-            results = data["results"]
-            print(f"   → {len(results)} 개 데이터 수신")
-            
-            # 종가 추출
-            closes = np.array([bar["c"] for bar in results])
-            
-            if len(closes) < LOOKBACK_DAYS + 30:
-                print(f"   ❌ 데이터 부족 ({len(closes)} rows)")
-                return None, None
-                
-            # 로그 수익률 기반 sigma 계산
-            log_returns = np.log(closes[1:] / closes[:-1])
-            sigma = float(np.std(log_returns[-LOOKBACK_DAYS:]))
-            prev_close = float(closes[-1])
-            
-            print(f"   ✅ {symbol} 성공 | 종가: {prev_close:.2f} | σ: {sigma*100:.2f}%")
-            return sigma, prev_close
-            
-        except Exception as e:
-            print(f"   시도 {attempt+1} 실패: {e}")
-            time.sleep(10)
-    
-    print(f"   ❌ {symbol} 최종 실패")
-    return None, None
+    # 200일 이동평균
+    ma200 = close.rolling(200).mean()
 
-# ==================== 메인 ====================
-def main():
-    if not MASSIVE_API_KEY:
-        print("❌ MASSIVE_API_KEY가 설정되지 않았습니다. .env 파일을 확인하세요.")
-        return
-        
-    print(f"🚀 Massive API Sigma Alert 시작 - {kst_now_str()}\n")
-    
-    messages = []
-    
-    for symbol in TICKERS:
-        sigma, prev_close = get_sigma_and_prev_close(symbol)
-        
-        if sigma is None or prev_close is None:
-            messages.append(f"❌ {symbol}: 데이터 로드 실패")
-            continue
+    # 전일 종가와 200일선 값
+    latest_price = close.iloc[-1].item()
+    latest_ma200 = ma200.iloc[-1].item()
 
-        thresh_1 = prev_close * (1 - sigma)
-        thresh_2 = prev_close * (1 - 2 * sigma)
+    # 불 마켓 여부 판정
+    is_bull_market = latest_price > latest_ma200
 
-        msg = (
-            f"📉 **{symbol} 매수 지정가 추천**\n"
-            f"📅 {kst_now_str()} (KST)\n"
-            f"전일 종가: `${prev_close:.2f}`\n"
-            f"1σ 가격: `${thresh_1:.2f}` ← 추천 지정가\n"
-            f"2σ 가격: `${thresh_2:.2f}` ← 강력 매수 지정가"
-        )
-        messages.append(msg)
+    # σ 값 선택
+    if is_bull_market:
+        sigma_value = SIGMA_FIXED
+    else:
+        sigma_value = np.log(close / close.shift(1)).dropna().std().item()
 
-    final_msg = "\n\n".join(messages)
-    print("="*60)
-    print(final_msg)
-    print("="*60 + "\n")
-    
-    send_discord(final_msg)
+    # -1σ, -2σ 가격 수준 계산
+    price_1sigma = latest_price * (1 - sigma_value)
+    price_2sigma = latest_price * (1 - 2 * sigma_value)
 
+    return sigma_value, is_bull_market, latest_price, price_1sigma, price_2sigma
+
+# ==================== 실행 ====================
 if __name__ == "__main__":
-    main()
+    for ticker in TICKERS:
+        sigma, bull, latest, p1, p2 = get_sigma_and_levels(ticker)
+        msg = (
+            f"✅ {ticker} σ 값: {sigma*100:.2f}% (불 마켓={bull}) | {kst_now_str()}\n"
+            f"   전일 종가: {latest:.2f}\n"
+            f"   -1σ 가격: {p1:.2f}\n"
+            f"   -2σ 가격: {p2:.2f}"
+        )
+        print(msg)
+        send_discord(msg)
