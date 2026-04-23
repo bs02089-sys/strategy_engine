@@ -2,7 +2,7 @@ name: Daily Sigma Alert (MASSIVE)
 
 on:
   schedule:
-    - cron: '0 10 * * 1-5'
+    - cron: '0 10 * * 1-5'   # 평일 오전 10시 UTC (KST 오후 7시)
   workflow_dispatch:
 
 jobs:
@@ -20,7 +20,7 @@ jobs:
           cache: 'pip'
 
       - name: Install dependencies
-        run: pip install numpy requests python-dotenv
+        run: pip install -r requirements.txt
 
       - name: Run MASSIVE Sigma Alert
         env:
