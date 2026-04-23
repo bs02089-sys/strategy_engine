@@ -2,4 +2,3 @@ yfinance
 numpy
 requests
 python-dotenv
-tzdata
