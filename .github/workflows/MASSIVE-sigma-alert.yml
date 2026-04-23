@@ -26,4 +26,4 @@ jobs:
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           MASSIVE_API_KEY: ${{ secrets.MASSIVE_API_KEY }}
-        run: python TQQQ_SOXL_sigma_alert.py
+        run: python SOXL_sigma_alert.py
