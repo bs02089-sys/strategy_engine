@@ -1,72 +1,87 @@
 import os
 import numpy as np
 import requests
+import yfinance as yf
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
-import yfinance as yf
 
-# 환경변수 로드
 load_dotenv()
 WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK")
-MASSIVE_API_KEY = os.getenv("MASSIVE_API_KEY")   
+MASSIVE_API_KEY = os.getenv("MASSIVE_API_KEY") 
 
-# 설정값
-TICKERS = ["SOXL"]   # 여러 종목을 넣을 수 있음
-SIGMA_FIXED = 0.083  # 불 마켓일 때 사용할 고정 σ 값 (8.3%)
+TICKERS = ["SOXL"]
+SIGMA_FIXED = 0.083
 
-# ==================== 유틸 ====================
-def kst_now_str():
-    """한국 표준시 현재 시각 문자열"""
-    now = datetime.now() + timedelta(hours=9)
-    return now.strftime("%Y-%m-%d %H:%M:%S")
-
-def send_discord(content: str):
-    """Discord 웹훅으로 메시지 전송"""
-    if not WEBHOOK_URL:
-        print("⚠️ DISCORD_WEBHOOK이 설정되지 않았습니다.")
-        return
+def get_data_backup(ticker):
+    """1순위 Massive API 실패 시 2순위 yfinance로 데이터 보충 (오류 수정 완료)"""
+    # 1. Massive API 시도
+    url = f"https://api.massiveapi.com/v1/market/candles"
+    params = {"symbol": ticker, "interval": "d", "limit": 250, "apikey": MASSIVE_API_KEY}
+    
     try:
-        requests.post(WEBHOOK_URL, json={"content": content})
+        print(f"🔄 {ticker} 데이터 호출 중 (Massive API)...")
+        res = requests.get(url, params=params, timeout=5)
+        if res.status_code == 200:
+            data = res.json()
+            # API 응답 구조에 따라 'candles' 내 'close' 추출
+            return [float(item['close']) for item in data['candles']]
+    except Exception:
+        print(f"⚠️ Massive 접속 실패. yfinance로 전환합니다.")
+
+    # 2. yfinance 시도 (DataFrame 처리 오류 수정)
+    try:
+        df = yf.download(ticker, period="3y", auto_adjust=True, progress=False)
+        if not df.empty:
+            # .tolist() 대신 values.flatten().tolist() 또는 간단히 list() 사용
+            closes = df["Close"].dropna().values.flatten().tolist()
+            return closes
     except Exception as e:
-        print(f"⚠️ Discord 전송 실패: {e}")
+        print(f"❌ 모든 데이터 호출 실패: {e}")
+    return None
 
-# ==================== 시그마 계산 로직 ====================
-def get_sigma_and_levels(ticker):
-    """불 마켓 여부 판정 후 σ 값과 -1σ, -2σ 가격 계산"""
-    df = yf.download(ticker, period="3y", auto_adjust=True, progress=False)
-    close = df["Close"].dropna().astype(float)
-
-    # 200일 이동평균
-    ma200 = close.rolling(200).mean()
-
-    # 전일 종가와 200일선 값
-    latest_price = close.iloc[-1].item()
-    latest_ma200 = ma200.iloc[-1].item()
-
-    # 불 마켓 여부 판정
-    is_bull_market = latest_price > latest_ma200
-
-    # σ 값 선택
-    if is_bull_market:
-        sigma_value = SIGMA_FIXED
-    else:
-        sigma_value = np.log(close / close.shift(1)).dropna().std().item()
-
-    # -1σ, -2σ 가격 수준 계산
-    price_1sigma = latest_price * (1 - sigma_value)
-    price_2sigma = latest_price * (1 - 2 * sigma_value)
-
-    return sigma_value, is_bull_market, latest_price, price_1sigma, price_2sigma
-
-# ==================== 실행 ====================
-if __name__ == "__main__":
+def main():
     for ticker in TICKERS:
-        sigma, bull, latest, p1, p2 = get_sigma_and_levels(ticker)
+        closes = get_data_backup(ticker)
+        
+        # 데이터가 최소 200개는 있어야 이평선 계산이 가능합니다.
+        if not closes or len(closes) < 200:
+            print(f"⚠️ {ticker} 분석을 위한 충분한 데이터를 가져오지 못했습니다.")
+            continue
+
+        latest_price = closes[-1]
+        # 최근 200일 종가 평균
+        ma200 = sum(closes[-200:]) / 200
+        
+        is_bull = latest_price > ma200
+        
+        if is_bull:
+            sigma = SIGMA_FIXED
+            status = "🔥 불 마켓 (상승장)"
+        else:
+            # 실시간 변동성 계산
+            log_returns = np.diff(np.log(closes))
+            sigma = np.std(log_returns)
+            status = "🛡️ 베어 마켓 (하락장)"
+
+        p1, p2 = latest_price * (1 - sigma), latest_price * (1 - 2 * sigma)
+
         msg = (
-            f"✅ {ticker} σ 값: {sigma*100:.2f}% (불 마켓={bull}) | {kst_now_str()}\n"
-            f"   전일 종가: {latest:.2f}\n"
-            f"   -1σ 가격: {p1:.2f}\n"
-            f"   -2σ 가격: {p2:.2f}"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"📊 **{ticker} 전략 리포트**\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"✅ 현재 상태: {status}\n"
+            f"💰 현재 종가: ${latest_price:.2f}\n"
+            f"📍 적용 시그마: {sigma*100:.2f}%\n\n"
+            f"🎯 **밤 11:30 LOC 매수 가이드**\n"
+            f"   - 1단계(-1σ): **${p1:.2f}**\n"
+            f"   - 2단계(-2σ): **${p2:.2f}**\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"⏰ 시각: {(datetime.now() + timedelta(hours=9)).strftime('%Y-%m-%d %H:%M')}"
         )
+        
         print(msg)
-        send_discord(msg)
+        if WEBHOOK_URL:
+            requests.post(WEBHOOK_URL, json={"content": msg})
+
+if __name__ == "__main__":
+    main()
