@@ -53,7 +53,6 @@ def main():
 
         p1, p2 = latest_price * (1 - sigma), latest_price * (1 - 2 * sigma)
 
-        # 요청하신 문구 수정 반영
         msg = (
             f"━━━━━━━━━━━━━━━━━━━━\n"
             f"📊 **{ticker} 전략 리포트**\n"
