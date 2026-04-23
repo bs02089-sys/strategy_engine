@@ -1,13 +1,12 @@
-# TQQQ_SOXL_sigma_alert
+# SOXL_sigma_alert
 
-📉 ** TQQQ_SOXL 1시그마/2시그마 기반 매수 신호 알림 시스템**
+📉 **SOXL 1시그마/2시그마 기반 매수 신호 알림 시스템**
 
-이 프로젝트는 `MASSIVE` 데이터를 활용하여 TQQQ, SOXL 종목의 **1σ와 2σ 변동성 기준 매수 신호**를 체크하고, 결과를 **콘솔 출력 및 디스코드 알림(Webhook)**으로 전송합니다.
+이 프로젝트는 `MASSIVE` 데이터를 활용하여 SOXL 종목의 **1σ와 2σ 변동성 기준 매수 신호**를 체크하고, 결과를 **콘솔 출력 및 디스코드 알림(Webhook)**으로 전송합니다.
 
 ## 🚀 주요 기능
-- TQQQ, SOXL 종목의 최근 1년 1σ와 2σ 계산
+- SOXL 종목의 최근 1년 1σ와 2σ 계산
 - 1σ, 2σ 기반 매수 조건 충족 여부 체크
-- 최근 1년 거래 횟수 집계
 - 결과를 콘솔과 디스코드 알림으로 전송
 
 ## 📦 설치 방법
@@ -25,4 +24,4 @@
    DISCORD_WEBHOOK=https://discord.com/api/webhooks/xxxx/yyyy
 
 4. 실행 방법
-   python TQQQ_SOXL_sigma_alert.py
+   python SOXL_sigma_alert.py
