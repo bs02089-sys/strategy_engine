@@ -12,7 +12,7 @@ MASSIVE_API_KEY = os.getenv("MASSIVE_API_KEY")
 
 # 설정값
 TICKERS = ["SOXL"]   # 여러 종목을 넣을 수 있음
-SIGMA_FIXED = 0.0832  # 불 마켓일 때 사용할 고정 σ 값 (8.32%)
+SIGMA_FIXED = 0.083  # 불 마켓일 때 사용할 고정 σ 값 (8.3%)
 
 # ==================== 유틸 ====================
 def kst_now_str():
