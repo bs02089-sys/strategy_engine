@@ -18,9 +18,12 @@ MIN_SIGMA_BULL = 0.10
 MAX_SIGMA_BEAR = 0.20
 
 # ---------------------------------------------------------
-# ⭐ JSON에서 데이터 불러오기
+# ⭐ JSON에서 데이터 불러오기 (항상 현재 파일 위치 기준)
 # ---------------------------------------------------------
-with open("config.json", "r") as f:
+base_dir = os.path.dirname(__file__)   # backtest 폴더
+config_path = os.path.join(base_dir, "config.json")
+
+with open(config_path, "r") as f:
     config = json.load(f)
 
 MY_AVG_PRICE = config["MY_AVG_PRICE"]
@@ -38,14 +41,18 @@ def get_data_backup(ticker):
         if res.status_code == 200:
             data = res.json()
             return [float(item['close']) for item in data['candles']]
-    except Exception: pass
+    except Exception:
+        pass
     try:
         df = yf.download(ticker, period="3y", auto_adjust=True, progress=False)
-        if not df.empty: return df["Close"].dropna().values.flatten().tolist()
-    except Exception: return None
+        if not df.empty:
+            return df["Close"].dropna().values.flatten().tolist()
+    except Exception:
+        return None
 
 def calculate_rsi(closes, period=14):
-    if len(closes) < period + 1: return 50.0
+    if len(closes) < period + 1:
+        return 50.0
     df = pd.DataFrame({'close': closes[-60:]})
     delta = df['close'].diff()
     gain = delta.where(delta > 0, 0)
@@ -60,7 +67,8 @@ def main():
 
     for ticker in TICKERS:
         closes = get_data_backup(ticker)
-        if not closes or len(closes) < 200: continue
+        if not closes or len(closes) < 200:
+            continue
 
         latest_close = closes[-1]
         current_rsi = calculate_rsi(closes)
@@ -131,13 +139,15 @@ def main():
 
         print(msg)
         if WEBHOOK_URL:
-            try: requests.post(WEBHOOK_URL, json={"content": msg})
-            except: pass
+            try:
+                requests.post(WEBHOOK_URL, json={"content": msg})
+            except:
+                pass
 
     # JSON 파일 업데이트 (낚시 횟수 반영)
     config["CURRENT_USED"] = CURRENT_USED
     config["PREMARKET_PRICE"] = 0  # 장 마감 후 초기화
-    with open("config.json", "w") as f:
+    with open(config_path, "w") as f:
         json.dump(config, f, indent=4)
 
 def git_push():
