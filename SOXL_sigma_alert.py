@@ -1,8 +1,10 @@
 import os
+import json
 import numpy as np
 import requests
 import yfinance as yf
 import pandas as pd
+import subprocess
 from datetime import datetime
 from dotenv import load_dotenv
 
@@ -15,11 +17,20 @@ TICKERS = ["SOXL"]
 MIN_SIGMA_BULL = 0.10
 MAX_SIGMA_BEAR = 0.20
 
-# ⭐ [설정] SOXL 평균 매수 단가 (매수 후 이 값을 업데이트하세요)
-MY_AVG_PRICE = 100.00 
+# ---------------------------------------------------------
+# ⭐ JSON에서 데이터 불러오기
+# ---------------------------------------------------------
+with open("config.json", "r") as f:
+    config = json.load(f)
+
+MY_AVG_PRICE = config["MY_AVG_PRICE"]
+MY_TOTAL_SHARES = config["MY_TOTAL_SHARES"]
+ANNUAL_QUOTA = config["ANNUAL_QUOTA"]
+CURRENT_USED = config["CURRENT_USED"]
+PREMARKET_PRICE = config["PREMARKET_PRICE"]
+# ---------------------------------------------------------
 
 def get_data_backup(ticker):
-    """Massive API 우선 시도 후 실패 시 야후 파이낸스로 백업"""
     url = f"https://api.massiveapi.com/v1/market/candles"
     params = {"symbol": ticker, "interval": "d", "limit": 250, "apikey": MASSIVE_API_KEY}
     try:
@@ -34,89 +45,109 @@ def get_data_backup(ticker):
     except Exception: return None
 
 def calculate_rsi(closes, period=14):
-    """Wilder's RSI 계산"""
     if len(closes) < period + 1: return 50.0
     df = pd.DataFrame({'close': closes[-60:]})
     delta = df['close'].diff()
-    gain = delta.where(delta > 0, 0); loss = -delta.where(delta < 0, 0)
+    gain = delta.where(delta > 0, 0)
+    loss = -delta.where(delta < 0, 0)
     avg_gain = gain.ewm(alpha=1/period, min_periods=period).mean()
     avg_loss = loss.ewm(alpha=1/period, min_periods=period).mean()
     rs = avg_gain / avg_loss.replace(0, 1e-10)
     return 100 - (100 / (1 + rs)).iloc[-1]
 
 def main():
+    global CURRENT_USED
+
     for ticker in TICKERS:
         closes = get_data_backup(ticker)
         if not closes or len(closes) < 200: continue
 
-        latest_price = closes[-1]
-        log_returns_40d = np.diff(np.log(closes[-41:]))
-        dynamic_sigma = np.std(log_returns_40d)
-        ma200 = sum(closes[-200:]) / 200
-        is_bull = latest_price > ma200
-        
-        if is_bull:
-            dynamic_sigma = max(dynamic_sigma, MIN_SIGMA_BULL)
-            status = "🔥 불 마켓"
-        else:
-            dynamic_sigma = min(dynamic_sigma, MAX_SIGMA_BEAR)
-            status = "🛡️ 베어 마켓"
-
+        latest_close = closes[-1]
         current_rsi = calculate_rsi(closes)
-        bear_signal = (not is_bull) and (current_rsi < 40)
-        bull_recovery_signal = is_bull and (current_rsi >= 50)
-        p1 = latest_price * (1 - dynamic_sigma); p2 = latest_price * (1 - 2 * dynamic_sigma)
-        sentiment = "🚨 강한 과매수" if current_rsi >= 80 else "🔴 과매수" if current_rsi >= 70 else "✅ 과매도" if current_rsi <= 30 else "⚪ 중립"
+        ma200 = sum(closes[-200:]) / 200
 
-        # 🎯 낚시 포인트
-        if current_rsi >= 80:
-            loc_section = f"⚠️ **강한 과매수 구간** (-1σ 보류 추천)\n\n   📍 2단계(-2σ) 몰빵 전략 가동: **${p2:.2f}**\n"
-        elif bear_signal:
-            loc_section = f"🚨 **베어 마켓 신호 감지** (리밸런싱 추천)\n\n   👉 SPYM 75% / SOXL 25% 로 즉시 조정\n   - 1단계: ${p1:.2f} / 2단계: ${p2:.2f}\n"
-        elif bull_recovery_signal:
-            loc_section = f"✅ **불 마켓 전환 신호 감지** (리밸런싱 추천)\n\n   👉 SPYM 50% / SOXL 50% 로 즉시 조정\n   - 1단계: ${p1:.2f} / 2단계: ${p2:.2f}\n"
+        # 불마켓 정의: MA200 위 + RSI ≥ 50
+        if latest_close > ma200 and current_rsi >= 50:
+            is_bull = True
+        elif latest_close < ma200 and current_rsi <= 50:
+            is_bull = False
         else:
-            loc_section = f"   - 1단계(-1σ): **${p1:.2f}** (30%)\n   - 2단계(-2σ): **${p2:.2f}** (70%)\n"
+            is_bull = None
 
-        # 🛑 매도 규칙
-        if MY_AVG_PRICE > 0:
-            targets = [("+50%", 1.5), ("+100%", 2.0), ("+200%", 3.0), ("+300%", 4.0)]
-            exit_lines = []
-            hit_signals = []
-
-            for label, mult in targets:
-                target_p = MY_AVG_PRICE * mult
-                if latest_price >= target_p:
-                    status_icon = "🎊 **[도달! 지금 매도하세요]**"
-                    hit_signals.append(f"💰 **{label} 익절 구간 도달!**")
-                else:
-                    status_icon = "⚪"
-                exit_lines.append(f"   • **{label} 익절가**:  **${target_p:.2f}** {status_icon}")
-
-            current_status = "\n".join(hit_signals) if hit_signals else "아직 목표가에 도달하지 않았습니다. 느긋하게 기다리세요. 🧘"
-            exit_section = "🛑 **매도 규칙 (실시간 감시 중)**\n" + "\n".join(exit_lines) + f"\n\n📢 **익절 상태**: {current_status}\n"
+        # 시그마 계산
+        if is_bull is True:
+            sentiment = "🔥 불 마켓"
+            sigma_label = "40D"
+            log_returns = np.diff(np.log(closes[-41:]))
+            dynamic_sigma = np.std(log_returns)
+            dynamic_sigma = max(dynamic_sigma, MIN_SIGMA_BULL)
         else:
-            exit_section = "🛑 **매도 규칙**: `MY_AVG_PRICE`를 설정하면 감시가 시작됩니다.\n"
+            sentiment = "🛡️ 베어/중립"
+            sigma_label = "1Y"
+            log_returns = np.diff(np.log(closes[-252:])) if len(closes) >= 252 else np.diff(np.log(closes))
+            dynamic_sigma = np.std(log_returns)
+            dynamic_sigma = min(dynamic_sigma, MAX_SIGMA_BEAR)
+
+        p1 = latest_close * (1 - dynamic_sigma)
+        p2 = latest_close * (1 - 2 * dynamic_sigma)
+
+        remaining = ANNUAL_QUOTA - CURRENT_USED
+        return_str = f"{((latest_close - MY_AVG_PRICE) / MY_AVG_PRICE) * 100:+.2f}%" if MY_AVG_PRICE > 0 else "평단가 정보 없음"
+
+        premarket_msg = ""
+        skip_p1 = False
+        if PREMARKET_PRICE > 0 and PREMARKET_PRICE <= p1:
+            premarket_msg = f"⚡ 프리마켓 지정가 매수 체결 (${PREMARKET_PRICE:.2f}) → 낚시 {CURRENT_USED}/{ANNUAL_QUOTA}회\n\n"
+            skip_p1 = True
+
+        loc_msg = ""
+        if not skip_p1 and latest_close <= p1 and CURRENT_USED < ANNUAL_QUOTA:
+            CURRENT_USED += 1
+            loc_msg += f"🎣 정규장 LOC -1σ 체결 (${p1:.2f}) → 낚시 {CURRENT_USED}/{ANNUAL_QUOTA}회\n\n"
+        if latest_close <= p2 and CURRENT_USED < ANNUAL_QUOTA:
+            CURRENT_USED += 1
+            loc_msg += f"🎣 정규장 LOC -2σ 체결 (${p2:.2f}) → 낚시 {CURRENT_USED}/{ANNUAL_QUOTA}회\n\n"
 
         msg = (
             f"━━━━━━━━━━━━━━━━━━━━\n"
             f"📊 **{ticker} 자율주행 리포트**\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"✅ 현재 추세: {status} ({sentiment})\n"
+            f"✅ 현재 추세: {sentiment}\n"
             f"🌡️ 심리 지수: RSI {current_rsi:.1f}\n"
-            f"💰 전일 종가: ${latest_price:.2f}\n"
-            f"📍 적용 시그마(40D): {dynamic_sigma*100:.2f}%\n\n"
-            f"🎯 낚시 포인트 (LOC)\n"
-            f"{loc_section}\n"
-            f"📌 배분 규칙: -1σ 30% / -2σ 70% (과매수 시 조절 가능)\n\n"
-            f"{exit_section}"
+            f"💰 전일 종가: ${latest_close:.2f}\n"
+            f"📍 적용 시그마({sigma_label}): {dynamic_sigma*100:.2f}%\n\n"
+            f"{premarket_msg}{loc_msg}"
+            f"🎯 **오늘의 낚시 포인트 (이중 저인망 전략)**\n"
+            f"   📍 -1σ 가격: **${p1:.2f}**\n"
+            f"   📍 -2σ 가격: **${p2:.2f}**\n\n"
+            f"📊 **시즌 낚시 현황: {CURRENT_USED}/{ANNUAL_QUOTA}회** (잔여: {remaining}회)\n"
+            f"📌 규칙: 연간 20회 한정 낚시\n\n"
+            f"🛑 **매도 규칙**\n"
+            f"   (현재 나의 수익률: **{return_str}**)\n"
+            f"   ✅ 20회 완료 후 80% SPYM 전환\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
             f"⏰ 시각: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
-            f"*(데이터 백업 시스템 가동 중)*"
         )
-        
-        print(msg)
-        if WEBHOOK_URL: requests.post(WEBHOOK_URL, json={"content": msg})
 
+        print(msg)
+        if WEBHOOK_URL:
+            try: requests.post(WEBHOOK_URL, json={"content": msg})
+            except: pass
+
+    # JSON 파일 업데이트 (낚시 횟수 반영)
+    config["CURRENT_USED"] = CURRENT_USED
+    config["PREMARKET_PRICE"] = 0  # 장 마감 후 초기화
+    with open("config.json", "w") as f:
+        json.dump(config, f, indent=4)
+
+def git_push():
+    try:
+        subprocess.run(["git", "add", "config.json"], check=True)
+        subprocess.run(["git", "commit", "-m", "Update config.json after market close"], check=True)
+        subprocess.run(["git", "push", "origin", "main"], check=True)
+        print("✅ GitHub push 완료")
+    except Exception as e:
+        print(f"⚠️ GitHub push 실패: {e}")
 if __name__ == "__main__":
     main()
+    git_push()
