@@ -152,7 +152,8 @@ def main():
 
 def git_push():
     try:
-        subprocess.run(["git", "add", "config.json"], check=True)
+        # backtest/config.json 경로를 명시적으로 지정
+        subprocess.run(["git", "add", "backtest/config.json"], check=True)
         subprocess.run(["git", "commit", "-m", "Update config.json after market close"], check=True)
         subprocess.run(["git", "push", "origin", "main"], check=True)
         print("✅ GitHub push 완료")
