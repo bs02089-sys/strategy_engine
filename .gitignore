@@ -20,3 +20,13 @@ __pycache__/
 
 # local virtualenv used for vectorbt/testing
 vbt_312/
+# Default ignored files
+/shelf/
+/workspace.xml
+# Editor-based HTTP Client requests
+/httpRequests/
+exchange.db
+exchange_backup_*.db
+vbt_clean/
+.idea/
+.env

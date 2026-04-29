@@ -1,0 +1,9 @@
+{
+    "date": "2025-11-27",
+    "regime": "Extreme Bear",
+    "target_weights": {
+        "QQQM": 0.95,
+        "IAUM": 0.05
+    },
+    "expected_return": 0.2308
+}

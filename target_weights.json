@@ -1,0 +1,13 @@
+{
+  "date": "2025-11-26",
+  "regime": "Strong Bull",
+  "target_weights": {
+    "QQQM": 0.9,
+    "IAUM": 0.1
+  },
+  "prices": {
+    "QQQM": 250.67,
+    "IAUM": 41.2
+  },
+  "note": "LazyRich 자동 리밸런싱 완료 - 구글 시트 전용"
+}
