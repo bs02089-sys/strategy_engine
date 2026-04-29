@@ -8,7 +8,24 @@ import re
 import os
 import shutil
 from dotenv import load_dotenv
-from colorama import Fore, Style, init
+
+try:
+    from colorama import Fore, Style, init
+    COLORAMA_AVAILABLE = True
+except ImportError:
+    class _DummyColor:
+        RESET_ALL = ""
+        BRIGHT = ""
+        RED = ""
+        GREEN = ""
+        YELLOW = ""
+        CYAN = ""
+        MAGENTA = ""
+        WHITE = ""
+
+    Fore = _DummyColor()
+    Style = _DummyColor()
+    COLORAMA_AVAILABLE = False
 
 # ========================
 # 설정
@@ -23,7 +40,8 @@ HEADERS = {
 load_dotenv()
 WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK")
 
-init(autoreset=True)
+if COLORAMA_AVAILABLE:
+    init(autoreset=True)
 
 # ========================
 # DB 초기화 (강력 마이그레이션)

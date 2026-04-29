@@ -19,6 +19,10 @@
     "python.envFile": "${workspaceFolder}/.env",
     "python.analysis.extraPaths": [
         "${workspaceFolder}/engine"
+<<<<<<< HEAD
     ],
     "terminal.integrated.cwd": "C:/Users/bs020/strategy_engine"
+=======
+    ]
+>>>>>>> 6d75b18f4b8367b831dbf73843c9b6d1e4cdcbe1
 }

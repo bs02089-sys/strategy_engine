@@ -11,14 +11,17 @@ from dotenv import load_dotenv
 # 환경변수 로드
 load_dotenv()
 WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK")
-MASSIVE_API_KEY = os.getenv("MASSIVE_API_KEY") 
+MASSIVE_API_KEY = os.getenv("MASSIVE_API_KEY")
+
+# 항상 strategy_engine 루트에서 실행되도록 강제
+os.chdir("C:/Users/bs020/strategy_engine")
 
 TICKERS = ["SOXL"]
 MIN_SIGMA_BULL = 0.10
 MAX_SIGMA_BEAR = 0.20
 
 # ---------------------------------------------------------
-# ⭐ JSON에서 데이터 불러오기 (항상 현재 파일 위치 기준)
+# JSON에서 데이터 불러오기
 # ---------------------------------------------------------
 base_dir = os.path.dirname(__file__)   # backtest 폴더
 config_path = os.path.join(base_dir, "config.json")
@@ -31,7 +34,6 @@ MY_TOTAL_SHARES = config["MY_TOTAL_SHARES"]
 ANNUAL_QUOTA = config["ANNUAL_QUOTA"]
 CURRENT_USED = config["CURRENT_USED"]
 PREMARKET_PRICE = config["PREMARKET_PRICE"]
-# ---------------------------------------------------------
 
 def get_data_backup(ticker):
     url = f"https://api.massiveapi.com/v1/market/candles"
@@ -74,7 +76,6 @@ def main():
         current_rsi = calculate_rsi(closes)
         ma200 = sum(closes[-200:]) / 200
 
-        # 불마켓 정의: MA200 위 + RSI ≥ 50
         if latest_close > ma200 and current_rsi >= 50:
             is_bull = True
         elif latest_close < ma200 and current_rsi <= 50:
@@ -82,7 +83,6 @@ def main():
         else:
             is_bull = None
 
-        # 시그마 계산
         if is_bull is True:
             sentiment = "🔥 불 마켓"
             sigma_label = "40D"
@@ -144,21 +144,49 @@ def main():
             except:
                 pass
 
-    # JSON 파일 업데이트 (낚시 횟수 반영)
+    # JSON 자동 갱신 (항상 변경되도록 LAST_RUN_TIME 추가)
     config["CURRENT_USED"] = CURRENT_USED
-    config["PREMARKET_PRICE"] = 0  # 장 마감 후 초기화
+    config["PREMARKET_PRICE"] = 0
+    config["LAST_RUN_TIME"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
     with open(config_path, "w") as f:
         json.dump(config, f, indent=4)
 
 def git_push():
     try:
-        # backtest/config.json 경로를 명시적으로 지정
-        subprocess.run(["git", "add", "backtest/config.json"], check=True)
-        subprocess.run(["git", "commit", "-m", "Update config.json after market close"], check=True)
+        # config.json만 절대 경로로 추가
+        subprocess.run(["git", "add", "C:/Users/bs020/strategy_engine/backtest/config.json"], check=True)
+
+        commit_msg = f"Update config.json after market close - {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+        subprocess.run(["git", "commit", "-m", commit_msg], check=True)
         subprocess.run(["git", "push", "origin", "main"], check=True)
+
         print("✅ GitHub push 완료")
+    except subprocess.CalledProcessError as e:
+        print(f"⚠️ GitHub push 실패 (명령어 오류): {e}")
     except Exception as e:
-        print(f"⚠️ GitHub push 실패: {e}")
+        print(f"⚠️ GitHub push 실패 (기타 오류): {e}")
+
 if __name__ == "__main__":
     main()
     git_push()
+
+    # 📢 실행 규칙 안내
+    # - 프리마켓/정규장 체결 횟수만큼 장 마감 후 코드를 실행해야 합니다.
+    # - 예: 프리마켓 1회 + 정규장 1회 체결 → 장 마감 후 코드 2회 실행
+    # - 자동 갱신: CURRENT_USED, PREMARKET_PRICE, LAST_RUN_TIME
+    # - 직접 수정: MY_AVG_PRICE, MY_TOTAL_SHARES, ANNUAL_QUOTA
+    #
+    # ┌───────────────────────────────┐
+    # │   장중 체결 발생 (프리/정규)    │
+    # └───────────────┬───────────────┘
+    #                 │
+    #                 ▼
+    # ┌───────────────────────────────┐
+    # │ 장 마감 후 코드 실행 (횟수만큼) │
+    # └───────────────┬───────────────┘
+    #                 │
+    #                 ▼
+    # ┌───────────────────────────────┐
+    # │ JSON 자동 갱신 + GitHub 반영   │
+    # └───────────────────────────────┘

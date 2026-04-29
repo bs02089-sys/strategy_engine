@@ -2,8 +2,8 @@ import yfinance as yf
 import numpy as np
 from datetime import datetime, timedelta
 
-# MSTU 티커 설정
-symbol = 'MSTU'
+# IONQ 티커 설정
+symbol = 'IONQ'
 
 # 최근 12개월 데이터 가져오기
 end_date = datetime.now()
@@ -24,5 +24,5 @@ daily_volatility = df['daily_return'].std()
 annualized_volatility = daily_volatility * np.sqrt(252)
 
 # 결과 출력
-print(f"MSTU 최근 12개월 평균 일간 변동성: {daily_volatility:.4f}")
-print(f"MSTU 최근 12개월 연환산 변동성: {annualized_volatility:.4f}")
+print(f"IONQ 최근 12개월 평균 일간 변동성: {daily_volatility:.4f}")
+print(f"IONQ 최근 12개월 연환산 변동성: {annualized_volatility:.4f}")
