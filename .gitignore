@@ -5,7 +5,6 @@
 !.gitignore
 !SOXL_sigma_alert.py
 !config.json
-!.env
 !requirements.txt
 !README.md
 !.github/
