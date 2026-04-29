@@ -1,0 +1,23 @@
+[33mcommit 8f549ca349b9baec4d7059a6e5e55ac9aa053d40[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m)[m
+Author: strategy_engine_user <you@example.com>
+Date:   Thu Nov 27 06:43:42 2025 +0900
+
+    Rename file to dollar_buy_alert.py
+
+[33mcommit dd3f7c8ae928b70561a4e9d0b3e81f8e4bb34c22[m[33m ([m[1;32mbackup-before-filter-20251104130559[m[33m, [m[1;32mbackup-before-filter[m[33m)[m
+Author: strategy_engine_user <you@example.com>
+Date:   Tue Nov 4 10:44:53 2025 +0900
+
+    Remove sensitive credential file and add to .gitignore
+
+[33mcommit e7b417d21458bc631b468bc92cde3486f0c68171[m
+Author: strategy_engine_user <you@example.com>
+Date:   Sun Nov 2 22:21:58 2025 +0900
+
+    Ignore local venv vbt_312
+
+[33mcommit 5a8daf92b02c19d93644eff65b0675d65875df12[m
+Author: strategy_engine_user <you@example.com>
+Date:   Sun Nov 2 22:18:41 2025 +0900
+
+    Merge .gitignore: move .idea ignores to root and remove duplicate .gitignore
