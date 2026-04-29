@@ -1,0 +1,39 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment variables
+.env
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Logs
+*.log
+
+# Cache
+.cache/
+
+# IDE settings (IntelliJ/PyCharm/VSCode)
+.idea/
+.vscode/
+
+# Local virtualenv used for vectorbt/testing
+vbt_312/
+vbt_clean/
+
+# Database files
+exchange.db
+exchange_backup_*.db
+
+# 민감한 서비스 계정/인증 파일 (로컬에서만 유지)
+mystockportfolioautomation-*.json
