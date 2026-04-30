@@ -29,7 +29,7 @@ else:
     config = {"MY_AVG_PRICE": 111.05, "MY_TOTAL_SHARES": 163, "CURRENT_USED": 1, "LAST_RUN_TIME": "N/A"}
 
 # ==========================================
-# 3. 전술 기준값 (상수)
+# 3. 기준값 (상수)
 # ==========================================
 TICKERS = ["SOXL"]
 MIN_SIGMA_BULL = 0.10
@@ -108,12 +108,12 @@ def main():
         sentiment = "과매수" if current_rsi >= 70 else "과매도" if current_rsi <= 30 else "중립"
         env_touched = (latest_price <= env_sup_25)
 
-        # 3. [V4.0 정렬 보정] 리포트 메시지 구성
+        # 리포트 메시지
         header_title = "🚀 [즉시 익절 권고]" if exit_ready else f"**{ticker} 리포트**"
         
-        # 판독 결과 내용만 확실하게 들여쓰기 적용
+        # 판독 결과 
         sell_reasoning = f"  - RSI 80 돌파: {'✅ 달성' if is_rsi_over else '❌ 미달 ('+str(round(current_rsi,1))+')'}\n" \
-                         f"  - 엔벨 상단 터치: {'✅ 달성' if is_env_over else '❌ 미달 ('+str(round(latest_price,2))+' < '+str(round(env_res_25,2))+')'}"
+                         f"  - 엔벨로프 상단 터치: {'✅ 달성' if is_env_over else '❌ 미달 ('+str(round(latest_price,2))+' < '+str(round(env_res_25,2))+')'}"
 
         if exit_ready:
             sell_guide = "🔥 **[ACTION] 지금 즉시 수익을 확정하십시오!**"
@@ -139,7 +139,7 @@ def main():
             f"  📍 1차 예약(-1σ): **${p1:.2f}**\n"
             f"  📍 2차 예약(-2σ): **${p2:.2f}**\n\n"
             f"📊 **시즌 현황: {CURRENT_USED}/{ANNUAL_QUOTA}회**\n"
-            f"🛑 **전술적 매도 판독 결과**\n"
+            f"🛑 **매도 판독 결과**\n"
             f"{sell_reasoning}\n"
             f"➡️ **가이드**: {sell_guide}\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
