@@ -26,7 +26,6 @@ if os.path.exists(config_path):
     with open(config_path, "r", encoding="utf-8") as f:
         config = json.load(f)
 else:
-    # 기본 평단가 및 수량 설정
     config = {"MY_AVG_PRICE": 111.05, "MY_TOTAL_SHARES": 163, "CURRENT_USED": 1, "LAST_RUN_TIME": "N/A"}
 
 # ==========================================
@@ -58,7 +57,6 @@ def calculate_rsi(df, period=14):
     avg_gain = gain.ewm(alpha=1/period, min_periods=period).mean()
     avg_loss = loss.ewm(alpha=1/period, min_periods=period).mean()
     rs = avg_gain / avg_loss.replace(0, 1e-10)
-    # Series 구조에 상관없이 마지막 값을 숫자로 추출
     last_rs = rs.iloc[-1]
     if hasattr(last_rs, "__iter__"): last_rs = last_rs[0]
     return float(100 - (100 / (1 + last_rs)))
@@ -70,7 +68,7 @@ def main():
         if df is None or len(df) < 252:
             continue
 
-        # [TypeError 완파] 데이터프레임 구조에 상관없이 첫 번째 값을 스칼라로 추출
+        # [안전한 추출] squeeze()를 통해 차원을 축소하여 스칼라값 추출
         close_series = df["Close"].squeeze()
         latest_price = float(close_series.iloc[0])
         previous_close = float(close_series.iloc[1])
@@ -78,7 +76,6 @@ def main():
         
         current_rsi = calculate_rsi(df)
         
-        # 이동평균 계산 및 스칼라 변환
         ma200_raw = df["Close"].head(200).mean()
         ma120_raw = df["Close"].head(120).mean()
         ma200 = float(ma200_raw.iloc[0] if hasattr(ma200_raw, "iloc") else ma200_raw)
@@ -87,65 +84,59 @@ def main():
         env_res_25 = ma120 * 1.25
         env_sup_25 = ma120 * 0.75
         
-        # 1. 추세 판단 및 시그마 산출 (사령관님 고유 로직)
+        # 1. 추세 및 시그마 산출
         is_bull = (latest_price > ma200) and (current_rsi >= 50)
         
         if current_rsi >= 80:
-            dynamic_sigma, status = 0.10, "🔥 상승장 (불 마켓)"
+            dynamic_sigma, status = 0.10, "불 마켓"
         elif current_rsi >= 70:
             log_returns = np.diff(np.log(closes_list[:41]))
-            dynamic_sigma, status = np.std(log_returns), "🔥 상승장 (불 마켓)"
+            dynamic_sigma, status = np.std(log_returns), "불 마켓"
         else:
             if is_bull:
                 log_returns = np.diff(np.log(closes_list[:41]))
-                dynamic_sigma, status = max(np.std(log_returns), MIN_SIGMA_BULL), "🔥 상승장 (불 마켓)"
+                dynamic_sigma, status = max(np.std(log_returns), MIN_SIGMA_BULL), "불 마켓"
             else:
                 log_returns = np.diff(np.log(closes_list[:252]))
-                dynamic_sigma, status = min(np.std(log_returns), MAX_SIGMA_BEAR), "🛡️ 하락장 (베어 마켓)"
+                dynamic_sigma, status = min(np.std(log_returns), MAX_SIGMA_BEAR), "베어 마켓"
 
         p1, p2 = latest_price * (1 - dynamic_sigma), latest_price * (1 - 2 * dynamic_sigma)
         
-        # 2. 조기 매도 판독 (RSI 80 & 엔벨 상단)
+        # 2. 매도 판독
         is_rsi_over = (current_rsi >= 80)
         is_env_over = (latest_price >= env_res_25)
         exit_ready = is_rsi_over and is_env_over
         
-        bear_signal = (not is_bull) and (current_rsi < 40)
-        bull_recovery = is_bull and (current_rsi >= 50) and (previous_close <= ma200)
-        
-        sentiment = "🚨 강한 과매수" if current_rsi >= 80 else "🔴 과매수" if current_rsi >= 70 else "✅ 과매도" if current_rsi <= 30 else "⚪ 중립"
+        sentiment = "과매수" if current_rsi >= 70 else "과매도" if current_rsi <= 30 else "중립"
         env_touched = (latest_price <= env_sup_25)
 
-        # 3. 리포트 메시지 구성
-        header_title = "🚀 [즉시 익절 실행 권고]" if exit_ready else f"📊 {ticker} 시그마 전술 리포트 V3.7"
+        # 3. [모바일 최적화] 리포트 메시지 구성
+        header_title = "🚀 [즉시 익절 권고]" if exit_ready else f"📊 **{ticker} 리포트**"
         
-        sell_reasoning = f"  - RSI 80 돌파: {'✅ 달성' if is_rsi_over else '❌ 미달 ('+str(round(current_rsi,1))+')'}\n" \
-                         f"  - 엔벨 상단 터치: {'✅ 달성' if is_env_over else '❌ 미달 (현재 $'+str(round(latest_price,2))+' < 저항선 $'+str(round(env_res_25,2))+')'}"
-
-        rebalance_msg = "🚨 **하락장 대응**: SOXL 비중 25% 축소 추천\n\n" if bear_signal else \
-                        "✅ **추세 전환**: 비중 50:50 재조정 추천\n\n" if bull_recovery else ""
+        # 여백 및 정렬 수정
+        sell_reasoning = f"- RSI 80돌파: {'✅ 달성' if is_rsi_over else '❌ 미달 ('+str(round(current_rsi,1))+')'}\n" \
+                         f"- 엔벨 상단터치: {'✅ 달성' if is_env_over else '❌ 미달 ('+str(round(latest_price,2))+' < '+str(round(env_res_25,2))+')'}"
 
         if exit_ready:
-            sell_guide = "🔥 **[ACTION] 조기 익절 조건 충족! 지금 즉시 수익을 확정하십시오.**"
+            sell_guide = "🔥 **[ACTION] 지금 즉시 수익을 확정하십시오!**"
         elif CURRENT_USED >= ANNUAL_QUOTA:
-            sell_guide = "🏁 **[ACTION] 연간 할당량 완료. 80%를 SPYM으로 안전하게 옮기십시오.**"
+            sell_guide = "🏁 **[종료] 연간 12회 완료. SPYM 전환 시점입니다.**"
         else:
-            sell_guide = "⏳ **시즌 운용 중** (기계적 매수 구간)"
+            sell_guide = "⏳ **시즌 운용 중**"
 
         return_val = ((latest_price - MY_AVG_PRICE) / MY_AVG_PRICE) * 100 if MY_AVG_PRICE > 0 else 0
 
         msg = (
             f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"**{header_title}**\n"
+            f"{header_title}\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"✅ 현재 추세: {status} ({sentiment})\n"
+            f"✅ 현재 추세: {status}({sentiment})\n"
             f"🌡️ 시장 심리: RSI {current_rsi:.1f}\n"
-            f"💰 현재 가격: ${latest_price:.2f} (수익률: {return_val:+.2f}%)\n"
-            f"📍 시그마 변동성: {dynamic_sigma*100:.2f}%\n\n"
+            f"💰 현재 가격: ${latest_price:.2f} ({return_val:+.2f}%)\n"
+            f"📍 시그마: {dynamic_sigma*100:.2f}%\n\n"
             f"📈 **엔벨로프 분석**\n"
-            f"  - 저항선(25%): ${env_res_25:.2f}\n"
-            f"  - 지지선(25%): ${env_sup_25:.2f} {'⚠️ 터치!' if env_touched else ''}\n\n"
-            f"{rebalance_msg}"
+            f"저항선(25%): ${env_res_25:.2f}\n"
+            f"지지선(25%): ${env_sup_25:.2f} {'⚠️ 터치!' if env_touched else ''}\n\n"
             f"🎯 **오늘의 매수 타점**\n"
             f"📍 1차 예약(-1σ): **${p1:.2f}**\n"
             f"📍 2차 예약(-2σ): **${p2:.2f}**\n\n"
@@ -154,7 +145,7 @@ def main():
             f"{sell_reasoning}\n"
             f"➡️ **가이드**: {sell_guide}\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"⏰ 보고 시각: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
+            f"⏰ 보고: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
         )
 
         print(msg)
@@ -166,7 +157,7 @@ def main():
     
     try:
         subprocess.run(["git", "add", "."], cwd=WORKING_DIR)
-        subprocess.run(["git", "commit", "-m", f"V3.7 Stable Final: {datetime.now().strftime('%Y-%m-%d %H:%M')}"], cwd=WORKING_DIR)
+        subprocess.run(["git", "commit", "-m", f"V3.8 Mobile Optimized: {datetime.now().strftime('%Y-%m-%d %H:%M')}"], cwd=WORKING_DIR)
         subprocess.run(["git", "push", "origin", "main"], cwd=WORKING_DIR)
     except: pass
         
