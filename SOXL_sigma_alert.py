@@ -19,7 +19,7 @@ print(f"🚀 본진 설정 완료: {WORKING_DIR}")
 # ==========================================
 # 2. 환경 변수 및 설정 로드
 # ==========================================
-# 본진으로 이동 후 .env 로드 (가장 확실한 방법)
+# 본진으로 이동 후 .env 로드 
 load_dotenv()
 WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK")
 MASSIVE_API_KEY = os.getenv("MASSIVE_API_KEY")
@@ -32,8 +32,8 @@ if os.path.exists(config_path):
     print(f"✅ 설정 파일 로드 완료: {config_path}")
 else:
     config = {
-        "MY_AVG_PRICE": 100.0,
-        "MY_TOTAL_SHARES": 500,
+        "MY_AVG_PRICE": 111.05,
+        "MY_TOTAL_SHARES": 163,
         "CURRENT_USED": 0,
         "LAST_RUN_TIME": "N/A"
     }
@@ -127,7 +127,7 @@ def main():
         if current_rsi >= 80:
             loc_section = f"⚠️ **강한 과매수 구간**입니다\n   • -2σ까지 깊은 조정 시 고려\n   📍 추천 LOC: **${p2:.2f}** (100%)\n"
         else:
-            loc_section = (f"🎯 **오늘의 낚시 포인트 (이중 그물 전략)**\n"
+            loc_section = (f"🎯 **오늘의 낚시 포인트 (이중 그물 전략)**\n"                           
                            f"   📍 LOC 예약 1(-1σ): **${p1:.2f}** (40%)\n"
                            f"   📍 LOC 예약 2(-2σ): **${p2:.2f}** (60%)\n")
 
