@@ -70,6 +70,7 @@ def main():
 
         close_series = df["Close"].squeeze()
         latest_price = float(close_series.iloc[0])
+        previous_close = float(close_series.iloc[1])  # 다시 활성화
         closes_list = close_series.values.flatten().tolist()
         
         current_rsi = calculate_rsi(df)
@@ -106,14 +107,12 @@ def main():
         sentiment = "과매수" if current_rsi >= 70 else "과매도" if current_rsi <= 30 else "중립"
         env_touched = (latest_price <= env_sup_25)
 
-        # 리포트 메시지
+        # 리포트 메시지 구성
         header_title = "🚀 [즉시 익절 권고]" if exit_ready else f"**{ticker} 리포트**"
         
-        # 1. 매도 판독 결과 
         sell_reasoning = f"  - RSI 80 돌파: {'✅ 달성' if is_rsi_over else '❌ 미달 ('+str(round(current_rsi,1))+')'}\n" \
                          f"  - 엔벨로프 상단 터치: {'✅ 달성' if is_env_over else '❌ 미달 ('+str(round(latest_price,2))+' < '+str(round(env_res_25,2))+')'}"
 
-        # 2. 매도 규칙 (사령관님 요청 최적화)
         sell_rules = f"  💎 \"12회 완료\" 또는 \"RSI 80 돌파 AND 엔벨로프 상단 터치\" 시 SPYM 전환\n" \
                      f"  🔄 \"남은 20%로 12회 재시작\""
 
@@ -133,6 +132,7 @@ def main():
             f"✅ 현재 추세: {status}({sentiment})\n"
             f"  🌡️ 시장 심리: RSI {current_rsi:.1f}\n"
             f"  💰 현재 가격: ${latest_price:.2f} ({return_val:+.2f}%)\n"
+            f"  ⏪ 전일 종가: ${previous_close:.2f}\n"  # 요청하신 줄 삽입
             f"  📍 시그마: {dynamic_sigma*100:.2f}%\n\n"
             f"📈 **엔벨로프 분석**\n"
             f"  🔺 저항선(25%): ${env_res_25:.2f}\n"
@@ -159,7 +159,7 @@ def main():
     
     try:
         subprocess.run(["git", "add", "."], cwd=WORKING_DIR)
-        subprocess.run(["git", "commit", "-m", f"V4.2 Strategy Polished: {datetime.now().strftime('%Y-%m-%d %H:%M')}"], cwd=WORKING_DIR)
+        subprocess.run(["git", "commit", "-m", f"V4.3 Prev Close Restored: {datetime.now().strftime('%Y-%m-%d %H:%M')}"], cwd=WORKING_DIR)
         subprocess.run(["git", "push", "origin", "main"], cwd=WORKING_DIR)
     except: pass
         
