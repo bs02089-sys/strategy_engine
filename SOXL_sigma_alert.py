@@ -70,7 +70,6 @@ def main():
 
         close_series = df["Close"].squeeze()
         latest_price = float(close_series.iloc[0])
-        previous_close = float(close_series.iloc[1])
         closes_list = close_series.values.flatten().tolist()
         
         current_rsi = calculate_rsi(df)
@@ -83,7 +82,6 @@ def main():
         env_res_25 = ma120 * 1.25
         env_sup_25 = ma120 * 0.75
         
-        # 추세 및 시그마 산출 로직
         is_bull = (latest_price > ma200) and (current_rsi >= 50)
         
         if current_rsi >= 80:
@@ -111,9 +109,13 @@ def main():
         # 리포트 메시지
         header_title = "🚀 [즉시 익절 권고]" if exit_ready else f"**{ticker} 리포트**"
         
-        # 판독 결과 
+        # 1. 매도 판독 결과 
         sell_reasoning = f"  - RSI 80 돌파: {'✅ 달성' if is_rsi_over else '❌ 미달 ('+str(round(current_rsi,1))+')'}\n" \
                          f"  - 엔벨로프 상단 터치: {'✅ 달성' if is_env_over else '❌ 미달 ('+str(round(latest_price,2))+' < '+str(round(env_res_25,2))+')'}"
+
+        # 2. 상시 매도 규칙 (사령관님 전술 명문화)
+        sell_rules = "  - 조건: RSI 80 돌파 AND 엔벨 상단 터치\n" \
+                     "  - 조치: 수익금 전액 익절 후 SPYM 대기"
 
         if exit_ready:
             sell_guide = "🔥 **[ACTION] 지금 즉시 수익을 확정하십시오!**"
@@ -141,6 +143,8 @@ def main():
             f"📊 **시즌 현황: {CURRENT_USED}/{ANNUAL_QUOTA}회**\n"
             f"🛑 **매도 판독 결과**\n"
             f"{sell_reasoning}\n"
+            f"📝 **전술 매도 규칙**\n"
+            f"{sell_rules}\n"
             f"➡️ **가이드**: {sell_guide}\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
             f"⏰ 보고: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
@@ -155,7 +159,7 @@ def main():
     
     try:
         subprocess.run(["git", "add", "."], cwd=WORKING_DIR)
-        subprocess.run(["git", "commit", "-m", f"V4.0 Final Layout: {datetime.now().strftime('%Y-%m-%d %H:%M')}"], cwd=WORKING_DIR)
+        subprocess.run(["git", "commit", "-m", f"V4.1 Rules Enforced: {datetime.now().strftime('%Y-%m-%d %H:%M')}"], cwd=WORKING_DIR)
         subprocess.run(["git", "push", "origin", "main"], cwd=WORKING_DIR)
     except: pass
         
