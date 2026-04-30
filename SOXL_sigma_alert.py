@@ -83,6 +83,7 @@ def main():
         env_res_25 = ma120 * 1.25
         env_sup_25 = ma120 * 0.75
         
+        # 추세 및 시그마 산출 로직
         is_bull = (latest_price > ma200) and (current_rsi >= 50)
         
         if current_rsi >= 80:
@@ -107,10 +108,10 @@ def main():
         sentiment = "과매수" if current_rsi >= 70 else "과매도" if current_rsi <= 30 else "중립"
         env_touched = (latest_price <= env_sup_25)
 
-        # 3. [V3.9 레이아웃 조정] 리포트 메시지 구성
-        header_title = "🚀 [즉시 익절 권고]" if exit_ready else f"📊 **{ticker} 리포트**"
+        # 3. [V4.0 정렬 보정] 리포트 메시지 구성
+        header_title = "🚀 [즉시 익절 권고]" if exit_ready else f"**{ticker} 리포트**"
         
-        # 판독 결과 띄어쓰기 및 들여쓰기 수정
+        # 판독 결과 내용만 확실하게 들여쓰기 적용
         sell_reasoning = f"  - RSI 80 돌파: {'✅ 달성' if is_rsi_over else '❌ 미달 ('+str(round(current_rsi,1))+')'}\n" \
                          f"  - 엔벨 상단 터치: {'✅ 달성' if is_env_over else '❌ 미달 ('+str(round(latest_price,2))+' < '+str(round(env_res_25,2))+')'}"
 
@@ -125,7 +126,7 @@ def main():
 
         msg = (
             f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"{header_title}\n"
+            f"📊 {header_title}\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
             f"✅ 현재 추세: {status}({sentiment})\n"
             f"  🌡️ 시장 심리: RSI {current_rsi:.1f}\n"
@@ -154,7 +155,7 @@ def main():
     
     try:
         subprocess.run(["git", "add", "."], cwd=WORKING_DIR)
-        subprocess.run(["git", "commit", "-m", f"V3.9 Layout Final: {datetime.now().strftime('%Y-%m-%d %H:%M')}"], cwd=WORKING_DIR)
+        subprocess.run(["git", "commit", "-m", f"V4.0 Final Layout: {datetime.now().strftime('%Y-%m-%d %H:%M')}"], cwd=WORKING_DIR)
         subprocess.run(["git", "push", "origin", "main"], cwd=WORKING_DIR)
     except: pass
         
