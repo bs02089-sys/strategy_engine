@@ -88,7 +88,7 @@ def main():
         ma200 = sum(closes[:200]) / 200 if len(closes) >= 200 else latest_price
         is_bull = (latest_price > ma200) and (current_rsi >= 50)
 
-        # 시그마 로직 (불필요한 노트 및 메시지 제거)
+        # 시그마 로직 (간소화)
         if current_rsi >= 80:
             dynamic_sigma, status = 0.10, "🔥 불 마켓"
         elif current_rsi >= 70:
@@ -105,13 +105,14 @@ def main():
         p1, p2 = latest_price * (1 - dynamic_sigma), latest_price * (1 - 2 * dynamic_sigma)
         sentiment = "🚨 강한 과매수" if current_rsi >= 80 else "🔴 과매수" if current_rsi >= 70 else "✅ 과매도" if current_rsi <= 30 else "⚪ 중립"
 
+        # 모바일 가독성 최적화 섹션
         if current_rsi >= 80:
             loc_section = (f"⚠️ **강한 과매수 구간**입니다\n"
-                           f"   📍 추천 LOC: **${p2:.2f}** (100%)\n")
+                           f"📍추천 LOC: **${p2:.2f}** (100%)\n")
         else:
-            loc_section = (f"🎯 **오늘의 낚시 포인트 (이중 그물 전략)**\n"
-                           f"   📍 LOC 예약 1(-1σ): **${p1:.2f}** (40%)\n"
-                           f"   📍 LOC 예약 2(-2σ): **${p2:.2f}** (60%)\n")
+            loc_section = (f"🎯 **오늘의 낚시 포인트**\n"
+                           f"📍LOC 예약 1(-1σ): **${p1:.2f}** (40%)\n"
+                           f"📍LOC 예약 2(-2σ): **${p2:.2f}** (60%)\n")
 
         bear_signal = (not is_bull) and (current_rsi < 40)
         bull_recovery = is_bull and (current_rsi >= 50) and (len(closes) > 200 and closes[1] <= ma200)
@@ -121,7 +122,6 @@ def main():
 
         return_val = ((latest_price - MY_AVG_PRICE) / MY_AVG_PRICE) * 100 if MY_AVG_PRICE > 0 else 0
 
-        # 출력문 심플화 및 최적화
         msg = (
             f"━━━━━━━━━━━━━━━━━━━━\n"
             f"📊 **{ticker} 자율주행 리포트**\n"
