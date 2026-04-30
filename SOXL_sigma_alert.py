@@ -88,7 +88,6 @@ def main():
         ma200 = sum(closes[:200]) / 200 if len(closes) >= 200 else latest_price
         is_bull = (latest_price > ma200) and (current_rsi >= 50)
 
-        # 시그마 로직 (간소화)
         if current_rsi >= 80:
             dynamic_sigma, status = 0.10, "🔥 불 마켓"
         elif current_rsi >= 70:
@@ -105,7 +104,6 @@ def main():
         p1, p2 = latest_price * (1 - dynamic_sigma), latest_price * (1 - 2 * dynamic_sigma)
         sentiment = "🚨 강한 과매수" if current_rsi >= 80 else "🔴 과매수" if current_rsi >= 70 else "✅ 과매도" if current_rsi <= 30 else "⚪ 중립"
 
-        # 모바일 가독성 최적화 섹션
         if current_rsi >= 80:
             loc_section = (f"⚠️ **강한 과매수 구간**입니다\n"
                            f"📍추천 LOC: **${p2:.2f}** (100%)\n")
@@ -133,8 +131,7 @@ def main():
             f"{rebalance_msg}{loc_section}\n"
             f"📊 **시즌 낚시 현황: {CURRENT_USED}/{ANNUAL_QUOTA}회**\n"
             f"📌 규칙: 연간 12회 동일 금액 분할 매수\n\n"
-            f"🛑 **매도 규칙**\n"
-            f"   (현재 수익률: **{return_val:+.2f}%**)\n"
+            f"🛑 **매도 규칙** (수익률: **{return_val:+.2f}%**)\n" # 위치 수정 완료
             f"   ✅ 12회 완료 후 80% SPYM 전환\n"
             f"   ✅ 남은 20%로 다시 12회 재시작\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
@@ -145,7 +142,6 @@ def main():
         print(msg)
         if WEBHOOK_URL: requests.post(WEBHOOK_URL, json={"content": msg})
 
-    # GitHub 자동 업데이트
     config["LAST_RUN_TIME"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with open(config_path, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=4, ensure_ascii=False)
@@ -154,7 +150,7 @@ def main():
         subprocess.run(["git", "add", "."], check=True, cwd=WORKING_DIR)
         subprocess.run(["git", "commit", "-m", f"Auto-update: {datetime.now().strftime('%Y-%m-%d %H:%M')}"], check=True, cwd=WORKING_DIR)
         subprocess.run(["git", "push", "origin", "main"], check=True, cwd=WORKING_DIR)
-        print("✅ GitHub Push 성공 (코드 및 설정 전체 업데이트 완료)")
+        print("✅ GitHub Push 성공")
     except Exception as e:
         print(f"⚠️ GitHub Push 실패: {e}")
         
