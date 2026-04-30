@@ -127,8 +127,8 @@ def main():
             loc_section = f"⚠️ **강한 과매수 구간**입니다\n   • -2σ까지 깊은 조정 시 고려\n   📍 추천 LOC: **${p2:.2f}** (100%)\n"
         else:
             loc_section = (f"🎯 **오늘의 낚시 포인트 (이중 그물 전략)**\n"                           
-                           f"   📍 LOC 예약 1(-1σ): **${p1:.2f}** (40%)\n"
-                           f"   📍 LOC 예약 2(-2σ): **${p2:.2f}** (60%)\n")
+                          f"📍LOC 예약 1(-1σ): **${p1:.2f}** (40%)\n"
+                          f"📍LOC 예약 2(-2σ): **${p2:.2f}** (60%)\n")
 
         bear_signal = (not is_bull) and (current_rsi < 40)
         bull_recovery = is_bull and (current_rsi >= 50) and (len(closes) > 200 and closes[1] <= ma200)
