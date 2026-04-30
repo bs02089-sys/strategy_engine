@@ -22,7 +22,6 @@ print(f"🚀 본진 설정 완료: {WORKING_DIR}")
 # 본진으로 이동 후 .env 로드 
 load_dotenv()
 WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK")
-MASSIVE_API_KEY = os.getenv("MASSIVE_API_KEY")
 
 # config.json 로드
 config_path = os.path.join(WORKING_DIR, "config.json")
