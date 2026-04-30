@@ -69,8 +69,8 @@ def main():
             continue
 
         close_series = df["Close"].squeeze()
-        latest_price = float(close_series.iloc[0])
-        previous_close = float(close_series.iloc[1])  # 다시 활성화
+        # 사령관님 지침: 종가 데이터를 기준으로 명칭 통일
+        latest_close = float(close_series.iloc[0]) 
         closes_list = close_series.values.flatten().tolist()
         
         current_rsi = calculate_rsi(df)
@@ -83,7 +83,7 @@ def main():
         env_res_25 = ma120 * 1.25
         env_sup_25 = ma120 * 0.75
         
-        is_bull = (latest_price > ma200) and (current_rsi >= 50)
+        is_bull = (latest_close > ma200) and (current_rsi >= 50)
         
         if current_rsi >= 80:
             dynamic_sigma, status = 0.10, "불 마켓"
@@ -98,20 +98,20 @@ def main():
                 log_returns = np.diff(np.log(closes_list[:252]))
                 dynamic_sigma, status = min(np.std(log_returns), MAX_SIGMA_BEAR), "베어 마켓"
 
-        p1, p2 = latest_price * (1 - dynamic_sigma), latest_price * (1 - 2 * dynamic_sigma)
+        p1, p2 = latest_close * (1 - dynamic_sigma), latest_close * (1 - 2 * dynamic_sigma)
         
         is_rsi_over = (current_rsi >= 80)
-        is_env_over = (latest_price >= env_res_25)
+        is_env_over = (latest_close >= env_res_25)
         exit_ready = is_rsi_over and is_env_over
         
         sentiment = "과매수" if current_rsi >= 70 else "과매도" if current_rsi <= 30 else "중립"
-        env_touched = (latest_price <= env_sup_25)
+        env_touched = (latest_close <= env_sup_25)
 
         # 리포트 메시지 구성
         header_title = "🚀 [즉시 익절 권고]" if exit_ready else f"**{ticker} 리포트**"
         
         sell_reasoning = f"  - RSI 80 돌파: {'✅ 달성' if is_rsi_over else '❌ 미달 ('+str(round(current_rsi,1))+')'}\n" \
-                         f"  - 엔벨로프 상단 터치: {'✅ 달성' if is_env_over else '❌ 미달 ('+str(round(latest_price,2))+' < '+str(round(env_res_25,2))+')'}"
+                         f"  - 엔벨로프 상단 터치: {'✅ 달성' if is_env_over else '❌ 미달 ('+str(round(latest_close,2))+' < '+str(round(env_res_25,2))+')'}"
 
         sell_rules = f"  💎 \"12회 완료\" 또는 \"RSI 80 돌파 AND 엔벨로프 상단 터치\" 시 SPYM 전환\n" \
                      f"  🔄 \"남은 20%로 12회 재시작\""
@@ -123,7 +123,7 @@ def main():
         else:
             sell_guide = "⏳ **시즌 운용 중**"
 
-        return_val = ((latest_price - MY_AVG_PRICE) / MY_AVG_PRICE) * 100 if MY_AVG_PRICE > 0 else 0
+        return_val = ((latest_close - MY_AVG_PRICE) / MY_AVG_PRICE) * 100 if MY_AVG_PRICE > 0 else 0
 
         msg = (
             f"━━━━━━━━━━━━━━━━━━━━\n"
@@ -131,8 +131,7 @@ def main():
             f"━━━━━━━━━━━━━━━━━━━━\n"
             f"✅ 현재 추세: {status}({sentiment})\n"
             f"  🌡️ 시장 심리: RSI {current_rsi:.1f}\n"
-            f"  💰 현재 가격: ${latest_price:.2f} ({return_val:+.2f}%)\n"
-            f"  ⏪ 전일 종가: ${previous_close:.2f}\n"  # 요청하신 줄 삽입
+            f"  💰 전일 종가: ${latest_close:.2f} ({return_val:+.2f}%)\n"
             f"  📍 시그마: {dynamic_sigma*100:.2f}%\n\n"
             f"📈 **엔벨로프 분석**\n"
             f"  🔺 저항선(25%): ${env_res_25:.2f}\n"
@@ -159,7 +158,7 @@ def main():
     
     try:
         subprocess.run(["git", "add", "."], cwd=WORKING_DIR)
-        subprocess.run(["git", "commit", "-m", f"V4.3 Prev Close Restored: {datetime.now().strftime('%Y-%m-%d %H:%M')}"], cwd=WORKING_DIR)
+        subprocess.run(["git", "commit", "-m", f"V4.4 Price Name Fixed: {datetime.now().strftime('%Y-%m-%d %H:%M')}"], cwd=WORKING_DIR)
         subprocess.run(["git", "push", "origin", "main"], cwd=WORKING_DIR)
     except: pass
         
