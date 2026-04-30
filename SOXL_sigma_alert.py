@@ -68,7 +68,6 @@ def main():
         if df is None or len(df) < 252:
             continue
 
-        # [안전한 추출] squeeze()를 통해 차원을 축소하여 스칼라값 추출
         close_series = df["Close"].squeeze()
         latest_price = float(close_series.iloc[0])
         previous_close = float(close_series.iloc[1])
@@ -84,7 +83,6 @@ def main():
         env_res_25 = ma120 * 1.25
         env_sup_25 = ma120 * 0.75
         
-        # 1. 추세 및 시그마 산출
         is_bull = (latest_price > ma200) and (current_rsi >= 50)
         
         if current_rsi >= 80:
@@ -102,7 +100,6 @@ def main():
 
         p1, p2 = latest_price * (1 - dynamic_sigma), latest_price * (1 - 2 * dynamic_sigma)
         
-        # 2. 매도 판독
         is_rsi_over = (current_rsi >= 80)
         is_env_over = (latest_price >= env_res_25)
         exit_ready = is_rsi_over and is_env_over
@@ -110,12 +107,12 @@ def main():
         sentiment = "과매수" if current_rsi >= 70 else "과매도" if current_rsi <= 30 else "중립"
         env_touched = (latest_price <= env_sup_25)
 
-        # 3. [모바일 최적화] 리포트 메시지 구성
+        # 3. [V3.9 레이아웃 조정] 리포트 메시지 구성
         header_title = "🚀 [즉시 익절 권고]" if exit_ready else f"📊 **{ticker} 리포트**"
         
-        # 여백 및 정렬 수정
-        sell_reasoning = f"- RSI 80돌파: {'✅ 달성' if is_rsi_over else '❌ 미달 ('+str(round(current_rsi,1))+')'}\n" \
-                         f"- 엔벨 상단터치: {'✅ 달성' if is_env_over else '❌ 미달 ('+str(round(latest_price,2))+' < '+str(round(env_res_25,2))+')'}"
+        # 판독 결과 띄어쓰기 및 들여쓰기 수정
+        sell_reasoning = f"  - RSI 80 돌파: {'✅ 달성' if is_rsi_over else '❌ 미달 ('+str(round(current_rsi,1))+')'}\n" \
+                         f"  - 엔벨 상단 터치: {'✅ 달성' if is_env_over else '❌ 미달 ('+str(round(latest_price,2))+' < '+str(round(env_res_25,2))+')'}"
 
         if exit_ready:
             sell_guide = "🔥 **[ACTION] 지금 즉시 수익을 확정하십시오!**"
@@ -131,15 +128,15 @@ def main():
             f"{header_title}\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
             f"✅ 현재 추세: {status}({sentiment})\n"
-            f"🌡️ 시장 심리: RSI {current_rsi:.1f}\n"
-            f"💰 현재 가격: ${latest_price:.2f} ({return_val:+.2f}%)\n"
-            f"📍 시그마: {dynamic_sigma*100:.2f}%\n\n"
+            f"  🌡️ 시장 심리: RSI {current_rsi:.1f}\n"
+            f"  💰 현재 가격: ${latest_price:.2f} ({return_val:+.2f}%)\n"
+            f"  📍 시그마: {dynamic_sigma*100:.2f}%\n\n"
             f"📈 **엔벨로프 분석**\n"
-            f"저항선(25%): ${env_res_25:.2f}\n"
-            f"지지선(25%): ${env_sup_25:.2f} {'⚠️ 터치!' if env_touched else ''}\n\n"
+            f"  🔺 저항선(25%): ${env_res_25:.2f}\n"
+            f"  🔻 지지선(25%): ${env_sup_25:.2f} {'⚠️ 터치!' if env_touched else ''}\n\n"
             f"🎯 **오늘의 매수 타점**\n"
-            f"📍 1차 예약(-1σ): **${p1:.2f}**\n"
-            f"📍 2차 예약(-2σ): **${p2:.2f}**\n\n"
+            f"  📍 1차 예약(-1σ): **${p1:.2f}**\n"
+            f"  📍 2차 예약(-2σ): **${p2:.2f}**\n\n"
             f"📊 **시즌 현황: {CURRENT_USED}/{ANNUAL_QUOTA}회**\n"
             f"🛑 **전술적 매도 판독 결과**\n"
             f"{sell_reasoning}\n"
@@ -157,7 +154,7 @@ def main():
     
     try:
         subprocess.run(["git", "add", "."], cwd=WORKING_DIR)
-        subprocess.run(["git", "commit", "-m", f"V3.8 Mobile Optimized: {datetime.now().strftime('%Y-%m-%d %H:%M')}"], cwd=WORKING_DIR)
+        subprocess.run(["git", "commit", "-m", f"V3.9 Layout Final: {datetime.now().strftime('%Y-%m-%d %H:%M')}"], cwd=WORKING_DIR)
         subprocess.run(["git", "push", "origin", "main"], cwd=WORKING_DIR)
     except: pass
         
