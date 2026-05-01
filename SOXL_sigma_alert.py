@@ -171,7 +171,7 @@ def main():
             f"⏰ 보고: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
         )
 
-        print(msg)
+        print(f"⏰ 보고: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
 
         if WEBHOOK_URL:
             ping = f"<@{DISCORD_USER_ID}>\n" if DISCORD_USER_ID else ""
