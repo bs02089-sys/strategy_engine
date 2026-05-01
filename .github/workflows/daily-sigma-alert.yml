@@ -1,4 +1,4 @@
-name: Daily Sigma Alert (MASSIVE)
+name: daily sigma alert 
 
 on:
   schedule:
