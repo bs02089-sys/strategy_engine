@@ -27,7 +27,13 @@ if os.path.exists(config_path):
     with open(config_path, "r", encoding="utf-8") as f:
         config = json.load(f)
 else:
-    config = {"MY_AVG_PRICE": 111.05, "MY_TOTAL_SHARES": 163, "ANNUAL_QUOTA": 12, "CURRENT_USED": 1, "LAST_RUN_TIME": "N/A"}
+    config = {
+        "MY_AVG_PRICE": 111.05,
+        "MY_TOTAL_SHARES": 163,
+        "ANNUAL_QUOTA": 12,
+        "CURRENT_USED": 0,
+        "LAST_RUN_TIME": "N/A"
+    }
 
 # ==========================================
 # 3. 기준값 (상수)
@@ -38,7 +44,7 @@ MAX_SIGMA_BEAR = 0.20
 
 ANNUAL_QUOTA = config.get("ANNUAL_QUOTA", 12)
 MY_AVG_PRICE = config.get("MY_AVG_PRICE", 111.05)
-CURRENT_USED = config.get("CURRENT_USED", 1)
+CURRENT_USED = config.get("CURRENT_USED", 0)
 
 def get_data_backup(ticker):
     try:
@@ -84,13 +90,19 @@ def main():
         if df is None or len(df) < 252:
             continue
 
-        # ... (중략: RSI, 시그마, 엔벨로프 계산 및 메시지 생성 로직 동일)
+        # RSI, 시그마, 엔벨로프 계산 로직 (생략 없이 실제 코드에 포함 가능)
+        closes = df["Close"].values
+        mean = np.mean(closes)
+        std = np.std(closes)
+        sigma = (closes[0] - mean) / std if std > 0 else 0
+        rsi = calculate_rsi(df)
 
         msg = (
             f"━━━━━━━━━━━━━━━━━━━━\n"
             f"📊 **{ticker} 리포트**\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
-            # ... (중략: 메시지 내용)
+            f"RSI: {rsi:.2f}\n"
+            f"Sigma: {sigma:.2f}\n"
             f"⏰ 보고: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
         )
 
@@ -102,7 +114,12 @@ def main():
 
         # config.json 갱신
         config["LAST_RUN_TIME"] = datetime.now().strftime("%Y-%m-%d %H:%M")
-        config["CURRENT_USED"] = config.get("CURRENT_USED", 0) + 1
+
+        # 조건부 로직: 내가 직접 수정하기 전까지는 그대로 유지
+        if config.get("CURRENT_USED", 0) == 0:
+            config["CURRENT_USED"] = 1
+        # 그 외에는 자동 증가하지 않음
+
         with open(config_path, "w", encoding="utf-8") as f:
             json.dump(config, f, indent=2, ensure_ascii=False)
 
