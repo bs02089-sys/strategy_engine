@@ -192,10 +192,11 @@ def git_push():
     try:
         subprocess.run(["git", "add", "."], check=True, capture_output=True)
         subprocess.run(["git", "commit", "-m", "Auto commit"], check=True, capture_output=True)
+        subprocess.run(["git", "pull", "origin", "main", "--rebase"], check=True, capture_output=True)
         subprocess.run(["git", "push", "origin", "main"], check=True, capture_output=True)
         print("✅ GitHub에 성공적으로 반영되었습니다.")
     except subprocess.CalledProcessError as e:
-        print("❌ Git push 실패:", e)
+        print("❌ Git push 실패 상세:", e.stderr)
 
 if __name__ == "__main__":
     main()
