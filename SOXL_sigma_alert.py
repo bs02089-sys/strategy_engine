@@ -131,8 +131,8 @@ def main():
 
         header_title = "🚀 [즉시 익절 권고]" if exit_ready else f"**{ticker} 리포트**"
         
-        sell_reasoning = f"  - RSI 80 돌파: {'✅ 달성' if is_rsi_over else '❌ 미달 ('+str(round(current_rsi,1))+')'}\n" \
-                         f"  - 엔벨로프 상단 터치: {'✅ 달성' if is_env_over else '❌ 미달 ('+str(round(latest_close,2))+' < '+str(round(env_res_25,2))+')'}"
+        sell_reasoning = f"  • RSI 80 돌파: {'✅ 달성' if is_rsi_over else '❌ 미달 ('+str(round(current_rsi,1))+')'}\n" \
+                         f"  • 엔벨로프 상단 터치: {'✅ 달성' if is_env_over else '❌ 미달 ('+str(round(latest_close,2))+' < '+str(round(env_res_25,2))+')'}"
 
         sell_rules = f"  💎 \"12회 완료\" 또는 \"RSI 80 돌파 AND 엔벨로프 상단 터치\" 시 80% SPYM 전환\n" \
                      f"  🔄 \"남은 20%로 12회 재시작\""
@@ -162,7 +162,7 @@ def main():
             f"  📍 2차 예약(-2σ): **${p2:.2f}**\n\n"
             f"📊 **시즌 현황: {CURRENT_USED}/{ANNUAL_QUOTA}회**\n"
             f"🛑 **매도 판독 결과**\n"
-            f"{sell_reasoning}\n"
+            f"{sell_reasoning}\n\n"
             f"📝 **매도 규칙**\n"
             f"{sell_rules}\n"
             f"➡️ **가이드**: {sell_guide}\n"
