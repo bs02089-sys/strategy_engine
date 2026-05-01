@@ -6,7 +6,7 @@ import yfinance as yf
 import pandas as pd
 from datetime import datetime
 from dotenv import load_dotenv
-import subprocess   # ← 깃 푸시용 모듈 추가
+import subprocess   # Git push용 모듈
 
 # ==========================================
 # 1. 경로 및 본진 설정
@@ -56,13 +56,17 @@ def get_data_backup(ticker):
 
 def calculate_rsi(df, period=10):
     closes = df["Close"].values.flatten()
-    if len(closes) < period + 1: return 50.0
+    if len(closes) < period + 1: 
+        return 50.0
     delta = pd.Series(closes).diff()
     gain = delta.where(delta > 0, 0)
     loss = -delta.where(delta > 0, 0)
     avg_gain = gain.ewm(alpha=1/period, min_periods=period).mean()
     avg_loss = loss.ewm(alpha=1/period, min_periods=period).mean()
-    rs = avg_gain / avg_loss.replace(0, 1e-10)
+    # 예외 처리: avg_loss가 0이면 RSI=100으로 반환
+    if avg_loss.iloc[-1] == 0:
+        return 100.0
+    rs = avg_gain / avg_loss
     return float(100 - (100 / (1 + rs.iloc[-1])))
 
 def send_discord_message(webhook_url, message):
@@ -166,6 +170,7 @@ def main():
             f"{sell_rules}\n"
             f"➡️ **가이드**: {sell_guide}\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
+
             f"⏰ 보고: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
         )
 
@@ -189,7 +194,8 @@ def main():
 def git_push():
     try:
         subprocess.run(["git", "add", "."], check=True)
-        subprocess.run(["git", "commit", "-m", "자동 커밋"], check=True)
+        # 커밋 메시지는 영어로 변경 (인코딩 문제 방지)
+        subprocess.run(["git", "commit", "-m", "Auto commit"], check=True)
         subprocess.run(["git", "push", "origin", "main"], check=True)
         print("✅ GitHub에 성공적으로 반영되었습니다.")
     except subprocess.CalledProcessError as e:
@@ -197,4 +203,4 @@ def git_push():
 
 if __name__ == "__main__":
     main()
-    git_push()   # ← main 실행 후 깃허브 자동 반영
+    git_push()   # main 실행 후 깃허브 자동 반영
