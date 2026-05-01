@@ -60,13 +60,10 @@ def calculate_rsi(df, period=10):
         return 50.0
     delta = pd.Series(closes).diff()
     gain = delta.where(delta > 0, 0)
-    loss = -delta.where(delta > 0, 0)
+    loss = -delta.where(delta < 0, 0)  # ✅ 버그 수정
     avg_gain = gain.ewm(alpha=1/period, min_periods=period).mean()
     avg_loss = loss.ewm(alpha=1/period, min_periods=period).mean()
-    # 예외 처리: avg_loss가 0이면 RSI=100으로 반환
-    if avg_loss.iloc[-1] == 0:
-        return 100.0
-    rs = avg_gain / avg_loss
+    rs = avg_gain / avg_loss.replace(0, 1e-10)  # ✅ RuntimeWarning 방지
     return float(100 - (100 / (1 + rs.iloc[-1])))
 
 def send_discord_message(webhook_url, message):
@@ -193,13 +190,13 @@ def main():
 # ==========================================
 def git_push():
     try:
-        subprocess.run(["git", "add", "."], check=True)
-        # 커밋 메시지는 영어로 변경 (인코딩 문제 방지)
-        subprocess.run(["git", "commit", "-m", "Auto commit"], check=True)
-        subprocess.run(["git", "push", "origin", "main"], check=True)
+        subprocess.run(["git", "add", "."], check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "Auto commit"], check=True, capture_output=True)
+        subprocess.run(["git", "pull", "origin", "main", "--rebase"], check=True, capture_output=True)
+        subprocess.run(["git", "push", "origin", "main"], check=True, capture_output=True)
         print("✅ GitHub에 성공적으로 반영되었습니다.")
     except subprocess.CalledProcessError as e:
-        print("❌ Git push 실패:", e)
+        print("❌ Git push 실패 상세:", e.stderr)
 
 if __name__ == "__main__":
     main()
