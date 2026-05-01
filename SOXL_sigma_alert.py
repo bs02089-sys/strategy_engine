@@ -60,13 +60,10 @@ def calculate_rsi(df, period=10):
         return 50.0
     delta = pd.Series(closes).diff()
     gain = delta.where(delta > 0, 0)
-    loss = -delta.where(delta > 0, 0)
+    loss = -delta.where(delta < 0, 0)
     avg_gain = gain.ewm(alpha=1/period, min_periods=period).mean()
     avg_loss = loss.ewm(alpha=1/period, min_periods=period).mean()
-    # 예외 처리: avg_loss가 0이면 RSI=100으로 반환
-    if avg_loss.iloc[-1] == 0:
-        return 100.0
-    rs = avg_gain / avg_loss
+    rs = avg_gain / avg_loss.replace(0, 1e-10)  # 0 나누기 방어
     return float(100 - (100 / (1 + rs.iloc[-1])))
 
 def send_discord_message(webhook_url, message):
