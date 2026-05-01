@@ -60,10 +60,13 @@ def calculate_rsi(df, period=10):
         return 50.0
     delta = pd.Series(closes).diff()
     gain = delta.where(delta > 0, 0)
-    loss = -delta.where(delta < 0, 0)
+    loss = -delta.where(delta > 0, 0)
     avg_gain = gain.ewm(alpha=1/period, min_periods=period).mean()
     avg_loss = loss.ewm(alpha=1/period, min_periods=period).mean()
-    rs = avg_gain / avg_loss.replace(0, 1e-10)  # 0 나누기 방어
+    # 예외 처리: avg_loss가 0이면 RSI=100으로 반환
+    if avg_loss.iloc[-1] == 0:
+        return 100.0
+    rs = avg_gain / avg_loss
     return float(100 - (100 / (1 + rs.iloc[-1])))
 
 def send_discord_message(webhook_url, message):
@@ -131,16 +134,16 @@ def main():
 
         header_title = "🚀 [즉시 익절 권고]" if exit_ready else f"**{ticker} 리포트**"
         
-        sell_reasoning = f"  • RSI 80 돌파: {'✅ 달성' if is_rsi_over else '❌ 미달 ('+str(round(current_rsi,1))+')'}\n" \
-                         f"  • 엔벨로프 상단 터치: {'✅ 달성' if is_env_over else '❌ 미달 ('+str(round(latest_close,2))+' < '+str(round(env_res_25,2))+')'}"
+        sell_reasoning = f"  - RSI 80 돌파: {'✅ 달성' if is_rsi_over else '❌ 미달 ('+str(round(current_rsi,1))+')'}\n" \
+                         f"  - 엔벨로프 상단 터치: {'✅ 달성' if is_env_over else '❌ 미달 ('+str(round(latest_close,2))+' < '+str(round(env_res_25,2))+')'}"
 
-        sell_rules = f"  💎 \"12회 완료\" 또는 \"RSI 80 돌파 AND 엔벨로프 상단 터치\" 시 80% SPYM 전환\n" \
+        sell_rules = f"  💎 \"12회 완료\" 또는 \"RSI 80 돌파 AND 엔벨로프 상단 터치\" 시 80% SSO 전환\n" \
                      f"  🔄 \"남은 20%로 12회 재시작\""
 
         if exit_ready:
             sell_guide = "🔥 **[ACTION] 지금 즉시 수익을 확정하십시오!**"
         elif CURRENT_USED >= ANNUAL_QUOTA:
-            sell_guide = "🏁 **[종료] 연간 12회 완료. SPYM 전환 시점입니다.**"
+            sell_guide = "🏁 **[종료] 연간 12회 완료. SSO 전환 시점입니다.**"
         else:
             sell_guide = "⏳ **시즌 운용 중**"
 
@@ -162,7 +165,7 @@ def main():
             f"  📍 2차 예약(-2σ): **${p2:.2f}**\n\n"
             f"📊 **시즌 현황: {CURRENT_USED}/{ANNUAL_QUOTA}회**\n"
             f"🛑 **매도 판독 결과**\n"
-            f"{sell_reasoning}\n\n"
+            f"{sell_reasoning}\n"
             f"📝 **매도 규칙**\n"
             f"{sell_rules}\n"
             f"➡️ **가이드**: {sell_guide}\n"
@@ -190,13 +193,13 @@ def main():
 # ==========================================
 def git_push():
     try:
-        subprocess.run(["git", "add", "."], check=True, capture_output=True)
-        subprocess.run(["git", "commit", "-m", "Auto commit"], check=True, capture_output=True)
-        subprocess.run(["git", "pull", "origin", "main", "--rebase"], check=True, capture_output=True)
-        subprocess.run(["git", "push", "origin", "main"], check=True, capture_output=True)
+        subprocess.run(["git", "add", "."], check=True)
+        # 커밋 메시지는 영어로 변경 (인코딩 문제 방지)
+        subprocess.run(["git", "commit", "-m", "Auto commit"], check=True)
+        subprocess.run(["git", "push", "origin", "main"], check=True)
         print("✅ GitHub에 성공적으로 반영되었습니다.")
     except subprocess.CalledProcessError as e:
-        print("❌ Git push 실패 상세:", e.stderr)
+        print("❌ Git push 실패:", e)
 
 if __name__ == "__main__":
     main()
