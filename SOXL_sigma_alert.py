@@ -94,24 +94,26 @@ def main():
     is_buy_signal = latest_close <= target_price
     guide_msg = "🔥 **신호 감지: -1σ가격 터치! 매수하세요.**" if is_buy_signal else "⏳ **매수 대기중**"
 
-    # 메시지 작성
+# 메시지(전의를 불태우는 최종 버전)
     report = [
         f"━━━━━━━━━━━━━━━━━━━━",
-        f"📊 **{ticker} -1σ 전략 리포트**",
+        f"📊 **{ticker} -1.0σ 전략 리포트**",
         f"━━━━━━━━━━━━━━━━━━━━",
-        f"✅ **전일 종가** : ${latest_close:.2f} ({profit_loss:+.2f}%)",
-        f"📍 **-1σ 가격** : **${target_price:.2f}**",
-        f"📍 **1σ (연평균)** : {sigma_val*100:.2f}%",
-        f"📉 **VIX 지수** : {vix_info}",
-        f"\n🎯 **투자 가이드**",
+        f"✅ **전일 종가**: ${latest_close:.2f} ({profit_loss:+.2f}%)",
+        f"📍 **-1.0σ 타점**: **${target_price:.2f}**",
+        f"📍 **1σ (1년 평균)**: {sigma_val*100:.2f}%",
+        f"📉 **VIX 지수**: {vix_info}",
+        f"\n🎯 **오늘의 전투 가이드**",
         f"{guide_msg}",
-        f"⚠️ **MDD -76.9% 공포를 무시해야만, 275% 수익률에 도달한다. MDD는 훈장이다.**",
-        f"\n📊 **시즌 현황 : {CURRENT_USED}/{ANNUAL_QUOTA}회**",
-        f"📝 **규칙** : buy&hold / {hold_date}까지 보유하세요.",
+        f"📢 **\"77%의 하락이라는 훈장을 견디는 자만이, 275%의 승리를 거머쥔다.**",
+        f"📢 **\"시장이 비명을 지를 때(-1.0σ),**",
+        f"    **나는 준비된 20발 중 한 발을 기쁘게 쏜다!\"**",        
+        f"\n📊 **시즌 탄창: {CURRENT_USED}/{ANNUAL_QUOTA} 발 사용**",
+        f"📝 **원칙**: 노 익절 | {hold_date}까지 홀딩",
         f"━━━━━━━━━━━━━━━━━━━━",
-        f"⏰ 보고: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+        f"⏰ 보고 시각: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
     ]
-
+    
     final_report = "\n".join(report)
     print(final_report)
     send_discord(final_report)
