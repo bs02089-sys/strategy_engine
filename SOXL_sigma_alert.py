@@ -3,128 +3,123 @@ import json
 import numpy as np
 import requests
 import yfinance as yf
-import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
-import subprocess   # Git push용 모듈
 
 # ==========================================
-# 1. 경로 및 본진 설정
-# ==========================================
-CURRENT_FILE_PATH = os.path.abspath(__file__)
-WORKING_DIR = os.path.dirname(CURRENT_FILE_PATH)
-os.chdir(WORKING_DIR)
-
-# ==========================================
-# 2. 환경 변수 및 설정 로드
+# 1. 환경 설정 및 경로 지정
 # ==========================================
 load_dotenv()
 WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK")
 DISCORD_USER_ID = os.getenv("DISCORD_USER_ID")
 
+# 스크립트 위치 기준으로 작업 디렉토리 고정
+WORKING_DIR = os.path.dirname(os.path.abspath(__file__))
+os.chdir(WORKING_DIR)
 config_path = os.path.join(WORKING_DIR, "config.json")
+
+# 설정 파일 로드 (없으면 기본값 생성)
 if os.path.exists(config_path):
     with open(config_path, "r", encoding="utf-8") as f:
         config = json.load(f)
 else:
     config = {
-        "MY_AVG_PRICE": 111.05,
-        "MY_TOTAL_SHARES": 163,
-        "ANNUAL_QUOTA": 12,
+        "MY_AVG_PRICE": 0.0,
+        "ANNUAL_QUOTA": 20,
         "CURRENT_USED": 0,
         "LAST_RUN_TIME": "N/A"
     }
 
-# ==========================================
-# 3. 기준값 (상수)
-# ==========================================
-TICKERS = ["SOXL"]
-MIN_SIGMA_BULL = 0.10
-MAX_SIGMA_BEAR = 0.20
-
-ANNUAL_QUOTA = config.get("ANNUAL_QUOTA", 12)
-MY_AVG_PRICE = config.get("MY_AVG_PRICE", 111.05)
+# 전략 파라미터 고정 (연간 개념 일치)
+ANNUAL_QUOTA = 20
 CURRENT_USED = config.get("CURRENT_USED", 0)
+MY_AVG_PRICE = config.get("MY_AVG_PRICE", 0.0)
 
-def get_data_backup(ticker):
+# ==========================================
+# 2. 보조 함수 (VIX 및 메시지 전송)
+# ==========================================
+def get_vix_report():
+    """VIX 지수 수집 및 상태 판별"""
     try:
-        df = yf.download(ticker, period="2y", auto_adjust=True, progress=False)
-        if not df.empty:
-            return df.sort_index(ascending=False)
-    except Exception as e:
-        print(f"❌ 데이터 수집 오류: {e}")
-    return None
+        df_vix = yf.download("^VIX", period="2d", auto_adjust=True, progress=False)
+        if not df_vix.empty:
+            vix_val = float(df_vix["Close"].iloc[-1].item())
+            if vix_val <= 15: status = "안정"
+            elif vix_val <= 25: status = "주의"
+            elif vix_val <= 35: status = "공포"
+            else: status = "극단적 공포"
+            return f"{vix_val:.1f} ({status})"
+    except: pass
+    return "N/A"
 
-def calculate_rsi(df, period=10):
-    closes = df["Close"].values.flatten()
-    if len(closes) < period + 1: 
-        return 50.0
-    delta = pd.Series(closes).diff()
-    gain = delta.where(delta > 0, 0)
-    loss = -delta.where(delta > 0, 0)
-    avg_gain = gain.ewm(alpha=1/period, min_periods=period).mean()
-    avg_loss = loss.ewm(alpha=1/period, min_periods=period).mean()
-    rs = avg_gain / avg_loss.replace(0, 1e-10)
-    return float(100 - (100 / (1 + rs.iloc[-1])))
-
-def send_discord_message(webhook_url, message):
+def send_discord(message):
+    """디스코드 메시지 전송"""
+    if not WEBHOOK_URL: return
+    ping = f"<@{DISCORD_USER_ID}>\n" if DISCORD_USER_ID else ""
     try:
-        response = requests.post(webhook_url, json={"content": message}, timeout=10)
-        response.raise_for_status()
-        print("✅ Discord 전송 성공")
-    except Exception as e:
-        print(f"❌ Discord 전송 실패: {e}")
+        requests.post(WEBHOOK_URL, json={"content": ping + message}, timeout=10)
+    except: pass
 
-def safe_git_push():
-    try:
-        subprocess.run(["git", "pull", "--rebase", "origin", "main"], check=True)
-        subprocess.run(["git", "push", "origin", "main"], check=True)
-        print("✅ Git push 성공")
-    except subprocess.CalledProcessError as e:
-        print(f"❌ Git push 실패: {e}")
-
+# ==========================================
+# 3. 메인 전략 실행 (SOXL 연간 시그마 전략)
+# ==========================================
 def main():
-    global CURRENT_USED
-    for ticker in TICKERS:
-        df = get_data_backup(ticker)
-        if df is None or len(df) < 252:
-            continue
+    ticker = "SOXL"
+    
+    # [개념 일치] 연간 변동성 추출을 위해 2년치 데이터 수집
+    df = yf.download(ticker, period="2y", auto_adjust=True, progress=False)
+    if df.empty:
+        print(f"❌ {ticker} 데이터를 가져올 수 없습니다.")
+        return
 
-        # RSI, 시그마, 엔벨로프 계산 로직 (생략 없이 실제 코드에 포함 가능)
-        closes = df["Close"].values
-        mean = np.mean(closes)
-        std = np.std(closes)
-        sigma = (closes[0] - mean) / std if std > 0 else 0
-        rsi = calculate_rsi(df)
+    # 데이터 정리
+    closes = df["Close"].values.flatten()
+    latest_close = float(closes[-1].item())
+    prev_close = float(closes[-2].item())
+    
+    # [핵심] 최근 252거래일(약 1년) 로그 수익률 기반 연간 평균 변동성(1σ) 계산
+    sample_size = min(len(closes) - 1, 252)
+    log_returns = np.diff(np.log(closes[-(sample_size + 1):]))
+    sigma_val = np.std(log_returns)
+    
+    # -1σ 가격: 전일 종가 대비 연간 평균 변동성 하단
+    target_price = prev_close * (1 - sigma_val)
+    
+    # 수익률 및 보유 기한 계산
+    profit_loss = ((latest_close - MY_AVG_PRICE) / MY_AVG_PRICE * 100) if MY_AVG_PRICE > 0 else 0
+    hold_date = (datetime.now() + timedelta(days=730)).strftime('%Y년 %m월 %d일')
+    vix_info = get_vix_report()
 
-        msg = (
-            f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"📊 **{ticker} 리포트**\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"RSI: {rsi:.2f}\n"
-            f"Sigma: {sigma:.2f}\n"
-            f"⏰ 보고: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
-        )
+    # 매수 신호 판정
+    is_buy_signal = latest_close <= target_price
+    guide_msg = "🔥 **신호 감지: -1σ가격 터치! 매수하세요.**" if is_buy_signal else "⏳ **매수 대기중**"
 
-        print(msg)
+    # 메시지 작성
+    report = [
+        f"━━━━━━━━━━━━━━━━━━━━",
+        f"📊 **{ticker} -1σ 전략 리포트**",
+        f"━━━━━━━━━━━━━━━━━━━━",
+        f"✅ **전일 종가** : ${latest_close:.2f} ({profit_loss:+.2f}%)",
+        f"📍 **-1σ 가격** : **${target_price:.2f}**",
+        f"📍 **1σ (연평균)** : {sigma_val*100:.2f}%",
+        f"📉 **VIX 지수** : {vix_info}",
+        f"\n🎯 **투자 가이드**",
+        f"{guide_msg}",
+        f"⚠️ **MDD -76.9% 공포를 무시해야만, 275% 수익률에 도달한다. MDD는 훈장이다.**",
+        f"\n📊 **시즌 현황 : {CURRENT_USED}/{ANNUAL_QUOTA}회**",
+        f"📝 **규칙** : buy&hold / {hold_date}까지 보유하세요.",
+        f"━━━━━━━━━━━━━━━━━━━━",
+        f"⏰ 보고: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+    ]
 
-        if WEBHOOK_URL:
-            ping = f"<@{DISCORD_USER_ID}>" if DISCORD_USER_ID else ""
-            send_discord_message(WEBHOOK_URL, ping + "\n" + msg)
+    final_report = "\n".join(report)
+    print(final_report)
+    send_discord(final_report)
 
-        # config.json 갱신
-        config["LAST_RUN_TIME"] = datetime.now().strftime("%Y-%m-%d %H:%M")
-
-        # 조건부 로직: 내가 직접 수정하기 전까지는 그대로 유지
-        if config.get("CURRENT_USED", 0) == 0:
-            config["CURRENT_USED"] = 1
-        # 그 외에는 자동 증가하지 않음
-
-        with open(config_path, "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=2, ensure_ascii=False)
-
-        # 로컬에서는 안전한 git push 실행
-        safe_git_push()
+    # 설정 업데이트
+    config["LAST_RUN_TIME"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with open(config_path, "w", encoding="utf-8") as f:
+        json.dump(config, f, indent=4, ensure_ascii=False)
 
 if __name__ == "__main__":
     main()
