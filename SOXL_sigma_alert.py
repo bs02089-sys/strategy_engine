@@ -97,21 +97,21 @@ def main():
 # 메시지(전의를 불태우는 최종 버전)
     report = [
         f"━━━━━━━━━━━━━━━━━━━━",
-        f"📊 **{ticker} -1.0σ 전략 리포트**",
+        f"📊 **{ticker} -1σ 전략 리포트**",
         f"━━━━━━━━━━━━━━━━━━━━",
-        f"✅ **전일 종가**: ${latest_close:.2f} ({profit_loss:+.2f}%)",
-        f"📍 **-1.0σ 타점**: **${target_price:.2f}**",
-        f"📍 **1σ (1년 평균)**: {sigma_val*100:.2f}%",
-        f"📉 **VIX 지수**: {vix_info}",
+        f"✅ **전일 종가** : ${latest_close:.2f} ({profit_loss:+.2f}%)",
+        f"📍 **-1.0σ 타점** : **${target_price:.2f}**",
+        f"📍 **1σ (1년 평균)** : {sigma_val*100:.2f}%",
+        f"📉 **VIX 지수** : {vix_info}",
         f"\n🎯 **오늘의 전투 가이드**",
         f"{guide_msg}",
-        f"📢 **\"77%의 하락이라는 훈장을 견디는 자만이, 275%의 승리를 거머쥔다.**",
+        f"📢 **\"77%의 하락이라는 훈장을 견디는 자만이, 275%의 수익률을 거머쥔다.**",
         f"📢 **\"시장이 비명을 지를 때(-1.0σ),**",
         f"    **나는 준비된 20발 중 한 발을 기쁘게 쏜다!\"**",        
-        f"\n📊 **시즌 탄창: {CURRENT_USED}/{ANNUAL_QUOTA} 발 사용**",
-        f"📝 **원칙**: 노 익절 | {hold_date}까지 홀딩",
+        f"\n📊 **시즌 탄창 : {CURRENT_USED}/{ANNUAL_QUOTA} 발 사용**",
+        f"📝 **원칙** : 익절은 없다! | {hold_date}까지 홀딩",
         f"━━━━━━━━━━━━━━━━━━━━",
-        f"⏰ 보고 시각: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+        f"⏰ 시각: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
     ]
     
     final_report = "\n".join(report)
