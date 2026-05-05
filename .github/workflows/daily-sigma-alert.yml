@@ -13,21 +13,26 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # 1. 저장소 체크아웃
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # 2. Python 환경 설정
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
+      # 3. 의존성 설치
       - name: Install dependencies
         run: |
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
+      # 4. Sigma Report 실행
       - name: Run Sigma Report
         run: python SOXL_sigma_alert.py
 
+      # 5. SSH 설정
       - name: Set up SSH
         run: |
           mkdir -p ~/.ssh
@@ -35,10 +40,16 @@ jobs:
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan github.com >> ~/.ssh/known_hosts
 
-      - name: Push updated config.json
+      # 6. Git 사용자 정보 및 원격 주소 설정
+      - name: Configure Git
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin git@github.com:BS02089-SYS/strategy_engine.git
+
+      # 7. 변경사항 커밋 및 푸시
+      - name: Push updated config.json
+        run: |
           git add config.json
           git commit -m "Update config.json" || echo "No changes to commit"
-          git push git@github.com:BS02089-SYS/strategy_engine.git HEAD:main
+          git push origin main
