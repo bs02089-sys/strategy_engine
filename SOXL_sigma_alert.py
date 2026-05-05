@@ -99,17 +99,17 @@ def main():
         f"━━━━━━━━━━━━━━━━━━━━",
         f"📊 **{ticker} 전략 리포트**",
         f"━━━━━━━━━━━━━━━━━━━━",
-        f"✅ **전일 종가** : ${latest_close:.2f} ({profit_loss:+.2f}%)",
-        f"📍 **-1σ 타점** : **${target_price:.2f}**",
-        f"📍 **1σ (연평균)** : {sigma_val*100:.2f}%",
-        f"📉 **VIX 지수** : {vix_info}",
-        f"\n🎯 **전략 지침**",
+        f"✅ 전일 종가 : ${latest_close:.2f} ({profit_loss:+.2f}%)",
+        f"📍 -1σ 타점 : ${target_price:.2f}",
+        f"📍 1σ (연평균) : {sigma_val*100:.2f}%",
+        f"📉 VIX 지수 : {vix_info}",
+        f"\n🎯 전략 지침",
         f"{guide_msg}",
-        f"📢 MDD 77%라는 훈장, 수익률 275%의 황금열쇠\n",
-        f"📢 시장 비명, 연간 20발, 기쁜 한 발",        
-        f"\n📊 시즌 탄약 : {CURRENT_USED}/{ANNUAL_QUOTA} 발",
-        f"📝 **2년간 보유, 익절은 없다! | {hold_date}까지 홀딩",
-        f"━━━━━━━━━━━━━━━━━━━━",
+        f"◆ 감정 배제, 신호 진입\n"
+        f"◆ 시장 비명, 연간 20발, 기쁨의 한 발\n"
+        f"◆ {hold_date}까지 2년간 보유, 익절은 없다!\n"
+        f"◆ MDD 77%라는 훈장, 수익률 275%의 황금열쇠\n"
+        f"\n📊 시즌 탄약 : {CURRENT_USED}/{ANNUAL_QUOTA} 발\n"        f"━━━━━━━━━━━━━━━━━━━━",
         f"⏰ 시각: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
     ]
     
