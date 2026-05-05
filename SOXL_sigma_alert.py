@@ -109,8 +109,7 @@ def main():
         f"◆ 시장 비명, 연간 20발, 기쁨의 한 발\n"
         f"◆ {hold_date}까지 보유, 익절은 없다!\n"
         f"◆ MDD 77%라는 훈장, 수익률 275%의 황금열쇠\n"
-        f"\n📊 시즌 탄약 : {CURRENT_USED}/{ANNUAL_QUOTA} 발\n"
-        f"━━━━━━━━━━━━━━━━━━━━",       
+        f"\n📊 시즌 탄약 : {CURRENT_USED}/{ANNUAL_QUOTA} 발\n"      
         f"⏰ 시각: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
     ]
     
