@@ -30,7 +30,7 @@ else:
         "LAST_RUN_TIME": "N/A"
     }
 
-# 전략 파라미터 고정 (연간 개념 일치)
+# 전략 파라미터 고정
 ANNUAL_QUOTA = 20
 CURRENT_USED = config.get("CURRENT_USED", 0)
 MY_AVG_PRICE = config.get("MY_AVG_PRICE", 0.0)
@@ -66,7 +66,7 @@ def send_discord(message):
 def main():
     ticker = "SOXL"
     
-    # [개념 일치] 연간 변동성 추출을 위해 2년치 데이터 수집
+    # 연간 변동성 추출을 위해 2년치 데이터 수집
     df = yf.download(ticker, period="2y", auto_adjust=True, progress=False)
     if df.empty:
         print(f"❌ {ticker} 데이터를 가져올 수 없습니다.")
@@ -77,30 +77,39 @@ def main():
     latest_close = float(closes[-1].item())
     prev_close = float(closes[-2].item())
     
-    # [핵심] 최근 252거래일(약 1년) 로그 수익률 기반 연간 평균 변동성(1σ) 계산
+    # [핵심] 최근 252거래일 로그 수익률 기반 연간 평균 변동성(1σ) 계산
     sample_size = min(len(closes) - 1, 252)
     log_returns = np.diff(np.log(closes[-(sample_size + 1):]))
     sigma_val = np.std(log_returns)
     
-    # -1σ 가격: 전일 종가 대비 연간 평균 변동성 하단
-    target_price = prev_close * (1 - sigma_val)
+    # [가격 설정] -1σ 및 -2σ 타점 계산
+    target_price_1s = prev_close * (1 - sigma_val)
+    target_price_2s = prev_close * (1 - (sigma_val * 2))
     
     # 수익률 및 보유 기한 계산
     profit_loss = ((latest_close - MY_AVG_PRICE) / MY_AVG_PRICE * 100) if MY_AVG_PRICE > 0 else 0
     hold_date = (datetime.now() + timedelta(days=730)).strftime('%Y년 %m월 %d일')
     vix_info = get_vix_report()
 
-    # 매수 신호 판정
-    is_buy_signal = latest_close <= target_price
-    guide_msg = "🔥 **신호 감지: -1σ가격 터치! 매수하세요.**" if is_buy_signal else "⏳매수 대기중"
+    # [매수 신호 판정] 상위 조건부터 하향식으로 검사하여 중복 방지
+    if latest_close <= target_price_2s:
+        is_buy_signal = True
+        guide_msg = "🔥 **신호 감지: -2σ가격 터치! 2회분을 매수하세요.**"
+    elif latest_close <= target_price_1s:
+        is_buy_signal = True
+        guide_msg = "🔥 **신호 감지: -1σ가격 터치! 매수하세요.**"
+    else:
+        is_buy_signal = False
+        guide_msg = "⏳매수 대기중"
 
-# 메시지
+    # [메시지 리포트]
     report = [
         f"━━━━━━━━━━━━━━━━━━━━",
         f"📊 **{ticker} 전략 리포트**",
         f"━━━━━━━━━━━━━━━━━━━━",
         f"✅ 전일 종가 : ${latest_close:.2f} ({profit_loss:+.2f}%)",
-        f"📍 -1σ 타점 : ${target_price:.2f}",
+        f"📍 -1σ 타점 : ${target_price_1s:.2f}",
+        f"📍 -2σ 타점 : ${target_price_2s:.2f}",
         f"📍 1σ (연평균) : {sigma_val*100:.2f}%",
         f"📉 VIX 지수 : {vix_info}",
         f"\n🎯 전략 지침",
