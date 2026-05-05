@@ -92,7 +92,7 @@ def main():
 
     # 매수 신호 판정
     is_buy_signal = latest_close <= target_price
-    guide_msg = "🔥 **신호 감지: -1σ가격 터치! 매수하세요.**" if is_buy_signal else "⏳ **매수 대기중**"
+    guide_msg = "🔥 **신호 감지: -1σ가격 터치! 매수하세요.**" if is_buy_signal else "⏳매수 대기중"
 
 # 메시지
     report = [
