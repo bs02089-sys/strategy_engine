@@ -105,9 +105,9 @@ def main():
         f"📉 **VIX 지수** : {vix_info}",
         f"\n🎯 **전략 지침**",
         f"{guide_msg}",
-        f"📢 **\"MDD 77%라는 훈장, 수익률 275%의 황금열쇠**",
-        f"📢 **\"시장 비명, 연간 20발, 기쁜 한 발\"**",        
-        f"\n📊 **시즌 탄약 : {CURRENT_USED}/{ANNUAL_QUOTA} 발**",
+        f"📢 MDD 77%라는 훈장, 수익률 275%의 황금열쇠\n",
+        f"📢 시장 비명, 연간 20발, 기쁜 한 발",        
+        f"\n📊 시즌 탄약 : {CURRENT_USED}/{ANNUAL_QUOTA} 발",
         f"📝 **2년간 보유, 익절은 없다! | {hold_date}까지 홀딩",
         f"━━━━━━━━━━━━━━━━━━━━",
         f"⏰ 시각: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
