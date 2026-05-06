@@ -1,4 +1,4 @@
-name: daily sigma alert
+name: daily_sigma_alert
 
 on:
   schedule:
