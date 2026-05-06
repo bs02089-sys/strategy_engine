@@ -2,7 +2,7 @@ name: daily_sigma_alert
 
 on:
   schedule:
-    - cron: '0 10 * * 1-5'   # 평일 오전 10시 UTC (KST 오후 7시)
+    - cron: '0 0 * * 1-5'   # 평일 오전 0시 UTC (KST 오전 9시)
   workflow_dispatch:
 
 permissions:
