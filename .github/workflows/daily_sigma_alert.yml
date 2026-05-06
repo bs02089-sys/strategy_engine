@@ -8,16 +8,20 @@ on:
 permissions:
   contents: write
 
+env:
+  # Node.js 24 강제 전환
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
-  run-sigma-alert:
+  daily_sigma_alert:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. 저장소 체크아웃
+      # 1. 저장소 체크아웃 (최신 버전 유지)
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2. Python 환경 설정
+      # 2. Python 환경 설정 (최신 버전 유지)
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -36,7 +40,7 @@ jobs:
       - name: Set up SSH
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.vscode-push-token-2026 }}" > ~/.ssh/id_rsa
+          echo "${{ secrets.vscode_push_token_2026 }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan github.com >> ~/.ssh/known_hosts
 
