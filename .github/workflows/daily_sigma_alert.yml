@@ -1,42 +1,35 @@
-name: daily_sigma_alert
-
+name: trade_alert
 on:
   schedule:
     - cron: '0 0 * * 1-5'   # 평일 오전 0시 UTC (KST 오전 9시)
     - cron: '0 10 * * 1-5'  # 평일 오전 10시 UTC (KST 오후 7시)
   workflow_dispatch:
-
 permissions:
   contents: write
-
 env:
-  # Node.js 24 강제 전환
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
-  daily_sigma_alert:
+  trade_alert:
     runs-on: ubuntu-latest
-
     steps:
-      # 1. 저장소 체크아웃 (최신 버전 유지)
+      # 1. 저장소 체크아웃
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      # 2. Python 환경 설정 (최신 버전 유지)
+      # 2. Python 환경 설정
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-
       # 3. 의존성 설치
       - name: Install dependencies
         run: |
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-
-      # 4. Sigma Report 실행
-      - name: Run Sigma Report
-        run: python SOXL_sigma_alert.py
-
+      # 4. Trade Alert 실행
+      - name: Run Trade Alert
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
+        run: python trade_alert.py
       # 5. SSH 설정
       - name: Set up SSH
         run: |
@@ -44,17 +37,9 @@ jobs:
           echo "${{ secrets.vscode_push_token_2026 }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan github.com >> ~/.ssh/known_hosts
-
       # 6. Git 사용자 정보 및 원격 주소 설정
       - name: Configure Git
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git remote set-url origin git@github.com:bs02089-sys/strategy_engine.git
-
-      # 7. 변경사항 커밋 및 푸시
-      - name: Push updated config.json
-        run: |
-          git add config.json
-          git commit -m "Update config.json" || echo "No changes to commit"
-          git push origin main
