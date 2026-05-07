@@ -1,6 +1,13 @@
 name: 나무증권 환율 적정성 알림
 
 on:
+  # VS Code에서 푸시할 때 자동 실행
+  push:
+    branches:
+      - main
+    paths:
+      - "strategy_engine/fx_alert.py"   # 이 파일 변경 시에만 실행
+
   schedule:
     # 평일 오전 9시, 오후 1시, 오후 4시 (KST = UTC+9)
     # KST 09:00 = UTC 00:00 / KST 13:00 = UTC 04:00 / KST 16:00 = UTC 07:00
@@ -11,28 +18,53 @@ on:
   # 수동 실행 (GitHub Actions 탭 → Run workflow)
   workflow_dispatch:
 
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   fx-alert:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 코드 체크아웃
+      # 1. 저장소 체크아웃
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Python 설정
+      # 2. Python 환경 설정
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: 의존성 설치
-        run: pip install requests
+      # 3. 의존성 설치
+      - name: Install dependencies
+        run: |
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      - name: 환율 적정성 분석 및 Discord 알림
+      # 4. 환율 적정성 분석 및 Discord 알림
+      - name: Run fx_alert
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
           NAMUH_SPREAD:    ${{ secrets.NAMUH_SPREAD }}
           PREFER_RATE:     ${{ secrets.PREFER_RATE }}
           PERCENTILE_THRESHOLD: ${{ secrets.PERCENTILE_THRESHOLD }}
-        # fx_alert.py 위치에 맞게 경로 수정
         run: python strategy_engine/fx_alert.py
+
+      # 5. SSH 설정
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.vscode_push_token_2026 }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+
+      # 6. Git 사용자 정보 및 원격 주소 설정
+      - name: Configure Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin git@github.com:bs02089-sys/strategy_engine.git
