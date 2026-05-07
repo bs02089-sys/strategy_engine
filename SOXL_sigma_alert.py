@@ -3,10 +3,9 @@ import json
 import numpy as np
 import requests
 import yfinance as yf
+import pytz
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
-from datetime import datetime
-import pytz
 
 # ==========================================
 # 1. 환경 설정 및 경로 지정
@@ -41,7 +40,6 @@ MY_AVG_PRICE = config.get("MY_AVG_PRICE", 0.0)
 # 2. 보조 함수 (VIX 및 메시지 전송)
 # ==========================================
 def get_vix_report():
-    """VIX 지수 수집 및 상태 판별"""
     try:
         df_vix = yf.download("^VIX", period="2d", auto_adjust=True, progress=False)
         if not df_vix.empty:
@@ -55,7 +53,6 @@ def get_vix_report():
     return "N/A"
 
 def send_discord(message):
-    """디스코드 메시지 전송"""
     if not WEBHOOK_URL: return
     ping = f"<@{DISCORD_USER_ID}>\n" if DISCORD_USER_ID else ""
     try:
@@ -67,33 +64,30 @@ def send_discord(message):
 # ==========================================
 def main():
     ticker = "SOXL"
-    
-    # 연간 변동성 추출을 위해 2년치 데이터 수집
+
     df = yf.download(ticker, period="2y", auto_adjust=True, progress=False)
     if df.empty:
         print(f"❌ {ticker} 데이터를 가져올 수 없습니다.")
         return
 
-    # 데이터 정리
     closes = df["Close"].values.flatten()
     latest_close = float(closes[-1].item())
-    prev_close = float(closes[-2].item())
-    
-    # [핵심] 최근 252거래일 로그 수익률 기반 연간 평균 변동성(1σ) 계산
+
+    # 최근 252거래일 로그 수익률 기반 연간 평균 변동성(1σ) 계산
     sample_size = min(len(closes) - 1, 252)
     log_returns = np.diff(np.log(closes[-(sample_size + 1):]))
     sigma_val = np.std(log_returns)
-    
-    # [가격 설정] -1σ 및 -2σ 타점 계산
-    target_price_1s = prev_close * (1 - sigma_val)
-    target_price_2s = prev_close * (1 - (sigma_val * 2))
-    
+
+    # -1σ 및 -2σ 타점 계산 (최신 종가 기준)
+    target_price_1s = latest_close * (1 - sigma_val)
+    target_price_2s = latest_close * (1 - (sigma_val * 2))
+
     # 수익률 및 보유 기한 계산
     profit_loss = ((latest_close - MY_AVG_PRICE) / MY_AVG_PRICE * 100) if MY_AVG_PRICE > 0 else 0
     hold_date = (datetime.now() + timedelta(days=730)).strftime('%Y년 %m월 %d일')
     vix_info = get_vix_report()
 
-    # [매수 신호 판정] 상위 조건부터 하향식으로 검사하여 중복 방지
+    # 매수 신호 판정
     if latest_close <= target_price_2s:
         is_buy_signal = True
         guide_msg = "🔥 **신호 감지: -2σ가격 터치! 2회분을 매수하세요.**"
@@ -104,7 +98,6 @@ def main():
         is_buy_signal = False
         guide_msg = "⏳매수 대기중"
 
-    # [메시지 리포트]
     KST = pytz.timezone('Asia/Seoul')
     report = [
         f"━━━━━━━━━━━━━━━━━━━━",
@@ -124,12 +117,11 @@ def main():
         f"\n📊 시즌 탄약 : {CURRENT_USED}/{ANNUAL_QUOTA} 발\n",
         f"⏰ 시각: {datetime.now(KST).strftime('%Y-%m-%d %H:%M')}"
     ]
-    
+
     final_report = "\n".join(report)
     print(final_report)
     send_discord(final_report)
 
-    # 설정 업데이트
     config["LAST_RUN_TIME"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with open(config_path, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=4, ensure_ascii=False)
