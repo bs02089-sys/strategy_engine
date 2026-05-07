@@ -5,6 +5,8 @@ import requests
 import yfinance as yf
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
+from datetime import datetime
+import pytz
 
 # ==========================================
 # 1. 환경 설정 및 경로 지정
@@ -103,6 +105,7 @@ def main():
         guide_msg = "⏳매수 대기중"
 
     # [메시지 리포트]
+    KST = pytz.timezone('Asia/Seoul')
     report = [
         f"━━━━━━━━━━━━━━━━━━━━",
         f"📊 **{ticker} 전략 리포트**",
@@ -114,12 +117,12 @@ def main():
         f"📉 VIX 지수 : {vix_info}",
         f"\n🎯 전략 지침",
         f"{guide_msg}",
-        f"◆ 감정 배제, 신호 진입\n"
-        f"◆ 시장 비명, 연간 20발, 기쁨의 한 발\n"
-        f"◆ {hold_date}까지 보유, 익절은 없다!\n"
-        f"◆ MDD 77%라는 훈장, 수익률 275%의 황금열쇠\n"
-        f"\n📊 시즌 탄약 : {CURRENT_USED}/{ANNUAL_QUOTA} 발\n"      
-        f"⏰ 시각: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+        f"◆ 감정 배제, 신호 진입\n",
+        f"◆ 시장 비명, 연간 20발, 기쁨의 한 발\n",
+        f"◆ {hold_date}까지 보유, 익절은 없다!\n",
+        f"◆ MDD 77%라는 훈장, 수익률 275%의 황금열쇠\n",
+        f"\n📊 시즌 탄약 : {CURRENT_USED}/{ANNUAL_QUOTA} 발\n",
+        f"⏰ 시각: {datetime.now(KST).strftime('%Y-%m-%d %H:%M')}"
     ]
     
     final_report = "\n".join(report)
