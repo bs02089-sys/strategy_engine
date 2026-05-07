@@ -1,4 +1,4 @@
-name: trade_alert
+name: daily_sigma_alert
 on:
   schedule:
     - cron: '0 0 * * 1-5'   # 평일 오전 0시 UTC (KST 오전 9시)
@@ -9,7 +9,7 @@ permissions:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 jobs:
-  trade_alert:
+  daily_sigma_alert:
     runs-on: ubuntu-latest
     steps:
       # 1. 저장소 체크아웃
@@ -24,12 +24,12 @@ jobs:
       - name: Install dependencies
         run: |
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-      # 4. Trade Alert 실행
-      - name: Run Trade Alert
+      # 4. daily_sigma_alert 실행
+      - name: Run daily_sigma_alert
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
-        run: python trade_alert.py
+        run: python SOXL_sigma_alert.py
       # 5. SSH 설정
       - name: Set up SSH
         run: |
