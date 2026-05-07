@@ -40,6 +40,7 @@ MY_AVG_PRICE = config.get("MY_AVG_PRICE", 0.0)
 # 2. 보조 함수 (VIX 및 메시지 전송)
 # ==========================================
 def get_vix_report():
+    """VIX 지수 수집 및 상태 판별"""
     try:
         df_vix = yf.download("^VIX", period="2d", auto_adjust=True, progress=False)
         if not df_vix.empty:
@@ -48,11 +49,19 @@ def get_vix_report():
             elif vix_val <= 25: status = "주의"
             elif vix_val <= 35: status = "공포"
             else: status = "극단적 공포"
-            return f"{vix_val:.1f} ({status})"
+            return vix_val, f"{vix_val:.1f} ({status})"
     except: pass
-    return "N/A"
+    return 0.0, "N/A"
+
+def get_order_strategy(vix_val):
+    """VIX 기준 매수 방식 추천"""
+    if vix_val >= 35:
+        return "📌 매수 방식 : LOC 매수 추천 (극단적 공포 → 종가 하락 가능성 높음)"
+    else:
+        return "📌 매수 방식 : 지정가 매수 추천 (장중 저점 체결 유리)"
 
 def send_discord(message):
+    """디스코드 메시지 전송"""
     if not WEBHOOK_URL: return
     ping = f"<@{DISCORD_USER_ID}>\n" if DISCORD_USER_ID else ""
     try:
@@ -78,25 +87,24 @@ def main():
     log_returns = np.diff(np.log(closes[-(sample_size + 1):]))
     sigma_val = np.std(log_returns)
 
-    # -1σ 및 -2σ 타점 계산 (최신 종가 기준)
+    # -1σ 및 -2σ 타점 계산
     target_price_1s = latest_close * (1 - sigma_val)
     target_price_2s = latest_close * (1 - (sigma_val * 2))
 
     # 수익률 및 보유 기한 계산
     profit_loss = ((latest_close - MY_AVG_PRICE) / MY_AVG_PRICE * 100) if MY_AVG_PRICE > 0 else 0
     hold_date = (datetime.now() + timedelta(days=730)).strftime('%Y년 %m월 %d일')
-    vix_info = get_vix_report()
+
+    vix_val, vix_info = get_vix_report()
+    order_strategy = get_order_strategy(vix_val)
 
     # 매수 신호 판정
     if latest_close <= target_price_2s:
-        is_buy_signal = True
         guide_msg = "🔥 **신호 감지: -2σ가격 터치! 2회분을 매수하세요.**"
     elif latest_close <= target_price_1s:
-        is_buy_signal = True
         guide_msg = "🔥 **신호 감지: -1σ가격 터치! 매수하세요.**"
     else:
-        is_buy_signal = False
-        guide_msg = "⏳매수 대기중"
+        guide_msg = "⏳ 매수 대기중"
 
     KST = pytz.timezone('Asia/Seoul')
     report = [
@@ -108,6 +116,7 @@ def main():
         f"📍 -2σ 타점 : ${target_price_2s:.2f}",
         f"📍 1σ (연평균) : {sigma_val*100:.2f}%",
         f"📉 VIX 지수 : {vix_info}",
+        f"{order_strategy}",
         f"\n🎯 전략 지침",
         f"{guide_msg}",
         f"◆ 감정 배제, 신호 진입",
