@@ -25,7 +25,7 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  fx-alert:
+  fx_alert:
     runs-on: ubuntu-latest
 
     steps:
