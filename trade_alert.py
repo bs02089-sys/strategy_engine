@@ -1,7 +1,9 @@
 import yfinance as yf
 import requests
 import os
+import pytz
 from dotenv import load_dotenv
+from datetime import datetime, timezone
 
 # 환경변수 로드
 load_dotenv()
@@ -11,6 +13,9 @@ DISCORD_USER_ID = os.getenv("DISCORD_USER_ID")
 # 스크립트 위치 기준으로 작업 디렉토리 고정
 WORKING_DIR = os.path.dirname(os.path.abspath(__file__))
 os.chdir(WORKING_DIR)
+
+KST = pytz.timezone('Asia/Seoul')
+kst_now = datetime.now(KST).strftime('%Y-%m-%d %H:%M')
 
 ticker = "SSO"
 data = yf.download(ticker, period="120d", auto_adjust=True)
@@ -30,7 +35,6 @@ buy_target  = prev_close * (1 - std_20d_avg / 100)
 mention = f"<@{DISCORD_USER_ID}>" if DISCORD_USER_ID else ""
 
 # 실행 시각 확인 (UTC 기준)
-from datetime import datetime, timezone
 utc_hour = datetime.now(timezone.utc).hour
 
 # 오전 9시 (UTC 0시) → 무조건 현황 알림
@@ -41,10 +45,11 @@ if utc_hour == 0:
         f"{'='*55}\n"
         f"  {ticker} 오전 현황 ({prev_date})\n"
         f"{'='*55}\n"
-        f"  전일종가 : ${prev_close:.2f}\n"
-        f"  현재가    : ${current_price:.2f}\n"
-        f"  익절 목표 : ${take_profit:.2f}  # 전일종가 × (1 + 20일평균σ {std_20d_avg:.4f}%)\n"
-        f"  매수 목표 : ${buy_target:.2f}  # 전일종가 × (1 - 20일평균σ {std_20d_avg:.4f}%)\n"
+        f"  ⏰ 시각      : {kst_now}\n"
+        f"  전일 종가  : ${prev_close:.2f}\n"
+        f"  현재가      : ${current_price:.2f}\n"
+        f"  익절 목표  : ${take_profit:.2f}  # 전일종가 × (1 + 20일평균σ {std_20d_avg:.4f}%)\n"
+        f"  매수 목표  : ${buy_target:.2f}  # 전일종가 × (1 - 20일평균σ {std_20d_avg:.4f}%)\n"
         f"{'='*55}\n"
         f"```"
     )
@@ -69,10 +74,11 @@ elif utc_hour == 10:
         f"{'='*55}\n"
         f"  {ticker} ({prev_date}) {alert_type}\n"
         f"{'='*55}\n"
-        f"  전일종가 : ${prev_close:.2f}\n"
-        f"  현재가    : ${current_price:.2f}\n"
-        f"  익절 목표 : ${take_profit:.2f}  # 전일종가 × (1 + 20일평균σ {std_20d_avg:.4f}%)\n"
-        f"  매수 목표 : ${buy_target:.2f}  # 전일종가 × (1 - 20일평균σ {std_20d_avg:.4f}%)\n"
+        f"  ⏰ 시각      : {kst_now}\n"
+        f"  전일 종가  : ${prev_close:.2f}\n"
+        f"  현재가      : ${current_price:.2f}\n"
+        f"  익절 목표  : ${take_profit:.2f}  # 전일종가 × (1 + 20일평균σ {std_20d_avg:.4f}%)\n"
+        f"  매수 목표  : ${buy_target:.2f}  # 전일종가 × (1 - 20일평균σ {std_20d_avg:.4f}%)\n"
         f"{'─'*55}\n"
         f"{alert_line}\n"
         f"{'='*55}\n"
