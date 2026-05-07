@@ -1,0 +1,27 @@
+name: trade_alert
+
+on:
+  schedule:
+    - cron: '0 0 * * 1-5'   # 한국 오전 9시 (평일)
+    - cron: '0 10 * * 1-5'  # 한국 오후 7시 (평일)
+  workflow_dispatch:
+
+jobs:
+  run-alert:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Python 설정
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: 패키지 설치
+        run: pip install -r requirements.txt
+
+      - name: 알림 실행
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
+        run: python trade_alert.py
