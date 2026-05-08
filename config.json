@@ -1,7 +1,7 @@
 {
-    "MY_AVG_PRICE": 0.0,
-    "MY_TOTAL_SHARES": 0,
+    "MY_AVG_PRICE": 155.63,
+    "MY_TOTAL_SHARES": 8,
     "ANNUAL_QUOTA": 20,
-    "CURRENT_USED": 0,
-    "LAST_RUN_TIME": "2026-05-07 18:57:04"
+    "CURRENT_USED": 1,
+    "LAST_RUN_TIME": "2026-05-08 18:14:07"
 }
