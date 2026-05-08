@@ -2,6 +2,12 @@
     "MY_AVG_PRICE": 155.63,
     "MY_TOTAL_SHARES": 8,
     "ANNUAL_QUOTA": 20,
+<<<<<<< HEAD
     "CURRENT_USED": 1,
     "LAST_RUN_TIME": "2026-05-08 18:14:07"
 }
+=======
+    "CURRENT_USED": 0,
+    "LAST_RUN_TIME": "2026-05-07 18:57:04",
+}
+>>>>>>> 6b740275347fb61e7352e9b69672d2c2eaec7aa3
