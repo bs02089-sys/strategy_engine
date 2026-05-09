@@ -2,9 +2,8 @@ name: daily_sigma_alert
 
 on:
   schedule:
-    - cron: '0 0 * * 1-5'    # KST 오전 9시
-    - cron: '0 10 * * 1-5'   # KST 오후 7시
-
+    - cron: '0 0 * * 1-5'
+    - cron: '0 10 * * 1-5'
   workflow_dispatch:
 
 permissions:
@@ -20,19 +19,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Set up SSH
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.vscode_push_token_2026 }}" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan github.com >> ~/.ssh/known_hosts
-
-      - name: Configure Git
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git remote set-url origin git@github.com:bs02089-sys/strategy_engine.git
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}   # GITHUB_TOKEN 사용
+          fetch-depth: 0
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -64,8 +53,7 @@ jobs:
             
             git commit -m "chore: daily_sigma_alert 실행 로그 업데이트 ($(date -u +'%Y-%m-%d %H:%M UTC'))" || echo "No changes to commit"
             
-            # 강력 push 전략
-            git push --force-with-lease || git push --force || echo "Push failed"
+            git push
           else
             echo "sigma_alert.log 파일이 없습니다."
           fi
