@@ -32,9 +32,9 @@ else:
     }
 
 # 전략 파라미터
-ANNUAL_QUOTA = 20
-CURRENT_USED = config.get("CURRENT_USED", 0)
 MY_AVG_PRICE = config.get("MY_AVG_PRICE", 0.0)
+CURRENT_USED = config.get("CURRENT_USED", 0)
+ANNUAL_QUOTA = config.get("ANNUAL_QUOTA", 20)
 
 # ==========================================
 # 2. 보조 함수
