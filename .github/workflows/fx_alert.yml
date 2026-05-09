@@ -1,68 +1,72 @@
 name: fx_alert
 
 on:
-  # VS Code에서 푸시할 때 자동 실행
+  # VS Code에서 수정 후 푸시하면 바로 실행
   push:
     branches:
       - main
     paths:
       - "fx_alert.py"
 
+  # 정기 실행 (평일 오전 9시, 오후 1시, 오후 3시)
   schedule:
-    # 평일 오전 9시, 오후 1시, 오후 3시 (KST = UTC+9)
-    # KST 09:00 = UTC 00:00 / KST 13:00 = UTC 04:00 / KST 15:00 = UTC 06:00
-    - cron: "0 0 * * 1-5"
-    - cron: "0 4 * * 1-5"
-    - cron: "0 6 * * 1-5"
+    - cron: "0 0 * * 1-5"    # KST 09:00
+    - cron: "0 4 * * 1-5"    # KST 13:00
+    - cron: "0 6 * * 1-5"    # KST 15:00
 
-  # 수동 실행 (GitHub Actions 탭 → Run workflow)
+  # GitHub에서 수동 실행
   workflow_dispatch:
 
 permissions:
   contents: write
 
 env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  PYTHONIOENCODING: utf-8
 
 jobs:
   fx_alert:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. 저장소 체크아웃
-      - name: Checkout repository
-        uses: actions/checkout@v4.2.2        # Node.js 20 경고 해결
+      - name: Repository Checkout (SSH)
+        uses: actions/checkout@v4
+        with:
+          ssh-key: ${{ secrets.vscode_push_token_2026 }}
+          ssh-strict: false
+          persist-credentials: true
 
-      # 2. Python 환경 설정
-      - name: Set up Python
-        uses: actions/setup-python@v5.6.0    # Node.js 20 경고 해결
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: 'pip'
 
-      # 3. 의존성 설치 (requests 직접 명시 — exit code 2 해결)
       - name: Install dependencies
         run: |
+          pip install --upgrade pip
           pip install requests
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          fi
 
-      # 4. 환율 적정성 분석 및 Discord 알림
       - name: Run fx_alert
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
         run: python fx_alert.py
 
-      # 5. SSH 설정
-      - name: Set up SSH
+      - name: 실행 로그 커밋 & 푸시
+        if: always()
         run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.vscode_push_token_2026 }}" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan github.com >> ~/.ssh/known_hosts
-
-      # 6. Git 사용자 정보 및 원격 주소 설정
-      - name: Configure Git
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git remote set-url origin git@github.com:bs02089-sys/strategy_engine.git
+          if [ -f fx_alert.log ]; then
+            git config --global user.name "github-actions[bot]"
+            git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            
+            git add fx_alert.log
+            git commit -m "chore: fx_alert 실행 로그 업데이트 ($(date -u +'%Y-%m-%d %H:%M UTC'))" || echo "No changes to commit"
+            git push
+          else
+            echo "fx_alert.log 파일이 없습니다."
+          fi
+        env:
+          GIT_SSH_COMMAND: "ssh -o StrictHostKeyChecking=no"
