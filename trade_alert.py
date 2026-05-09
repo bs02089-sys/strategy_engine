@@ -2,87 +2,178 @@ import yfinance as yf
 import requests
 import os
 import pytz
+import sys
+import logging
 from dotenv import load_dotenv
 from datetime import datetime, timezone
+import pandas as pd
 
-# 환경변수 로드
+# ====================== 설정 ======================
 load_dotenv()
+
+# 환경변수
 WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK")
 DISCORD_USER_ID = os.getenv("DISCORD_USER_ID")
+TICKER = os.getenv("TICKER", "SSO")          # env에서 ticker 설정 가능
 
-# 스크립트 위치 기준으로 작업 디렉토리 고정
+# 필수 환경변수 체크
+if not WEBHOOK_URL:
+    raise ValueError("❌ DISCORD_WEBHOOK 환경변수가 설정되지 않았습니다.")
+
+# 로깅 설정
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s | %(levelname)s | %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger(__name__)
+
+# 스크립트 위치 기준 작업 디렉토리 고정
 WORKING_DIR = os.path.dirname(os.path.abspath(__file__))
 os.chdir(WORKING_DIR)
 
+# 시간대
 KST = pytz.timezone('Asia/Seoul')
-kst_now = datetime.now(KST).strftime('%Y-%m-%d %H:%M')
 
-ticker = "SSO"
-data = yf.download(ticker, period="120d", auto_adjust=True)
-close_prices = data["Close"].squeeze()
 
-daily_returns = close_prices.pct_change()
-rolling_std = daily_returns.rolling(window=20).std() * 100
+# ====================== 함수 정의 ======================
+def get_market_data(ticker: str):
+    """시장 데이터 다운로드 및 계산"""
+    try:
+        # 130일 데이터로 충분한 rolling window 확보
+        data = yf.download(ticker, period="130d", auto_adjust=True, progress=False)
+        
+        if data.empty:
+            raise ValueError(f"{ticker} 데이터를 가져올 수 없습니다.")
+            
+        close_prices = data["Close"].squeeze()
+        
+        # 수익률 및 변동성 계산
+        daily_returns = close_prices.pct_change().dropna()
+        rolling_std = daily_returns.rolling(window=20).std() * 100
+        
+        std_20d_avg = float(rolling_std[-20:].mean())
+        
+        # 안전장치
+        if len(rolling_std) < 20 or pd.isna(std_20d_avg):
+            logger.warning("변동성 계산 데이터 부족 → 기본값 1.8% 사용")
+            std_20d_avg = 1.8
 
-std_20d_avg   = float(rolling_std.tail(20).mean())
-prev_close    = float(close_prices.iloc[-1])
-prev_date     = data.index[-1].strftime('%Y-%m-%d')
-current_price = float(yf.Ticker(ticker).fast_info["last_price"])
+        prev_close = float(close_prices.iloc[-1])
+        prev_date = data.index[-1].strftime('%Y-%m-%d')
+        current_price = float(yf.Ticker(ticker).fast_info["last_price"])
 
-take_profit = prev_close * (1 + std_20d_avg / 100)
-buy_target  = prev_close * (1 - std_20d_avg / 100)
+        take_profit = prev_close * (1 + std_20d_avg / 100)
+        buy_target = prev_close * (1 - std_20d_avg / 100)
 
-mention = f"<@{DISCORD_USER_ID}>" if DISCORD_USER_ID else ""
+        return {
+            "prev_close": prev_close,
+            "prev_date": prev_date,
+            "current_price": current_price,
+            "take_profit": take_profit,
+            "buy_target": buy_target,
+            "std_20d_avg": std_20d_avg,
+        }
+        
+    except Exception as e:
+        logger.error(f"시장 데이터 가져오기 실패: {e}")
+        raise
 
-# 실행 시각 확인 (UTC 기준)
-utc_hour = datetime.now(timezone.utc).hour
 
-# 오전 9시 (UTC 0시) → 무조건 현황 알림
-if utc_hour == 0:
-    message = (
-        f"{mention}\n"
-        f"```\n"
+def create_base_message(data: dict, kst_now: str, ticker: str):
+    """공통 메시지 베이스 생성 (중복 제거)"""
+    return (
         f"{'='*55}\n"
-        f"  {ticker} 오전 현황 ({prev_date})\n"
+        f"  {ticker} ({data['prev_date']})\n"
         f"{'='*55}\n"
         f"  ⏰ 시각      : {kst_now}\n"
-        f"  전일 종가  : ${prev_close:.2f}\n"
-        f"  현재가      : ${current_price:.2f}\n"
-        f"  익절 목표  : ${take_profit:.2f}  # 전일종가 × (1 + 20일평균σ {std_20d_avg:.4f}%)\n"
-        f"  매수 목표  : ${buy_target:.2f}  # 전일종가 × (1 - 20일평균σ {std_20d_avg:.4f}%)\n"
+        f"  전일 종가  : ${data['prev_close']:.2f}\n"
+        f"  현재가      : ${data['current_price']:.2f}\n"
+        f"  익절 목표  : ${data['take_profit']:.2f}  "
+        f"# 전일종가 × (1 + 20일평균σ {data['std_20d_avg']:.4f}%)\n"
+        f"  매수 목표  : ${data['buy_target']:.2f}   "
+        f"# 전일종가 × (1 - 20일평균σ {data['std_20d_avg']:.4f}%)\n"
         f"{'='*55}\n"
-        f"```"
     )
-    requests.post(WEBHOOK_URL, json={"content": message})
-    print("오전 현황 알림 전송 완료!")
 
-# 오후 7시 (UTC 10시) → 조건 충족 시에만 알림
-elif utc_hour == 10:
-    if current_price >= take_profit:
-        alert_type = "🔴 익절 알림"
-        alert_line = f"  현재가 ${current_price:.2f} → 익절 목표가 ${take_profit:.2f} 도달!"
-    elif current_price <= buy_target:
-        alert_type = "🟢 매수 알림"
-        alert_line = f"  현재가 ${current_price:.2f} → 매수 목표가 ${buy_target:.2f} 도달!"
+
+def send_discord_message(content: str):
+    """디스코드 웹훅 전송"""
+    mention = f"<@{DISCORD_USER_ID}>" if DISCORD_USER_ID else ""
+    
+    message = f"{mention}\n{content}" if mention else content
+    
+    try:
+        response = requests.post(
+            WEBHOOK_URL,
+            json={"content": message},
+            timeout=10
+        )
+        response.raise_for_status()
+        logger.info("Discord 메시지 전송 성공")
+        return True
+    except Exception as e:
+        logger.error(f"Discord 전송 실패: {e}")
+        return False
+
+
+# ====================== 메인 로직 ======================
+def main():
+    kst_now = datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')
+    utc_hour = datetime.now(timezone.utc).hour
+
+    logger.info(f"스크립트 실행 | KST: {kst_now} | UTC Hour: {utc_hour}")
+
+    # 시장 데이터 가져오기
+    data = get_market_data(TICKER)
+
+    # ====================== 오전 9시 (UTC 0시) - 무조건 현황 보고 ======================
+    if utc_hour == 0:
+        base_msg = create_base_message(data, kst_now, TICKER)
+        
+        message = (
+            f"```\n"
+            f"{base_msg}"
+            f"```"
+        )
+        
+        send_discord_message(message)
+        logger.info("✅ 오전 현황 알림 전송 완료")
+
+    # ====================== 오후 7시 (UTC 10시) - 조건 충족 시 알림 ======================
+    elif utc_hour == 10:
+        if data["current_price"] >= data["take_profit"]:
+            alert_type = "🔴 익절 알림"
+            alert_line = f"  🔥 현재가 ${data['current_price']:.2f} → 익절 목표 ${data['take_profit']:.2f} 도달!"
+            
+        elif data["current_price"] <= data["buy_target"]:
+            alert_type = "🟢 매수 알림"
+            alert_line = f"  💰 현재가 ${data['current_price']:.2f} → 매수 목표 ${data['buy_target']:.2f} 도달!"
+            
+        else:
+            logger.info(f"조건 미충족 | 현재가: ${data['current_price']:.2f} | "
+                       f"익절: ${data['take_profit']:.2f} | 매수: ${data['buy_target']:.2f}")
+            return
+
+        base_msg = create_base_message(data, kst_now, TICKER)
+        
+        message = (
+            f"```\n"
+            f"{base_msg}"
+            f"{'─'*55}\n"
+            f"{alert_line}\n"
+            f"{'='*55}\n"
+            f"```"
+        )
+        
+        send_discord_message(message)
+        logger.info(f"✅ 오후 {alert_type} 전송 완료")
+
     else:
-        print(f"조건 미충족 | 현재가: ${current_price:.2f} | 익절: ${take_profit:.2f} | 매수: ${buy_target:.2f}")
-        exit()
+        logger.info(f"스케줄 외 실행 시간 (UTC {utc_hour}시)")
 
-    message = (
-        f"{mention}\n"
-        f"```\n"
-        f"{'='*55}\n"
-        f"  {ticker} ({prev_date}) {alert_type}\n"
-        f"{'='*55}\n"
-        f"  ⏰ 시각      : {kst_now}\n"
-        f"  전일 종가  : ${prev_close:.2f}\n"
-        f"  현재가      : ${current_price:.2f}\n"
-        f"  익절 목표  : ${take_profit:.2f}  # 전일종가 × (1 + 20일평균σ {std_20d_avg:.4f}%)\n"
-        f"  매수 목표  : ${buy_target:.2f}  # 전일종가 × (1 - 20일평균σ {std_20d_avg:.4f}%)\n"
-        f"{'─'*55}\n"
-        f"{alert_line}\n"
-        f"{'='*55}\n"
-        f"```"
-    )
-    requests.post(WEBHOOK_URL, json={"content": message})
-    print(f"오후 얼럿 전송 완료! [{alert_type}]")
+
+if __name__ == "__main__":
+    main()
