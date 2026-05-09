@@ -87,7 +87,7 @@ def main():
     # 매수/매도 타점 계산
     target_price_1s = latest_close * (1 - sigma_val)
     target_price_2s = latest_close * (1 - (sigma_val * 2))
-    target_profit_1s = latest_close * (1 + sigma_val)  # 처형 연말 매도 목표
+    target_profit_1s = latest_close * (1 + sigma_val)
 
     # 수익률 계산
     profit_loss = ((latest_close - MY_AVG_PRICE) / MY_AVG_PRICE * 100) if MY_AVG_PRICE > 0 else 0
@@ -112,7 +112,7 @@ def main():
         f"✅ 전일 종가 : ${latest_close:.2f} ({profit_loss:+.2f}%)",
         f"📍 -1σ 매수 타점 : ${target_price_1s:.2f}",
         f"📍 -2σ 매수 타점 : ${target_price_2s:.2f}",
-        f"📍 +1σ 매도 목표 : ${target_profit_1s:.2f}  (처형 연말 참고)",  # 내년 초 삭제
+        f"📍 +1σ 매도 목표 : ${target_profit_1s:.2f}  (처형 연말 참고)",
         f"📍 1σ (연평균)   : {sigma_val*100:.2f}%",
         f"📉 VIX 지수 : {vix_info}",
         f"{order_strategy}",
@@ -130,9 +130,26 @@ def main():
     print(final_report)
     send_discord(final_report)
 
+    # config 업데이트
     config["LAST_RUN_TIME"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with open(config_path, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=4, ensure_ascii=False)
+
+    # ====================== GitHub Actions용 실행 로그 기록 ======================
+    try:
+        with open("sigma_alert.log", "a", encoding="utf-8") as f:
+            f.write(
+                f"[{datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')}] "
+                f"실행 완료 | Ticker: {ticker} | "
+                f"현재가: ${latest_close:.2f} | "
+                f"1σ: {sigma_val*100:.3f}% | "
+                f"Guide: {'-2σ' if latest_close <= target_price_2s else '-1σ' if latest_close <= target_price_1s else '대기중'}\n"
+            )
+    except Exception as e:
+        print(f"로그 기록 중 오류 발생: {e}")
+
+    print("✅ sigma_alert.log에 실행 기록이 저장되었습니다.")
+
 
 if __name__ == "__main__":
     main()
