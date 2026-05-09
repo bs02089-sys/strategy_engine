@@ -105,7 +105,7 @@ def get_current_rate() -> float | None:
     return None
 
 
-def get_historical_rates(days: int = 365) -> list[float]:
+def get_historical_rates(days: int = 180) -> list[float]:
     cached = load_cache()
     if cached:
         return cached
