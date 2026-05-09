@@ -1,45 +1,63 @@
 name: daily_sigma_alert
+
 on:
+  # 정기 실행 (평일)
   schedule:
-    - cron: '0 0 * * 1-5'   # 평일 오전 0시 UTC (KST 오전 9시)
-    - cron: '0 10 * * 1-5'  # 평일 오전 10시 UTC (KST 오후 7시)
+    - cron: '0 0 * * 1-5'    # KST 오전 9시
+    - cron: '0 10 * * 1-5'   # KST 오후 7시
+
+  # 수동 실행
   workflow_dispatch:
+
 permissions:
   contents: write
+
 env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  PYTHONIOENCODING: utf-8
+
 jobs:
   daily_sigma_alert:
     runs-on: ubuntu-latest
+
     steps:
-      # 1. 저장소 체크아웃
-      - name: Checkout repository
+      - name: Repository Checkout (SSH)
         uses: actions/checkout@v4
-      # 2. Python 환경 설정
-      - name: Set up Python
+        with:
+          ssh-key: ${{ secrets.vscode_push_token_2026 }}
+          ssh-strict: false
+          persist-credentials: true
+
+      - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      # 3. 의존성 설치
+          cache: 'pip'
+
       - name: Install dependencies
         run: |
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-      # 4. daily_sigma_alert 실행
-      - name: Run daily_sigma_alert
+          pip install --upgrade pip
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          fi
+
+      - name: Run SOXL Sigma Alert
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
         run: python SOXL_sigma_alert.py
-      # 5. SSH 설정
-      - name: Set up SSH
+
+      - name: 실행 로그 커밋 & 푸시
+        if: always()
         run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.vscode_push_token_2026 }}" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan github.com >> ~/.ssh/known_hosts
-      # 6. Git 사용자 정보 및 원격 주소 설정
-      - name: Configure Git
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git remote set-url origin git@github.com:bs02089-sys/strategy_engine.git
+          if [ -f sigma_alert.log ]; then
+            git config --global user.name "github-actions[bot]"
+            git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            
+            git add sigma_alert.log
+            git commit -m "chore: daily_sigma_alert 실행 로그 업데이트 ($(date -u +'%Y-%m-%d %H:%M UTC'))" || echo "No changes to commit"
+            git push
+          else
+            echo "sigma_alert.log 파일이 없습니다."
+          fi
+        env:
+          GIT_SSH_COMMAND: "ssh -o StrictHostKeyChecking=no"
