@@ -26,8 +26,8 @@ if os.path.exists(config_path):
 else:
     config = {
         "MY_AVG_PRICE": 0.0,
-        "ANNUAL_QUOTA": 20,
         "CURRENT_USED": 0,
+        "ANNUAL_QUOTA": 20,   
         "LAST_RUN_TIME": "N/A"
     }
 
