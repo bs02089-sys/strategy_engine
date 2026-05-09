@@ -6,7 +6,7 @@ on:
     branches:
       - main
     paths:
-      - "strategy_engine/fx_alert.py"
+      - "fx_alert.py"
 
   schedule:
     # 평일 오전 9시, 오후 1시, 오후 3시 (KST = UTC+9)
@@ -53,7 +53,7 @@ jobs:
           NAMUH_SPREAD:    ${{ secrets.NAMUH_SPREAD }}
           PREFER_RATE:     ${{ secrets.PREFER_RATE }}
           PERCENTILE_THRESHOLD: ${{ secrets.PERCENTILE_THRESHOLD }}
-        run: python strategy_engine/fx_alert.py
+        run: python fx_alert.py
 
       # 5. SSH 설정
       - name: Set up SSH
