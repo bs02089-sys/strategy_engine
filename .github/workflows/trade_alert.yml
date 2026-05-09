@@ -20,7 +20,7 @@ on:
         default: 'VS Code 수동 테스트'
 
 permissions:
-  contents: write     # 로그 커밋 등을 위해 write 권한 필요
+  contents: write
 
 env:
   PYTHONIOENCODING: utf-8
@@ -30,12 +30,21 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-      - name: Repository Checkout (SSH)
+      - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          ssh-key: ${{ secrets.vscode_push_token_2026 }}
-          ssh-strict: false
-          persist-credentials: true
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.vscode_push_token_2026 }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin git@github.com:bs02089-sys/strategy_engine.git
 
       - name: Python 3.12 설정
         uses: actions/setup-python@v5
@@ -56,17 +65,12 @@ jobs:
         run: python trade_alert.py
 
       - name: 실행 로그 커밋 & 푸시
-        if: always()    # 성공/실패 여부와 상관없이 로그 기록
+        if: always()
         run: |
           if [ -f trade_alert.log ]; then
-            git config --global user.name "github-actions[bot]"
-            git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            
-            git add trade_alert.log
+            git add -f trade_alert.log
             git commit -m "chore: trade_alert 실행 로그 업데이트 ($(date -u +'%Y-%m-%d %H:%M UTC'))" || echo "No changes to commit"
             git push
           else
             echo "trade_alert.log 파일이 없습니다."
           fi
-        env:
-          GIT_SSH_COMMAND: "ssh -o StrictHostKeyChecking=no"
