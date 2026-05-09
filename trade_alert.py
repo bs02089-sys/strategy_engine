@@ -12,9 +12,9 @@ import pandas as pd
 load_dotenv()
 
 # 환경변수
-WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK")
+WEBHOOK_URL     = os.getenv("DISCORD_WEBHOOK")
 DISCORD_USER_ID = os.getenv("DISCORD_USER_ID")
-TICKER = os.getenv("TICKER", "SSO")
+TICKER          = os.getenv("TICKER", "SSO")
 
 # 필수 환경변수 체크
 if not WEBHOOK_URL:
@@ -40,33 +40,32 @@ def get_market_data(ticker: str):
     """시장 데이터 다운로드 및 계산"""
     try:
         data = yf.download(ticker, period="130d", auto_adjust=True, progress=False)
-        
+
         if data.empty:
             raise ValueError(f"{ticker} 데이터를 가져올 수 없습니다.")
-            
-        close_prices = data["Close"].squeeze()
+
+        close_prices  = data["Close"].squeeze()
         daily_returns = close_prices.pct_change().dropna()
-        rolling_std = daily_returns.rolling(window=20).std() * 100
-        
-        std_20d_avg = float(rolling_std[-20:].mean())
-        
+        rolling_std   = daily_returns.rolling(window=20).std() * 100
+        std_20d_avg   = float(rolling_std[-20:].mean())
+
         if len(rolling_std) < 20 or pd.isna(std_20d_avg):
             logger.warning("변동성 계산 데이터 부족 → 기본값 1.8% 사용")
             std_20d_avg = 1.8
 
-        prev_close = float(close_prices.iloc[-1])
-        prev_date = data.index[-1].strftime('%Y-%m-%d')
+        prev_close    = float(close_prices.iloc[-1])
+        prev_date     = data.index[-1].strftime('%Y-%m-%d')
         current_price = float(yf.Ticker(ticker).fast_info["last_price"])
 
         return {
-            "prev_close": prev_close,
-            "prev_date": prev_date,
+            "prev_close"   : prev_close,
+            "prev_date"    : prev_date,
             "current_price": current_price,
-            "take_profit": prev_close * (1 + std_20d_avg / 100),
-            "buy_target": prev_close * (1 - std_20d_avg / 100),
-            "std_20d_avg": std_20d_avg,
+            "take_profit"  : prev_close * (1 + std_20d_avg / 100),
+            "buy_target"   : prev_close * (1 - std_20d_avg / 100),
+            "std_20d_avg"  : std_20d_avg,
         }
-        
+
     except Exception as e:
         logger.error(f"시장 데이터 가져오기 실패: {e}")
         raise
@@ -93,11 +92,11 @@ def send_discord_message(content: str):
     """디스코드 웹훅 전송"""
     mention = f"<@{DISCORD_USER_ID}>" if DISCORD_USER_ID else ""
     message = f"{mention}\n{content}" if mention else content
-    
+
     try:
         response = requests.post(
-            WEBHOOK_URL, 
-            json={"content": message}, 
+            WEBHOOK_URL,
+            json={"content": message},
             timeout=10
         )
         response.raise_for_status()
@@ -108,23 +107,9 @@ def send_discord_message(content: str):
         return False
 
 
-def write_execution_log(data: dict, utc_hour: int, status: str = "완료"):
-    """GitHub Actions용 실행 로그 기록"""
-    try:
-        with open("trade_alert.log", "a", encoding="utf-8") as f:
-            f.write(
-                f"[{datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')}] "
-                f"UTC:{utc_hour:02d} | Ticker:{TICKER} | "
-                f"현재가:${data['current_price']:.2f} | "
-                f"20dσ:{data['std_20d_avg']:.3f}% | Status:{status}\n"
-            )
-    except Exception as e:
-        logger.warning(f"로그 기록 실패: {e}")
-
-
 # ====================== 메인 로직 ======================
 def main():
-    kst_now = datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')
+    kst_now  = datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')
     utc_hour = datetime.now(timezone.utc).hour
 
     logger.info(f"스크립트 실행 | KST: {kst_now} | UTC Hour: {utc_hour}")
@@ -137,7 +122,6 @@ def main():
             base_msg = create_base_message(data, kst_now, TICKER)
             send_discord_message(f"```\n{base_msg}```")
             logger.info("✅ 오전 현황 알림 전송 완료")
-            write_execution_log(data, utc_hour, "오전_현황")
 
         # ====================== 오후 7시 - 조건 알림 ======================
         elif utc_hour == 10:
@@ -149,22 +133,18 @@ def main():
                 alert_line = f"  💰 현재가 ${data['current_price']:.2f} → 매수 목표 ${data['buy_target']:.2f} 도달!"
             else:
                 logger.info(f"조건 미충족 | 현재가: ${data['current_price']:.2f}")
-                write_execution_log(data, utc_hour, "조건_미충족")
                 return
 
             base_msg = create_base_message(data, kst_now, TICKER)
-            message = f"```\n{base_msg}{'─'*55}\n{alert_line}\n{'='*55}\n```"
+            message  = f"```\n{base_msg}{'─'*55}\n{alert_line}\n{'='*55}\n```"
             send_discord_message(message)
             logger.info(f"✅ 오후 {alert_type} 전송 완료")
-            write_execution_log(data, utc_hour, alert_type)
 
         else:
             logger.info(f"스케줄 외 실행 시간 (UTC {utc_hour}시)")
-            write_execution_log(data, utc_hour, "스케줄_외")
 
     except Exception as e:
         logger.error(f"스크립트 실행 중 오류 발생: {e}")
-        write_execution_log({"current_price": 0, "std_20d_avg": 0}, utc_hour, "오류")
         raise
 
 
