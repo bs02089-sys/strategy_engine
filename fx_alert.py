@@ -20,10 +20,7 @@ import requests
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(message)s",
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler("fx_alert.log", encoding="utf-8", mode="a")
-    ],
+    handlers=[logging.StreamHandler(sys.stdout)],
 )
 logger = logging.getLogger(__name__)
 
@@ -51,12 +48,12 @@ class Config:
 
 config = Config.load()
 
-WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK", "")
+WEBHOOK_URL     = os.getenv("DISCORD_WEBHOOK", "")
 DISCORD_USER_ID = os.getenv("DISCORD_USER_ID", "")
 
 COLOR_GREEN = 0x1D9E75
 COLOR_AMBER = 0xBA7517
-COLOR_RED = 0xA32D2D
+COLOR_RED   = 0xA32D2D
 
 
 # =============================================
@@ -116,13 +113,13 @@ def get_historical_rates(days: int = 365) -> list[float]:
         return cached
 
     try:
-        end_date = datetime.now().date()
+        end_date   = datetime.now().date()
         start_date = end_date - timedelta(days=days)
         url = f"https://api.frankfurter.app/{start_date}..{end_date}?from=USD&to=KRW"
-        
+
         resp = requests.get(url, timeout=15)
         resp.raise_for_status()
-        data = resp.json()
+        data  = resp.json()
         rates = [float(v["KRW"]) for v in data.get("rates", {}).values()]
         sorted_rates = sorted(rates)
         save_cache(sorted_rates)
@@ -137,13 +134,13 @@ def get_historical_rates(days: int = 365) -> list[float]:
 # =============================================
 def calc_applied_rate(base_rate: float) -> RateInfo:
     effective_spread = config.NAMUH_SPREAD * (1 - config.PREFER_RATE / 100)
-    applied_rate = base_rate * (1 + effective_spread / 100)
-    spread_cost = applied_rate - base_rate
+    applied_rate     = base_rate * (1 + effective_spread / 100)
+    spread_cost      = applied_rate - base_rate
 
     return {
-        "base_rate": round(base_rate, 2),
-        "applied_rate": round(applied_rate, 2),
-        "spread_cost": round(spread_cost, 2),
+        "base_rate"       : round(base_rate, 2),
+        "applied_rate"    : round(applied_rate, 2),
+        "spread_cost"     : round(spread_cost, 2),
         "effective_spread": round(effective_spread, 4),
     }
 
@@ -152,7 +149,7 @@ def calc_percentile(sorted_rates: list[float], current: float) -> float:
     n = len(sorted_rates)
     if n == 0:
         return 50.0
-    better = sum(1 for r in sorted_rates if r < current)
+    better          = sum(1 for r in sorted_rates if r < current)
     equal_or_better = sum(1 for r in sorted_rates if r <= current)
     return round((better + equal_or_better) / 2 / n * 100, 1)
 
@@ -178,26 +175,6 @@ def get_rating(percentile: float) -> Tuple[str, str]:
 
 
 # =============================================
-# GitHub Actions용 실행 로그
-# =============================================
-def write_execution_log(rate_info: RateInfo | None, percentile: float, is_recommended: bool):
-    """GitHub Actions에서 커밋할 요약 로그 기록"""
-    try:
-        status = "추천" if is_recommended else "보통"
-        applied = rate_info["applied_rate"] if rate_info else 0
-
-        with open("fx_alert.log", "a", encoding="utf-8") as f:
-            f.write(
-                f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
-                f"적용환율: ₩{applied:,.2f} | "
-                f"하위 {percentile:.1f}% | "
-                f"상태: {status}\n"
-            )
-    except Exception as e:
-        logger.warning(f"실행 로그 기록 실패: {e}")
-
-
-# =============================================
 # Discord 알림
 # =============================================
 def send_discord_alert(rate_info: RateInfo, percentile: float, median_applied: float, is_recommended: bool) -> bool:
@@ -205,42 +182,41 @@ def send_discord_alert(rate_info: RateInfo, percentile: float, median_applied: f
         logger.warning("DISCORD_WEBHOOK이 설정되지 않았습니다.")
         return False
 
-    rating, comment = get_rating(percentile)
-    current_applied = rate_info["applied_rate"]
-    diff = current_applied - median_applied
-
-    comparison = f"중간값보다 **{abs(diff):.2f}원 {'낮음 (유리)' if diff <= 0 else '높음 (불리)' }**"
+    rating, comment  = get_rating(percentile)
+    current_applied  = rate_info["applied_rate"]
+    diff             = current_applied - median_applied
+    comparison       = f"중간값보다 **{abs(diff):.2f}원 {'낮음 (유리)' if diff <= 0 else '높음 (불리)'}**"
     comparison_emoji = "🟢" if diff <= 0 else "🔴"
 
     filled = max(0, min(10, int(percentile / 10)))
-    bar = "🟩" * filled + "⬜" * (10 - filled)
+    bar    = "🟩" * filled + "⬜" * (10 - filled)
 
     title = f"✅ 달러 매수 적기! {rating}" if is_recommended else f"📊 현재 환율 현황 — {rating}"
     color = COLOR_GREEN if is_recommended else COLOR_AMBER
 
     payload = {
         "username": "📉 나무증권 환전봇",
-        "embeds": [{
-            "title": title,
+        "embeds"  : [{
+            "title"      : title,
             "description": f"현재 적용환율은 최근 1년 중 **하위 {percentile:.1f}%** 수준입니다.\n{comment}",
-            "color": color,
-            "fields": [
-                {"name": "💱 시장 기준율", "value": f"**₩{rate_info['base_rate']:,.2f}**", "inline": True},
-                {"name": "🏦 나무증권 적용환율", "value": f"**₩{current_applied:,.2f}**", "inline": True},
-                {"name": "💸 스프레드 비용", "value": f"₩{rate_info['spread_cost']:,.2f}", "inline": True},
+            "color"      : color,
+            "fields"     : [
+                {"name": "💱 시장 기준율",       "value": f"**₩{rate_info['base_rate']:,.2f}**",  "inline": True},
+                {"name": "🏦 나무증권 적용환율", "value": f"**₩{current_applied:,.2f}**",         "inline": True},
+                {"name": "💸 스프레드 비용",     "value": f"₩{rate_info['spread_cost']:,.2f}",    "inline": True},
                 {
-                    "name": "📉 적정성 (낮을수록 유리)",
-                    "value": f"하위 **{percentile:.1f}%** — {rating}\n{bar}\n⬅️ 싼 구간       비싼 구간 ➡️",
+                    "name" : "📉 적정성 (낮을수록 유리)",
+                    "value": f"하위 **{percentile:.1f}%** — {rating}\n{bar}\n⬅️ 싼 구간       비싼 구간 ➡️",
                     "inline": False,
                 },
                 {
-                    "name": "📆 최근 1년 나무증권 적용환율",
+                    "name" : "📆 최근 1년 나무증권 적용환율",
                     "value": f"중간값 **₩{median_applied:,.2f}**\n{comparison_emoji} {comparison}",
                     "inline": False,
                 },
             ],
-            "timestamp": datetime.utcnow().isoformat(),
-            "footer": {"text": f"우대율 {config.PREFER_RATE}% • 알림 기준 하위 {config.PERCENTILE_THRESHOLD:.0f}%"},
+            "timestamp": datetime.now(tz=__import__('datetime').timezone.utc).isoformat(),
+            "footer"   : {"text": f"우대율 {config.PREFER_RATE}% • 알림 기준 하위 {config.PERCENTILE_THRESHOLD:.0f}%"},
         }],
     }
 
@@ -265,10 +241,10 @@ def analyze() -> Tuple[bool, RateInfo | dict, float, float]:
     if current is None:
         return False, {}, 0.0, 0.0
 
-    historical = get_historical_rates(365)
-    percentile = calc_percentile(historical, current)
+    historical     = get_historical_rates(365)
+    percentile     = calc_percentile(historical, current)
     median_applied = get_median_applied_rate(historical)
-    rate_info = calc_applied_rate(current)
+    rate_info      = calc_applied_rate(current)
     is_recommended = percentile <= config.PERCENTILE_THRESHOLD
 
     return is_recommended, rate_info, percentile, median_applied
@@ -279,24 +255,21 @@ def analyze() -> Tuple[bool, RateInfo | dict, float, float]:
 # =============================================
 def run_once():
     logger.info("=== 나무증권 환율 적정성 봇 (1회 실행) ===")
-    
+
     try:
         is_recommended, rate_info, percentile, median_applied = analyze()
 
         if not rate_info or not isinstance(rate_info, dict) or len(rate_info) == 0:
             logger.error("환율 조회 실패 - API 응답 없음")
-            write_execution_log(None, 0.0, False)
-            return  # sys.exit(1) 대신 return으로 변경
+            return
 
         logger.info(f"적용환율: ₩{rate_info['applied_rate']:,.2f} | 하위 {percentile:.1f}%")
-        
         send_discord_alert(rate_info, percentile, median_applied, is_recommended)
-        write_execution_log(rate_info, percentile, is_recommended)
 
     except Exception as e:
         logger.error(f"run_once 실행 중 오류 발생: {e}")
-        write_execution_log(None, 0.0, False)
-        
+
+
 def run_monitor():
     logger.info("=== 나무증권 환율 적정성 봇 — 모니터링 모드 ===")
     consecutive_errors = 0
@@ -308,14 +281,12 @@ def run_monitor():
             if not rate_info or not isinstance(rate_info, dict) or len(rate_info) == 0:
                 consecutive_errors += 1
                 logger.warning(f"환율 조회 실패 ({consecutive_errors}회 연속)")
-                write_execution_log(None, 0.0, False)
             else:
                 consecutive_errors = 0
-                logger.info(f"적용환율: ₩{rate_info['applied_rate']:,.2f} | "
-                           f"하위 {percentile:.1f}% | 추천: {is_recommended}")
-
-                # GitHub Actions용 실행 로그 기록
-                write_execution_log(rate_info, percentile, is_recommended)
+                logger.info(
+                    f"적용환율: ₩{rate_info['applied_rate']:,.2f} | "
+                    f"하위 {percentile:.1f}% | 추천: {is_recommended}"
+                )
 
                 if is_recommended:
                     logger.info("✅ 매수 적기 감지! Discord 알림 전송")
@@ -332,8 +303,8 @@ def run_monitor():
         except Exception as e:
             consecutive_errors += 1
             logger.error(f"예기치 못한 오류 발생 ({consecutive_errors}회): {e}")
-            write_execution_log(None, 0.0, False)
-            time.sleep(60)  # 오류 발생 시 1분 대기
+            time.sleep(60)
+
 
 # =============================================
 if __name__ == "__main__":
