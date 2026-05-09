@@ -1,15 +1,45 @@
-# 1. 모든 파일의 깃허브 행렬 차단
-*
+# ====================== 기본 무시 ======================
+# OS / IDE / Python 관련
+.DS_Store
+Thumbs.db
+*.pyc
+__pycache__/
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
 
-# 2. 예외적으로 '핵심 요원'만 통과 허용 (앞에 !를 붙임)
+# 환경설정 파일 (민감 정보 보호)
+.env
+*.env
+
+# 캐시 / 임시 파일
+*.log.tmp
+*.cache
+
+# ====================== 명시적 허용 ======================
+# Git 관련
 !.gitignore
+
+# 핵심 소스 파일
 !SOXL_sigma_alert.py
+!trade_alert.py
+!fx_alert.py          
 !config.json
 !requirements.txt
 !README.md
-!.github/
 
-# 3. (추가 팁) .env 파일에 민감한 정보(API 키 등)가 있다면 
-# 보안을 위해 깃허브에 올리지 않는 것이 원칙입니다.
-# 만약 깃허브에 API 키가 노출되는 게 걱정되신다면 
-# 위의 !.env 줄만 지우시면 됩니다.
+# GitHub Actions 워크플로우
+!.github/
+!.github/**
+
+# Actions 실행 로그 (GitHub에 기록용)
+!trade_alert.log
+!fx_alert.log
+!sigma_alert.log
+
+# ====================== 추가 추천 ======================
+# 필요 시 활성화
+# !.env.example
