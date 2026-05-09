@@ -1,5 +1,5 @@
 """
-나무증권 원화 → 달러 환율 적정성 알림 봇 (단순화 버전)
+나무증권 원화 → 달러 환율 적정성 알림 봇 (최종 단순화 버전)
 """
 
 import os
@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 class Config:
     NAMUH_SPREAD: float = 1.75
     PREFER_RATE: float = 95.0
-    PERCENTILE_THRESHOLD: float = 25.0      # ← 25로 변경
+    PERCENTILE_THRESHOLD: float = 25.0      # 추천값
     CHECK_INTERVAL: int = 300
     CACHE_HOURS: int = 6
 
@@ -154,7 +154,6 @@ def calc_percentile(sorted_rates: list[float], current: float) -> float:
 
 
 def get_median_applied_rate(sorted_base_rates: list[float]) -> float:
-    """적용환율 기준 중간값 계산"""
     if not sorted_base_rates:
         return 0.0
     median_base = sorted_base_rates[len(sorted_base_rates) // 2]
@@ -175,7 +174,7 @@ def get_rating(percentile: float) -> Tuple[str, str]:
 
 
 # =============================================
-# Discord 알림 (단순화 버전)
+# Discord 알림
 # =============================================
 def send_discord_alert(rate_info: RateInfo, percentile: float, median_applied: float, is_recommended: bool) -> bool:
     if not WEBHOOK_URL:
@@ -193,6 +192,11 @@ def send_discord_alert(rate_info: RateInfo, percentile: float, median_applied: f
         comparison = f"중간값보다 **{abs(diff):.2f}원 낮음** (유리)"
         comparison_emoji = "🟢"
 
+    # 직관적 초록색 바 (왼쪽=싼 구간, 오른쪽=비싼 구간)
+    filled = max(0, min(10, int(percentile / 10)))
+    bar = "🟩" * filled + "⬜" * (10 - filled)
+    bar_explain = "⬅️ 싼 구간" + "       " + "비싼 구간 ➡️"
+
     if is_recommended:
         title = f"✅ 달러 매수 적기! {rating}"
         color = COLOR_GREEN
@@ -200,16 +204,13 @@ def send_discord_alert(rate_info: RateInfo, percentile: float, median_applied: f
         title = f"📊 현재 환율 현황 — {rating}"
         color = COLOR_AMBER
 
-    filled = max(0, min(10, int((100 - percentile) / 10)))
-    bar = "🟩" * filled + "⬜" * (10 - filled)
-
     fields = [
         {"name": "💱 시장 기준율", "value": f"**₩{rate_info['base_rate']:,.2f}**", "inline": True},
         {"name": "🏦 나무증권 적용환율", "value": f"**₩{current_applied:,.2f}**", "inline": True},
         {"name": "💸 스프레드 비용", "value": f"₩{rate_info['spread_cost']:,.2f}", "inline": True},
         {
             "name": "📉 적정성 (낮을수록 유리)",
-            "value": f"하위 **{percentile:.1f}%** — {rating}\n{bar}",
+            "value": f"하위 **{percentile:.1f}%** — {rating}\n{bar}\n{bar_explain}",
             "inline": False,
         },
         {
@@ -262,7 +263,7 @@ def analyze() -> Tuple[bool, RateInfo, float, float]:
 
 
 # =============================================
-# 실행 함수
+# 실행
 # =============================================
 def run_once():
     logger.info("=== 나무증권 환율 적정성 봇 (1회 실행) ===")
