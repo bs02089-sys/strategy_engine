@@ -6,6 +6,12 @@ on:
     - cron: '0 10 * * 1-5'  # 한국 오후 7시 (평일)
   workflow_dispatch:
 
+permissions:
+  contents: write
+  
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  
 jobs:
   run-alert:
     runs-on: ubuntu-latest
