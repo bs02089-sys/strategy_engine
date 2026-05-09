@@ -4,11 +4,9 @@ on:
   push:
     branches:
       - main
-
   schedule:
-    - cron: '0 0 * * 1-5'    # KST 오전 9시
-    - cron: '0 10 * * 1-5'   # KST 오후 7시
-
+    - cron: '0 0 * * 1-5'
+    - cron: '0 10 * * 1-5'
   workflow_dispatch:
 
 permissions:
@@ -64,11 +62,9 @@ jobs:
             
             git add -f trade_alert.log
             
-            # 충돌 방지: pull 먼저 하고 push
-            git pull --rebase origin main || echo "Pull skipped or failed"
-            
             git commit -m "chore: trade_alert 실행 로그 업데이트 ($(date -u +'%Y-%m-%d %H:%M UTC'))" || echo "No changes to commit"
-            git push
+            
+            git push --force-with-lease || git push
           else
             echo "trade_alert.log 파일이 없습니다."
           fi
