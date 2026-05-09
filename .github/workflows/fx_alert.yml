@@ -1,7 +1,7 @@
 name: fx_alert
 
 on:
-  # VS Code에서 수정 후 푸시하면 바로 실행
+  # VS Code에서 푸시하면 바로 실행
   push:
     branches:
       - main
@@ -14,7 +14,6 @@ on:
     - cron: "0 4 * * 1-5"    # KST 13:00
     - cron: "0 6 * * 1-5"    # KST 15:00
 
-  # GitHub에서 수동 실행
   workflow_dispatch:
 
 permissions:
@@ -38,21 +37,21 @@ jobs:
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: '3.12'
           cache: 'pip'
 
       - name: Install dependencies
         run: |
           pip install --upgrade pip
           pip install requests
-          if [ -f requirements.txt ]; then
-            pip install -r requirements.txt
-          fi
 
       - name: Run fx_alert
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
+          NAMUH_SPREAD: ${{ secrets.NAMUH_SPREAD }}           # 필요 시
+          PREFER_RATE: ${{ secrets.PREFER_RATE }}
+          PERCENTILE_THRESHOLD: ${{ secrets.PERCENTILE_THRESHOLD }}
         run: python fx_alert.py
 
       - name: 실행 로그 커밋 & 푸시
