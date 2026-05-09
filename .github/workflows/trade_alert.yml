@@ -1,46 +1,72 @@
 name: trade_alert
 
 on:
+  # VS Code에서 수정 후 푸시하면 바로 실행 (수동 테스트용)
+  push:
+    branches:
+      - main
+
+  # 정기 실행 (평일만)
   schedule:
-    - cron: '0 0 * * 1-5'   # 한국 오전 9시 (평일)
-    - cron: '0 10 * * 1-5'  # 한국 오후 7시 (평일)
+    - cron: '0 0 * * 1-5'    # KST 오전 9시 (UTC 00:00)
+    - cron: '0 10 * * 1-5'   # KST 오후 7시 (UTC 10:00)
+
+  # GitHub에서 수동 실행
   workflow_dispatch:
+    inputs:
+      manual_reason:
+        description: '수동 실행 이유 (선택)'
+        required: false
+        default: 'VS Code 수동 테스트'
 
 permissions:
-  contents: write
-  
+  contents: write     # 로그 커밋 등을 위해 write 권한 필요
+
 env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  
+  PYTHONIOENCODING: utf-8
+
 jobs:
   trade_alert:
     runs-on: ubuntu-latest
+    
     steps:
-      - uses: actions/checkout@v3
+      - name: Repository Checkout (SSH)
+        uses: actions/checkout@v4
+        with:
+          ssh-key: ${{ secrets.vscode_push_token_2026 }}
+          ssh-strict: false
+          persist-credentials: true
 
-      - name: Python 설정
-        uses: actions/setup-python@v4
+      - name: Python 3.12 설정
+        uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+          cache: 'pip'
 
       - name: 패키지 설치
-        run: pip install -r requirements.txt
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
 
-      - name: 알림 실행
+      - name: Discord 알림 실행
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
+          # TICKER: ${{ secrets.TICKER }}     # 필요하면 추가
         run: python trade_alert.py
 
-      - name: Set up SSH
+      - name: 실행 로그 커밋 & 푸시
+        if: always()    # 성공/실패 여부와 상관없이 로그 기록
         run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.vscode_push_token_2026 }}" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan github.com >> ~/.ssh/known_hosts
-      
-      - name: Configure Git
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git remote set-url origin git@github.com:bs02089-sys/strategy_engine.git
+          if [ -f trade_alert.log ]; then
+            git config --global user.name "github-actions[bot]"
+            git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            
+            git add trade_alert.log
+            git commit -m "chore: trade_alert 실행 로그 업데이트 ($(date -u +'%Y-%m-%d %H:%M UTC'))" || echo "No changes to commit"
+            git push
+          else
+            echo "trade_alert.log 파일이 없습니다."
+          fi
+        env:
+          GIT_SSH_COMMAND: "ssh -o StrictHostKeyChecking=no"
