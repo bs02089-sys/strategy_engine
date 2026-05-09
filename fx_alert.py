@@ -280,21 +280,23 @@ def analyze() -> Tuple[bool, RateInfo | dict, float, float]:
 def run_once():
     logger.info("=== 나무증권 환율 적정성 봇 (1회 실행) ===")
     
-    is_recommended, rate_info, percentile, median_applied = analyze()
+    try:
+        is_recommended, rate_info, percentile, median_applied = analyze()
 
-    if not rate_info:
-        logger.error("환율 조회 실패")
-        write_execution_log(None, 0, False)
-        sys.exit(1)
+        if not rate_info or not isinstance(rate_info, dict) or len(rate_info) == 0:
+            logger.error("환율 조회 실패 - API 응답 없음")
+            write_execution_log(None, 0.0, False)
+            return  # sys.exit(1) 대신 return으로 변경
 
-    logger.info(f"적용환율: ₩{rate_info['applied_rate']:,.2f} | 하위 {percentile:.1f}%")
-    
-    send_discord_alert(rate_info, percentile, median_applied, is_recommended)
-    
-    # GitHub Actions용 요약 로그 기록
-    write_execution_log(rate_info, percentile, is_recommended)
+        logger.info(f"적용환율: ₩{rate_info['applied_rate']:,.2f} | 하위 {percentile:.1f}%")
+        
+        send_discord_alert(rate_info, percentile, median_applied, is_recommended)
+        write_execution_log(rate_info, percentile, is_recommended)
 
-
+    except Exception as e:
+        logger.error(f"run_once 실행 중 오류 발생: {e}")
+        write_execution_log(None, 0.0, False)
+        
 def run_monitor():
     logger.info("=== 나무증권 환율 적정성 봇 — 모니터링 모드 ===")
     consecutive_errors = 0
