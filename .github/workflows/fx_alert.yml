@@ -1,4 +1,4 @@
-name: 나무증권 환율 적정성 알림
+name: fx_alert
 
 on:
   # VS Code에서 푸시할 때 자동 실행
@@ -25,7 +25,7 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  fx-alert:
+  fx_alert:
     runs-on: ubuntu-latest
 
     steps:
