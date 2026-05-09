@@ -50,9 +50,6 @@ jobs:
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
-          NAMUH_SPREAD:    ${{ secrets.NAMUH_SPREAD }}
-          PREFER_RATE:     ${{ secrets.PREFER_RATE }}
-          PERCENTILE_THRESHOLD: ${{ secrets.PERCENTILE_THRESHOLD }}
         run: python fx_alert.py
 
       # 5. SSH 설정
