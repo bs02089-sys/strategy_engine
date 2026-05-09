@@ -62,9 +62,15 @@ jobs:
         if: always()
         run: |
           if [ -f fx_alert.log ]; then
+            git config --global user.name "github-actions[bot]"
+            git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            
             git add -f fx_alert.log
+            
             git commit -m "chore: fx_alert 실행 로그 업데이트 ($(date -u +'%Y-%m-%d %H:%M UTC'))" || echo "No changes to commit"
-            git push
+            
+            # trade_alert와 동일한 안전 push 전략
+            git push --force-with-lease || git push
           else
             echo "⚠️ fx_alert.log 파일이 없습니다."
           fi
