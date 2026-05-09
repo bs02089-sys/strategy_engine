@@ -6,7 +6,7 @@ on:
     branches:
       - main
     paths:
-      - "strategy_engine/fx_alert.py"   # 이 파일 변경 시에만 실행
+      - "strategy_engine/fx_alert.py"
 
   schedule:
     # 평일 오전 9시, 오후 1시, 오후 3시 (KST = UTC+9)
@@ -31,17 +31,18 @@ jobs:
     steps:
       # 1. 저장소 체크아웃
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.2.2        # Node.js 20 경고 해결
 
       # 2. Python 환경 설정
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v5.6.0    # Node.js 20 경고 해결
         with:
           python-version: "3.12"
 
-      # 3. 의존성 설치
+      # 3. 의존성 설치 (requests 직접 명시 — exit code 2 해결)
       - name: Install dependencies
         run: |
+          pip install requests
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
       # 4. 환율 적정성 분석 및 Discord 알림
