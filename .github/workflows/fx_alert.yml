@@ -1,20 +1,17 @@
 name: fx_alert
 
 on:
-  # VS Code에서 수정 후 푸시하면 바로 실행 (수동 테스트용)
   push:
     branches:
       - main
     paths:
       - "fx_alert.py"
 
-  # 정기 실행 (평일)
   schedule:
-    - cron: "0 0 * * 1-5"    # KST 오전 9시
-    - cron: "0 4 * * 1-5"    # KST 오후 1시
-    - cron: "0 6 * * 1-5"    # KST 오후 3시
+    - cron: "0 0 * * 1-5"    # KST 09:00
+    - cron: "0 4 * * 1-5"    # KST 13:00
+    - cron: "0 6 * * 1-5"    # KST 15:00
 
-  # GitHub에서 수동 실행
   workflow_dispatch:
 
 permissions:
@@ -50,10 +47,6 @@ jobs:
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
-          # 필요하면 아래도 추가
-          # NAMUH_SPREAD: ${{ secrets.NAMUH_SPREAD }}
-          # PREFER_RATE: ${{ secrets.PREFER_RATE }}
-          # PERCENTILE_THRESHOLD: ${{ secrets.PERCENTILE_THRESHOLD }}
         run: python fx_alert.py
 
       - name: 실행 로그 커밋 & 푸시
@@ -63,13 +56,12 @@ jobs:
             git config --global user.name "github-actions[bot]"
             git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
             
-            # .gitignore에 있어도 강제로 추가
             git add -f fx_alert.log
             
             git commit -m "chore: fx_alert 실행 로그 업데이트 ($(date -u +'%Y-%m-%d %H:%M UTC'))" || echo "No changes to commit"
-            git push
+            
+            # SSH 키를 다시 명시적으로 사용
+            GIT_SSH_COMMAND="ssh -o StrictHostKeyChecking=no" git push
           else
             echo "⚠️ fx_alert.log 파일이 없습니다."
           fi
-        env:
-          GIT_SSH_COMMAND: "ssh -o StrictHostKeyChecking=no"
