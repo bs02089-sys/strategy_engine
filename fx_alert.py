@@ -6,6 +6,7 @@ import os
 import sys
 import json
 import logging
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from dataclasses import dataclass
@@ -296,9 +297,41 @@ def run_once():
 
 def run_monitor():
     logger.info("=== 나무증권 환율 적정성 봇 — 모니터링 모드 ===")
-    # ... (기존 코드 유지)
-    pass   # 필요 시 구현
+    consecutive_errors = 0
 
+    while True:
+        try:
+            is_recommended, rate_info, percentile, median_applied = analyze()
+
+            if not rate_info or not isinstance(rate_info, dict) or len(rate_info) == 0:
+                consecutive_errors += 1
+                logger.warning(f"환율 조회 실패 ({consecutive_errors}회 연속)")
+                write_execution_log(None, 0.0, False)
+            else:
+                consecutive_errors = 0
+                logger.info(f"적용환율: ₩{rate_info['applied_rate']:,.2f} | "
+                           f"하위 {percentile:.1f}% | 추천: {is_recommended}")
+
+                # GitHub Actions용 실행 로그 기록
+                write_execution_log(rate_info, percentile, is_recommended)
+
+                if is_recommended:
+                    logger.info("✅ 매수 적기 감지! Discord 알림 전송")
+                    send_discord_alert(rate_info, percentile, median_applied, True)
+                    logger.info("매수 적기 알림 전송 후 모니터링 종료")
+                    break
+
+            time.sleep(config.CHECK_INTERVAL)
+
+        except KeyboardInterrupt:
+            logger.info("👋 사용자에 의해 모니터링이 종료되었습니다.")
+            break
+
+        except Exception as e:
+            consecutive_errors += 1
+            logger.error(f"예기치 못한 오류 발생 ({consecutive_errors}회): {e}")
+            write_execution_log(None, 0.0, False)
+            time.sleep(60)  # 오류 발생 시 1분 대기
 
 # =============================================
 if __name__ == "__main__":
