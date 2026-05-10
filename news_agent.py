@@ -1,11 +1,3 @@
-"""
-📰 Stock News Agent
-- Google News RSS로 키워드 기반 뉴스 수집
-- Gemini API로 투자 시사점 분석
-- Discord Webhook으로 전송
-- 매일 오전 9시 / 오후 7시 자동 실행
-"""
-
 import feedparser
 import google.genai as genai
 import requests
@@ -13,15 +5,27 @@ import schedule
 import time
 from datetime import datetime, timedelta
 from urllib.parse import quote
-from config import KEYWORDS, DISCORD_WEBHOOK, GEMINI_API_KEY, SCHEDULE_TIMES, MAX_NEWS_PER_KEYWORD
+
+# config.py 파일에서 설정값 로드
+try:
+    from config import KEYWORDS, DISCORD_WEBHOOK, GEMINI_API_KEY, SCHEDULE_TIMES, MAX_NEWS_PER_KEYWORD
+except ImportError:
+    print("❌ 에러: config.py 파일을 찾을 수 없습니다. 설정 파일을 확인해주세요.")
+    exit()
 
 # ─────────────────────────────────────────
-# 뉴스 수집
+# 1. 뉴스 수집 (투자 둔화 시그널 쿼리 보완)
 # ─────────────────────────────────────────
 
 def fetch_news(keyword: str, max_results: int = MAX_NEWS_PER_KEYWORD) -> list[dict]:
-    """Google News RSS에서 키워드 뉴스 수집"""
-    encoded = quote(keyword)
+    """Google News RSS에서 키워드 기반 뉴스 수집"""
+    
+    # AI/반도체 관련 키워드일 경우 '둔화' 및 'CapEx' 키워드 조합
+    search_query = keyword
+    if any(target in keyword.upper() for target in ["AI", "STOCK", "ETF", "SEMICONDUCTOR"]):
+        search_query = f'"{keyword}" AND ("CapEx" OR "slowdown" OR "spending cut" OR "peak-out")'
+    
+    encoded = quote(search_query)
     url = f"https://news.google.com/rss/search?q={encoded}&hl=en-US&gl=US&ceid=US:en"
 
     feed = feedparser.parse(url)
@@ -31,10 +35,8 @@ def fetch_news(keyword: str, max_results: int = MAX_NEWS_PER_KEYWORD) -> list[di
     for entry in feed.entries[:max_results]:
         try:
             published = datetime(*entry.published_parsed[:6])
-            if published < cutoff:
-                continue
-        except Exception:
-            published = datetime.now()
+            if published < cutoff: continue
+        except Exception: published = datetime.now()
 
         news_list.append({
             "title": entry.get("title", ""),
@@ -43,150 +45,97 @@ def fetch_news(keyword: str, max_results: int = MAX_NEWS_PER_KEYWORD) -> list[di
             "published": published.strftime("%Y-%m-%d %H:%M"),
             "source": entry.get("source", {}).get("title", "Unknown"),
         })
-
     return news_list
 
-
 # ─────────────────────────────────────────
-# Gemini 분석
+# 2. Gemini 분석 (강세장 종료 신호 감지 프롬프트)
 # ─────────────────────────────────────────
 
 def analyze_with_gemini(keyword: str, news_list: list[dict]) -> str:
-    """Gemini API로 뉴스 묶음 분석"""
-    if not news_list:
-        return None
+    """Gemini API로 뉴스 분석 및 리스크 탐지"""
+    if not news_list: return None
 
     client = genai.Client(api_key=GEMINI_API_KEY)
-
     news_text = "\n\n".join([
         f"[{i+1}] {n['title']}\n출처: {n['source']} | {n['published']}\n내용: {n['summary']}"
         for i, n in enumerate(news_list)
     ])
 
-    prompt = f"""당신은 미국 주식 투자 전문 애널리스트입니다.
-아래는 키워드 '{keyword}'에 관한 최신 뉴스입니다.
+    prompt = f"""당신은 전문 주식 애널리스트입니다. 아래 뉴스 묶음을 한국어로 분석하세요.
+키워드: {keyword}
 
 {news_text}
 
-뉴스 제목과 내용은 한글로 번역하여 표시해주세요.
+분석 시 '강세장 종료 신호(AI 투자 둔화, CapEx 감소, 반도체 피크아웃)'가 있는지 엄격히 체크하세요.
 
-다음 형식으로 분석해주세요:
+형식:
+**📊 시장 분위기**: (긍정적/부정적/중립적 + 이유)
+**🚨 AI 투자 경보**: (CapEx 둔화 징후가 보이면 상세히 기술, 없으면 '특이사항 없음')
+**🔑 핵심 내용**: (3줄 요약)
+**💹 투자 시사점**: (대응 전략)
+**⚠️ 주의사항**: (리스크 요인)"""
 
-**📊 시장 분위기**: (긍정적/부정적/중립적 + 한 줄 이유)
-**🔑 핵심 내용**: (3줄 이내 요약)
-**💹 투자 시사점**: (이 키워드 관련 주식/섹터에 미치는 영향, 단기/중기 관점)
-**⚠️ 주의사항**: (놓치면 안 될 리스크 또는 변수)
-
-간결하고 날카롭게, 실제 투자 판단에 도움이 되도록 작성해주세요."""
-
-    response = client.models.generate_content(
-        model="gemini-2.0-flash",
-        contents=prompt,
-    )
+    response = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
     return response.text
 
-
 # ─────────────────────────────────────────
-# Discord 전송
+# 3. Discord 전송
 # ─────────────────────────────────────────
 
 def send_to_discord(keyword: str, news_list: list[dict], analysis: str):
-    """Discord Webhook으로 뉴스 + 분석 전송"""
-    now = datetime.now().strftime("%Y년 %m월 %d일 %H:%M")
-    session_label = "🌅 오전 브리핑" if datetime.now().hour < 12 else "🌆 오후 브리핑"
-
-    header_embed = {
-        "title": f"{session_label} | `{keyword}`",
-        "description": f"📅 {now} 기준 최신 뉴스 **{len(news_list)}건** 분석 완료",
-        "color": 0x00B4D8,
-        "footer": {"text": "Stock News Agent · Powered by Gemini"},
-    }
-
-    news_fields = []
-    for i, n in enumerate(news_list[:5]):
-        news_fields.append({
-            "name": f"{i+1}. {n['title'][:80]}",
-            "value": f"📰 {n['source']} | {n['published']}\n[기사 보기]({n['link']})",
-            "inline": False,
-        })
-
-    news_embed = {
-        "title": "📋 수집된 뉴스",
-        "color": 0x48CAE4,
-        "fields": news_fields,
-    }
-
-    analysis_embed = {
-        "title": "🤖 Gemini AI 투자 분석",
-        "description": analysis[:4000] if analysis else "분석 결과 없음",
-        "color": 0x0077B6,
-    }
+    """Discord Webhook으로 분석 결과 전송"""
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    
+    # 분석 내용에 따라 메시지 색상 변경 (경보 시 붉은색)
+    is_alert = "🚨" in (analysis or "") and "특이사항 없음" not in analysis
+    color = 0xFF0000 if is_alert else 0x00B4D8
 
     payload = {
         "username": "📈 Stock News Agent",
-        "avatar_url": "https://cdn-icons-png.flaticon.com/512/2103/2103633.png",
-        "embeds": [header_embed, news_embed, analysis_embed],
+        "embeds": [
+            {
+                "title": f"🔔 {keyword} 브리핑 ({now})",
+                "description": f"최신 뉴스 {len(news_list)}건 분석 완료",
+                "color": color,
+                "footer": {"text": "Powered by Gemini 2.0 Flash"}
+            },
+            {
+                "title": "📋 수집된 뉴스 리스트",
+                "color": 0x48CAE4,
+                "fields": [
+                    {"name": f"{i+1}. {n['title'][:80]}", "value": f"[기사 보기]({n['link']})", "inline": False}
+                    for i, n in enumerate(news_list[:5])
+                ]
+            },
+            {
+                "title": "🤖 AI 투자 심층 분석",
+                "description": analysis[:4000] if analysis else "분석 실패",
+                "color": 0x0077B6
+            }
+        ]
     }
-
-    resp = requests.post(DISCORD_WEBHOOK, json=payload)
-    if resp.status_code in (200, 204):
-        print(f"  ✅ Discord 전송 완료: {keyword}")
-    else:
-        print(f"  ❌ Discord 전송 실패 ({resp.status_code}): {keyword}")
-
-
-def send_separator_to_discord():
-    """뉴스 묶음 사이 구분선"""
-    requests.post(DISCORD_WEBHOOK, json={
-        "username": "📈 Stock News Agent",
-        "content": "─────────────────────────────",
-    })
-
+    requests.post(DISCORD_WEBHOOK, json=payload)
 
 # ─────────────────────────────────────────
-# 메인 실행
+# 4. 실행 및 스케줄러
 # ─────────────────────────────────────────
 
 def run_agent():
-    """전체 뉴스 에이전트 실행"""
-    print(f"\n{'='*50}")
-    print(f"🚀 뉴스 에이전트 시작: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"{'='*50}")
-
+    print(f"🚀 실행 시작: {datetime.now()}")
     for keyword in KEYWORDS:
-        print(f"\n🔍 키워드 처리 중: [{keyword}]")
-
-        news_list = fetch_news(keyword)
-        print(f"  📰 수집된 뉴스: {len(news_list)}건")
-
-        if not news_list:
-            print(f"  ⚠️  최근 24시간 내 뉴스 없음, 건너뜀")
-            continue
-
-        print(f"  🤖 Gemini 분석 중...")
-        analysis = analyze_with_gemini(keyword, news_list)
-
-        send_to_discord(keyword, news_list, analysis)
-        send_separator_to_discord()
-
-        time.sleep(2)
-
-    print(f"\n✅ 모든 키워드 처리 완료\n")
-
-
-# ─────────────────────────────────────────
-# 스케줄러
-# ─────────────────────────────────────────
+        news = fetch_news(keyword)
+        if not news: continue
+        analysis = analyze_with_gemini(keyword, news)
+        send_to_discord(keyword, news, analysis)
+        time.sleep(1)
+    print("✅ 전송 완료")
 
 if __name__ == "__main__":
-    print("📅 뉴스 에이전트 스케줄러 시작")
-    print(f"⏰ 실행 시간: {', '.join(SCHEDULE_TIMES)}")
-    print(f"🔑 키워드: {', '.join(KEYWORDS)}\n")
-
+    print(f"📅 스케줄러 가동 중: {SCHEDULE_TIMES}")
     for t in SCHEDULE_TIMES:
         schedule.every().day.at(t).do(run_agent)
-
-    # 시작 시 즉시 한 번 실행하려면 아래 주석 해제
+    
+    # 즉시 테스트하려면 아래 주석 해제
     # run_agent()
 
     while True:
