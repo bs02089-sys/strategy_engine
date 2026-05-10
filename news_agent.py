@@ -7,7 +7,7 @@
 """
 
 import feedparser
-import google.generativeai as genai
+import google.genai as genai
 import requests
 import schedule
 import time
@@ -56,8 +56,7 @@ def analyze_with_gemini(keyword: str, news_list: list[dict]) -> str:
     if not news_list:
         return None
 
-    genai.configure(api_key=GEMINI_API_KEY)
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    client = genai.Client(api_key=GEMINI_API_KEY)
 
     news_text = "\n\n".join([
         f"[{i+1}] {n['title']}\n출처: {n['source']} | {n['published']}\n내용: {n['summary']}"
@@ -69,6 +68,8 @@ def analyze_with_gemini(keyword: str, news_list: list[dict]) -> str:
 
 {news_text}
 
+뉴스 제목과 내용은 한글로 번역하여 표시해주세요.
+
 다음 형식으로 분석해주세요:
 
 **📊 시장 분위기**: (긍정적/부정적/중립적 + 한 줄 이유)
@@ -78,7 +79,10 @@ def analyze_with_gemini(keyword: str, news_list: list[dict]) -> str:
 
 간결하고 날카롭게, 실제 투자 판단에 도움이 되도록 작성해주세요."""
 
-    response = model.generate_content(prompt)
+    response = client.models.generate_content(
+        model="gemini-2.0-flash",
+        contents=prompt,
+    )
     return response.text
 
 
