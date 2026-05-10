@@ -1,4 +1,4 @@
-name: stock_news_agent
+name: news_agent
 
 on:
   schedule:
@@ -10,7 +10,7 @@ permissions:
   contents: write
 
 jobs:
-  run-news_stock_agent:
+  run-news_agent:
     runs-on: ubuntu-latest
 
     steps:
@@ -53,5 +53,5 @@ jobs:
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git remote set-url origin git@github.com:bs02089-sys/strategy_engine.git
 
-      - name: 🚀 증권 뉴스 에이전트 실행
+      - name: 🚀 뉴스 에이전트 실행
         run: python -c "from news_agent import run_agent; run_agent()"
