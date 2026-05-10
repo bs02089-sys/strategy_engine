@@ -4,3 +4,6 @@ requests
 python-dotenv
 pandas
 pytz
+feedparser
+google-generativeai
+schedule
