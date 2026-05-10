@@ -6,6 +6,9 @@ on:
     - cron: '0 10 * * *'  # 한국시간 오후 7시 (UTC 10:00)
   workflow_dispatch:        # 수동 실행 버튼
 
+permissions:
+  contents: write
+
 jobs:
   run-news_stock_agent:
     runs-on: ubuntu-latest
@@ -36,7 +39,7 @@ jobs:
           SCHEDULE_TIMES = ["09:00", "19:00"]
           MAX_NEWS_PER_KEYWORD = 5
           EOF
-
+          
       - name: Set up SSH
         run: |
           mkdir -p ~/.ssh
