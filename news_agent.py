@@ -7,7 +7,7 @@
 """
 
 import feedparser
-import google.genai as genai
+import google.generativeai as genai
 import requests
 import schedule
 import time
