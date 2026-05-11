@@ -1,29 +1,55 @@
 name: news_agent
 
 on:
+  push:
+    branches:
+      - main
   schedule:
-    - cron: '0 0 * * *'   # 한국시간 오전 9시 (UTC 00:00)
-    - cron: '0 10 * * *'  # 한국시간 오후 7시 (UTC 10:00)
-  workflow_dispatch:        # 수동 실행 버튼
+    - cron: '0 0 * * 1-5'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  PYTHONIOENCODING: utf-8
 
 jobs:
-  run-news_agent:
+  news_agent:
     runs-on: ubuntu-latest
-
+    
     steps:
-      - name: 📥 코드 체크아웃
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: 🐍 Python 설정
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.vscode_push_token_2026 }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin git@github.com:bs02089-sys/strategy_engine.git
+
+      - name: Python 3.12 설정
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+          cache: 'pip'
 
-      - name: 📦 패키지 설치
-        run: pip install -r requirements.txt
+      - name: 패키지 설치
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
 
-      - name: 🚀 뉴스 에이전트 실행
+      - name: Discord 알림 실행
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        run: python -c "from news_agent import run_agent; run_agent()"
+          FORCE_RUN: "true"               # 디버깅용 (나중에 false로 변경)
+        run: python news_agent.py
