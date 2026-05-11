@@ -15,12 +15,12 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # 4. 환경변수 읽기
-WEBHOOK_URL     = os.getenv("DISCORD_WEBHOOK")
+DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
 DISCORD_USER_ID = os.getenv("DISCORD_USER_ID")
-TICKER          = os.getenv("TICKER", "SSO")
+TICKER = os.getenv("TICKER", "SSO")
 
 # 필수 환경변수 체크
-if not WEBHOOK_URL:
+if not DISCORD_WEBHOOK:
     raise ValueError("❌ DISCORD_WEBHOOK 환경변수가 설정되지 않았습니다.")
 
 # 로깅 설정
@@ -98,7 +98,7 @@ def send_discord_message(content: str):
 
     try:
         response = requests.post(
-            WEBHOOK_URL,
+            DISCORD_WEBHOOK,
             json={"content": message},
             timeout=10
         )
