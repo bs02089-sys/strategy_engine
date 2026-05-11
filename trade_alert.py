@@ -75,19 +75,17 @@ def get_market_data(ticker: str):
 
 
 def create_base_message(data: dict, kst_now: str, ticker: str):
-    """공통 메시지 베이스 생성"""
     return (
-        f"{'='*55}\n"
-        f"  {ticker} ({data['prev_date']})\n"
-        f"{'='*55}\n"
-        f"  ⏰ 시각      : {kst_now}\n"
-        f"  전일 종가  : ${data['prev_close']:.2f}\n"
-        f"  현재가      : ${data['current_price']:.2f}\n"
-        f"  익절 목표  : ${data['take_profit']:.2f}  "
-        f"# 전일종가 × (1 + 20일평균σ {data['std_20d_avg']:.4f}%)\n"
-        f"  매수 목표  : ${data['buy_target']:.2f}   "
-        f"# 전일종가 × (1 - 20일평균σ {data['std_20d_avg']:.4f}%)\n"
-        f"{'='*55}\n"
+        f"🔔 **{ticker} 시장 현황** ({data['prev_date']})\n\n"
+        f"📍 **현재 시각** : {kst_now}\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"💰 전일 종가     : ${data['prev_close']:.2f}\n"
+        f"📊 현재가        : ${data['current_price']:.2f}\n"
+        f"🎯 익절 목표     : ${data['take_profit']:.2f}    "
+        f"# +{data['std_20d_avg']:.4f}%\n"
+        f"🛒 매수 목표     : ${data['buy_target']:.2f}    "
+        f"# -{data['std_20d_avg']:.4f}%\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━"
     )
 
 
