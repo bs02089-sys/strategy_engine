@@ -90,7 +90,7 @@ def create_base_message(data: dict, kst_now: str, ticker: str):
         f"💰 전일 종가 : ${data['prev_close']:.2f}\n"
         f"📊 현 재 가  : ${data['current_price']:.2f}\n"
         f"🎯 익절 목표 : ${data['take_profit']:.2f} (+{to_tp:.2f}%)\n"
-        f"🛒 매수 목표 : ${data['buy_target']:.2f}  ({to_buy:.2f}%)\n"
+        f"🛒 매수 목표 : ${data['buy_target']:.2f} ({to_buy:.2f}%)\n"
         f"━━━━━━━━━━━━━━━━━━━━━━"
     )
         
