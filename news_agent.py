@@ -1,16 +1,23 @@
 import feedparser
 import google.genai as genai
 import requests
-import schedule
-import time
+import os
 from datetime import datetime, timedelta
 from urllib.parse import quote
 
 # config.py 파일에서 설정값 로드
 try:
-    from config import KEYWORDS, DISCORD_WEBHOOK, GEMINI_API_KEY, SCHEDULE_TIMES, MAX_NEWS_PER_KEYWORD
+    from config import KEYWORDS, SCHEDULE_TIMES, MAX_NEWS_PER_KEYWORD
 except ImportError:
     print("❌ 에러: config.py 파일을 찾을 수 없습니다. 설정 파일을 확인해주세요.")
+    exit()
+
+# 민감 정보는 환경변수에서 로드 (GitHub Actions Secrets)
+DISCORD_WEBHOOK = os.environ.get("DISCORD_WEBHOOK")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+
+if not DISCORD_WEBHOOK or not GEMINI_API_KEY:
+    print("❌ 에러: DISCORD_WEBHOOK 또는 GEMINI_API_KEY 환경변수가 설정되지 않았습니다.")
     exit()
 
 # ─────────────────────────────────────────
@@ -117,27 +124,20 @@ def send_to_discord(keyword: str, news_list: list[dict], analysis: str):
     requests.post(DISCORD_WEBHOOK, json=payload)
 
 # ─────────────────────────────────────────
-# 4. 실행 및 스케줄러
+# 4. 실행 (GitHub Actions가 스케줄 담당)
 # ─────────────────────────────────────────
 
 def run_agent():
     print(f"🚀 실행 시작: {datetime.now()}")
     for keyword in KEYWORDS:
         news = fetch_news(keyword)
-        if not news: continue
+        if not news:
+            print(f"⚠️ {keyword}: 수집된 뉴스 없음")
+            continue
         analysis = analyze_with_gemini(keyword, news)
         send_to_discord(keyword, news, analysis)
-        time.sleep(1)
-    print("✅ 전송 완료")
+        print(f"✅ {keyword} 전송 완료")
+    print("🎯 전체 완료")
 
 if __name__ == "__main__":
-    print(f"📅 스케줄러 가동 중: {SCHEDULE_TIMES}")
-    for t in SCHEDULE_TIMES:
-        schedule.every().day.at(t).do(run_agent)
-    
-    # 즉시 테스트하려면 아래 주석 해제
-    # run_agent()
-
-    while True:
-        schedule.run_pending()
-        time.sleep(30)
+    run_agent()
