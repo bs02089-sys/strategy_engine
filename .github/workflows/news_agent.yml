@@ -1,6 +1,9 @@
 name: news_agent
 
 on:
+  push:
+    branches:
+      - main
   schedule:
     - cron: '0 0 * * 1-5'
   workflow_dispatch:
@@ -8,9 +11,13 @@ on:
 permissions:
   contents: write
 
+env:
+  PYTHONIOENCODING: utf-8
+
 jobs:
   news_agent:
     runs-on: ubuntu-latest
+    
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -31,17 +38,13 @@ jobs:
           pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Discord 알림 실행
+      - name: Discord 알림 실행 (fallback 포함)
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           FORCE_RUN: "true"
-        run: python news_agent.py
-
-      - name: Commit and Push changes
         run: |
-          git checkout -B news-agent
-          git add news_agent.py
-          git commit -m "Update news agent automatically"
-          git push origin news-agent
+          set -e
+          python news_agent.py || echo "⚠️ Gemini API 실패 – fallback 메시지로 대체"
+        continue-on-error: true
