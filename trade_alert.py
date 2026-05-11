@@ -92,7 +92,6 @@ def create_base_message(data: dict, kst_now: str, ticker: str):
 
 
 def send_discord_message(content: str):
-    """디스코드 웹훅 전송"""
     mention = f"<@{DISCORD_USER_ID}>" if DISCORD_USER_ID else ""
     message = f"{mention}\n{content}" if mention else content
 
@@ -103,11 +102,11 @@ def send_discord_message(content: str):
             timeout=10
         )
         response.raise_for_status()
-        logger.info("Discord 메시지 전송 성공")
+        logger.info("✅ Discord 메시지 전송 성공")
         return True
     except Exception as e:
-        logger.error(f"Discord 전송 실패: {e}")
-        return False
+        logger.error(f"❌ Discord 전송 실패: {e}")
+        return False   # ← 실패 시 False 반환
 
 
 # ====================== 메인 로직 ======================
