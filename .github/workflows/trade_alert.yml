@@ -1,46 +1,55 @@
 name: trade_alert
 
 on:
-  workflow_dispatch:   # 수동 실행 가능
+  push:
+    branches:
+      - main
   schedule:
-    # 오후 7시 (KST → UTC 10시)
-    - cron: '0 10 * * *'
+    - cron: '0 0 * * 1-5'
+    - cron: '0 10 * * 1-5'
+  workflow_dispatch:
 
 permissions:
-  contents: write   # 저장소에 커밋/푸시할 수 있는 권한을 명시적으로 부여
+  contents: write
+
+env:
+  PYTHONIOENCODING: utf-8
 
 jobs:
   trade_alert:
     runs-on: ubuntu-latest
-
+    
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Install dependencies
+      - name: Set up SSH
         run: |
-          pip install -r requirements.txt
+          mkdir -p ~/.ssh
+          echo "${{ secrets.vscode_push_token_2026 }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
 
-      - name: Run trade alert
-        env:
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-          DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
-          TICKER: ${{ secrets.TICKER }}
-        run: python trade_alert.py
-
-      - name: Commit and Push changes
+      - name: Configure Git
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .
-          if ! git diff --cached --quiet; then
-            git commit -m "Update trade alert"
-            git push origin trade-alert
-          else
-            echo "No changes to commit"
-          fi
+          git remote set-url origin git@github.com:bs02089-sys/strategy_engine.git
+
+      - name: Python 3.12 설정
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: 패키지 설치
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Discord 알림 실행
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
+          FORCE_RUN: "true"               # 디버깅용 (나중에 false로 변경)
+        run: python trade_alert.py
