@@ -1,17 +1,20 @@
-import yfinance as yf
-import requests
+# 1. 표준 라이브러리
 import os
-import pytz
 import sys
 import logging
-from dotenv import load_dotenv
+import pytz
 from datetime import datetime, timezone
-import pandas as pd
 
-# ====================== 설정 ======================
+# 2. 서드파티 라이브러리
+import pandas as pd
+import requests
+import yfinance as yf
+from dotenv import load_dotenv
+
+# 3. .env 로드 (환경변수 설정)
 load_dotenv()
 
-# 환경변수
+# 4. 환경변수 읽기
 WEBHOOK_URL     = os.getenv("DISCORD_WEBHOOK")
 DISCORD_USER_ID = os.getenv("DISCORD_USER_ID")
 TICKER          = os.getenv("TICKER", "SSO")
