@@ -54,20 +54,3 @@ jobs:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
         run: python SOXL_sigma_alert.py
-
-      - name: 실행 로그 커밋 & 푸시 (실패해도 OK)
-        if: always()
-        continue-on-error: true
-        run: |
-          if [ -f sigma_alert.log ]; then
-            git config --global user.name "github-actions[bot]"
-            git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            
-            git add -f sigma_alert.log || true
-            
-            git commit -m "chore: daily_sigma_alert 실행 로그 업데이트 ($(date -u +'%Y-%m-%d %H:%M UTC'))" || echo "No changes to commit"
-            
-            git push --force-with-lease || git push || echo "로그 푸시 실패 (무시)"
-          else
-            echo "sigma_alert.log 파일이 없습니다. (처음 실행 시 정상)"
-          fi
