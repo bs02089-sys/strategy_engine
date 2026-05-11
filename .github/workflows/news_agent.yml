@@ -5,11 +5,11 @@ on:
     branches:
       - main
   schedule:
-    - cron: '0 0 * * 1-5'   # 월~금, UTC 0시 (한국시간 오전 9시)
+    - cron: '0 0 * * 1-5'
   workflow_dispatch:
 
 permissions:
-  contents: write   # GITHUB_TOKEN으로 커밋/푸시 가능
+  contents: write
 
 env:
   PYTHONIOENCODING: utf-8
@@ -43,11 +43,5 @@ jobs:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          FORCE_RUN: "true"   # 디버깅용 (나중에 false로 변경)
+          FORCE_RUN: "true"
         run: python news_agent.py
-
-      - name: Commit and Push changes (optional)
-        run: |
-          git add config.py
-          git commit -m "Update keywords automatically"
-          git push
