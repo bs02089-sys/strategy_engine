@@ -114,19 +114,20 @@ def send_discord_message(content: str):
 def main():
     kst_now  = datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')
     utc_hour = datetime.now(timezone.utc).hour
+    
+    # GitHub Actions 수동 실행 또는 push 시 강제 실행 여부
+    force_run = os.getenv("FORCE_RUN", "false").lower() == "true"
 
     logger.info(f"스크립트 실행 | KST: {kst_now} | UTC Hour: {utc_hour}")
 
     try:
         data = get_market_data(TICKER)
 
-        # ====================== 오전 9시 - 현황 보고 ======================
-        if utc_hour == 0:
+        if utc_hour == 0 or force_run:
             base_msg = create_base_message(data, kst_now, TICKER)
             send_discord_message(f"```\n{base_msg}```")
             logger.info("✅ 오전 현황 알림 전송 완료")
 
-        # ====================== 오후 7시 - 조건 알림 ======================
         elif utc_hour == 10:
             if data["current_price"] >= data["take_profit"]:
                 alert_type = "🔴 익절 알림"
