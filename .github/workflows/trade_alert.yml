@@ -1,15 +1,8 @@
 name: trade_alert
 
 on:
-  workflow_dispatch:
-    inputs:
-      force_run:
-        description: '강제로 알림 실행 여부'
-        required: false
-        default: 'false'
+  workflow_dispatch:   # 수동 실행 가능
   schedule:
-    # 오전 9시 (KST → UTC 0시)
-    - cron: '0 0 * * *'
     # 오후 7시 (KST → UTC 10시)
     - cron: '0 10 * * *'
 
@@ -38,7 +31,6 @@ jobs:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
           TICKER: ${{ secrets.TICKER }}
-          FORCE_RUN: ${{ github.event.inputs.force_run }}
         run: python trade_alert.py
 
       - name: Commit and Push changes
