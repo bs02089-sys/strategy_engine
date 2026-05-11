@@ -1,6 +1,7 @@
 import feedparser
 import google.genai as genai
 import requests
+from dotenv import load_dotenv
 import os
 from datetime import datetime, timedelta
 from urllib.parse import quote
@@ -12,9 +13,11 @@ except ImportError:
     print("❌ 에러: config.py 파일을 찾을 수 없습니다. 설정 파일을 확인해주세요.")
     exit()
 
-# 민감 정보는 환경변수에서 로드 (GitHub Actions Secrets)
-DISCORD_WEBHOOK = os.environ.get("DISCORD_WEBHOOK")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+load_dotenv()
+
+DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
+DISCORD_USER_ID = os.getenv("DISCORD_USER_ID")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 if not DISCORD_WEBHOOK or not GEMINI_API_KEY:
     print("❌ 에러: DISCORD_WEBHOOK 또는 GEMINI_API_KEY 환경변수가 설정되지 않았습니다.")
