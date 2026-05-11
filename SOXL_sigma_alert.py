@@ -7,7 +7,6 @@ import pytz
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
-# ==========================================
 # 1. 환경 설정 및 경로 지정
 # ==========================================
 load_dotenv()
@@ -134,21 +133,6 @@ def main():
     config["LAST_RUN_TIME"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with open(config_path, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=4, ensure_ascii=False)
-
-    # ====================== GitHub Actions용 실행 로그 기록 ======================
-    try:
-        with open("sigma_alert.log", "a", encoding="utf-8") as f:
-            f.write(
-                f"[{datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')}] "
-                f"실행 완료 | Ticker: {ticker} | "
-                f"현재가: ${latest_close:.2f} | "
-                f"1σ: {sigma_val*100:.3f}% | "
-                f"Guide: {'-2σ' if latest_close <= target_price_2s else '-1σ' if latest_close <= target_price_1s else '대기중'}\n"
-            )
-    except Exception as e:
-        print(f"로그 기록 중 오류 발생: {e}")
-
-    print("✅ sigma_alert.log에 실행 기록이 저장되었습니다.")
 
 
 if __name__ == "__main__":
