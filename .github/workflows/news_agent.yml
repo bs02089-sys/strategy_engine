@@ -6,9 +6,6 @@ on:
     - cron: '0 10 * * *'  # 한국시간 오후 7시 (UTC 10:00)
   workflow_dispatch:        # 수동 실행 버튼
 
-permissions:
-  contents: write
-
 jobs:
   run-news_agent:
     runs-on: ubuntu-latest
@@ -25,33 +22,8 @@ jobs:
       - name: 📦 패키지 설치
         run: pip install -r requirements.txt
 
-      - name: 🔑 config.py 생성
-        run: |
-          cat > config.py << EOF
-          GEMINI_API_KEY = "${{ secrets.GEMINI_API_KEY }}"
-          DISCORD_WEBHOOK = "${{ secrets.DISCORD_WEBHOOK }}"
-          KEYWORDS = [
-              "semiconductor stock",
-              "SOXL ETF",
-              "TSLA stock",
-              "IONQ stock",
-          ]
-          SCHEDULE_TIMES = ["09:00", "19:00"]
-          MAX_NEWS_PER_KEYWORD = 5
-          EOF
-          
-      - name: Set up SSH
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.vscode_push_token_2026 }}" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan github.com >> ~/.ssh/known_hosts
-
-      - name: Configure Git
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git remote set-url origin git@github.com:bs02089-sys/strategy_engine.git
-
       - name: 🚀 뉴스 에이전트 실행
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: python -c "from news_agent import run_agent; run_agent()"
