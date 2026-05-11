@@ -7,7 +7,7 @@ from urllib.parse import quote
 
 # config.py 파일에서 설정값 로드
 try:
-    from config import KEYWORDS, SCHEDULE_TIMES, MAX_NEWS_PER_KEYWORD
+    from config import KEYWORDS, MAX_NEWS_PER_KEYWORD
 except ImportError:
     print("❌ 에러: config.py 파일을 찾을 수 없습니다. 설정 파일을 확인해주세요.")
     exit()
