@@ -76,8 +76,8 @@ def get_market_data(ticker: str):
 
 
 def create_base_message(data: dict, kst_now: str, ticker: str):
-    """개선된 가독성 메시지 (추천 버전)"""
-    today_date = kst_now.split()[0]  # 오늘 날짜 (KST)
+    """최종 개선 버전 - 레이아웃 조정"""
+    today_date = kst_now.split()[0]
     
     # 현재가 기준 목표까지 거리 계산
     to_tp = (data['take_profit'] - data['current_price']) / data['current_price'] * 100
@@ -87,15 +87,13 @@ def create_base_message(data: dict, kst_now: str, ticker: str):
         f"🔔 **{ticker} 시장 현황** ({today_date})\n\n"
         f"📍 **현재 시각** : {kst_now}\n\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"💰 전일 종가     : ${data['prev_close']:.2f}\n"
-        f"📊 **현재가**     : ${data['current_price']:.2f}\n"
-        f"🎯 익절 목표     : ${data['take_profit']:.2f}    "
-        f"(+{to_tp:+.2f}%)\n"
-        f"🛒 매수 목표     : ${data['buy_target']:.2f}    "
-        f"({to_buy:-.2f}%)\n"
+        f"💰 전일 종가 : ${data['prev_close']:.2f}\n"
+        f"📊 현 재 가  : ${data['current_price']:.2f}\n"
+        f"🎯 익절 목표 : ${data['take_profit']:.2f} (+{to_tp:.2f}%)\n"
+        f"🛒 매수 목표 : ${data['buy_target']:.2f}  ({to_buy:.2f}%)\n"
         f"━━━━━━━━━━━━━━━━━━━━━━"
     )
-
+    
 
 def send_discord_message(content: str):
     """디스코드 웹훅 전송"""
