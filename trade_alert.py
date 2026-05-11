@@ -75,8 +75,12 @@ def get_market_data(ticker: str):
 
 
 def create_base_message(data: dict, kst_now: str, ticker: str):
+    """가독성 높인 최종 버전 - 제목은 오늘 날짜로 표시"""
+    # 오늘 날짜 추출 (KST)
+    today_date = kst_now.split()[0]   # 예: 2026-05-11
+    
     return (
-        f"🔔 **{ticker} 시장 현황** ({data['prev_date']})\n\n"
+        f"🔔 **{ticker} 시장 현황** ({today_date})\n\n"
         f"📍 **현재 시각** : {kst_now}\n\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
         f"💰 전일 종가     : ${data['prev_close']:.2f}\n"
@@ -87,7 +91,7 @@ def create_base_message(data: dict, kst_now: str, ticker: str):
         f"# -{data['std_20d_avg']:.4f}%\n"
         f"━━━━━━━━━━━━━━━━━━━━━━"
     )
-
+    
 
 def send_discord_message(content: str):
     mention = f"<@{DISCORD_USER_ID}>" if DISCORD_USER_ID else ""
