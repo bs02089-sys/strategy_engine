@@ -25,3 +25,12 @@ jobs:
           else
             echo "No changes to commit"
           fi
+
+      - name: Discord 알림
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
+        run: |
+          curl -H "Content-Type: application/json" \
+               -d "{\"content\": \"<@${DISCORD_USER_ID}> Trade Alert 실행 완료\"}" \
+               $DISCORD_WEBHOOK
