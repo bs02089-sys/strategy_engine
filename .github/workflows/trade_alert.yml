@@ -1,9 +1,6 @@
 name: trade_alert
 
 on:
-  push:
-    branches:
-      - main
   schedule:
     - cron: '0 0 * * 1-5'
     - cron: '0 13 * * 1-5'
@@ -12,13 +9,9 @@ on:
 permissions:
   contents: write
 
-env:
-  PYTHONIOENCODING: utf-8
-
 jobs:
   trade_alert:
     runs-on: ubuntu-latest
-    
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -45,3 +38,10 @@ jobs:
           DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
           FORCE_RUN: "true"
         run: python trade_alert.py
+
+      - name: Commit and Push changes
+        run: |
+          git checkout -B trade-alert
+          git add trade_alert.py
+          git commit -m "Update trade alert automatically"
+          git push origin trade-alert
