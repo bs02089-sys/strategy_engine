@@ -115,18 +115,18 @@ def main():
     kst_now  = datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')
     utc_hour = datetime.now(timezone.utc).hour
     
-    # GitHub Actions 수동 실행 또는 push 시 강제 실행 여부
     force_run = os.getenv("FORCE_RUN", "false").lower() == "true"
 
-    logger.info(f"스크립트 실행 | KST: {kst_now} | UTC Hour: {utc_hour}")
+    logger.info(f"스크립트 실행 | KST: {kst_now} | UTC Hour: {utc_hour} | FORCE_RUN: {force_run}")
 
     try:
         data = get_market_data(TICKER)
 
-        if utc_hour == 0 or force_run:
+        # FORCE_RUN이면 무조건 기본 메시지 전송
+        if force_run or utc_hour == 0:
             base_msg = create_base_message(data, kst_now, TICKER)
             send_discord_message(f"```\n{base_msg}```")
-            logger.info("✅ 오전 현황 알림 전송 완료")
+            logger.info("✅ 강제 실행 또는 오전 현황 알림 전송 완료")
 
         elif utc_hour == 10:
             if data["current_price"] >= data["take_profit"]:
@@ -136,21 +136,21 @@ def main():
                 alert_type = "🟢 매수 알림"
                 alert_line = f"  💰 현재가 ${data['current_price']:.2f} → 매수 목표 ${data['buy_target']:.2f} 도달!"
             else:
-                logger.info(f"조건 미충족 | 현재가: ${data['current_price']:.2f}")
+                logger.info(f"조건 미충족 | 현재가: ${data['current_price']:.2f} | "
+                          f"Buy: ${data['buy_target']:.2f} | TP: ${data['take_profit']:.2f}")
                 return
 
             base_msg = create_base_message(data, kst_now, TICKER)
             message  = f"```\n{base_msg}{'─'*55}\n{alert_line}\n{'='*55}\n```"
             send_discord_message(message)
-            logger.info(f"✅ 오후 {alert_type} 전송 완료")
+            logger.info(f"✅ {alert_type} 전송 완료")
 
         else:
-            logger.info(f"스케줄 외 실행 시간 (UTC {utc_hour}시)")
+            logger.info(f"스케줄 외 실행 시간 (UTC {utc_hour}시) - FORCE_RUN=false")
 
     except Exception as e:
         logger.error(f"스크립트 실행 중 오류 발생: {e}")
         raise
-
 
 if __name__ == "__main__":
     main()
