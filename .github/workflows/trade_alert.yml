@@ -51,5 +51,5 @@ jobs:
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
-          FORCE_RUN: "true"                    # ← 디버깅용
-       run: python trade_alert.py
+          FORCE_RUN: "true"               # 디버깅용 (나중에 false로 변경)
+        run: python trade_alert.py
