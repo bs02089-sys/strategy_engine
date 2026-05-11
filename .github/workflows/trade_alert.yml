@@ -1,17 +1,12 @@
 name: trade_alert
 
 on:
-  schedule:
-    - cron: '0 0 * * 1-5'
-    - cron: '0 13 * * 1-5'
   workflow_dispatch:
-
-permissions:
-  contents: write
 
 jobs:
   trade_alert:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -21,27 +16,12 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Python 3.12 설정
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-          cache: 'pip'
-
-      - name: 패키지 설치
-        run: |
-          pip install --upgrade pip
-          pip install -r requirements.txt
-
-      - name: Discord 알림 실행
-        env:
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-          DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
-          FORCE_RUN: "true"
-        run: python trade_alert.py
-
       - name: Commit and Push changes
         run: |
-          git checkout -B trade-alert
-          git add trade_alert.py
-          git commit -m "Update trade alert automatically"
-          git push origin trade-alert
+          git add .
+          if ! git diff --cached --quiet; then
+            git commit -m "Update trade alert"
+            git push origin trade-alert
+          else
+            echo "No changes to commit"
+          fi
