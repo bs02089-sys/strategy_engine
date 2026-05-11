@@ -10,13 +10,15 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 # 키워드는 영문으로 입력
 KEYWORDS = ["AI Infrastructure", "Semiconductor"]
-MAX_NEWS_PER_KEYWORD = 3
 
-# 간단한 영→한 번역 매핑
+# 영→한 번역 매핑 확장 가능
 TRANSLATIONS = {
     "AI Infrastructure": "AI 인프라스트럭처",
-    "Semiconductor": "반도체"
+    "Semiconductor": "반도체",
+    # 필요하면 여기에 계속 추가 가능
 }
+
+MAX_NEWS_PER_KEYWORD = 3
 
 def send_discord_message(content: str):
     data = {"content": f"<@{DISCORD_USER_ID}>\n{content}"}
@@ -63,7 +65,6 @@ def run_agent():
         news = fetch_news(keyword)
         analysis = analyze_with_gemini(keyword, news)
         if analysis:
-            # Discord 메시지에는 한글 번역된 키워드 사용
             translated_keyword = TRANSLATIONS.get(keyword, keyword)
             send_discord_message(f"🔎 {translated_keyword} 분석 결과:\n{analysis}")
 
