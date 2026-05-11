@@ -1,3 +1,4 @@
+# ====================== Import ======================
 # 1. 표준 라이브러리
 import os
 import sys
@@ -8,9 +9,10 @@ from datetime import datetime, timezone
 import pandas as pd
 import requests
 import yfinance as yf
+import pytz                               # ← 추가됨
 from dotenv import load_dotenv
 
-# 3. .env 로드
+# 3. .env 로드 (환경변수 설정)
 load_dotenv()
 
 # 4. 환경변수 읽기
@@ -18,6 +20,7 @@ DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
 DISCORD_USER_ID = os.getenv("DISCORD_USER_ID")
 TICKER = os.getenv("TICKER", "SSO")
 
+# 필수 환경변수 체크
 if not DISCORD_WEBHOOK:
     raise ValueError("❌ DISCORD_WEBHOOK 환경변수가 설정되지 않았습니다.")
 
@@ -33,7 +36,7 @@ logger = logging.getLogger(__name__)
 WORKING_DIR = os.path.dirname(os.path.abspath(__file__))
 os.chdir(WORKING_DIR)
 
-KST = pytz.timezone('Asia/Seoul')  # pytz import 추가 필요
+KST = pytz.timezone('Asia/Seoul')
 
 
 # ====================== 함수 정의 ======================
