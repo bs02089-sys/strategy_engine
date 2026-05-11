@@ -52,19 +52,3 @@ jobs:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
         run: python trade_alert.py
-
-      - name: 실행 로그 커밋 & 푸시
-        if: always()
-        run: |
-          if [ -f trade_alert.log ]; then
-            git config --global user.name "github-actions[bot]"
-            git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            
-            git add -f trade_alert.log
-            
-            git commit -m "chore: trade_alert 실행 로그 업데이트 ($(date -u +'%Y-%m-%d %H:%M UTC'))" || echo "No changes to commit"
-            
-            git push --force-with-lease || git push
-          else
-            echo "trade_alert.log 파일이 없습니다."
-          fi
