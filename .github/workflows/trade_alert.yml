@@ -2,6 +2,19 @@ name: trade_alert
 
 on:
   workflow_dispatch:
+    inputs:
+      force_run:
+        description: '강제로 알림 실행 여부'
+        required: false
+        default: 'false'
+  schedule:
+    # 오전 9시 (KST → UTC 0시)
+    - cron: '0 0 * * *'
+    # 오후 7시 (KST → UTC 10시)
+    - cron: '0 10 * * *'
+
+permissions:
+  contents: write   # 저장소에 커밋/푸시할 수 있는 권한을 명시적으로 부여
 
 jobs:
   trade_alert:
@@ -11,13 +24,27 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Configure Git
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
         run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          pip install -r requirements.txt
+
+      - name: Run trade alert
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
+          TICKER: ${{ secrets.TICKER }}
+          FORCE_RUN: ${{ github.event.inputs.force_run }}
+        run: python trade_alert.py
 
       - name: Commit and Push changes
         run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add .
           if ! git diff --cached --quiet; then
             git commit -m "Update trade alert"
@@ -25,12 +52,3 @@ jobs:
           else
             echo "No changes to commit"
           fi
-
-      - name: Discord 알림
-        env:
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-          DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
-        run: |
-          curl -H "Content-Type: application/json" \
-               -d "{\"content\": \"<@${DISCORD_USER_ID}> Trade Alert 실행 완료\"}" \
-               $DISCORD_WEBHOOK
