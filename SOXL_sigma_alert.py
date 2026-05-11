@@ -90,7 +90,7 @@ def main():
 
     # 수익률 계산
     profit_loss = ((latest_close - MY_AVG_PRICE) / MY_AVG_PRICE * 100) if MY_AVG_PRICE > 0 else 0
-    hold_date = (datetime.now() + timedelta(days=730)).strftime('%Y년 %m월 %d일')
+    hold_date = "2028년 05월 07일"
 
     vix_val, vix_info = get_vix_report()
     order_strategy = get_order_strategy(vix_val)
