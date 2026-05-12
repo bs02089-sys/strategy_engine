@@ -40,7 +40,7 @@ KST = pytz.timezone('Asia/Seoul')
 
 
 def get_market_data(ticker: str):
-    """시장 데이터 다운로드 - GitHub Actions 최적화 버전"""
+    """시장 데이터 다운로드 - GitHub Actions + SSO 완벽 대응 버전"""
     try:
         data = yf.download(
             ticker,
@@ -52,24 +52,33 @@ def get_market_data(ticker: str):
         )
 
         if data.empty:
-            raise ValueError(f"{ticker} 데이터를 가져올 수 없습니다. (empty)")
+            raise ValueError(f"{ticker} 데이터를 가져올 수 없습니다.")
 
-        # ==================== 컬럼 구조 방어 코드 ====================
-        # MultiIndex인 경우 처리
+        # ==================== 컬럼 정리 ====================
+        # 1. MultiIndex인 경우 처리
         if isinstance(data.columns, pd.MultiIndex):
-            data = data.droplevel(0, axis=1)   # ticker 레벨 제거
+            # ticker 레벨 제거
+            if len(data.columns.levels) > 1:
+                data = data.droplevel(0, axis=1)
 
-        # 컬럼명을 소문자로 정규화 (가끔 대소문자 문제 발생)
-        data.columns = [col.lower() if isinstance(col, str) else col for col in data.columns]
+        # 2. 컬럼이 ticker 이름만 있는 경우 (SSO 특이 케이스)
+        if all(str(col).lower() == ticker.lower() for col in data.columns):
+            # SSO 같은 ETF에서 가끔 발생하는 현상
+            data = data[ticker] if ticker in data.columns else data
 
-        # Close 컬럼 찾기 (다양한 경우 대응)
+        # 3. 컬럼명 정규화
+        data.columns = [str(col).lower().replace(" ", "_") for col in data.columns]
+
+        # Close 컬럼 찾기 (여러 가능성 대응)
+        close_candidates = ['close', 'adj_close', 'adj close']
         close_col = None
         for col in data.columns:
-            if str(col).lower() in ['close', 'adj close', 'adj_close']:
+            if col in close_candidates or 'close' in col:
                 close_col = col
                 break
 
         if close_col is None:
+            logger.error(f"컬럼 확인 필요: {list(data.columns)}")
             raise KeyError(f"Close 컬럼을 찾을 수 없습니다. 현재 컬럼: {list(data.columns)}")
 
         close_prices = data[close_col].squeeze()
@@ -84,11 +93,11 @@ def get_market_data(ticker: str):
             logger.warning("변동성 계산 데이터 부족 → 기본값 1.8% 사용")
             std_20d_avg = 1.8
 
-        # 현재가 가져오기 (2가지 방법 백업)
+        # 현재가 가져오기 (안전하게)
         ticker_obj = yf.Ticker(ticker)
         current_price = ticker_obj.fast_info.get("last_price")
         if not current_price or pd.isna(current_price):
-            hist = ticker_obj.history(period="2d")
+            hist = ticker_obj.history(period="2d", auto_adjust=True)
             current_price = float(hist["Close"].iloc[-1])
 
         prev_close = float(close_prices.iloc[-1])
@@ -105,9 +114,10 @@ def get_market_data(ticker: str):
 
     except Exception as e:
         logger.error(f"시장 데이터 가져오기 실패: {e}")
-        logger.error(f"받은 컬럼 정보: {list(data.columns) if 'data' in locals() else 'N/A'}")
+        if 'data' in locals():
+            logger.error(f"받은 컬럼: {list(data.columns)}")
         raise
-        
+            
 
 def create_base_message(data: dict, kst_now: str, ticker: str):
     """최종 개선 버전"""
