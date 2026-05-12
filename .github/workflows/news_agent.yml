@@ -1,6 +1,9 @@
 name: news_agent
 
 on:
+  push:
+    branches:
+      - main
   schedule:
     - cron: '0 0 * * *'   # 매일 UTC 0시 → KST 오전 9시
   workflow_dispatch:
