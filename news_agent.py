@@ -1,4 +1,5 @@
 import os
+import re
 import requests
 import xml.etree.ElementTree as ET
 import google.genai as genai
@@ -34,8 +35,13 @@ def fetch_latest_news():
                 items = root.findall(".//item")
                 for item in items[:3]:
                     title = item.find('title').text or ""
-                    description = item.find('description').text or ""
-                    all_news_text += f"- 제목: {title}\n  내용: {description}\n"
+                    raw_desc = item.find('description').text or ""
+                    # HTML 태그 및 URL 제거, 순수 텍스트만 추출
+                    clean_desc = re.sub(r'<[^>]+>', '', raw_desc)
+                    clean_desc = re.sub(r'http\S+', '', clean_desc).strip()
+                    all_news_text += f"- 제목: {title}\n"
+                    if clean_desc:
+                        all_news_text += f"  내용: {clean_desc}\n"
         except Exception as e:
             print(f"뉴스 수집 에러 ({en_kw}): {e}")
             continue
