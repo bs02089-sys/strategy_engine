@@ -43,40 +43,38 @@ KST = pytz.timezone('Asia/Seoul')
 def get_market_data(ticker: str):
     """시장 데이터 다운로드 및 계산 - GitHub Actions 안정화 버전"""
     try:
-        # 1. User-Agent + timeout 강화
-        import yfinance as yf
-        yf.pdr_override()  # 필요시
-        
+        # yfinance 다운로드 (GitHub Actions 환경 최적화)
         data = yf.download(
             ticker,
             period="130d",
             auto_adjust=True,
             progress=False,
-            timeout=30,           # ← 추가
-            threads=False,        # ← GitHub Actions에서 안정적
-            group_by='ticker'
+            timeout=30,
+            threads=False,          # 멀티스레드 비활성화 (Actions에서 안정적)
         )
 
         if data.empty:
-            raise ValueError(f"{ticker} 데이터를 가져올 수 없습니다. (empty dataframe)")
+            raise ValueError(f"{ticker} 데이터를 가져올 수 없습니다.")
 
-        # MultiIndex 처리 방어
+        # 컬럼이 MultiIndex인 경우 처리
         if isinstance(data.columns, pd.MultiIndex):
-            data = data.droplevel(0, axis=1) if len(data.columns.levels) > 1 else data
+            data = data.droplevel(0, axis=1)
 
         close_prices = data["Close"].squeeze()
         daily_returns = close_prices.pct_change().dropna()
         
         rolling_std = daily_returns.rolling(window=20).std() * 100
-        std_20d_avg = float(rolling_std[-20:].mean()) if len(rolling_std) >= 20 else 1.8
+        std_20d_avg = float(rolling_std.tail(20).mean())
 
-        if pd.isna(std_20d_avg) or std_20d_avg <= 0:
+        if len(rolling_std) < 20 or pd.isna(std_20d_avg) or std_20d_avg <= 0:
+            logger.warning("변동성 계산 데이터 부족 → 기본값 1.8% 사용")
             std_20d_avg = 1.8
 
-        # 현재가 가져오는 부분도 강화
+        # 현재가 가져오기 (더 안정적인 방법)
         ticker_obj = yf.Ticker(ticker)
-        current_price = float(ticker_obj.fast_info.get("last_price", 
-                              ticker_obj.history(period="1d")["Close"].iloc[-1]))
+        current_price = ticker_obj.fast_info.get("last_price")
+        if current_price is None or pd.isna(current_price):
+            current_price = float(ticker_obj.history(period="1d")["Close"].iloc[-1])
 
         prev_close = float(close_prices.iloc[-1])
         prev_date = data.index[-1].strftime('%Y-%m-%d')
@@ -84,7 +82,7 @@ def get_market_data(ticker: str):
         return {
             "prev_close": prev_close,
             "prev_date": prev_date,
-            "current_price": current_price,
+            "current_price": float(current_price),
             "take_profit": prev_close * (1 + std_20d_avg / 100),
             "buy_target": prev_close * (1 - std_20d_avg / 100),
             "std_20d_avg": std_20d_avg,
@@ -92,14 +90,8 @@ def get_market_data(ticker: str):
 
     except Exception as e:
         logger.error(f"시장 데이터 가져오기 실패: {e}")
-        # 재시도 로직 (최대 2회)
-        if "timeout" in str(e).lower() or "No objects to concatenate" in str(e):
-            logger.info("재시도 중...")
-            import time
-            time.sleep(5)
-            # 여기서 다시 한 번 시도하거나 fallback 처리
         raise
-
+    
 
 def create_base_message(data: dict, kst_now: str, ticker: str):
     """최종 개선 버전 - 매수 목표 %를 음수로 표시"""
@@ -113,7 +105,7 @@ def create_base_message(data: dict, kst_now: str, ticker: str):
         f"🔔 **{ticker} 시장 현황** ({today_date})\n\n"
         f"📍 **현재 시각** : {kst_now}\n\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"💰 전일 종가   : ${data['latest_price']:.2f}\n"
+        f"💰 전일 종가   : ${data['prev_close']:.2f}\n"
         f"📊 **현재가**   : ${data['current_price']:.2f}\n"
         f"🎯 익절 목표   : ${data['take_profit']:.2f}   (+{to_tp:.2f}%)\n"
         f"🛒 매수 목표   : ${data['buy_target']:.2f}   ({to_buy:.2f}%)\n"
@@ -122,7 +114,7 @@ def create_base_message(data: dict, kst_now: str, ticker: str):
         
 
 def send_discord_message(content: str):
-    """디스코드 웹훅 전송"""
+    """디스코드 웹훅 전송 - 디버깅 강화 버전"""
     mention = f"<@{DISCORD_USER_ID}>" if DISCORD_USER_ID else ""
     message = f"{mention}\n{content}" if mention else content
 
@@ -130,15 +122,26 @@ def send_discord_message(content: str):
         response = requests.post(
             DISCORD_WEBHOOK,
             json={"content": message},
-            timeout=10
+            timeout=15,
+            headers={"Content-Type": "application/json"}
         )
-        response.raise_for_status()
-        logger.info("✅ Discord 메시지 전송 성공")
-        return True
-    except Exception as e:
-        logger.error(f"❌ Discord 전송 실패: {e}")
-        return False
+        
+        logger.info(f"Discord 응답 코드: {response.status_code}")
+        logger.info(f"Discord 응답 내용: {response.text[:200]}")  # ← 디버깅용
+        
+        if response.status_code == 204:
+            logger.info("✅ Discord 메시지 전송 성공 (No Content)")
+            return True
+        else:
+            logger.error(f"❌ Discord 전송 실패: {response.status_code} - {response.text}")
+            return False
 
+    except requests.exceptions.RequestException as e:
+        logger.error(f"❌ Discord 요청 예외 발생: {e}")
+        return False
+    except Exception as e:
+        logger.error(f"❌ Discord 전송 중 알 수 없는 오류: {e}")
+        return False
 
 # ====================== 메인 로직 ======================
 def main():
@@ -152,34 +155,21 @@ def main():
     try:
         data = get_market_data(TICKER)
 
-        if force_run or utc_hour == 0:
+        # FORCE_RUN이 True이면 무조건 전송
+        if force_run or utc_hour in [0, 10]:
             base_msg = create_base_message(data, kst_now, TICKER)
-            send_discord_message(f"```\n{base_msg}```")
-            logger.info("✅ 오전 현황 알림 전송 완료")
-
-        elif utc_hour == 10:
-            if data["current_price"] >= data["take_profit"]:
-                alert_type = "🔴 익절 알림"
-                alert_line = f"🔥 현재가 ${data['current_price']:.2f} → 익절 목표 ${data['take_profit']:.2f} 도달!"
-            elif data["current_price"] <= data["buy_target"]:
-                alert_type = "🟢 매수 알림"
-                alert_line = f"💰 현재가 ${data['current_price']:.2f} → 매수 목표 ${data['buy_target']:.2f} 도달!"
+            success = send_discord_message(f"```\n{base_msg}```")
+            
+            if success:
+                logger.info("✅ Discord 알림 전송 완료")
             else:
-                logger.info(f"조건 미충족 | 현재가: ${data['current_price']:.2f}")
-                return
-
-            base_msg = create_base_message(data, kst_now, TICKER)
-            message = f"```\n{base_msg}\n{'─'*30}\n{alert_line}\n{'═'*30}\n```"
-            send_discord_message(message)
-            logger.info(f"✅ {alert_type} 전송 완료")
-
+                logger.error("❌ Discord 알림 전송 실패")
         else:
-            logger.info(f"스케줄 외 실행 시간 (UTC {utc_hour}시)")
+            logger.info(f"스케줄 외 시간 (UTC {utc_hour}시) - 알림 생략")
 
     except Exception as e:
-        logger.error(f"스크립트 실행 중 오류 발생: {e}")
+        logger.error(f"스크립트 실행 중 오류: {e}")
         raise
-
 
 if __name__ == "__main__":
     main()
