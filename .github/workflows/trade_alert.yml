@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: write      # GITHUB_TOKEN이 push 할 수 있도록 권한 부여
 
 env:
   PYTHONIOENCODING: utf-8
@@ -22,19 +22,14 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Set up SSH
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.vscode_push_token_2026 }}" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan github.com >> ~/.ssh/known_hosts
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}   # push 권한 강화
 
       - name: Configure Git
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git remote set-url origin git@github.com:bs02089-sys/strategy_engine.git
+          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/bs02089-sys/strategy_engine.git
 
       - name: Python 3.12 설정
         uses: actions/setup-python@v5
@@ -51,5 +46,6 @@ jobs:
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
-          FORCE_RUN: "true"               # 디버깅용 (나중에 false로 변경)
+          TICKER: ${{ secrets.TICKER }}           # 필요시
+          FORCE_RUN: "false"                      # 필요할 때만 true로 변경
         run: python trade_alert.py
