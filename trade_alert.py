@@ -40,50 +40,22 @@ KST = pytz.timezone('Asia/Seoul')
 
 
 def get_market_data(ticker: str):
-    """최종 안정 버전 - SSO 문제 완전 해결"""
+    """최종 안정 버전 - 현재가 제거"""
     try:
-        # 방법 1: Ticker.history() 사용 (더 안정적)
         ticker_obj = yf.Ticker(ticker)
-        data = ticker_obj.history(
-            period="130d",
-            auto_adjust=True,
-            timeout=30
-        )
-
-        if data.empty:
-            # 방법 2: fallback으로 download 시도
-            logger.warning("history() 실패 → download fallback")
-            data = yf.download(
-                ticker, period="130d", auto_adjust=True, 
-                progress=False, timeout=30, threads=False
-            )
+        data = ticker_obj.history(period="130d", auto_adjust=True, timeout=30)
 
         if data.empty:
             raise ValueError(f"{ticker} 데이터 다운로드 실패")
 
-        # ==================== 컬럼 정리 ====================
-        # 컬럼이 ticker 이름만 있는 경우 (현재 SSO 문제)
-        if len(data.columns) > 0 and str(data.columns[0]).lower() == ticker.lower():
-            # SSO가 컬럼명으로 되어있는 경우 → DataFrame 구조 조정
-            data = data.rename(columns={col: col.lower() for col in data.columns})
-
-        # 컬럼명 정규화
+        # 컬럼 정리
         data.columns = [str(col).lower().replace(" ", "_") for col in data.columns]
-
-        # Close 컬럼 찾기
-        close_col = None
-        for col in data.columns:
-            if 'close' in col:
-                close_col = col
-                break
-
+        close_col = next((col for col in data.columns if 'close' in col), None)
+        
         if close_col is None:
-            logger.error(f"컬럼: {list(data.columns)}")
             raise KeyError(f"Close 컬럼 없음: {list(data.columns)}")
 
         close_prices = data[close_col].squeeze()
-
-        # ============================================================
 
         daily_returns = close_prices.pct_change().dropna()
         rolling_std = daily_returns.rolling(window=20).std() * 100
@@ -92,49 +64,44 @@ def get_market_data(ticker: str):
         if len(rolling_std) < 20 or pd.isna(std_20d_avg) or std_20d_avg <= 0:
             std_20d_avg = 1.8
 
-        # 현재가
-        current_price = ticker_obj.fast_info.get("last_price")
-        if not current_price or pd.isna(current_price):
-            current_price = float(close_prices.iloc[-1])
-
         prev_close = float(close_prices.iloc[-1])
         prev_date = data.index[-1].strftime('%Y-%m-%d')
 
         return {
             "prev_close": prev_close,
             "prev_date": prev_date,
-            "current_price": float(current_price),
-            "take_profit": prev_close * (1 + std_20d_avg / 100),
-            "buy_target": prev_close * (1 - std_20d_avg / 100),
             "std_20d_avg": std_20d_avg,
+            # current_price, take_profit, buy_target는 create_base_message에서 계산
         }
 
     except Exception as e:
         logger.error(f"시장 데이터 가져오기 실패: {e}")
-        if 'data' in locals():
-            logger.error(f"최종 컬럼: {list(data.columns)}")
         raise
-                
+                    
 
 def create_base_message(data: dict, kst_now: str, ticker: str):
-    """최종 개선 버전"""
+    """현재가 제거 + 전일 종가 기준으로 깔끔하게"""
     today_date = kst_now.split()[0]
+    prev_close = data['prev_close']
+    std = data['std_20d_avg']
     
-    # 현재가 기준 목표까지 거리 계산
-    to_tp = (data['take_profit'] - data['current_price']) / data['current_price'] * 100
-    to_buy = (data['buy_target'] - data['current_price']) / data['current_price'] * 100
+    take_profit = prev_close * (1 + std / 100)
+    buy_target = prev_close * (1 - std / 100)
+
+    to_tp = (take_profit - prev_close)   # 이미 +std%
+    to_buy = (buy_target - prev_close)   # 이미 -std%
 
     return (
         f"🔔 **{ticker} 시장 현황** ({today_date})\n\n"
         f"📍 **현재 시각** : {kst_now}\n\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"💰 전일 종가   : ${data['prev_close']:.2f}\n"           # ← latest_price → prev_close 수정
-        f"📊 **현재가**   : ${data['current_price']:.2f}\n"
-        f"🎯 익절 목표   : ${data['take_profit']:.2f}   (+{to_tp:.2f}%)\n"
-        f"🛒 매수 목표   : ${data['buy_target']:.2f}   ({to_buy:.2f}%)\n"
+        f"💰 **전일 종가**   : ${prev_close:.2f}\n"
+        f"📊 **20일 평균 변동성** : ±{std:.2f}%\n"
+        f"🎯 익절 목표   : ${take_profit:.2f}   (+{std:.2f}%)\n"
+        f"🛒 매수 목표   : ${buy_target:.2f}   (-{std:.2f}%)\n"
         f"━━━━━━━━━━━━━━━━━━━━━━"
     )
-            
+                
 
 def send_discord_message(content: str):
     """디스코드 웹훅 전송 - 디버깅 강화 버전"""
