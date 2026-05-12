@@ -25,7 +25,6 @@ def fetch_latest_news():
     headers = {"User-Agent": "Mozilla/5.0"}
     
     for en_kw, ko_kw in KEYWORDS_MAP.items():
-        # Google News RSS (영문 뉴스 수집)
         rss_url = f"https://news.google.com/rss/search?q={en_kw}+when:1d&hl=en-US&gl=US&ceid=US:en"
         try:
             resp = requests.get(rss_url, headers=headers, timeout=15)
@@ -50,27 +49,25 @@ def main():
 
     report = None
     try:
-        # 3. Gemini 클라이언트 설정 (v1 정식 버전 사용)
+        # 3. Gemini 클라이언트 설정 (v1beta 사용)
         client = genai.Client(
             api_key=GEMINI_API_KEY,
-            http_options={'api_version': 'v1'}
+            http_options={'api_version': 'v1beta'}  # v1 → v1beta
         )
         
         response = client.models.generate_content(
-            model="models/gemini-1.5-flash",  # 다시 models/ 를 붙여줍니다.
+            model="models/gemini-1.5-flash",
             contents=f"너는 금융 전문 번역가야. 아래 뉴스 제목들을 반드시 한국어로 번역해서 요약해줘. 영어는 절대 쓰지 마:\n\n{news_content}"
         )
-
+        report = response.text  # 누락된 할당 추가
 
     except Exception as e:
-        # 에러 발생 시 콘솔에 상세 내용 출력
         print(f"AI 분석 실패 상세: {e}")
 
     # 5. 최종 결과 전송 로직
     if report:
         final_message = f"📢 **오늘의 글로벌 시장 분석 리포트**\n\n{report}"
     else:
-        # AI 실패 시 원문이라도 전송
         final_message = f"⚠️ **AI 요약 실패 (뉴스 원문 목록)**\n\n{news_content}"
 
     # 디스코드 전송
