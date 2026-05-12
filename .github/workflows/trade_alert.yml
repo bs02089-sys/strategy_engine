@@ -47,7 +47,7 @@ jobs:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
           TICKER: "SSO"
-          FORCE_RUN: "false"
+          FORCE_RUN: "true"
         run: |
           for i in {1..3}; do
             python trade_alert.py && break || echo "Retry $i failed..." && sleep 10
