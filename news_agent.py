@@ -8,7 +8,7 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
 DISCORD_USER_ID = os.getenv("DISCORD_USER_ID")
 
-# 키워드 매핑
+# 키워드 한글 매핑 (AI 실패 시 비상용)
 KEYWORDS_MAP = {
     "Semiconductor": "반도체",
     "AI Infrastructure": "AI 인프라",
@@ -40,29 +40,30 @@ def main():
 
     report = None
     try:
-        # [핵심 변경] v1 정식 API와 최신 모델 ID를 사용하여 404 원천 차단
-        client = genai.Client(api_key=GEMINI_API_KEY, http_options={'api_version': 'v1'})
+        # [해결책] v1 정식 API 설정 + 모델 풀네임(models/...) 사용
+        client = genai.Client(
+            api_key=GEMINI_API_KEY,
+            http_options={'api_version': 'v1'}
+        )
         
+        # 모델명을 'models/gemini-1.5-flash'로 명시적으로 지정
         response = client.models.generate_content(
-            model="gemini-1.5-flash", # 혹은 "gemini-1.5-flash-002"
-            contents=f"너는 투자 뉴스 번역가야. 아래의 섹터별 뉴스 제목들을 하나도 빠짐없이 '한국어'로 번역해서 요약해줘. 영어 원문은 출력하지 마.\n\n{news_content}"
+            model="models/gemini-1.5-flash",
+            contents=f"너는 금융 전문 번역가야. 아래 뉴스 제목들을 반드시 한국어로 번역해서 요약해줘. 영어는 절대 쓰지 마:\n\n{news_content}"
         )
         report = response.text
     except Exception as e:
-        # 에러 발생 시 로그 출력
         print(f"AI 분석 실패 상세: {e}")
 
-    # 최종 메시지 구성
+    # 최종 결과 전송
     if report:
-        # AI 분석 성공 시: 요약된 한글 내용 출력
         final_message = f"📢 **오늘의 글로벌 시장 분석 리포트**\n\n{report}"
     else:
-        # AI 분석 실패 시: 한글 섹터명 + 영어 제목 출력 (현재 상태)
+        # 404 에러 시 이 메시지가 출력되며, 뉴스 제목은 영어로 나옵니다.
         final_message = f"⚠️ **AI 요약 실패 (뉴스 원문 목록)**\n\n{news_content}"
 
     mention = f"<@{DISCORD_USER_ID}>\n" if DISCORD_USER_ID else ""
-    payload = {"content": f"{mention}{final_message}"}
-    requests.post(DISCORD_WEBHOOK, json=payload, timeout=15)
+    requests.post(DISCORD_WEBHOOK, json={"content": f"{mention}{final_message}"}, timeout=15)
 
 if __name__ == "__main__":
     main()
