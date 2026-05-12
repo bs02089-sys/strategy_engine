@@ -33,8 +33,9 @@ def fetch_latest_news():
                 all_news_text += f"\n### 📂 섹터: {ko_kw}\n"
                 items = root.findall(".//item")
                 for item in items[:3]:
-                    title = item.find('title').text
-                    all_news_text += f"- {title}\n"
+                    title = item.find('title').text or ""
+                    description = item.find('description').text or ""
+                    all_news_text += f"- 제목: {title}\n  내용: {description}\n"
         except Exception as e:
             print(f"뉴스 수집 에러 ({en_kw}): {e}")
             continue
