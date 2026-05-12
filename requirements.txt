@@ -5,5 +5,5 @@ python-dotenv
 pandas
 pytz
 feedparser
-google-genai>=0.3.0
+google-generativeai
 schedule
