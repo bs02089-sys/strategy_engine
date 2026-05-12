@@ -2,13 +2,17 @@ import os
 import requests
 import xml.etree.ElementTree as ET
 import google.genai as genai
+from dotenv import load_dotenv
 
-# 환경 변수 로드
+# 1. .env 파일의 환경 변수를 로드합니다. (로컬 실행 시 필수)
+load_dotenv()
+
+# 2. 환경 변수 로드
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
 DISCORD_USER_ID = os.getenv("DISCORD_USER_ID")
 
-# 키워드 한글 매핑 (AI 실패 시 비상용)
+# 키워드 한글 매핑 (비상용)
 KEYWORDS_MAP = {
     "Semiconductor": "반도체",
     "AI Infrastructure": "AI 인프라",
@@ -21,6 +25,7 @@ def fetch_latest_news():
     headers = {"User-Agent": "Mozilla/5.0"}
     
     for en_kw, ko_kw in KEYWORDS_MAP.items():
+        # Google News RSS (영문 뉴스 수집)
         rss_url = f"https://news.google.com/rss/search?q={en_kw}+when:1d&hl=en-US&gl=US&ceid=US:en"
         try:
             resp = requests.get(rss_url, headers=headers, timeout=15)
@@ -31,40 +36,53 @@ def fetch_latest_news():
                 for item in items[:3]:
                     title = item.find('title').text
                     all_news_text += f"- {title}\n"
-        except: continue
+        except Exception as e:
+            print(f"뉴스 수집 에러 ({en_kw}): {e}")
+            continue
     return all_news_text
 
 def main():
+    # 뉴스 수집
     news_content = fetch_latest_news()
-    if not news_content.strip(): return
+    if not news_content.strip():
+        print("수집된 뉴스가 없습니다.")
+        return
 
     report = None
-    # ... (앞부분 생략)
-
     try:
+        # 3. Gemini 클라이언트 설정 (v1 정식 버전 사용)
         client = genai.Client(
             api_key=GEMINI_API_KEY,
             http_options={'api_version': 'v1'}
         )
         
-        # [수정 포인트] 'models/'를 지우고 이름만 적어줍니다.
+        # 4. 모델 호출 (404 방지를 위해 접두사 제거한 모델명 사용)
         response = client.models.generate_content(
-            model="gemini-1.5-flash", 
-            contents=f"뉴스 내용을 한국어로 번역해서 요약해줘:\n\n{news_content}"
+            model="gemini-1.5-flash",
+            contents=f"너는 금융 전문 번역가야. 아래 뉴스 제목들을 반드시 한국어로 번역해서 요약해줘. 영어는 절대 쓰지 마:\n\n{news_content}"
         )
         report = response.text
     except Exception as e:
+        # 에러 발생 시 콘솔에 상세 내용 출력
         print(f"AI 분석 실패 상세: {e}")
 
-    # 최종 결과 전송
+    # 5. 최종 결과 전송 로직
     if report:
         final_message = f"📢 **오늘의 글로벌 시장 분석 리포트**\n\n{report}"
     else:
-        # 404 에러 시 이 메시지가 출력되며, 뉴스 제목은 영어로 나옵니다.
+        # AI 실패 시 원문이라도 전송
         final_message = f"⚠️ **AI 요약 실패 (뉴스 원문 목록)**\n\n{news_content}"
 
-    mention = f"<@{DISCORD_USER_ID}>\n" if DISCORD_USER_ID else ""
-    requests.post(DISCORD_WEBHOOK, json={"content": f"{mention}{final_message}"}, timeout=15)
+    # 디스코드 전송
+    if DISCORD_WEBHOOK:
+        mention = f"<@{DISCORD_USER_ID}>\n" if DISCORD_USER_ID else ""
+        try:
+            requests.post(DISCORD_WEBHOOK, json={"content": f"{mention}{final_message}"}, timeout=15)
+            print("디스코드 메시지 전송 완료")
+        except Exception as e:
+            print(f"디스코드 전송 실패: {e}")
+    else:
+        print("디스코드 웹후크 URL이 설정되지 않았습니다.")
 
 if __name__ == "__main__":
     main()
