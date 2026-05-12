@@ -1,12 +1,14 @@
 name: daily_sigma_alert
 
 on:
-  # 정기 실행 (평일)
+  push:
+    paths:
+      - 'daily_sigma_alert.py' 
+      
   schedule:
     - cron: '0 0 * * 1-5'    # KST 오전 9시
     - cron: '0 10 * * 1-5'   # KST 오후 7시
 
-  # 수동 실행
   workflow_dispatch:
 
 permissions:
