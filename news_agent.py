@@ -1,15 +1,12 @@
 import os
-import re
 import requests
 import xml.etree.ElementTree as ET
-import google.genai as genai
 from dotenv import load_dotenv
 
 # 1. .env 파일의 환경 변수를 로드합니다.
 load_dotenv()
 
 # 2. 환경 변수 로드
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
 DISCORD_USER_ID = os.getenv("DISCORD_USER_ID")
 
@@ -35,13 +32,7 @@ def fetch_latest_news():
                 items = root.findall(".//item")
                 for item in items[:3]:
                     title = item.find('title').text or ""
-                    raw_desc = item.find('description').text or ""
-                    # HTML 태그 및 URL 제거, 순수 텍스트만 추출
-                    clean_desc = re.sub(r'<[^>]+>', '', raw_desc)
-                    clean_desc = re.sub(r'http\S+', '', clean_desc).strip()
-                    all_news_text += f"- 제목: {title}\n"
-                    if clean_desc:
-                        all_news_text += f"  내용: {clean_desc}\n"
+                    all_news_text += f"- {title}\n"
         except Exception as e:
             print(f"뉴스 수집 에러 ({en_kw}): {e}")
             continue
@@ -54,30 +45,9 @@ def main():
         print("수집된 뉴스가 없습니다.")
         return
 
-    report = None
-    try:
-        # 3. Gemini 클라이언트 설정
-        client = genai.Client(
-            api_key=GEMINI_API_KEY,
-            http_options={'api_version': 'v1beta'}
-        )
-        
-        response = client.models.generate_content(
-            model="models/gemini-1.5-flash",
-            contents=f"너는 금융 전문 번역가야. 아래 뉴스 제목과 내용을 반드시 한국어로 번역해서 요약해줘. 영어는 절대 쓰지 마:\n\n{news_content}"
-        )
-        report = response.text
+    final_message = f"📢 **오늘의 글로벌 시장 뉴스**\n\n{news_content}"
 
-    except Exception as e:
-        print(f"AI 분석 실패 상세: {e}")
-
-    # 4. 최종 결과 전송 로직
-    if report:
-        final_message = f"📢 **오늘의 글로벌 시장 분석 리포트**\n\n{report}"
-    else:
-        final_message = f"⚠️ **AI 요약 실패 (뉴스 원문 목록)**\n\n{news_content}"
-
-    # 5. 디스코드 전송 (2000자 제한 처리)
+    # 디스코드 전송 (2000자 제한 처리)
     if DISCORD_WEBHOOK:
         mention = f"<@{DISCORD_USER_ID}>\n" if DISCORD_USER_ID else ""
         full_message = f"{mention}{final_message}"
