@@ -20,7 +20,7 @@ def fetch_latest_news():
             resp = requests.get(rss_url, headers=headers, timeout=15)
             if resp.status_code == 200:
                 root = ET.fromstring(resp.text)
-                all_news_text += f"\n[분석 섹터: {kw}]\n"
+                all_news_text += f"\n[섹터: {kw}]\n"
                 items = root.findall(".//item")
                 for item in items[:3]:
                     all_news_text += f"- {item.find('title').text}\n"
@@ -31,7 +31,7 @@ def analyze_market_with_gemini(context: str):
     if not GEMINI_API_KEY: return None
     
     try:
-        # [핵심 수정] 시스템 인스트럭션을 통해 AI의 정체성을 '한국어 분석가'로 고정
+        # 시스템 인스트럭션을 통해 AI의 정체성을 '한국어 분석가'로 고정
         client = genai.Client(api_key=GEMINI_API_KEY)
         
         # 시스템 지침을 명확히 전달하는 구조
