@@ -2,8 +2,10 @@ name: daily_sigma_alert
 
 on:
   push:
+    branches:
+      - main
     paths:
-      - 'daily_sigma_alert.py' 
+      - "daily_sigma_alert.py"
       
   schedule:
     - cron: '0 0 * * 1-5'    # KST 오전 9시
