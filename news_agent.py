@@ -1,11 +1,8 @@
 import os
-import datetime
 import requests
 import xml.etree.ElementTree as ET
 import google.genai as genai
-from google.genai import types
 
-# 환경 변수 로드
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
 DISCORD_USER_ID = os.getenv("DISCORD_USER_ID")
@@ -28,38 +25,29 @@ def fetch_latest_news():
         except: continue
     return all_news_text
 
-def analyze_market_with_gemini(context: str):
-    if not GEMINI_API_KEY: return None
-    
-    try:
-        # [핵심] v1 정식 버전 API를 사용하도록 강제 설정
-        client = genai.Client(api_key=GEMINI_API_KEY, http_options={'api_version': 'v1'})
-        
-        # 모델 명칭은 가장 기본인 gemini-1.5-flash 사용
-        response = client.models.generate_content(
-            model="gemini-1.5-flash", 
-            contents=f"명령: 아래 영문 뉴스들을 한국어로 요약해줘. 반드시 한국어만 사용해.\n\n내용:\n{context}"
-        )
-        return response.text
-    except Exception as e:
-        print(f"AI 분석 실패 상세: {e}")
-        return None
-
 def main():
     news_content = fetch_latest_news()
     if not news_content.strip(): return
 
-    analysis_report = analyze_market_with_gemini(news_content)
-    
-    if analysis_report:
-        final_message = f"📢 **오늘의 글로벌 시장 분석 리포트**\n\n{analysis_report}"
+    try:
+        # SDK 재설치 후 정석 호출 방식
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        response = client.models.generate_content(
+            model="gemini-1.5-flash",
+            contents=f"당신은 테크 분석가입니다. 아래 뉴스를 읽고 반드시 '한국어'로 요약해 주세요. 영어는 번역해서 출력하세요:\n\n{news_content}"
+        )
+        report = response.text
+    except Exception as e:
+        print(f"AI 분석 실패: {e}")
+        report = None
+
+    if report:
+        msg = f"📢 **오늘의 글로벌 시장 분석 리포트**\n\n{report}"
     else:
-        # 404가 또 나더라도 원문은 확실히 나오게 처리
-        final_message = f"⚠️ **AI 분석 실패 (원문 목록)**\n\n{news_content}"
+        msg = f"⚠️ **AI 분석 실패 (원문 목록)**\n\n{news_content}"
 
     mention = f"<@{DISCORD_USER_ID}>\n" if DISCORD_USER_ID else ""
-    payload = {"content": f"{mention}{final_message}"}
-    requests.post(DISCORD_WEBHOOK, json=payload, timeout=15)
+    requests.post(DISCORD_WEBHOOK, json={"content": f"{mention}{msg}"}, timeout=15)
 
 if __name__ == "__main__":
     main()
