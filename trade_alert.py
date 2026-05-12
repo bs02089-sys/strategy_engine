@@ -39,30 +39,44 @@ os.chdir(WORKING_DIR)
 KST = pytz.timezone('Asia/Seoul')
 
 
-# ====================== 함수 정의 ======================
 def get_market_data(ticker: str):
-    """시장 데이터 다운로드 및 계산 - GitHub Actions 안정화 버전"""
+    """시장 데이터 다운로드 - GitHub Actions 최적화 버전"""
     try:
-        # yfinance 다운로드 (GitHub Actions 환경 최적화)
         data = yf.download(
             ticker,
             period="130d",
             auto_adjust=True,
             progress=False,
             timeout=30,
-            threads=False,          # 멀티스레드 비활성화 (Actions에서 안정적)
+            threads=False,
         )
 
         if data.empty:
-            raise ValueError(f"{ticker} 데이터를 가져올 수 없습니다.")
+            raise ValueError(f"{ticker} 데이터를 가져올 수 없습니다. (empty)")
 
-        # 컬럼이 MultiIndex인 경우 처리
+        # ==================== 컬럼 구조 방어 코드 ====================
+        # MultiIndex인 경우 처리
         if isinstance(data.columns, pd.MultiIndex):
-            data = data.droplevel(0, axis=1)
+            data = data.droplevel(0, axis=1)   # ticker 레벨 제거
 
-        close_prices = data["Close"].squeeze()
+        # 컬럼명을 소문자로 정규화 (가끔 대소문자 문제 발생)
+        data.columns = [col.lower() if isinstance(col, str) else col for col in data.columns]
+
+        # Close 컬럼 찾기 (다양한 경우 대응)
+        close_col = None
+        for col in data.columns:
+            if str(col).lower() in ['close', 'adj close', 'adj_close']:
+                close_col = col
+                break
+
+        if close_col is None:
+            raise KeyError(f"Close 컬럼을 찾을 수 없습니다. 현재 컬럼: {list(data.columns)}")
+
+        close_prices = data[close_col].squeeze()
+
+        # ============================================================
+
         daily_returns = close_prices.pct_change().dropna()
-        
         rolling_std = daily_returns.rolling(window=20).std() * 100
         std_20d_avg = float(rolling_std.tail(20).mean())
 
@@ -70,11 +84,12 @@ def get_market_data(ticker: str):
             logger.warning("변동성 계산 데이터 부족 → 기본값 1.8% 사용")
             std_20d_avg = 1.8
 
-        # 현재가 가져오기 (더 안정적인 방법)
+        # 현재가 가져오기 (2가지 방법 백업)
         ticker_obj = yf.Ticker(ticker)
         current_price = ticker_obj.fast_info.get("last_price")
-        if current_price is None or pd.isna(current_price):
-            current_price = float(ticker_obj.history(period="1d")["Close"].iloc[-1])
+        if not current_price or pd.isna(current_price):
+            hist = ticker_obj.history(period="2d")
+            current_price = float(hist["Close"].iloc[-1])
 
         prev_close = float(close_prices.iloc[-1])
         prev_date = data.index[-1].strftime('%Y-%m-%d')
@@ -90,8 +105,9 @@ def get_market_data(ticker: str):
 
     except Exception as e:
         logger.error(f"시장 데이터 가져오기 실패: {e}")
+        logger.error(f"받은 컬럼 정보: {list(data.columns) if 'data' in locals() else 'N/A'}")
         raise
-    
+        
 
 def create_base_message(data: dict, kst_now: str, ticker: str):
     """최종 개선 버전"""
