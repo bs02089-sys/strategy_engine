@@ -3,6 +3,7 @@ import requests
 import xml.etree.ElementTree as ET
 import google.genai as genai
 
+# 환경 변수 로드
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
 DISCORD_USER_ID = os.getenv("DISCORD_USER_ID")
@@ -30,15 +31,16 @@ def main():
     if not news_content.strip(): return
 
     try:
-        # SDK 재설치 후 정석 호출 방식
+        # 404 에러를 방지하는 가장 최신 규격의 호출 방식
         client = genai.Client(api_key=GEMINI_API_KEY)
         response = client.models.generate_content(
             model="gemini-1.5-flash",
-            contents=f"당신은 테크 분석가입니다. 아래 뉴스를 읽고 반드시 '한국어'로 요약해 주세요. 영어는 번역해서 출력하세요:\n\n{news_content}"
+            contents=f"당신은 금융 전문 번역가입니다. 아래 뉴스를 반드시 '한국어'로 요약해 주세요. 영어는 한마디도 섞지 마세요:\n\n{news_content}"
         )
         report = response.text
     except Exception as e:
-        print(f"AI 분석 실패: {e}")
+        # 에러가 나면 터미널에 상세 내용을 찍습니다.
+        print(f"AI 분석 실패 상세: {e}")
         report = None
 
     if report:
