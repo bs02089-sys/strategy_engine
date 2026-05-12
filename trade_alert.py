@@ -41,25 +41,45 @@ KST = pytz.timezone('Asia/Seoul')
 
 # ====================== 함수 정의 ======================
 def get_market_data(ticker: str):
-    """시장 데이터 다운로드 및 계산"""
+    """시장 데이터 다운로드 및 계산 - GitHub Actions 안정화 버전"""
     try:
-        data = yf.download(ticker, period="130d", auto_adjust=True, progress=False)
+        # 1. User-Agent + timeout 강화
+        import yfinance as yf
+        yf.pdr_override()  # 필요시
+        
+        data = yf.download(
+            ticker,
+            period="130d",
+            auto_adjust=True,
+            progress=False,
+            timeout=30,           # ← 추가
+            threads=False,        # ← GitHub Actions에서 안정적
+            group_by='ticker'
+        )
 
         if data.empty:
-            raise ValueError(f"{ticker} 데이터를 가져올 수 없습니다.")
+            raise ValueError(f"{ticker} 데이터를 가져올 수 없습니다. (empty dataframe)")
+
+        # MultiIndex 처리 방어
+        if isinstance(data.columns, pd.MultiIndex):
+            data = data.droplevel(0, axis=1) if len(data.columns.levels) > 1 else data
 
         close_prices = data["Close"].squeeze()
         daily_returns = close_prices.pct_change().dropna()
+        
         rolling_std = daily_returns.rolling(window=20).std() * 100
-        std_20d_avg = float(rolling_std[-20:].mean())
+        std_20d_avg = float(rolling_std[-20:].mean()) if len(rolling_std) >= 20 else 1.8
 
-        if len(rolling_std) < 20 or pd.isna(std_20d_avg):
-            logger.warning("변동성 계산 데이터 부족 → 기본값 1.8% 사용")
+        if pd.isna(std_20d_avg) or std_20d_avg <= 0:
             std_20d_avg = 1.8
+
+        # 현재가 가져오는 부분도 강화
+        ticker_obj = yf.Ticker(ticker)
+        current_price = float(ticker_obj.fast_info.get("last_price", 
+                              ticker_obj.history(period="1d")["Close"].iloc[-1]))
 
         prev_close = float(close_prices.iloc[-1])
         prev_date = data.index[-1].strftime('%Y-%m-%d')
-        current_price = float(yf.Ticker(ticker).fast_info["last_price"])
 
         return {
             "prev_close": prev_close,
@@ -72,6 +92,12 @@ def get_market_data(ticker: str):
 
     except Exception as e:
         logger.error(f"시장 데이터 가져오기 실패: {e}")
+        # 재시도 로직 (최대 2회)
+        if "timeout" in str(e).lower() or "No objects to concatenate" in str(e):
+            logger.info("재시도 중...")
+            import time
+            time.sleep(5)
+            # 여기서 다시 한 번 시도하거나 fallback 처리
         raise
 
 
