@@ -33,18 +33,11 @@ def analyze_market_with_gemini(context: str):
     try:
         client = genai.Client(api_key=GEMINI_API_KEY)
         
-        # [핵심 변경] 모델명에서 'models/'를 제거하고, 가장 안정적인 최신 명칭 사용
-        # 만약 1.5-flash가 계속 404가 나면 'gemini-1.5-flash-002'로 시도해볼 수 있습니다.
-        target_model = "gemini-1.5-flash" 
-        
+        # [핵심] 404 에러 방지를 위해 명칭을 'gemini-1.5-flash-latest'로 변경
+        # 이 명칭은 v1beta API에서 가장 안정적으로 경로가 잡히는 별칭입니다.
         response = client.models.generate_content(
-            model=target_model,
-            contents=[
-                {
-                    "role": "user",
-                    "parts": [{"text": f"지시: 아래 영문 뉴스 리스트를 한국인 투자자를 위해 한국어로 요약해줘. 절대로 영어를 그대로 출력하지 말고 번역해서 출력해.\n\n내용:\n{context}"}]
-                }
-            ]
+            model="gemini-1.5-flash-latest", 
+            contents=f"지시: 아래 영문 뉴스 헤드라인들을 한국 투자자를 위해 '한국어'로 요약해줘. 절대 영어를 그대로 쓰지 말고 번역해서 출력해.\n\n내용:\n{context}"
         )
         return response.text
     except Exception as e:
@@ -60,8 +53,8 @@ def main():
     if analysis_report:
         final_message = f"📢 **오늘의 글로벌 시장 분석 리포트**\n\n{analysis_report}"
     else:
-        # 에러 시에는 원문이라도 확실히 나오게 함
-        final_message = f"⚠️ **AI 요약 실패 (원문 목록)**\n\n{news_content}"
+        # 404 에러가 또 나더라도 최소한 뉴스는 볼 수 있게 구성
+        final_message = f"⚠️ **AI 분석 실패 (원문 목록)**\n\n{news_content}"
 
     mention = f"<@{DISCORD_USER_ID}>\n" if DISCORD_USER_ID else ""
     payload = {"content": f"{mention}{final_message}"}
