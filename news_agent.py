@@ -56,12 +56,12 @@ def main():
             http_options={'api_version': 'v1'}
         )
         
-        # 4. 모델 호출 (404 방지를 위해 접두사 제거한 모델명 사용)
         response = client.models.generate_content(
-            model="gemini-1.5-flash",
+            model="models/gemini-1.5-flash",  # 다시 models/ 를 붙여줍니다.
             contents=f"너는 금융 전문 번역가야. 아래 뉴스 제목들을 반드시 한국어로 번역해서 요약해줘. 영어는 절대 쓰지 마:\n\n{news_content}"
         )
-        report = response.text
+
+
     except Exception as e:
         # 에러 발생 시 콘솔에 상세 내용 출력
         print(f"AI 분석 실패 상세: {e}")
