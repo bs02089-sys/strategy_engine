@@ -4,7 +4,7 @@ import xml.etree.ElementTree as ET
 import google.genai as genai
 from dotenv import load_dotenv
 
-# 1. .env 파일의 환경 변수를 로드합니다. (로컬 실행 시 필수)
+# 1. .env 파일의 환경 변수를 로드합니다.
 load_dotenv()
 
 # 2. 환경 변수 로드
@@ -12,7 +12,7 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
 DISCORD_USER_ID = os.getenv("DISCORD_USER_ID")
 
-# 키워드 한글 매핑 (비상용)
+# 키워드 한글 매핑
 KEYWORDS_MAP = {
     "Semiconductor": "반도체",
     "AI Infrastructure": "AI 인프라",
@@ -50,32 +50,37 @@ def main():
 
     report = None
     try:
-        # 3. Gemini 클라이언트 설정 (v1beta 사용)
+        # 3. Gemini 클라이언트 설정
         client = genai.Client(
             api_key=GEMINI_API_KEY,
-            http_options={'api_version': 'v1beta'}  # v1 → v1beta
+            http_options={'api_version': 'v1beta'}
         )
         
         response = client.models.generate_content(
             model="models/gemini-1.5-flash",
-            contents=f"너는 금융 전문 번역가야. 아래 뉴스 제목들을 반드시 한국어로 번역해서 요약해줘. 영어는 절대 쓰지 마:\n\n{news_content}"
+            contents=f"너는 금융 전문 번역가야. 아래 뉴스 제목과 내용을 반드시 한국어로 번역해서 요약해줘. 영어는 절대 쓰지 마:\n\n{news_content}"
         )
-        report = response.text  # 누락된 할당 추가
+        report = response.text
 
     except Exception as e:
         print(f"AI 분석 실패 상세: {e}")
 
-    # 5. 최종 결과 전송 로직
+    # 4. 최종 결과 전송 로직
     if report:
         final_message = f"📢 **오늘의 글로벌 시장 분석 리포트**\n\n{report}"
     else:
         final_message = f"⚠️ **AI 요약 실패 (뉴스 원문 목록)**\n\n{news_content}"
 
-    # 디스코드 전송
+    # 5. 디스코드 전송 (2000자 제한 처리)
     if DISCORD_WEBHOOK:
         mention = f"<@{DISCORD_USER_ID}>\n" if DISCORD_USER_ID else ""
+        full_message = f"{mention}{final_message}"
+        
+        if len(full_message) > 2000:
+            full_message = full_message[:1997] + "..."
+        
         try:
-            requests.post(DISCORD_WEBHOOK, json={"content": f"{mention}{final_message}"}, timeout=15)
+            requests.post(DISCORD_WEBHOOK, json={"content": full_message}, timeout=15)
             print("디스코드 메시지 전송 완료")
         except Exception as e:
             print(f"디스코드 전송 실패: {e}")
