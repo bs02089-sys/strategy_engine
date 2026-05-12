@@ -5,7 +5,7 @@ on:
     branches:
       - main
     paths:
-      - 'news_agent.py'
+      - "news_agent.py"
       
   schedule:
     - cron: '0 0 * * *'   # 매일 UTC 0시 → KST 오전 9시
