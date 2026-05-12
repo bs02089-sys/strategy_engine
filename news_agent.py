@@ -4,12 +4,12 @@ import requests
 import google.genai as genai
 from google.genai import errors
 
-# --- 설정 및 환경 변수 ---
+# ====================== 설정 및 환경 변수 ======================
 DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
 DISCORD_USER_ID = os.getenv("DISCORD_USER_ID")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-# 키워드 설정 (영문)
+# 분석 키워드 (영문)
 KEYWORDS = ["AI Infrastructure", "Semiconductor"]
 
 # 영→한 번역 매핑
@@ -20,94 +20,82 @@ TRANSLATIONS = {
 
 MAX_NEWS_PER_KEYWORD = 3
 
+# ====================== 기능 함수 ======================
+
 def send_discord_message(content: str):
-    """디스코드 채널로 메시지를 전송합니다."""
+    """디스코드 알림 전송"""
     if not DISCORD_WEBHOOK:
-        print("⚠️ DISCORD_WEBHOOK 환경변수가 설정되지 않았습니다.")
+        print("⚠️ DISCORD_WEBHOOK이 설정되지 않았습니다.")
         return
         
     data = {"content": f"<@{DISCORD_USER_ID}>\n{content}"}
     try:
-        response = requests.post(DISCORD_WEBHOOK, json=data)
+        response = requests.post(DISCORD_WEBHOOK, json=data, timeout=15)
         response.raise_for_status()
     except Exception as e:
         print(f"❌ Discord 전송 실패: {e}")
 
 def fetch_news(keyword: str) -> list[dict]:
-    """
-    뉴스 데이터를 가져오는 함수 (현재는 예시 데이터)
-    사용자님의 기존 뉴스 수집 로직이 있다면 이 부분을 교체하세요.
-    """
+    """뉴스 데이터 수집 (예시 데이터 - 실제 API 연결 시 이 부분을 수정하세요)"""
+    # 실제 구현 시에는 Google News RSS 등을 파싱하는 로직이 들어갑니다.
     return [
-        {"title": f"{keyword} 관련 시장 동향 뉴스 1", "source": "TechNews", "published": "2026-05-12", "summary": "최근 기업들의 설비 투자 추이에 대한 분석 보고서가 발표되었습니다."},
-        {"title": f"{keyword} 글로벌 수요 변화 2", "source": "EconomyLog", "published": "2026-05-12", "summary": "공급망 병목 현상 완화와 함께 하반기 투자 계획이 수정되고 있습니다."}
+        {"title": f"{keyword} 시장 공급망 리포트", "source": "Reuters", "published": "2026-05-12", "summary": "AI 수요 폭증으로 인한 반도체 제조사의 CapEx 투자 확대가 지속되고 있습니다."},
+        {"title": f"{keyword} 투자 심리 분석", "source": "Bloomberg", "published": "2026-05-12", "summary": "금리 변동에 따른 대규모 인프라 투자 지연 우려가 제기되었습니다."}
     ]
 
-def analyze_all_news_with_gemini_batch(all_news_context: str) -> str:
-    """
-    모든 뉴스 데이터를 한 번에 Gemini 1.5 Flash로 분석 (배치 방식)
-    """
-    if not all_news_context:
-        return "분석할 뉴스 데이터가 없습니다."
-
-    if not GEMINI_API_KEY:
-        return "❌ GEMINI_API_KEY 환경변수가 설정되지 않았습니다."
+def analyze_with_gemini_batch(news_context: str) -> str:
+    """Gemini 1.5 Flash를 이용한 배치 분석 (400 에러 해결 버전)"""
+    if not news_context or not GEMINI_API_KEY:
+        return "데이터 또는 API 키가 부족합니다."
 
     client = genai.Client(api_key=GEMINI_API_KEY)
     
     prompt = f"""
-당신은 글로벌 IT 및 반도체 시장 분석가입니다. 
-아래 제공된 뉴스 리스트를 바탕으로 'AI 인프라' 및 '반도체' 분야의 CapEx(설비투자) 흐름을 종합 분석해 주세요.
-
-[분석 요청 사항]
-1. 각 섹터별로 투자 확대 혹은 둔화(Slowdown)의 징후가 있는지 파악할 것.
-2. 중요한 수치나 기업의 결정이 있다면 강조할 것.
-3. 전체적인 시장 심리를 요약할 것.
-4. 반드시 한국어로 답변할 것.
+당신은 반도체 및 AI 산업 분석가입니다. 아래 뉴스 데이터를 바탕으로 'CapEx 투자 둔화' 징후가 있는지 중점적으로 분석하여 한국어로 요약해 주세요.
 
 [뉴스 데이터]
-{all_news_context}
+{news_context}
 """
 
     try:
-        # 모델을 1.5 Flash로 설정하여 무료 티어 안정성 확보
+        # 모델명을 'models/gemini-1.5-flash'로 명시하여 400 NOT_FOUND 방지
         response = client.models.generate_content(
-            model="gemini-1.5-flash", 
+            model="models/gemini-1.5-flash", 
             contents=prompt
         )
         return response.text
     except errors.ClientError as e:
+        # 사용량 초과(429/Resource Exhausted)나 다른 API 오류 처리
         if "RESOURCE_EXHAUSTED" in str(e):
-            return "❌ Gemini API 무료 티어 사용량 초과 (RPM/RPD 제한). 잠시 후 다시 시도해 주세요."
+            return "❌ API 사용량 초과 (무료 티어 제한). 나중에 다시 시도해 주세요."
         return f"❌ Gemini API 오류 발생: {e}"
-    except Exception as e:
-        return f"❌ 예상치 못한 오류 발생: {e}"
 
 def run_agent():
-    print(f"🚀 실행 시작: {datetime.datetime.now()}")
+    """뉴스 에이전트 메인 실행 로직"""
+    print(f"🚀 뉴스 에이전트 실행 시작: {datetime.datetime.now()}")
     
-    combined_news_text = ""
-    
-    # 1. 모든 키워드 뉴스를 먼저 수집하여 하나의 텍스트로 병합
+    combined_text = ""
     for keyword in KEYWORDS:
         news_list = fetch_news(keyword)
         if news_list:
-            translated_name = TRANSLATIONS.get(keyword, keyword)
-            combined_news_text += f"\n### 섹터: {translated_name}\n"
-            for i, n in enumerate(news_list[:MAX_NEWS_PER_KEYWORD]):
-                combined_news_text += f"[{i+1}] {n['title']}\n- 요약: {n['summary'][:150]}\n"
-    
-    # 2. 수집된 텍스트가 있으면 '단 한 번' API 호출
-    if combined_news_text:
-        print("📝 뉴스 분석 중 (Gemini 1.5 Flash 배치 모드)...")
-        analysis_result = analyze_all_news_with_gemini_batch(combined_news_text)
-        
-        # 3. 최종 결과 전송
-        final_message = f"🔎 **오늘의 시장 분석 보고서**\n{analysis_result}"
-        send_discord_message(final_message)
-        print("✅ 분석 완료 및 Discord 전송 시도 성공")
-    else:
-        print("⚠️ 수집된 뉴스가 없어 분석을 건너뜁니다.")
+            translated = TRANSLATIONS.get(keyword, keyword)
+            combined_text += f"\n### 섹터: {translated}\n"
+            for n in news_list[:MAX_NEWS_PER_KEYWORD]:
+                combined_text += f"- {n['title']}\n  (요약: {n['summary']})\n"
 
+    if combined_text:
+        print("📝 Gemini 분석 중...")
+        analysis = analyze_with_gemini_batch(combined_text)
+        
+        # 결과 전송
+        final_msg = f"🔎 **오늘의 AI/반도체 뉴스 분석 보고서**\n\n{analysis}"
+        send_discord_message(final_msg)
+        print("✅ 분석 완료 및 전송 성공")
+    else:
+        print("⚠️ 수집된 뉴스가 없습니다.")
+
+# ====================== 실행부 (격리 완료) ======================
 if __name__ == "__main__":
+    # 이 파일이 직접 실행될 때만 run_agent()가 호출됩니다.
+    # trade_alert.py에서 import할 때는 실행되지 않습니다.
     run_agent()
