@@ -53,7 +53,7 @@ def analyze_market_with_gemini(context: str):
         return "❌ Gemini API 키가 설정되지 않았습니다."
 
     client = genai.Client(api_key=GEMINI_API_KEY)
-    model_id = "models/gemini-1.5-flash"
+    model_id = "gemini-1.5-flash"
 
     prompt = f"""
 당신은 IT/반도체 시장 전문 분석가입니다. 
