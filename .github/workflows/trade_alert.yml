@@ -5,7 +5,7 @@ on:
     branches:
       - main
     paths: 
-      - 'trade_alert.yml'
+      - "trade_alert.yml"
         
   schedule:
     - cron: '0 0 * * 1-5'
