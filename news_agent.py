@@ -39,17 +39,18 @@ def main():
     if not news_content.strip(): return
 
     report = None
+    # ... (앞부분 생략)
+
     try:
-        # [해결책] v1 정식 API 설정 + 모델 풀네임(models/...) 사용
         client = genai.Client(
             api_key=GEMINI_API_KEY,
             http_options={'api_version': 'v1'}
         )
         
-        # 모델명을 'models/gemini-1.5-flash'로 명시적으로 지정
+        # [수정 포인트] 'models/'를 지우고 이름만 적어줍니다.
         response = client.models.generate_content(
-            model="models/gemini-1.5-flash",
-            contents=f"너는 금융 전문 번역가야. 아래 뉴스 제목들을 반드시 한국어로 번역해서 요약해줘. 영어는 절대 쓰지 마:\n\n{news_content}"
+            model="gemini-1.5-flash", 
+            contents=f"뉴스 내용을 한국어로 번역해서 요약해줘:\n\n{news_content}"
         )
         report = response.text
     except Exception as e:
