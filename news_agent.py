@@ -19,7 +19,7 @@ def fetch_latest_news():
             resp = requests.get(rss_url, headers=headers, timeout=15)
             if resp.status_code == 200:
                 root = ET.fromstring(resp.text)
-                all_news_text += f"\n[섹터: {kw}]\n"
+                all_news_text += f"\n[섹터: {kw}]\n" # '분석 섹터' 대신 '섹터'로 유지
                 items = root.findall(".//item")
                 for item in items[:3]:
                     all_news_text += f"- {item.find('title').text}\n"
@@ -31,26 +31,27 @@ def main():
     if not news_content.strip(): return
 
     try:
-        # [핵심 처방] v1 정식 API 버전을 사용하도록 강제 설정
-        # 이 설정이 v1beta로 인한 404 에러를 해결하는 가장 강력한 방법입니다.
-        client = genai.Client(
-            api_key=GEMINI_API_KEY,
-            http_options={'api_version': 'v1'}
-        )
+        client = genai.Client(api_key=GEMINI_API_KEY, http_options={'api_version': 'v1'})
         
+        # [수정] 404 에러 해결을 위해 모델 경로를 'models/gemini-1.5-flash'로 풀네임 작성
         response = client.models.generate_content(
-            model="gemini-1.5-flash",
-            contents=f"당신은 테크 분석가입니다. 아래 뉴스를 읽고 반드시 '한국어'로만 요약해 주세요:\n\n{news_content}"
+            model="models/gemini-1.5-flash", 
+            contents=[
+                "너는 글로벌 경제 뉴스 전문 요약가야. 아래 영문 뉴스들을 읽고 한국인 투자자들이 이해하기 쉽게 핵심만 한국어로 요약해줘.",
+                "지침: 1. 영어는 한 마디도 쓰지 마. 2. 섹터별로 나눠서 요약해.",
+                f"분석할 뉴스:\n{news_content}"
+            ]
         )
         report = response.text
     except Exception as e:
         print(f"AI 분석 실패 상세: {e}")
         report = None
 
+    # 결과 전송 (분석 실패 시에도 원문은 한글 '섹터' 표기 유지)
     if report:
         msg = f"📢 **오늘의 글로벌 시장 분석 리포트**\n\n{report}"
     else:
-        msg = f"⚠️ **AI 분석 실패 (원문 목록)**\n\n{news_content}"
+        msg = f"⚠️ **AI 분석 실패 (뉴스 원문 리스트)**\n\n{news_content}"
 
     mention = f"<@{DISCORD_USER_ID}>\n" if DISCORD_USER_ID else ""
     requests.post(DISCORD_WEBHOOK, json={"content": f"{mention}{msg}"}, timeout=15)
