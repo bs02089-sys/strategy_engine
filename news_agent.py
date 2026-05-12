@@ -55,7 +55,7 @@ def main():
         )
         
         response = client.models.generate_content(
-            model="models/gemini-2.0-flash",
+            model="models/gemini-2.5-flash",
             contents=f"너는 금융 전문 번역가야. 아래 뉴스 제목들을 반드시 한국어로 번역해줘. 섹터 구조는 그대로 유지하고, 영어는 절대 쓰지 마:\n\n{news_content}"
         )
         report = response.text
