@@ -1,12 +1,14 @@
 import os
 import requests
 import xml.etree.ElementTree as ET
+import google.genai as genai
 from dotenv import load_dotenv
 
 # 1. .env 파일의 환경 변수를 로드합니다.
 load_dotenv()
 
 # 2. 환경 변수 로드
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
 DISCORD_USER_ID = os.getenv("DISCORD_USER_ID")
 
@@ -45,7 +47,27 @@ def main():
         print("수집된 뉴스가 없습니다.")
         return
 
-    final_message = f"📢 **오늘의 글로벌 시장 뉴스**\n\n{news_content}"
+    report = None
+    try:
+        client = genai.Client(
+            api_key=GEMINI_API_KEY,
+            http_options={'api_version': 'v1beta'}
+        )
+        
+        response = client.models.generate_content(
+            model="models/gemini-2.0-flash-lite",
+            contents=f"너는 금융 전문 번역가야. 아래 뉴스 제목들을 반드시 한국어로 번역해줘. 섹터 구조는 그대로 유지하고, 영어는 절대 쓰지 마:\n\n{news_content}"
+        )
+        report = response.text
+
+    except Exception as e:
+        print(f"AI 분석 실패 상세: {e}")
+
+    # 최종 결과 전송 로직
+    if report:
+        final_message = f"📢 **오늘의 글로벌 시장 뉴스**\n\n{report}"
+    else:
+        final_message = f"⚠️ **AI 번역 실패 (뉴스 원문)**\n\n{news_content}"
 
     # 디스코드 전송 (2000자 제한 처리)
     if DISCORD_WEBHOOK:
