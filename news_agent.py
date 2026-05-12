@@ -3,6 +3,7 @@ import datetime
 import requests
 import xml.etree.ElementTree as ET
 import google.genai as genai
+from google.genai import types
 
 # 환경 변수 로드
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -31,13 +32,13 @@ def analyze_market_with_gemini(context: str):
     if not GEMINI_API_KEY: return None
     
     try:
-        client = genai.Client(api_key=GEMINI_API_KEY)
+        # [핵심] v1 정식 버전 API를 사용하도록 강제 설정
+        client = genai.Client(api_key=GEMINI_API_KEY, http_options={'api_version': 'v1'})
         
-        # [핵심] 404 에러 방지를 위해 명칭을 'gemini-1.5-flash-latest'로 변경
-        # 이 명칭은 v1beta API에서 가장 안정적으로 경로가 잡히는 별칭입니다.
+        # 모델 명칭은 가장 기본인 gemini-1.5-flash 사용
         response = client.models.generate_content(
-            model="gemini-1.5-flash-latest", 
-            contents=f"지시: 아래 영문 뉴스 헤드라인들을 한국 투자자를 위해 '한국어'로 요약해줘. 절대 영어를 그대로 쓰지 말고 번역해서 출력해.\n\n내용:\n{context}"
+            model="gemini-1.5-flash", 
+            contents=f"명령: 아래 영문 뉴스들을 한국어로 요약해줘. 반드시 한국어만 사용해.\n\n내용:\n{context}"
         )
         return response.text
     except Exception as e:
@@ -53,7 +54,7 @@ def main():
     if analysis_report:
         final_message = f"📢 **오늘의 글로벌 시장 분석 리포트**\n\n{analysis_report}"
     else:
-        # 404 에러가 또 나더라도 최소한 뉴스는 볼 수 있게 구성
+        # 404가 또 나더라도 원문은 확실히 나오게 처리
         final_message = f"⚠️ **AI 분석 실패 (원문 목록)**\n\n{news_content}"
 
     mention = f"<@{DISCORD_USER_ID}>\n" if DISCORD_USER_ID else ""
