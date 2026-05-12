@@ -5,7 +5,7 @@ on:
     branches:
       - main
     paths:
-      - "fx_alert.py"
+      - 'fx_alert.py'
 
   schedule:
     - cron: "0 0 * * 1-5"    # KST 09:00
