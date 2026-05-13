@@ -130,19 +130,27 @@ def main():
     kst_now = datetime.now(config["kst"]).strftime('%Y-%m-%d %H:%M:%S')
     utc_hour = datetime.now(timezone.utc).hour
     
+# ====================== 메인 실행부 수정 ======================
     try:
+        # 1. 시장 데이터 분석 및 하이브리드 타점 계산
         data = get_market_data(config["ticker"])
 
-        # 실행 조건: 수동 실행(FORCE_RUN) 또는 정해진 시간(UTC 0시, 10시)
-        # 잽싸게 등록하고 싶을 땐 FORCE_RUN=true로 수동 실행하세요!
-        if config["force_run"] or utc_hour in [0, 10, 13, 14]: # 미장 개장 시간대 포함
-            base_msg = create_base_message(data, kst_now, config["ticker"])
-            success = send_discord_message(f"```\n{base_msg}```", config["webhook"], config["user_id"])
-            if success: logger.info("✅ 알림 전송 완료")
-            
-    except Exception as e:
-        logger.error(f"실행 중 오류: {e}")
+        # 2. 메시지 생성 및 전송
+        # 별도의 조건 체크 없이, 실행되면 즉시 리포트를 생성하여 전송합니다.
+        # (실행 타이밍은 GitHub Actions의 스케줄러와 수동 버튼이 제어함)
+        base_msg = create_base_message(data, kst_now, config["ticker"])
+        
+        # 메시지 전송 실행
+        success = send_discord_message(f"```\n{base_msg}```", config["webhook"], config["user_id"])
+        
+        if success:
+            logger.info(f"✅ [{config['ticker']}] 알림 전송 완료 (KST {kst_now})")
+        else:
+            logger.error("❌ 알림 전송 실패")
 
+    except Exception as e:
+        logger.error(f"⚠️ 스크립트 실행 중 오류 발생: {e}")
+        
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format='%(message)s')
     main()
