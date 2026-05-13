@@ -62,23 +62,12 @@ def send_discord(message):
     if not WEBHOOK_URL:
         print("⚠️ DISCORD_WEBHOOK이 설정되지 않았습니다.")
         return
-    if not message or len(message.strip()) < 10:
-        print("⚠️ Discord 메시지가 너무 짧거나 비어있습니다.")
-        return
-    
     ping = f"<@{DISCORD_USER_ID}>\n" if DISCORD_USER_ID else ""
     try:
-        response = requests.post(
-            WEBHOOK_URL, 
-            json={"content": ping + message}, 
-            timeout=15
-        )
-        if response.status_code == 204:
-            print("✅ Discord 전송 성공")
-        else:
-            print(f"⚠️ Discord 전송 실패: {response.status_code} {response.text}")
+        response = requests.post(WEBHOOK_URL, json={"content": ping + message}, timeout=15)
+        print(f"Discord 전송: {response.status_code}")
     except Exception as e:
-        print(f"❌ Discord 전송 오류: {e}")
+        print(f"Discord 전송 오류: {e}")
 
 
 # ==========================================
@@ -93,7 +82,7 @@ def main():
             print(f"❌ {ticker} 데이터를 가져올 수 없습니다.")
             return
     except Exception as e:
-        print(f"yfinance 다운로드 오류: {e}")
+        print(f"yfinance 오류: {e}")
         return
 
     # 시간대 처리
@@ -104,25 +93,25 @@ def main():
     if last_row_date < today_est:
         prev_close = float(df["Close"].iloc[-1].item())
         today_open = prev_close
-        mode_msg = "⏳ **장 개시 전: 전일 데이터 기준**"
+        mode_msg = "⏳ **장 개시 전: 전일 종가 기준**"
         is_market_open = False
     else:
         prev_close = float(df["Close"].iloc[-2].item())
         today_open = float(df["Open"].iloc[-1].item())
-        mode_msg = "🚀 **장 개시 후: 하이브리드 전략 적용 중**"
+        mode_msg = "🚀 **장 개시 후**"
         is_market_open = True
 
     closes = df["Close"].values
 
     sigma_short = calculate_annual_sigma(closes, 30)
-    sigma_main  = calculate_annual_sigma(closes, 90)
+    sigma_main  = calculate_annual_sigma(closes, 90)   # 메인
     sigma_long  = calculate_annual_sigma(closes, 252)
     ratio = sigma_short / sigma_long if sigma_long > 0 else 1.0
 
     gap_ratio = (today_open - prev_close) / prev_close
 
-    # 다중 타점 계산
-    base = today_open if is_market_open else prev_close
+    # === 타점 계산: 장 개시 전에는 항상 전일 종가 기준 ===
+    base = prev_close if not is_market_open else today_open
     extreme_gap_down = gap_ratio <= -0.08
 
     t_1_0 = base * (1 - sigma_main)
@@ -190,16 +179,17 @@ def main():
         f"📊 **{ticker} 3단계 변동성 전략 리포트**",
         f"━━━━━━━━━━━━━━━━━━━━",
         f"{mode_msg} | {regime}",
+        f"📊 **90일 σ (메인)** : {sigma_main*100:.2f}%",
         f"✅ 전일 종가 : ${prev_close:.2f} ({profit_loss:+.2f}%)",
         f"🚀 금일 시가 : ${today_open:.2f} (갭 {gap_ratio*100:+.1f}%)",
         f"━━━━━━━━━━━━━━━━━━━━",
-        f"📍 -1.0σ : ${t_1_0:.2f}",
+        f"📍 -1.0σ : ${t_1_0:.2f}  ← 전일 종가 기준",
         f"📍 -1.2σ : ${t_1_2:.2f}",
         f"📍 -1.5σ : ${t_1_5:.2f}",
         f"📍 -2.0σ : ${t_2_0:.2f}",
         f"📍 -2.5σ : ${t_2_5:.2f} (VIX 극단용)",
         f"📍 +1.0σ 목표 : ${target_profit:.2f}",
-        f"📊 90일 σ : {sigma_main*100:.2f}% | 단기/장기 비율: {ratio:.2f}",
+        f"📉 단기/장기 σ 비율: {ratio:.2f}",
         f"📉 VIX : {vix_info}",
         f"\n🔎 시장 판단",
         f"{extreme_msg}{guidance}",
@@ -211,8 +201,8 @@ def main():
     ]
 
     final_report = "\n".join(report)
-    print(final_report)          # Actions 로그 확인용
-    send_discord(final_report)   # Discord 전송
+    print(final_report)
+    send_discord(final_report)
 
     # config 업데이트
     config["LAST_RUN_TIME"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
