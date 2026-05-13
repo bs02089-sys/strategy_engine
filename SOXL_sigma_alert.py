@@ -140,7 +140,7 @@ def main():
         f"━━━━━━━━━━━━━━━━━━━━",
         f"{mode_msg}",
         f"{sub_msg}",
-        f"✅ 전일 종가 : ${prev_close:.2f}",
+        f"✅ 전일 종가 : ${prev_close:.2f} ({profit_loss:+.2f}%)",
         f"🚀 금일 시가 : ${today_open:.2f} (갭: {gap_ratio*100:+.2f}%)",
         f"━━━━━━━━━━━━━━━━━━━━",
         f"📍 -1σ 매수 타점 : ${target_price_1s:.2f}",
