@@ -8,21 +8,15 @@ from datetime import datetime
 from dotenv import load_dotenv
 
 # ==========================================
-# 1. 환경 변수 로드 (로컬 + Actions 모두 지원)
+# 1. 환경 설정
 # ==========================================
-load_dotenv()  # 로컬 .env 파일 로드
+load_dotenv()
 
 WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK")
 DISCORD_USER_ID = os.getenv("DISCORD_USER_ID")
 
-# GitHub Actions 디버깅용 출력
 print(f"🔍 DEBUG: WEBHOOK_URL loaded = {bool(WEBHOOK_URL)}")
-if not WEBHOOK_URL:
-    print("⚠️ WARNING: DISCORD_WEBHOOK이 설정되지 않았습니다.")
 
-# ==========================================
-# 2. 설정 파일
-# ==========================================
 WORKING_DIR = os.path.dirname(os.path.abspath(__file__))
 os.chdir(WORKING_DIR)
 
@@ -46,7 +40,7 @@ ANNUAL_QUOTA = config.get("ANNUAL_QUOTA", 20)
 HOLD_DATE = config.get("HOLD_DATE", "2028-05-07")
 
 # ==========================================
-# 3. 보조 함수
+# 2. 보조 함수
 # ==========================================
 def calculate_annual_sigma(closes, window):
     closes = np.array(closes, dtype=float)
@@ -56,7 +50,7 @@ def calculate_annual_sigma(closes, window):
     log_returns = np.diff(np.log(closes[-window-1:]))
     log_returns = log_returns[np.isfinite(log_returns)]
     if len(log_returns) < 15:
-        return 0.40  # SOXL 기본값 fallback
+        return 0.40
     return np.std(log_returns) * np.sqrt(252)
 
 
@@ -74,18 +68,13 @@ def get_vix_report():
 
 def send_discord(message):
     if not WEBHOOK_URL:
-        print("⚠️ Discord Webhook이 설정되지 않아 전송을 건너뜁니다.")
+        print("⚠️ DISCORD_WEBHOOK이 설정되지 않았습니다.")
         return
-    
     ping = f"<@{DISCORD_USER_ID}>\n" if DISCORD_USER_ID else ""
     try:
-        response = requests.post(
-            WEBHOOK_URL,
-            json={"content": ping + message},
-            timeout=15
-        )
+        response = requests.post(WEBHOOK_URL, json={"content": ping + message}, timeout=15)
         if response.status_code == 204:
-            print("✅ Discord 메시지 전송 성공")
+            print("✅ Discord 전송 성공")
         else:
             print(f"⚠️ Discord 전송 실패: {response.status_code}")
     except Exception as e:
@@ -93,7 +82,7 @@ def send_discord(message):
 
 
 # ==========================================
-# 4. 메인 함수
+# 3. 메인
 # ==========================================
 def main():
     ticker = "SOXL"
@@ -103,7 +92,17 @@ def main():
         if df.empty:
             print("❌ SOXL 데이터 다운로드 실패")
             return
-        df = df.dropna(subset=["Close", "Open"])
+        
+        print(f"📥 yfinance 다운로드 완료: {len(df)} rows")
+        print(f"컬럼 목록: {list(df.columns)}")
+        
+        # 안전한 NaN 제거
+        drop_cols = [col for col in ["Close", "Open"] if col in df.columns]
+        if drop_cols:
+            df = df.dropna(subset=drop_cols)
+        else:
+            df = df.dropna()
+            
     except Exception as e:
         print(f"yfinance 오류: {e}")
         return
@@ -216,7 +215,10 @@ def main():
 
     final_report = "\n".join(report)
     
+    print("\n" + "="*60)
     print(final_report)
+    print("="*60 + "\n")
+
     send_discord(final_report)
 
     # config 업데이트
