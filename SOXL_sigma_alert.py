@@ -48,7 +48,7 @@ def calculate_annual_sigma(closes, window):
 
 def get_vix_report():
     try:
-        df_vix = yfinance.download("^VIX", period="2d", auto_adjust=True, progress=False)
+        df_vix = yf.download("^VIX", period="2d", auto_adjust=True, progress=False)
         if not df_vix.empty:
             vix_val = float(df_vix["Close"].iloc[-1].item())
             status = "안정" if vix_val <= 15 else "주의" if vix_val <= 25 else "공포" if vix_val <= 35 else "극단적 공포"
@@ -59,12 +59,26 @@ def get_vix_report():
 
 
 def send_discord(message):
-    if not WEBHOOK_URL: return
+    if not WEBHOOK_URL:
+        print("⚠️ DISCORD_WEBHOOK이 설정되지 않았습니다.")
+        return
+    if not message or len(message.strip()) < 10:
+        print("⚠️ Discord 메시지가 너무 짧거나 비어있습니다.")
+        return
+    
     ping = f"<@{DISCORD_USER_ID}>\n" if DISCORD_USER_ID else ""
     try:
-        requests.post(WEBHOOK_URL, json={"content": ping + message}, timeout=10)
+        response = requests.post(
+            WEBHOOK_URL, 
+            json={"content": ping + message}, 
+            timeout=15
+        )
+        if response.status_code == 204:
+            print("✅ Discord 전송 성공")
+        else:
+            print(f"⚠️ Discord 전송 실패: {response.status_code} {response.text}")
     except Exception as e:
-        print(f"Discord 전송 오류: {e}")
+        print(f"❌ Discord 전송 오류: {e}")
 
 
 # ==========================================
@@ -74,7 +88,7 @@ def main():
     ticker = "SOXL"
     
     try:
-        df = yfinance.download(ticker, period="2y", auto_adjust=True, progress=False)
+        df = yf.download(ticker, period="2y", auto_adjust=True, progress=False)
         if df.empty:
             print(f"❌ {ticker} 데이터를 가져올 수 없습니다.")
             return
@@ -82,7 +96,7 @@ def main():
         print(f"yfinance 다운로드 오류: {e}")
         return
 
-    # ==================== 시간대 처리 ====================
+    # 시간대 처리
     tz_est = pytz.timezone('US/Eastern')
     today_est = datetime.now(tz_est).date()
     last_row_date = df.index[-1].date()
@@ -100,7 +114,6 @@ def main():
 
     closes = df["Close"].values
 
-    # 3단계 시그마
     sigma_short = calculate_annual_sigma(closes, 30)
     sigma_main  = calculate_annual_sigma(closes, 90)
     sigma_long  = calculate_annual_sigma(closes, 252)
@@ -108,7 +121,7 @@ def main():
 
     gap_ratio = (today_open - prev_close) / prev_close
 
-    # 다중 타점 계산 + 극단 갭 하락 보정
+    # 다중 타점 계산
     base = today_open if is_market_open else prev_close
     extreme_gap_down = gap_ratio <= -0.08
 
@@ -150,7 +163,6 @@ def main():
         aggression = "공격적"
         recommend = f"-1.0σ (${t_1_0:.2f}) ~ -1.2σ"
 
-    # 가이드 메시지
     extreme_msg = "⚠️ **극단적 갭 하락 감지!** 타점 하한 적용됨\n" if extreme_gap_down else ""
 
     if vix_val >= 35:
@@ -169,15 +181,38 @@ def main():
     else:
         guide_msg = "💤 미 개장 전입니다."
 
-    # 리포트 출력
+    # ==================== 리포트 ====================
     profit_loss = ((today_open - MY_AVG_PRICE) / MY_AVG_PRICE * 100) if MY_AVG_PRICE > 0 else 0
     KST = pytz.timezone('Asia/Seoul')
 
-    report = [ ... ]   # ← 기존 리포트 부분 그대로 사용
+    report = [
+        f"━━━━━━━━━━━━━━━━━━━━",
+        f"📊 **{ticker} 3단계 변동성 전략 리포트**",
+        f"━━━━━━━━━━━━━━━━━━━━",
+        f"{mode_msg} | {regime}",
+        f"✅ 전일 종가 : ${prev_close:.2f} ({profit_loss:+.2f}%)",
+        f"🚀 금일 시가 : ${today_open:.2f} (갭 {gap_ratio*100:+.1f}%)",
+        f"━━━━━━━━━━━━━━━━━━━━",
+        f"📍 -1.0σ : ${t_1_0:.2f}",
+        f"📍 -1.2σ : ${t_1_2:.2f}",
+        f"📍 -1.5σ : ${t_1_5:.2f}",
+        f"📍 -2.0σ : ${t_2_0:.2f}",
+        f"📍 -2.5σ : ${t_2_5:.2f} (VIX 극단용)",
+        f"📍 +1.0σ 목표 : ${target_profit:.2f}",
+        f"📊 90일 σ : {sigma_main*100:.2f}% | 단기/장기 비율: {ratio:.2f}",
+        f"📉 VIX : {vix_info}",
+        f"\n🔎 시장 판단",
+        f"{extreme_msg}{guidance}",
+        f"🎯 매수 공격성 : {aggression}",
+        f"\n{guide_msg}",
+        f"◆ {HOLD_DATE}까지 보유, 익절은 없다!",
+        f"◆ 탄약 : {CURRENT_USED}/{ANNUAL_QUOTA} 발",
+        f"⏰ {datetime.now(KST).strftime('%Y-%m-%d %H:%M')}"
+    ]
 
     final_report = "\n".join(report)
-    print(final_report)
-    send_discord(final_report)
+    print(final_report)          # Actions 로그 확인용
+    send_discord(final_report)   # Discord 전송
 
     # config 업데이트
     config["LAST_RUN_TIME"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
