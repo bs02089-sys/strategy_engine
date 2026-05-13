@@ -48,11 +48,23 @@ def calculate_annual_sigma(closes, window):
     closes = closes[~np.isnan(closes)]
     if len(closes) < window + 10:
         window = max(30, len(closes) - 10)
-    log_returns = np.diff(np.log(closes[-window-1:]))
+    
+    # 윈도우 구간 로그 수익률
+    window_closes = closes[-(window + 1):]
+    log_returns = np.diff(np.log(window_closes))
     log_returns = log_returns[np.isfinite(log_returns)]
+    
     if len(log_returns) < 15:
         return 0.40
-    return np.std(log_returns) * np.sqrt(252)
+    
+    # ✅ ddof=1: 표본표준편차 (금융 표준)
+    daily_sigma = np.std(log_returns, ddof=1)
+    annual_sigma = daily_sigma * np.sqrt(252)
+    
+    # ✅ 디버그 출력 (검증용)
+    print(f"  [{window}일 윈도우] 일별σ={daily_sigma*100:.2f}%, 연환산σ={annual_sigma*100:.2f}%")
+    
+    return annual_sigma
 
 
 def get_vix_report():
