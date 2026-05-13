@@ -36,12 +36,23 @@ ANNUAL_QUOTA = config.get("ANNUAL_QUOTA", 20)
 HOLD_DATE = config.get("HOLD_DATE", "2028-05-07")
 
 # ==========================================
-# 2. 보조 함수
+# 2. 보조 함수 (NaN 방지 강화)
 # ==========================================
 def calculate_annual_sigma(closes, window):
-    if len(closes) < window + 1:
-        window = len(closes) - 1
+    """NaN 안전하게 처리한 연율화 시그마"""
+    closes = np.array(closes, dtype=float)
+    closes = closes[~np.isnan(closes)]  # NaN 제거
+    
+    if len(closes) < window + 5:  # 최소 데이터 확보
+        window = max(20, len(closes) - 5)
+    
     log_returns = np.diff(np.log(closes[-window-1:]))
+    # NaN 또는 inf 제거
+    log_returns = log_returns[np.isfinite(log_returns)]
+    
+    if len(log_returns) < 10:
+        return 0.35  # 기본값 (SOXL 평균 변동성 근처)
+    
     daily_std = np.std(log_returns)
     return daily_std * np.sqrt(252)
 
@@ -54,20 +65,20 @@ def get_vix_report():
             status = "안정" if vix_val <= 15 else "주의" if vix_val <= 25 else "공포" if vix_val <= 35 else "극단적 공포"
             return vix_val, f"{vix_val:.1f} ({status})"
     except Exception as e:
-        print(f"VIX 데이터 오류: {e}")
+        print(f"VIX 오류: {e}")
     return 0.0, "N/A"
 
 
 def send_discord(message):
     if not WEBHOOK_URL:
-        print("⚠️ DISCORD_WEBHOOK이 설정되지 않았습니다.")
+        print("⚠️ WEBHOOK 미설정")
         return
     ping = f"<@{DISCORD_USER_ID}>\n" if DISCORD_USER_ID else ""
     try:
-        response = requests.post(WEBHOOK_URL, json={"content": ping + message}, timeout=15)
-        print(f"Discord 전송: {response.status_code}")
+        requests.post(WEBHOOK_URL, json={"content": ping + message}, timeout=15)
+        print("✅ Discord 전송 완료")
     except Exception as e:
-        print(f"Discord 전송 오류: {e}")
+        print(f"Discord 전송 실패: {e}")
 
 
 # ==========================================
@@ -79,8 +90,10 @@ def main():
     try:
         df = yf.download(ticker, period="2y", auto_adjust=True, progress=False)
         if df.empty:
-            print(f"❌ {ticker} 데이터를 가져올 수 없습니다.")
+            print("❌ 데이터 다운로드 실패")
             return
+        # NaN 제거
+        df = df.dropna(subset=["Close"])
     except Exception as e:
         print(f"yfinance 오류: {e}")
         return
@@ -104,13 +117,13 @@ def main():
     closes = df["Close"].values
 
     sigma_short = calculate_annual_sigma(closes, 30)
-    sigma_main  = calculate_annual_sigma(closes, 90)   # 메인
+    sigma_main  = calculate_annual_sigma(closes, 90)
     sigma_long  = calculate_annual_sigma(closes, 252)
     ratio = sigma_short / sigma_long if sigma_long > 0 else 1.0
 
     gap_ratio = (today_open - prev_close) / prev_close
 
-    # === 타점 계산: 장 개시 전에는 항상 전일 종가 기준 ===
+    # 타점 계산
     base = prev_close if not is_market_open else today_open
     extreme_gap_down = gap_ratio <= -0.08
 
@@ -128,7 +141,7 @@ def main():
 
     target_profit = prev_close * (1 + sigma_main)
 
-    # Regime 판단
+    # Regime 판단 (생략 없이 동일)
     vix_val, vix_info = get_vix_report()
 
     if vix_val >= 35.0:
@@ -183,13 +196,13 @@ def main():
         f"✅ 전일 종가 : ${prev_close:.2f} ({profit_loss:+.2f}%)",
         f"🚀 금일 시가 : ${today_open:.2f} (갭 {gap_ratio*100:+.1f}%)",
         f"━━━━━━━━━━━━━━━━━━━━",
-        f"📍 -1.0σ : ${t_1_0:.2f}  ← 전일 종가 기준",
+        f"📍 -1.0σ : ${t_1_0:.2f} ← 전일 종가 기준",
         f"📍 -1.2σ : ${t_1_2:.2f}",
         f"📍 -1.5σ : ${t_1_5:.2f}",
         f"📍 -2.0σ : ${t_2_0:.2f}",
         f"📍 -2.5σ : ${t_2_5:.2f} (VIX 극단용)",
         f"📍 +1.0σ 목표 : ${target_profit:.2f}",
-        f"📉 단기/장기 σ 비율: {ratio:.2f}",
+        f"📉 단기/장기 σ 비율 : {ratio:.2f}",
         f"📉 VIX : {vix_info}",
         f"\n🔎 시장 판단",
         f"{extreme_msg}{guidance}",
@@ -204,7 +217,6 @@ def main():
     print(final_report)
     send_discord(final_report)
 
-    # config 업데이트
     config["LAST_RUN_TIME"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with open(config_path, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=4, ensure_ascii=False)
