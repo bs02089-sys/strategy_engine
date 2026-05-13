@@ -10,7 +10,7 @@ import yfinance as yf
 import pytz
 from dotenv import load_dotenv
 
-# 로깅 설정 (함수 밖에서는 정의만 수행)
+# 로깅 설정
 logger = logging.getLogger(__name__)
 
 # ====================== 핵심 환경 설정 ======================
@@ -28,124 +28,121 @@ def setup_environment():
 
 # ====================== 데이터 분석 로직 ======================
 def get_market_data(ticker: str):
-    """야후 파이낸스에서 시장 데이터를 가져와 변동성 및 목표가 계산"""
+    """야후 파이낸스에서 시장 데이터를 가져와 변동성 및 하이브리드 타점 계산"""
     try:
+        # 시그마 계산을 위해 충분한 데이터 로드
         ticker_obj = yf.Ticker(ticker)
-        data = ticker_obj.history(period="130d", auto_adjust=True, timeout=30)
+        df = ticker_obj.history(period="130d", auto_adjust=True, timeout=30)
 
-        if data.empty:
+        if df.empty:
             raise ValueError(f"{ticker} 데이터 다운로드 실패")
 
-        # 컬럼 소문자화 및 정리
-        data.columns = [str(col).lower().replace(" ", "_") for col in data.columns]
-        close_col = next((col for col in data.columns if 'close' in col), None)
-        
-        if close_col is None:
-            raise KeyError(f"Close 컬럼을 찾을 수 없습니다.")
+        # [1] 시간대 판별 및 기본 가격 추출
+        # ------------------------------------------
+        last_row_time = df.index[-1]
+        # 미국 동부 시각 기준 오늘 날짜 확인
+        today_date_us = datetime.now(pytz.timezone('US/Eastern')).date()
 
-        close_prices = data[close_col].squeeze()
+        if last_row_time.date() < today_date_us:
+            # 장 개시 전 (낮 시간)
+            prev_close = float(df["Close"].iloc[-1])
+            today_open = prev_close
+            is_market_open = False
+            mode_msg = "⏳ 장 개시 전 (전일 종가 기준)"
+        else:
+            # 장 개시 후 (밤 시간)
+            prev_close = float(df["Close"].iloc[-2])
+            today_open = float(df["Open"].iloc[-1])
+            is_market_open = True
+            mode_msg = "🚀 장 개시 후 (시가 보정 적용)"
+        # ------------------------------------------
 
-        # 변동성 계산 (20일 평균)
-        daily_returns = close_prices.pct_change().dropna()
+        # [2] 변동성 계산 (20일 평균)
+        daily_returns = df["Close"].pct_change().dropna()
         rolling_std = daily_returns.rolling(window=20).std() * 100
         std_20d_avg = float(rolling_std.tail(20).mean())
 
-        # 기본값 방어 로직
-        if len(rolling_std) < 20 or pd.isna(std_20d_avg) or std_20d_avg <= 0:
+        # 기본값 방어
+        if pd.isna(std_20d_avg) or std_20d_avg <= 0:
             std_20d_avg = 1.8
 
+        # [3] 하이브리드 타점 계산
+        gap_ratio = (today_open - prev_close) / prev_close
+        
+        # 갭 하락 시에만 타점 하향 보정
+        if is_market_open and gap_ratio < 0:
+            # 시가에서 (평균 변동성 - 이미 발생한 갭 하락분)만큼 추가 대기
+            rem_std = max(0, std_20d_avg + (gap_ratio * 100))
+            buy_target = today_open * (1 - rem_std / 100)
+            sub_msg = f"📉 갭 하락 보정 (-{abs(gap_ratio*100):.2f}% 반영)"
+        else:
+            # 장전이거나 갭 상승 시 기존 방식
+            buy_target = prev_close * (1 - std_20d_avg / 100)
+            sub_msg = "📈 기존 타점 유지"
+
+        take_profit = prev_close * (1 + std_20d_avg / 100)
+
         return {
-            "prev_close": float(close_prices.iloc[-1]),
-            "prev_date": data.index[-1].strftime('%Y-%m-%d'),
-            "std_20d_avg": std_20d_avg,
+            "prev_close": prev_close,
+            "today_open": today_open,
+            "gap_ratio": gap_ratio,
+            "std": std_20d_avg,
+            "buy_target": buy_target,
+            "take_profit": take_profit,
+            "mode_msg": mode_msg,
+            "sub_msg": sub_msg,
+            "is_market_open": is_market_open
         }
 
     except Exception as e:
-        logger.error(f"시장 데이터 가져오기 실패: {e}")
+        logger.error(f"시장 데이터 분석 실패: {e}")
         raise
 
 def create_base_message(data: dict, kst_now: str, ticker: str):
-    """디스코드에 보낼 메시지 텍스트 생성"""
-    today_date = kst_now.split()[0]
-    prev_close = data['prev_close']
-    std = data['std_20d_avg']
-    
-    take_profit = prev_close * (1 + std / 100)
-    buy_target = prev_close * (1 - std / 100)
-
+    """디스코드 리포트 텍스트 생성"""
     return (
-        f"🔔 **{ticker} 시장 현황** ({today_date})\n\n"
-        f"📍 **현재 시각** : {kst_now}\n\n"
+        f"🔔 **{ticker} 전략 알림**\n"
+        f"📍 {data['mode_msg']}\n"
+        f"📍 {data['sub_msg']}\n\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"💰 **전일 종가** : ${prev_close:.2f}\n"
-        f"📊 **20일 평균 변동성** : ±{std:.2f}%\n"
-        f"🎯 익절 목표 : ${take_profit:.2f} (+{std:.2f}%)\n"
-        f"🛒 매수 목표 : ${buy_target:.2f} (-{std:.2f}%)\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━"
+        f"💰 전일 종가 : ${data['prev_close']:.2f}\n"
+        f"🚀 금일 시가 : ${data['today_open']:.2f} (Gap: {data['gap_ratio']*100:+.2f}%)\n"
+        f"📊 평균 변동성 : ±{data['std']:.2f}%\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🛒 **매수 타점 : ${data['buy_target']:.2f}**\n"
+        f"🎯 **익절 목표 : ${data['take_profit']:.2f}**\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"⏰ 분석시각: {kst_now}"
     )
 
 def send_discord_message(content: str, webhook_url: str, user_id: str):
     """디스코드 웹훅 전송"""
-    if not webhook_url:
-        logger.error("웹훅 URL이 없어 메시지를 전송할 수 없습니다.")
-        return False
-
+    if not webhook_url: return False
     mention = f"<@{user_id}>" if user_id else ""
-    message = f"{mention}\n{content}"
-
     try:
-        response = requests.post(
-            webhook_url,
-            json={"content": message},
-            timeout=15
-        )
-        if response.status_code in [200, 204]:
-            return True
-        else:
-            logger.error(f"Discord 전송 실패: {response.status_code}")
-            return False
-    except Exception as e:
-        logger.error(f"Discord 통신 오류: {e}")
-        return False
+        requests.post(webhook_url, json={"content": f"{mention}\n{content}"}, timeout=15)
+        return True
+    except: return False
 
 # ====================== 메인 실행부 ======================
 def main():
-    """스크립트의 실제 실행 로직"""
     config = setup_environment()
     kst_now = datetime.now(config["kst"]).strftime('%Y-%m-%d %H:%M:%S')
     utc_hour = datetime.now(timezone.utc).hour
     
-    logger.info(f"실행 시작 | KST: {kst_now} | UTC Hour: {utc_hour}")
-
     try:
-        # 데이터 수집
         data = get_market_data(config["ticker"])
 
-        # 조건 체크 (FORCE_RUN이거나 특정 시간대인 경우)
-        if config["force_run"] or utc_hour in [0, 10]:
+        # 실행 조건: 수동 실행(FORCE_RUN) 또는 정해진 시간(UTC 0시, 10시)
+        # 잽싸게 등록하고 싶을 땐 FORCE_RUN=true로 수동 실행하세요!
+        if config["force_run"] or utc_hour in [0, 10, 13, 14]: # 미장 개장 시간대 포함
             base_msg = create_base_message(data, kst_now, config["ticker"])
             success = send_discord_message(f"```\n{base_msg}```", config["webhook"], config["user_id"])
+            if success: logger.info("✅ 알림 전송 완료")
             
-            if success:
-                logger.info("✅ 트레이드 알림 전송 완료")
-        else:
-            logger.info(f"알림 생략 시간 (UTC {utc_hour}시)")
-
     except Exception as e:
-        logger.error(f"스크립트 실행 중 오류 발생: {e}")
+        logger.error(f"실행 중 오류: {e}")
 
-# 다른 파일에서 import 할 때는 실행되지 않도록 차단
 if __name__ == "__main__":
-    # 직접 실행 시 로깅 핸들러 추가
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s | %(levelname)s | %(message)s',
-        handlers=[logging.StreamHandler(sys.stdout)]
-    )
-    
-    # 작업 디렉토리 설정
-    working_dir = os.path.dirname(os.path.abspath(__file__))
-    if working_dir:
-        os.chdir(working_dir)
-        
+    logging.basicConfig(level=logging.INFO, format='%(message)s')
     main()
