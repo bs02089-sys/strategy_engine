@@ -42,7 +42,6 @@ HOLD_DATE = config.get("HOLD_DATE", "2028-05-07")
 # 2. 보조 함수
 # ==========================================
 def calculate_annual_sigma(closes, window):
-    # 멀티인덱스 방지 및 1차원 배열 강제화
     closes = np.array(closes).flatten().astype(float)
     closes = closes[~np.isnan(closes)]
     
@@ -51,15 +50,13 @@ def calculate_annual_sigma(closes, window):
     
     window_closes = closes[-(window + 1):]
     log_returns = np.diff(np.log(window_closes))
-    
-    # 이상치 제거 및 유효 데이터 체크
     log_returns = log_returns[np.isfinite(log_returns)]
+    
     if len(log_returns) < 5:
-        return 0.60  # 기본값
+        return 0.60
     
     daily_sigma = np.std(log_returns, ddof=1)
-    annual_sigma = daily_sigma * np.sqrt(252)
-    return annual_sigma
+    return daily_sigma * np.sqrt(252)
 
 def get_vix_report():
     try:
@@ -113,55 +110,64 @@ def main():
         mode_msg = "🚀 **장 개시 후**"
         is_market_open = True
 
-    # 시그마 계산 (90일 메인)
+    # 변동성 계산
     closes = df["Close"].values
     sigma_main = calculate_annual_sigma(closes, 90)
     sigma_short = calculate_annual_sigma(closes, 30)
     sigma_long = calculate_annual_sigma(closes, 252)
     ratio = sigma_short / sigma_long if sigma_long > 0 else 1.0
-
-    # 💡 직관적 타점 계산 핵심: 연간 시그마를 일일 시그마로 변환
+    
     daily_vol = sigma_main / np.sqrt(252)
     base = today_open if is_market_open else prev_close
 
-    # 타점 = 기준가 - (기준가 * 일일변동성 * 배수)
+    # 타점 리스트 (직관적 차감 방식)
     t_1_0 = base * (1 - daily_vol * 1.0)
     t_1_2 = base * (1 - daily_vol * 1.2)
     t_1_5 = base * (1 - daily_vol * 1.5)
     t_2_0 = base * (1 - daily_vol * 2.0)
     t_2_5 = base * (1 - daily_vol * 2.5)
-    
     target_profit = base * (1 + daily_vol * 1.0)
 
-    # 리포트 작성
+    # VIX 정보 가져오기
     vix_val, vix_info = get_vix_report()
-    profit_loss = ((base - MY_AVG_PRICE) / MY_AVG_PRICE * 100) if MY_AVG_PRICE > 0 else 0
     KST = pytz.timezone('Asia/Seoul')
+    profit_loss = ((base - MY_AVG_PRICE) / MY_AVG_PRICE * 100) if MY_AVG_PRICE > 0 else 0
 
-    # 시장 판단 로직 (생략 없이 유지)
+    # --- 시장 상황별 타점 결정 로직 ---
     if vix_val >= 35.0:
-        regime, guidance, aggression = "🔴🔴 **극단 공포**", "⚠️ -2.5σ 대기", "극보수적"
-    elif ratio >= 1.50:
-        regime, guidance, aggression = "🔴 극고변동성", "📉 -1.5σ ~ -2.0σ 분할", "보수적"
+        regime = "🔴🔴 **VIX 극단 공포**"
+        recommend_price = t_2_5
+        target_name = "-2.5σ (비상 매수)"
+        guidance = "⚠️ 시장 투매 구간입니다. -2.5σ 아래에서만 입질하세요."
+    elif ratio >= 1.30:
+        regime = "🔴 **고변동성 (주의)**"
+        recommend_price = t_2_0
+        target_name = "-2.0σ (방어 매수)"
+        guidance = "📉 변동성 확대 중입니다. 깊은 타점(-2.0σ)에 그물을 치세요."
     else:
-        regime, guidance, aggression = "🟢 정상 범위", "🚀 -1.0σ ~ -1.2σ 매수", "공격적"
+        regime = "🟢 **정상 변동성**"
+        recommend_price = t_1_0
+        target_name = "-1.0σ (추세 매수)"
+        guidance = "🚀 흐름이 안정적입니다. -1.0σ부터 적극적으로 대응하세요."
 
+    # 리포트 구성
     report = [
         f"━━━━━━━━━━━━━━━━━━━━",
-        f"📊 **{ticker} 변동성 전략 리포트**",
+        f"📊 **{ticker} 실전 전략 리포트**",
         f"━━━━━━━━━━━━━━━━━━━━",
         f"{mode_msg} | {regime}",
-        f"📊 **연환산 σ** : {sigma_main*100:.2f}% (일일: {daily_vol*100:.2f}%)",
-        f"✅ 전일 종가 : ${prev_close:.2f} ({profit_loss:+.2f}%)",
-        f"🚀 기준가 : ${base:.2f}",
+        f"📊 **90일 σ** : {sigma_main*100:.1f}% (일일 {daily_vol*100:.2f}%)",
+        f"✅ 기준가 : ${base:.2f} ({profit_loss:+.2f}%)",
         f"━━━━━━━━━━━━━━━━━━━━",
-        f"📍 -1.0σ 타점 : **${t_1_0:.2f}**",
-        f"📍 -1.2σ 타점 : **${t_1_2:.2f}**",
-        f"📍 -1.5σ 타점 : **${t_1_5:.2f}**",
-        f"📍 -2.0σ 타점 : **${t_2_0:.2f}**",
-        f"📍 +1.0σ 목표 : **${target_profit:.2f}**",
+        f"🎯 **오늘의 집중 타점**",
+        f"👉 **{target_name} : ${recommend_price:.2f}**", 
+        f"\n📍 보조 타점",
+        f"- 1단계(-1.2σ) : ${t_1_2:.2f}",
+        f"- 2단계(-1.5σ) : ${t_1_5:.2f}",
+        f"📍 목표 수익(+1.0σ) : ${target_profit:.2f}",
+        f"━━━━━━━━━━━━━━━━━━━━",
         f"📉 VIX : {vix_info}",
-        f"\n🔎 가이드: {guidance} ({aggression})",
+        f"🔎 가이드: {guidance}",
         f"◆ 탄약 : {CURRENT_USED}/{ANNUAL_QUOTA} 발",
         f"⏰ {datetime.now(KST).strftime('%Y-%m-%d %H:%M')}"
     ]
@@ -170,7 +176,7 @@ def main():
     print(final_report)
     send_discord(final_report)
 
-    # 업데이트
+    # 설정 저장
     config["LAST_RUN_TIME"] = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S")
     with open(config_path, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=4, ensure_ascii=False)
