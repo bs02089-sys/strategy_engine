@@ -7,7 +7,8 @@ import pytz
 from datetime import datetime
 from dotenv import load_dotenv
 
-# 1. 환경 설정 및 경로 지정
+# ==========================================
+# 1. 환경 설정
 # ==========================================
 load_dotenv()
 WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK")
@@ -17,6 +18,7 @@ WORKING_DIR = os.path.dirname(os.path.abspath(__file__))
 os.chdir(WORKING_DIR)
 config_path = os.path.join(WORKING_DIR, "config.json")
 
+# config 로드
 if os.path.exists(config_path):
     with open(config_path, "r", encoding="utf-8") as f:
         config = json.load(f)
@@ -24,137 +26,185 @@ else:
     config = {
         "MY_AVG_PRICE": 0.0,
         "CURRENT_USED": 0,
-        "ANNUAL_QUOTA": 20,   
+        "ANNUAL_QUOTA": 20,
+        "HOLD_DATE": "2028-05-07",
         "LAST_RUN_TIME": "N/A"
     }
 
 MY_AVG_PRICE = config.get("MY_AVG_PRICE", 0.0)
 CURRENT_USED = config.get("CURRENT_USED", 0)
 ANNUAL_QUOTA = config.get("ANNUAL_QUOTA", 20)
+HOLD_DATE = config.get("HOLD_DATE", "2028-05-07")
 
 # ==========================================
 # 2. 보조 함수
 # ==========================================
+def calculate_annual_sigma(closes, window):
+    """연율화된 시그마 계산"""
+    if len(closes) < window + 1:
+        window = len(closes) - 1
+    log_returns = np.diff(np.log(closes[-window-1:]))
+    daily_std = np.std(log_returns)
+    return daily_std * np.sqrt(252)
+
+
 def get_vix_report():
     try:
         df_vix = yf.download("^VIX", period="2d", auto_adjust=True, progress=False)
         if not df_vix.empty:
-            vix_val = float(df_vix["Close"].iloc[-1].item())
-            if vix_val <= 15: status = "안정"
-            elif vix_val <= 25: status = "주의"
-            elif vix_val <= 35: status = "공포"
-            else: status = "극단적 공포"
+            vix_val = float(df_vix["Close"].iloc[-1])
+            status = "안정" if vix_val <= 15 else "주의" if vix_val <= 25 else "공포" if vix_val <= 35 else "극단적 공포"
             return vix_val, f"{vix_val:.1f} ({status})"
-    except: pass
+    except Exception as e:
+        print(f"VIX 데이터 오류: {e}")
     return 0.0, "N/A"
 
-def get_order_strategy(vix_val):
-    if vix_val >= 35:
-        return "📌 매수 방식 : LOC 매수 추천 (극단적 공포 → 종가 하락 가능성 높음)"
-    else:
-        return "📌 매수 방식 : 지정가 매수 추천 (장중 저점 체결 유리)"
 
 def send_discord(message):
-    if not WEBHOOK_URL: return
+    if not WEBHOOK_URL:
+        return
     ping = f"<@{DISCORD_USER_ID}>\n" if DISCORD_USER_ID else ""
     try:
         requests.post(WEBHOOK_URL, json={"content": ping + message}, timeout=10)
-    except: pass
+    except Exception as e:
+        print(f"Discord 전송 오류: {e}")
+
 
 # ==========================================
-# 3. 메인 전략 실행 (시간대별 데이터 무결성 확보)
+# 3. 메인
 # ==========================================
 def main():
     ticker = "SOXL"
     
-    # 2년치 데이터 (시그마 계산용)
-    df = yf.download(ticker, period="2y", auto_adjust=True, progress=False)
-    if df.empty:
-        print(f"❌ {ticker} 데이터를 가져올 수 없습니다.")
+    try:
+        df = yf.download(ticker, period="2y", auto_adjust=True, progress=False)
+        if df.empty:
+            print(f"❌ {ticker} 데이터를 가져올 수 없습니다.")
+            return
+    except Exception as e:
+        print(f"yfinance 다운로드 오류: {e}")
         return
 
-    # [시간대별 데이터 추출 로직 보정]
-    # ------------------------------------------
-    last_row_time = df.index[-1]
-    today_date = datetime.now(pytz.timezone('US/Eastern')).date()
+    # 시간대 처리
+    tz_est = pytz.timezone('US/Eastern')
+    today_est = datetime.now(tz_est).date()
+    last_row_date = df.index[-1].date()
 
-    if last_row_time.date() < today_date:
-        # 상황 1: 아직 오늘 장이 열리기 전 (한국 시간 낮~오후)
-        prev_close = float(df["Close"].iloc[-1].item())  # 마지막 줄이 어제의 확정 종가
-        today_open = prev_close  # 아직 시가가 없으므로 종가로 임시 세팅
-        mode_msg = "⏳ **장 개시 전: 전일 데이터 기준 (시가 미반영)**"
+    if last_row_date < today_est:
+        prev_close = float(df["Close"].iloc[-1])
+        today_open = prev_close
+        mode_msg = "⏳ **장 개시 전: 전일 데이터 기준**"
         is_market_open = False
     else:
-        # 상황 2: 오늘 장이 개시됨 (밤 시간대)
-        prev_close = float(df["Close"].iloc[-2].item())  # 뒤에서 두 번째 줄이 어제의 확정 종가
-        today_open = float(df["Open"].iloc[-1].item())   # 마지막 줄이 오늘의 실시간 시가
+        prev_close = float(df["Close"].iloc[-2])
+        today_open = float(df["Open"].iloc[-1])
         mode_msg = "🚀 **장 개시 후: 하이브리드 전략 적용 중**"
         is_market_open = True
-    # ------------------------------------------
 
-    # 연간 σ 계산 (최근 252거래일 로그 수익률 기준)
-    closes = df["Close"].values.flatten()
-    sample_size = min(len(closes) - 1, 252)
-    log_returns = np.diff(np.log(closes[-(sample_size + 1):]))
-    sigma_val = np.std(log_returns)
+    closes = df["Close"].values
 
-    # 매수 타점 계산 (하이브리드 로직)
+    # 3단계 시그마
+    sigma_short = calculate_annual_sigma(closes, 30)
+    sigma_main  = calculate_annual_sigma(closes, 90)
+    sigma_long  = calculate_annual_sigma(closes, 252)
+    ratio = sigma_short / sigma_long if sigma_long > 0 else 1.0
+
     gap_ratio = (today_open - prev_close) / prev_close
+
+    # === 다중 타점 계산 + 극단 갭 하락 보정 ===
+    base = today_open if is_market_open else prev_close
     
-    if is_market_open and gap_ratio < 0:
-        # 갭 하락 시: 시가에서 잔여 변동성만큼 추가 대기
-        rem_1s = max(0, sigma_val + gap_ratio) 
-        rem_2s = max(0, (sigma_val * 2) + gap_ratio)
-        target_price_1s = today_open * (1 - rem_1s)
-        target_price_2s = today_open * (1 - rem_2s)
-        sub_msg = f"📉 갭 하락 보정 적용 (타점 하향)"
-    else:
-        # 갭 상승 또는 장 개시 전: 전일 종가 기준 고정
-        target_price_1s = prev_close * (1 - sigma_val)
-        target_price_2s = prev_close * (1 - (sigma_val * 2))
-        sub_msg = f"📈 갭 상승/장전 (종가 기준 유지)"
+    # 극단적 갭 하락 감지 (-8% 이하)
+    extreme_gap_down = gap_ratio <= -0.08
 
-    target_profit_1s = prev_close * (1 + sigma_val)
+    t_1_0 = base * (1 - sigma_main)
+    t_1_2 = base * (1 - sigma_main * 1.2)
+    t_1_5 = base * (1 - sigma_main * 1.5)
+    t_2_0 = base * (1 - sigma_main * 2.0)
+    t_2_5 = base * (1 - sigma_main * 2.5)
 
-    # 수익률 계산 및 리포트 작성
-    profit_loss = ((today_open - MY_AVG_PRICE) / MY_AVG_PRICE * 100) if MY_AVG_PRICE > 0 else 0
-    hold_date = "2028년 05월 07일"
+    # 극단적 하락 시 타점 하한선 설정 (전일 종가 대비 최대 -38%)
+    if extreme_gap_down:
+        floor_price = prev_close * 0.62   # 최대 -38%까지
+        t_1_5 = max(t_1_5, floor_price)
+        t_2_0 = max(t_2_0, floor_price)
+        t_2_5 = max(t_2_5, floor_price * 0.95)  # -2.5σ는 조금 더 낮게 허용
+
+    target_profit = prev_close * (1 + sigma_main)
+
+    # Regime 판단 (VIX 우선)
     vix_val, vix_info = get_vix_report()
-    order_strategy = get_order_strategy(vix_val)
 
-    # 가이드 메시지 판정
-    if is_market_open:
-        if today_open <= target_price_2s:
-            guide_msg = "🔥 **신호 감지: -2σ 터치! 2회분 매수**"
-        elif today_open <= target_price_1s:
-            guide_msg = "🔥 **신호 감지: -1σ 터치! 매수**"
-        else:
-            guide_msg = "⏳ 타점 대기 중"
+    if vix_val >= 35.0:
+        regime = "🔴🔴 **VIX 극단 공포**"
+        guidance = "⚠️ 극단적 공포 구간. -2.5σ 이하에서 극소량 LOC 매수만 고려하세요."
+        aggression = "극보수적"
+        recommend = f"-2.5σ (${t_2_5:.2f})"
+    elif ratio >= 1.50:
+        regime = "🔴 극고변동성"
+        guidance = "📉 변동성 매우 높음. -1.5σ ~ -2.0σ 구간에서 분할 매수 추천"
+        aggression = "보수적"
+        recommend = f"-1.5σ (${t_1_5:.2f}) ~ -2.0σ"
+    elif ratio >= 1.20:
+        regime = "🟡 고변동성"
+        guidance = "📍 변동성 확대 중. -1.2σ ~ -1.5σ에서 분할 매수 추천"
+        aggression = "중립"
+        recommend = f"-1.2σ (${t_1_2:.2f}) ~ -1.5σ"
     else:
-        guide_msg = "💤 미 증시 개장 전입니다."
+        regime = "🟢 저~중변동성"
+        guidance = "🚀 안정 구간. -1.0σ ~ -1.2σ에서 적극 매수 추천"
+        aggression = "공격적"
+        recommend = f"-1.0σ (${t_1_0:.2f}) ~ -1.2σ"
 
+    # 가이드 메시지
+    if extreme_gap_down:
+        extreme_msg = "⚠️ **극단적 갭 하락 감지!** 타점에 하한선을 적용했습니다.\n"
+    else:
+        extreme_msg = ""
+
+    if vix_val >= 35:
+        guide_msg = f"🔥 **VIX 극단 공포! {recommend}까지 기다리세요**"
+    elif is_market_open:
+        if today_open <= t_2_0 * 0.99:
+            guide_msg = "🔥 **-2.0σ 터치! 대량 분할 매수 고려**"
+        elif today_open <= t_1_5:
+            guide_msg = "🔥 **-1.5σ 근접! 분할 매수**"
+        elif today_open <= t_1_2:
+            guide_msg = "🔥 **-1.2σ 터치! 매수 고려**"
+        elif today_open <= t_1_0:
+            guide_msg = "🔥 **-1.0σ 터치! 매수**"
+        else:
+            guide_msg = f"⏳ 타점 대기 중 (추천: {recommend})"
+    else:
+        guide_msg = "💤 미 개장 전입니다."
+
+    # 리포트
+    profit_loss = ((today_open - MY_AVG_PRICE) / MY_AVG_PRICE * 100) if MY_AVG_PRICE > 0 else 0
     KST = pytz.timezone('Asia/Seoul')
+
     report = [
         f"━━━━━━━━━━━━━━━━━━━━",
-        f"📊 **{ticker} 전략 리포트**",
+        f"📊 **{ticker} 3단계 변동성 전략 리포트**",
         f"━━━━━━━━━━━━━━━━━━━━",
-        f"{mode_msg}",
-        f"{sub_msg}",
+        f"{mode_msg} | {regime}",
         f"✅ 전일 종가 : ${prev_close:.2f} ({profit_loss:+.2f}%)",
-        f"🚀 금일 시가 : ${today_open:.2f} (갭: {gap_ratio*100:+.2f}%)",
+        f"🚀 금일 시가 : ${today_open:.2f} (갭 {gap_ratio*100:+.1f}%)",
         f"━━━━━━━━━━━━━━━━━━━━",
-        f"📍 -1σ 매수 타점 : ${target_price_1s:.2f}",
-        f"📍 -2σ 매수 타점 : ${target_price_2s:.2f}",
-        f"📍 +1σ 매도 목표 : ${target_profit_1s:.2f}",
-        f"📍 1σ (연평균)   : {sigma_val*100:.2f}%",
-        f"📉 VIX 지수 : {vix_info}",
-        f"{order_strategy}",
-        f"\n🎯 전략 지침",
-        f"{guide_msg}",
-        f"◆ MDD 77%는 훈장, 수익률 275%는 결과",
-        f"◆ {hold_date}까지 보유, 익절은 없다!",
-        f"\n📊 시즌 탄약 : {CURRENT_USED}/{ANNUAL_QUOTA} 발",
-        f"⏰ 시각: {datetime.now(KST).strftime('%Y-%m-%d %H:%M')}"
+        f"📍 -1.0σ : ${t_1_0:.2f}",
+        f"📍 -1.2σ : ${t_1_2:.2f}",
+        f"📍 -1.5σ : ${t_1_5:.2f}",
+        f"📍 -2.0σ : ${t_2_0:.2f}",
+        f"📍 -2.5σ : ${t_2_5:.2f} (VIX 극단용)",
+        f"📍 +1.0σ 목표 : ${target_profit:.2f}",
+        f"📊 90일 σ : {sigma_main*100:.2f}% | 단기/장기 비율: {ratio:.2f}",
+        f"📉 VIX : {vix_info}",
+        f"\n🔎 시장 판단",
+        f"{extreme_msg}{guidance}",
+        f"🎯 매수 공격성 : {aggression}",
+        f"\n{guide_msg}",
+        f"◆ {HOLD_DATE}까지 보유, 익절은 없다!",
+        f"◆ 탄약 : {CURRENT_USED}/{ANNUAL_QUOTA} 발",
+        f"⏰ {datetime.now(KST).strftime('%Y-%m-%d %H:%M')}"
     ]
 
     final_report = "\n".join(report)
@@ -165,6 +215,7 @@ def main():
     config["LAST_RUN_TIME"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with open(config_path, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=4, ensure_ascii=False)
+
 
 if __name__ == "__main__":
     main()
