@@ -44,25 +44,31 @@ HOLD_DATE = config.get("HOLD_DATE", "2028-05-07")
 # 2. 보조 함수
 # ==========================================
 def calculate_annual_sigma(closes, window):
-    closes = np.array(closes, dtype=float)
+    # 1차원 배열로 강제 변환 (멀티인덱스 방어)
+    closes = np.array(closes).flatten().astype(float)
     closes = closes[~np.isnan(closes)]
-    if len(closes) < window + 10:
-        window = max(30, len(closes) - 10)
     
-    # 윈도우 구간 로그 수익률
+    if len(closes) < window + 1:
+        window = len(closes) - 1
+    
     window_closes = closes[-(window + 1):]
-    log_returns = np.diff(np.log(window_closes))
-    log_returns = log_returns[np.isfinite(log_returns)]
     
-    if len(log_returns) < 15:
+    # 가격이 0이거나 음수인 경우 방어 (로그 에러 방지)
+    window_closes = window_closes[window_closes > 0]
+    
+    if len(window_closes) < 2:
+        return 0.40 # 데이터 부족 시 기본값
+        
+    log_returns = np.diff(np.log(window_closes))
+    
+    # 극단적인 이상치(Outlier) 제거 (데이터 노이즈 방어)
+    log_returns = log_returns[np.abs(log_returns) < 1.0] 
+    
+    if len(log_returns) < 5:
         return 0.40
     
-    # ✅ ddof=1: 표본표준편차 (금융 표준)
     daily_sigma = np.std(log_returns, ddof=1)
     annual_sigma = daily_sigma * np.sqrt(252)
-    
-    # ✅ 디버그 출력 (검증용)
-    print(f"  [{window}일 윈도우] 일별σ={daily_sigma*100:.2f}%, 연환산σ={annual_sigma*100:.2f}%")
     
     return annual_sigma
 
@@ -143,7 +149,7 @@ def main():
         mode_msg = "🚀 **장 개시 후**"
         is_market_open = True
 
-    closes = df["Close"].values
+    closes = df["Close"].iloc[:, 0].values if isinstance(df["Close"], pd.DataFrame) else df["Close"].values
 
     sigma_short = calculate_annual_sigma(closes, 30)
     sigma_main  = calculate_annual_sigma(closes, 90)
