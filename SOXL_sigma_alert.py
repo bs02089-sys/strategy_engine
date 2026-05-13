@@ -8,16 +8,24 @@ from datetime import datetime
 from dotenv import load_dotenv
 
 # ==========================================
-# 1. 환경 설정
+# 1. 환경 변수 로드 (로컬 + Actions 모두 지원)
 # ==========================================
-load_dotenv()
+load_dotenv()  # 로컬 .env 파일 로드
+
 WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK")
 DISCORD_USER_ID = os.getenv("DISCORD_USER_ID")
 
-print(f"🔍 DEBUG: WEBHOOK_URL 존재 = {bool(WEBHOOK_URL)}")
+# GitHub Actions 디버깅용 출력
+print(f"🔍 DEBUG: WEBHOOK_URL loaded = {bool(WEBHOOK_URL)}")
+if not WEBHOOK_URL:
+    print("⚠️ WARNING: DISCORD_WEBHOOK이 설정되지 않았습니다.")
 
+# ==========================================
+# 2. 설정 파일
+# ==========================================
 WORKING_DIR = os.path.dirname(os.path.abspath(__file__))
 os.chdir(WORKING_DIR)
+
 config_path = os.path.join(WORKING_DIR, "config.json")
 
 if os.path.exists(config_path):
@@ -38,19 +46,18 @@ ANNUAL_QUOTA = config.get("ANNUAL_QUOTA", 20)
 HOLD_DATE = config.get("HOLD_DATE", "2028-05-07")
 
 # ==========================================
-# 2. 보조 함수
+# 3. 보조 함수
 # ==========================================
 def calculate_annual_sigma(closes, window):
     closes = np.array(closes, dtype=float)
     closes = closes[~np.isnan(closes)]
-    if len(closes) < window + 5:
-        window = max(20, len(closes) - 5)
+    if len(closes) < window + 10:
+        window = max(30, len(closes) - 10)
     log_returns = np.diff(np.log(closes[-window-1:]))
     log_returns = log_returns[np.isfinite(log_returns)]
-    if len(log_returns) < 10:
-        return 0.40
-    daily_std = np.std(log_returns)
-    return daily_std * np.sqrt(252)
+    if len(log_returns) < 15:
+        return 0.40  # SOXL 기본값 fallback
+    return np.std(log_returns) * np.sqrt(252)
 
 
 def get_vix_report():
@@ -60,46 +67,43 @@ def get_vix_report():
             vix_val = float(df_vix["Close"].iloc[-1].item())
             status = "안정" if vix_val <= 15 else "주의" if vix_val <= 25 else "공포" if vix_val <= 35 else "극단적 공포"
             return vix_val, f"{vix_val:.1f} ({status})"
-    except Exception as e:
-        print(f"VIX 오류: {e}")
+    except:
+        pass
     return 0.0, "N/A"
 
 
 def send_discord(message):
-    print("🚀 send_discord 함수가 호출되었습니다.")
     if not WEBHOOK_URL:
-        print("❌ DISCORD_WEBHOOK이 설정되지 않았습니다. GitHub Secrets 확인하세요.")
+        print("⚠️ Discord Webhook이 설정되지 않아 전송을 건너뜁니다.")
         return
+    
     ping = f"<@{DISCORD_USER_ID}>\n" if DISCORD_USER_ID else ""
     try:
         response = requests.post(
-            WEBHOOK_URL, 
-            json={"content": ping + message}, 
+            WEBHOOK_URL,
+            json={"content": ping + message},
             timeout=15
         )
-        print(f"📤 Discord HTTP 응답: {response.status_code}")
         if response.status_code == 204:
-            print("✅ Discord 전송 성공!")
+            print("✅ Discord 메시지 전송 성공")
         else:
-            print(f"⚠️ Discord 실패: {response.text[:200]}")
+            print(f"⚠️ Discord 전송 실패: {response.status_code}")
     except Exception as e:
-        print(f"❌ Discord 전송 예외: {e}")
+        print(f"❌ Discord 전송 오류: {e}")
 
 
 # ==========================================
-# 3. 메인
+# 4. 메인 함수
 # ==========================================
 def main():
-    print("✅ main() 시작")
     ticker = "SOXL"
     
     try:
         df = yf.download(ticker, period="2y", auto_adjust=True, progress=False)
         if df.empty:
-            print("❌ 데이터 다운로드 실패")
+            print("❌ SOXL 데이터 다운로드 실패")
             return
         df = df.dropna(subset=["Close", "Open"])
-        print(f"📥 데이터 로드 완료: {len(df)} rows")
     except Exception as e:
         print(f"yfinance 오류: {e}")
         return
@@ -128,26 +132,20 @@ def main():
     ratio = sigma_short / sigma_long if sigma_long > 0 else 1.0
 
     gap_ratio = (today_open - prev_close) / prev_close
-
     base = prev_close if not is_market_open else today_open
-    extreme_gap_down = gap_ratio <= -0.08
 
+    # 타점 계산
     t_1_0 = base * (1 - sigma_main)
     t_1_2 = base * (1 - sigma_main * 1.2)
     t_1_5 = base * (1 - sigma_main * 1.5)
     t_2_0 = base * (1 - sigma_main * 2.0)
     t_2_5 = base * (1 - sigma_main * 2.5)
 
-    if extreme_gap_down:
-        floor_price = prev_close * 0.62
-        t_1_5 = max(t_1_5, floor_price)
-        t_2_0 = max(t_2_0, floor_price)
-        t_2_5 = max(t_2_5, floor_price * 0.95)
-
     target_profit = prev_close * (1 + sigma_main)
 
     vix_val, vix_info = get_vix_report()
 
+    # Regime 판단
     if vix_val >= 35.0:
         regime = "🔴🔴 **VIX 극단 공포**"
         guidance = "⚠️ 극단적 공포 구간. -2.5σ 이하에서 극소량 LOC 매수만 고려하세요."
@@ -169,8 +167,7 @@ def main():
         aggression = "공격적"
         recommend = f"-1.0σ (${t_1_0:.2f}) ~ -1.2σ"
 
-    extreme_msg = "⚠️ **극단적 갭 하락 감지!** 타점 하한 적용됨\n" if extreme_gap_down else ""
-
+    # 가이드 메시지
     if vix_val >= 35:
         guide_msg = f"🔥 **VIX 극단 공포! {recommend}까지 기다리세요**"
     elif is_market_open:
@@ -200,7 +197,7 @@ def main():
         f"✅ 전일 종가 : ${prev_close:.2f} ({profit_loss:+.2f}%)",
         f"🚀 금일 시가 : ${today_open:.2f} (갭 {gap_ratio*100:+.1f}%)",
         f"━━━━━━━━━━━━━━━━━━━━",
-        f"📍 -1.0σ : ${t_1_0:.2f} ← 전일 종가 기준",
+        f"📍 -1.0σ : ${t_1_0:.2f}",
         f"📍 -1.2σ : ${t_1_2:.2f}",
         f"📍 -1.5σ : ${t_1_5:.2f}",
         f"📍 -2.0σ : ${t_2_0:.2f}",
@@ -209,7 +206,7 @@ def main():
         f"📉 단기/장기 σ 비율 : {ratio:.2f}",
         f"📉 VIX : {vix_info}",
         f"\n🔎 시장 판단",
-        f"{extreme_msg}{guidance}",
+        f"{guidance}",
         f"🎯 매수 공격성 : {aggression}",
         f"\n{guide_msg}",
         f"◆ {HOLD_DATE}까지 보유, 익절은 없다!",
@@ -219,18 +216,13 @@ def main():
 
     final_report = "\n".join(report)
     
-    print("\n" + "═"*60)
     print(final_report)
-    print("═"*60)
-
-    send_discord(final_report)   # Discord 전송
+    send_discord(final_report)
 
     # config 업데이트
     config["LAST_RUN_TIME"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with open(config_path, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=4, ensure_ascii=False)
-
-    print("✅ main() 종료")
 
 
 if __name__ == "__main__":
