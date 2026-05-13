@@ -1,6 +1,7 @@
 import os
 import json
 import numpy as np
+import pandas as pd
 import requests
 import yfinance as yf
 import pytz
@@ -58,6 +59,9 @@ def get_vix_report():
     try:
         df_vix = yf.download("^VIX", period="2d", auto_adjust=True, progress=False)
         if not df_vix.empty:
+            # ✅ 수정 1: 멀티인덱스 처리
+            if isinstance(df_vix.columns, pd.MultiIndex):
+                df_vix.columns = df_vix.columns.droplevel(1)
             vix_val = float(df_vix["Close"].iloc[-1].item())
             status = "안정" if vix_val <= 15 else "주의" if vix_val <= 25 else "공포" if vix_val <= 35 else "극단적 공포"
             return vix_val, f"{vix_val:.1f} ({status})"
@@ -86,23 +90,27 @@ def send_discord(message):
 # ==========================================
 def main():
     ticker = "SOXL"
-    
+
     try:
         df = yf.download(ticker, period="2y", auto_adjust=True, progress=False)
         if df.empty:
             print("❌ SOXL 데이터 다운로드 실패")
             return
-        
+
         print(f"📥 yfinance 다운로드 완료: {len(df)} rows")
         print(f"컬럼 목록: {list(df.columns)}")
-        
+
+        # ✅ 수정 1: 멀티인덱스 처리 (최신 yfinance 대응)
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.droplevel(1)
+
         # 안전한 NaN 제거
         drop_cols = [col for col in ["Close", "Open"] if col in df.columns]
         if drop_cols:
             df = df.dropna(subset=drop_cols)
         else:
             df = df.dropna()
-            
+
     except Exception as e:
         print(f"yfinance 오류: {e}")
         return
@@ -210,19 +218,20 @@ def main():
         f"\n{guide_msg}",
         f"◆ {HOLD_DATE}까지 보유, 익절은 없다!",
         f"◆ 탄약 : {CURRENT_USED}/{ANNUAL_QUOTA} 발",
+        # ✅ 수정 3: LAST_RUN_TIME을 KST 기준으로 저장
         f"⏰ {datetime.now(KST).strftime('%Y-%m-%d %H:%M')}"
     ]
 
     final_report = "\n".join(report)
-    
+
     print("\n" + "="*60)
     print(final_report)
     print("="*60 + "\n")
 
     send_discord(final_report)
 
-    # config 업데이트
-    config["LAST_RUN_TIME"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    # config 업데이트 (✅ 수정 3: KST 기준)
+    config["LAST_RUN_TIME"] = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S")
     with open(config_path, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=4, ensure_ascii=False)
 
