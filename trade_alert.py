@@ -1,6 +1,5 @@
 # ====================== Import ======================
 import os
-import sys
 import logging
 from datetime import datetime, timezone
 
@@ -20,9 +19,8 @@ def setup_environment():
     config = {
         "webhook": os.getenv("DISCORD_WEBHOOK"),
         "user_id": os.getenv("DISCORD_USER_ID"),
-        "ticker": os.getenv("TICKER", "SSO"),
+        "ticker": os.getenv("TICKER", "TSLA"),
         "kst": pytz.timezone('Asia/Seoul'),
-        "force_run": os.getenv("FORCE_RUN", "false").lower() == "true"
     }
     return config
 
@@ -128,7 +126,6 @@ def send_discord_message(content: str, webhook_url: str, user_id: str):
 def main():
     config = setup_environment()
     kst_now = datetime.now(config["kst"]).strftime('%Y-%m-%d %H:%M:%S')
-    utc_hour = datetime.now(timezone.utc).hour
     
 # ====================== 메인 실행부 수정 ======================
     try:
