@@ -14,6 +14,8 @@ load_dotenv()
 WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK")
 DISCORD_USER_ID = os.getenv("DISCORD_USER_ID")
 
+print(f"🔍 DEBUG: WEBHOOK_URL 존재 = {bool(WEBHOOK_URL)}")
+
 WORKING_DIR = os.path.dirname(os.path.abspath(__file__))
 os.chdir(WORKING_DIR)
 config_path = os.path.join(WORKING_DIR, "config.json")
@@ -41,16 +43,12 @@ HOLD_DATE = config.get("HOLD_DATE", "2028-05-07")
 def calculate_annual_sigma(closes, window):
     closes = np.array(closes, dtype=float)
     closes = closes[~np.isnan(closes)]
-    
     if len(closes) < window + 5:
         window = max(20, len(closes) - 5)
-    
     log_returns = np.diff(np.log(closes[-window-1:]))
     log_returns = log_returns[np.isfinite(log_returns)]
-    
     if len(log_returns) < 10:
-        return 0.40  # SOXL 평균 수준 fallback
-    
+        return 0.40
     daily_std = np.std(log_returns)
     return daily_std * np.sqrt(252)
 
@@ -68,8 +66,9 @@ def get_vix_report():
 
 
 def send_discord(message):
+    print("🚀 send_discord 함수가 호출되었습니다.")
     if not WEBHOOK_URL:
-        print("⚠️ DISCORD_WEBHOOK 환경변수가 설정되지 않았습니다.")
+        print("❌ DISCORD_WEBHOOK이 설정되지 않았습니다. GitHub Secrets 확인하세요.")
         return
     ping = f"<@{DISCORD_USER_ID}>\n" if DISCORD_USER_ID else ""
     try:
@@ -78,26 +77,29 @@ def send_discord(message):
             json={"content": ping + message}, 
             timeout=15
         )
+        print(f"📤 Discord HTTP 응답: {response.status_code}")
         if response.status_code == 204:
-            print("✅ Discord 메시지 전송 성공")
+            print("✅ Discord 전송 성공!")
         else:
-            print(f"⚠️ Discord 전송 실패: {response.status_code}")
+            print(f"⚠️ Discord 실패: {response.text[:200]}")
     except Exception as e:
-        print(f"❌ Discord 전송 중 오류 발생: {e}")
+        print(f"❌ Discord 전송 예외: {e}")
 
 
 # ==========================================
 # 3. 메인
 # ==========================================
 def main():
+    print("✅ main() 시작")
     ticker = "SOXL"
     
     try:
         df = yf.download(ticker, period="2y", auto_adjust=True, progress=False)
         if df.empty:
-            print("❌ SOXL 데이터 다운로드 실패")
+            print("❌ 데이터 다운로드 실패")
             return
         df = df.dropna(subset=["Close", "Open"])
+        print(f"📥 데이터 로드 완료: {len(df)} rows")
     except Exception as e:
         print(f"yfinance 오류: {e}")
         return
@@ -146,7 +148,6 @@ def main():
 
     vix_val, vix_info = get_vix_report()
 
-    # Regime 판단 (생략 없이)
     if vix_val >= 35.0:
         regime = "🔴🔴 **VIX 극단 공포**"
         guidance = "⚠️ 극단적 공포 구간. -2.5σ 이하에서 극소량 LOC 매수만 고려하세요."
@@ -186,7 +187,7 @@ def main():
     else:
         guide_msg = "💤 미 개장 전입니다."
 
-    # ==================== 리포트 ====================
+    # 리포트
     profit_loss = ((today_open - MY_AVG_PRICE) / MY_AVG_PRICE * 100) if MY_AVG_PRICE > 0 else 0
     KST = pytz.timezone('Asia/Seoul')
 
@@ -218,13 +219,18 @@ def main():
 
     final_report = "\n".join(report)
     
-    print(final_report)           # GitHub Actions 로그용
-    send_discord(final_report)    # ← Discord 전송 (반드시 여기 있음)
+    print("\n" + "═"*60)
+    print(final_report)
+    print("═"*60)
+
+    send_discord(final_report)   # Discord 전송
 
     # config 업데이트
     config["LAST_RUN_TIME"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with open(config_path, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=4, ensure_ascii=False)
+
+    print("✅ main() 종료")
 
 
 if __name__ == "__main__":
