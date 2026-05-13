@@ -1,14 +1,13 @@
-name: daily_sigma_alert
+name: SOXL_sigma_alert
 
 on:
   push:
     branches:
       - main
     paths:
-      - "daily_sigma_alert.py"
+      - "SOXL_sigma_alert.py"
       
   schedule:
-    - cron: '0 0 * * 1-5'    # KST 오전 9시
     - cron: '0 10 * * 1-5'   # KST 오후 7시
 
   workflow_dispatch:
