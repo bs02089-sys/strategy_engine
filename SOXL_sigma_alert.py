@@ -28,7 +28,7 @@ if os.path.exists(config_path):
 else:
     config = {
         "MY_AVG_PRICE": 0.0,
-        "CURRENT_USED": 3,  # 베프님 현재 3회차 집행 중
+        "CURRENT_USED": 0, 
         "ANNUAL_QUOTA": 20,
         "LAST_RUN_TIME": "N/A"
     }
@@ -131,9 +131,9 @@ def main():
         regime = "🔴🔴 **VIX 비상 (패닉)**"
         recommend_price = t_2_5
         target_name = "-2.5σ (비상 매수)"
-        guidance = "⚠️ 투매 발생! -2.5σ 아래에서만 거물을 낚으세요."
+        guidance = "⚠️ 투매 발생! -2.5σ 아래에서만 그물을 낚으세요."
     
-    # 베프님의 갭하락 대응 로직 (-1% 이상 하락 출발 시)
+    # 갭하락 대응 로직 (-1% 이상 하락 출발 시)
     elif gap_ratio <= -0.01:
         regime = "📉 **갭하락 발생 (기회)**"
         recommend_price = t_0_5
