@@ -145,13 +145,13 @@ def main():
         f"{mode_msg} | {regime}",
         f"{price_info}",
         f"━━━━━━━━━━━━━━━━━━━━",
-        f"🎯 **오늘의 집행 타점**",
+        f"🎯 **오늘의 캐스팅 포인트**",
         f"👉 **{target_name} : ${recommend_price:.2f}**", 
         f"\n📍 익절 목표(+1.5σ) : ${target_profit:.2f}",
         f"━━━━━━━━━━━━━━━━━━━━",
         f"📉 VIX 상태 : {vix_info}",
         f"🔎 가이드: {guidance}",
-        f"◆ 탄약 : {CURRENT_CASTS}/{ANNUAL_QUOTA} 발",
+        f"◆ 캐스팅 : {CURRENT_CASTS}/{ANNUAL_QUOTA} 회",
         f"⏰ {datetime.now(KST).strftime('%m/%d %H:%M')}"
     ]
 
