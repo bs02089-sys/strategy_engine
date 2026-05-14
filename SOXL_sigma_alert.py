@@ -89,7 +89,7 @@ def main():
     m_close = now_est.replace(hour=16, minute=0, second=0, microsecond=0)
     is_regular_market = m_open <= now_est <= m_close and now_est.weekday() < 5
 
-    # [2] 대왕 고기 타점 기준 설정
+    # [2] 대왕 고기 포인트 기준 설정
     if is_regular_market:
         mode_msg = "🚀 **장 개시 후 (실시간)**"
         prev_close = float(df["Close"].iloc[-2].item())
@@ -104,7 +104,7 @@ def main():
         gap_ratio = 0
         price_info = f"✅ 전일 종가 : ${prev_close:.2f}"
 
-    # [3] 변동성 분석 및 심화 타점 계산
+    # [3] 변동성 분석 및 심화 캐스팅 포인트 계산
     closes = df["Close"].values
     sigma_90 = calculate_annual_sigma(closes, 90)
     sigma_252 = calculate_annual_sigma(closes, 252)
@@ -112,7 +112,7 @@ def main():
     vol_ratio = sigma_30 / sigma_252 if sigma_252 > 0 else 1.0
     daily_vol = sigma_90 / np.sqrt(252)
     
-    # 타점 심화 적용 (-1.0 -> -1.5 / -0.5 -> -1.0)
+    # 캐스팅 포인트 심화 적용 (-1.0 -> -1.5 / -0.5 -> -1.0)
     t_1_0 = base * (1 - daily_vol * 1.0)
     t_1_5 = base * (1 - daily_vol * 1.5)
     t_2_0 = base * (1 - daily_vol * 2.0)
