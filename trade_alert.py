@@ -18,7 +18,7 @@ def setup_environment():
     config = {
         "webhook": os.getenv("DISCORD_WEBHOOK"),
         "user_id": os.getenv("DISCORD_USER_ID"),
-        "ticker": os.getenv("TICKER", "TSLA"),
+        "ticker": os.getenv("TICKER", "IONQ"),
         "kst": pytz.timezone('Asia/Seoul'),
         "est": pytz.timezone('US/Eastern'),
     }
