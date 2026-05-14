@@ -9,7 +9,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 
 # ==========================================
-# 1. 환경 설정 및 데이터 로드 (베프님 전용)
+# 1. 환경 설정 및 데이터 로드 
 # ==========================================
 load_dotenv()
 
@@ -26,15 +26,15 @@ if os.path.exists(config_path):
         config = json.load(f)
 else:
     config = {
-        "MY_AVG_PRICE": 0.0,
-        "CURRENT_USED": 0,      # 초기값 0으로 리팩토링 완료
-        "ANNUAL_QUOTA": 20,
+        "MY_AVG_PRICE": 0.0,    # 초기값
+        "CURRENT_CASTS": 0,      # 초기값 
+        "ANNUAL_QUOTA": 20,     # 초기값
         "LAST_RUN_TIME": "N/A"
     }
 
 MY_AVG_PRICE = config.get("MY_AVG_PRICE", 0.0)
-CURRENT_USED = config.get("CURRENT_USED", 0)
-ANNUAL_QUOTA = config.get("ANNUAL_QUOTA", 20)
+CURRENT_CASTS = config.get("CURRENT_CASTS", 0)
+ANNUAL_QUOTA = config.get("ANNUAL_QUOTA", 20)  # 초기값
 
 # ==========================================
 # 2. 핵심 계산 함수
@@ -144,7 +144,6 @@ def main():
         f"━━━━━━━━━━━━━━━━━━━━",
         f"{mode_msg} | {regime}",
         f"{price_info}",
-        f"📈 내 수익률 : {profit_loss:+.2f}%",
         f"━━━━━━━━━━━━━━━━━━━━",
         f"🎯 **오늘의 집행 타점**",
         f"👉 **{target_name} : ${recommend_price:.2f}**", 
@@ -152,7 +151,7 @@ def main():
         f"━━━━━━━━━━━━━━━━━━━━",
         f"📉 VIX 상태 : {vix_info}",
         f"🔎 가이드: {guidance}",
-        f"◆ 탄약 : {CURRENT_USED}/{ANNUAL_QUOTA} 발",
+        f"◆ 탄약 : {CURRENT_CASTS}/{ANNUAL_QUOTA} 발",
         f"⏰ {datetime.now(KST).strftime('%m/%d %H:%M')}"
     ]
 
