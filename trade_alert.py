@@ -1,4 +1,3 @@
-# ====================== Import ======================
 import os
 import logging
 from datetime import datetime
@@ -21,12 +20,13 @@ def setup_environment():
         "user_id": os.getenv("DISCORD_USER_ID"),
         "ticker": os.getenv("TICKER", "TSLA"),
         "kst": pytz.timezone('Asia/Seoul'),
+        "est": pytz.timezone('US/Eastern'),
     }
     return config
 
 # ====================== 데이터 분석 로직 ======================
-def get_market_data(ticker: str):
-    """야후 파이낸스에서 시장 데이터를 가져와 변동성 및 하이브리드 타점 계산"""
+def get_market_data(ticker: str, est_tz: pytz.timezone):
+    """시장 데이터를 가져와 정규장 시간 체크 및 하이브리드 타점 계산"""
     try:
         # 시그마 계산을 위해 충분한 데이터 로드
         ticker_obj = yf.Ticker(ticker)
@@ -35,24 +35,31 @@ def get_market_data(ticker: str):
         if df.empty:
             raise ValueError(f"{ticker} 데이터 다운로드 실패")
 
-        # [1] 시간대 판별 및 기본 가격 추출
+        # [1] 미국 현지 시간 판별 및 장 상태 정밀 체크
         # ------------------------------------------
-        last_row_time = df.index[-1]
-        # 미국 동부 시각 기준 오늘 날짜 확인
-        today_date_us = datetime.now(pytz.timezone('US/Eastern')).date()
+        now_est = datetime.now(est_tz)
+        
+        # 정규장 시간 정의 (09:30 ~ 16:00)
+        m_open = now_est.replace(hour=9, minute=30, second=0, microsecond=0)
+        m_close = now_est.replace(hour=16, minute=0, second=0, microsecond=0)
+        
+        # 실제 '정규장 중'인지 여부 (영업일 & 시간대)
+        is_regular_market = m_open <= now_est <= m_close and now_est.weekday() < 5
 
-        if last_row_time.date() < today_date_us:
-            # 장 개시 전 (낮 시간)
-            prev_close = float(df["Close"].iloc[-1])
-            today_open = prev_close
-            is_market_open = False
-            mode_msg = "⏳ 장 개시 전 (전일 종가 기준)"
-        else:
-            # 장 개시 후 (밤 시간)
+        if is_regular_market:
+            # 실시간 장 중 모드
+            mode_msg = "🚀 장 개시 후 (실시간 보정)"
             prev_close = float(df["Close"].iloc[-2])
             today_open = float(df["Open"].iloc[-1])
+            base_price = today_open
             is_market_open = True
-            mode_msg = "🚀 장 개시 후 (시가 보정 적용)"
+        else:
+            # 장 개시 전 또는 마감 후 모드
+            mode_msg = "⏳ 장 개시 전 (대기/전일 기준)"
+            prev_close = float(df["Close"].iloc[-1])
+            today_open = prev_close  # 갭 계산용 (장전엔 0%가 됨)
+            base_price = prev_close
+            is_market_open = False
         # ------------------------------------------
 
         # [2] 변동성 계산 (20일 평균)
@@ -60,21 +67,18 @@ def get_market_data(ticker: str):
         rolling_std = daily_returns.rolling(window=20).std() * 100
         std_20d_avg = float(rolling_std.tail(20).mean())
 
-        # 기본값 방어
         if pd.isna(std_20d_avg) or std_20d_avg <= 0:
             std_20d_avg = 1.8
 
         # [3] 하이브리드 타점 계산
         gap_ratio = (today_open - prev_close) / prev_close
         
-        # 갭 하락 시에만 타점 하향 보정
+        # 장 중이면서 갭 하락 시에만 타점 하향 보정
         if is_market_open and gap_ratio < 0:
-            # 시가에서 (평균 변동성 - 이미 발생한 갭 하락분)만큼 추가 대기
             rem_std = max(0, std_20d_avg + (gap_ratio * 100))
             buy_target = today_open * (1 - rem_std / 100)
             sub_msg = f"📉 갭 하락 보정 (-{abs(gap_ratio*100):.2f}% 반영)"
         else:
-            # 장전이거나 갭 상승 시 기존 방식
             buy_target = prev_close * (1 - std_20d_avg / 100)
             sub_msg = "📈 기존 타점 유지"
 
@@ -123,22 +127,23 @@ def send_discord_message(content: str, webhook_url: str, user_id: str):
     except: return False
 
 # ====================== 메인 실행부 ======================
+# ====================== 메인 실행부 수정 ======================
 def main():
     config = setup_environment()
     kst_now = datetime.now(config["kst"]).strftime('%Y-%m-%d %H:%M:%S')
     
-# ====================== 메인 실행부 수정 ======================
     try:
-        # 1. 시장 데이터 분석 및 하이브리드 타점 계산
-        data = get_market_data(config["ticker"])
+        # 1. 시장 데이터 분석 및 하이브리드 타점 계산 (EST 시간대 전달)
+        data = get_market_data(config["ticker"], config["est"])
 
         # 2. 메시지 생성 및 전송
-        # 별도의 조건 체크 없이, 실행되면 즉시 리포트를 생성하여 전송합니다.
-        # (실행 타이밍은 GitHub Actions의 스케줄러와 수동 버튼이 제어함)
         base_msg = create_base_message(data, kst_now, config["ticker"])
         
+        # 디스코드 박스 형태를 위해 백틱을 안전하게 감쌉니다.
+        final_content = f"```\n{base_msg}```"
+        
         # 메시지 전송 실행
-        success = send_discord_message(f"```\n{base_msg}```", config["webhook"], config["user_id"])
+        success = send_discord_message(final_content, config["webhook"], config["user_id"])
         
         if success:
             logger.info(f"✅ [{config['ticker']}] 알림 전송 완료 (KST {kst_now})")
@@ -148,6 +153,7 @@ def main():
     except Exception as e:
         logger.error(f"⚠️ 스크립트 실행 중 오류 발생: {e}")
         
+                
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format='%(message)s')
     main()
