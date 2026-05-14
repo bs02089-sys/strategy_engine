@@ -49,7 +49,7 @@ jobs:
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
-          TICKER: "TSLA"
+          TICKER: "IONQ"
         run: |
           for i in {1..3}; do
             python trade_alert.py && break || echo "Retry $i failed..." && sleep 10
