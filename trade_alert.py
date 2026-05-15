@@ -28,7 +28,15 @@ def setup_environment():
     }
     return config
 
-# ====================== 데이터 분석 로직 ======================
+# ====================== 데이터 분석 및 판별 로직 ======================
+def is_triple_witching_week(d):
+    """매월 세 번째 금요일(세마녀의 날)이 포함된 주간의 수, 목, 금요일 판별"""
+    # 세 번째 금요일은 항상 15일~21일 사이에 위치함
+    is_third_friday = (15 <= d.day <= 21) and (d.weekday() == 4)
+    # 변동성이 극대화되는 수(2), 목(3), 금(4)요일 집중 모니터링
+    is_witching_range = (13 <= d.day <= 21) and (2 <= d.weekday() <= 4)
+    return is_witching_range
+
 def get_combined_market_data(tickers: list, est_tz: pytz.timezone):
     try:
         # [1] 데이터 다운로드
@@ -45,6 +53,9 @@ def get_combined_market_data(tickers: list, est_tz: pytz.timezone):
         m_open = now_est.replace(hour=9, minute=30, second=0, microsecond=0)
         m_close = now_est.replace(hour=16, minute=0, second=0, microsecond=0)
         is_regular_market = m_open <= now_est <= m_close and now_est.weekday() < 5
+
+        # 세 마녀 주간 (수, 목, 금) 여부 감지
+        is_witching = is_triple_witching_week(now_est.date())
 
         for ticker in tickers:
             if len(tickers) > 1:
@@ -73,20 +84,35 @@ def get_combined_market_data(tickers: list, est_tz: pytz.timezone):
             if pd.isna(std_20d) or std_20d <= 0:
                 std_20d = 2.0 
 
-            # [3] 매수 예정가 계산 
             gap_ratio = (today_open - prev_close) / prev_close
-            
-            if is_regular_market and gap_ratio < 0:
-                rem_std = max(0, std_20d + (gap_ratio * 100))
-                buy_target = today_open * (1 - rem_std / 100)
-                # 보정된 시그마 배수 계산 (예: 1.0σ에서 갭 하락분만큼 차감된 배수)
-                sigma_mult = rem_std / std_20d if std_20d > 0 else 0
-                buy_name = f"-{sigma_mult:.1f}σ"
-                sub_msg = "📉 갭 하락 보정 반영"
+
+            # [3] 매수 예정가 계산 (세 마녀 주간 반영)
+            if is_witching:
+                # 세 마녀 주간일 때는 기본적으로 1.5σ 하단에서 그물 대기
+                base_sigma = std_20d * 1.5
+                if is_regular_market and gap_ratio < 0:
+                    # 세 마녀 주간에 장중 갭하락까지 겹치면 최대 2.0σ 수준까지 깊게 보정
+                    rem_std = max(0, base_sigma + (gap_ratio * 100))
+                    buy_target = today_open * (1 - rem_std / 100)
+                    sigma_mult = rem_std / std_20d if std_20d > 0 else 0
+                    buy_name = f"-{sigma_mult:.1f}σ"
+                    sub_msg = "🧙 세 마녀 주간 갭 하락 보정"
+                else:
+                    buy_target = prev_close * (1 - base_sigma / 100)
+                    buy_name = "-1.5σ"
+                    sub_msg = "🧙 세 마녀 주간 하단 그물 대기"
             else:
-                buy_target = prev_close * (1 - std_20d / 100)
-                buy_name = "-1.0σ"
-                sub_msg = "📈 기존 시그마 유지"
+                # 평상시 로직 (기존 유지)
+                if is_regular_market and gap_ratio < 0:
+                    rem_std = max(0, std_20d + (gap_ratio * 100))
+                    buy_target = today_open * (1 - rem_std / 100)
+                    sigma_mult = rem_std / std_20d if std_20d > 0 else 0
+                    buy_name = f"-{sigma_mult:.1f}σ"
+                    sub_msg = "📉 갭 하락 보정 반영"
+                else:
+                    buy_target = prev_close * (1 - std_20d / 100)
+                    buy_name = "-1.0σ"
+                    sub_msg = "📈 기존 시그마 유지"
 
             # [4] 매도 예정가 계산
             if gap_ratio >= 0.02:

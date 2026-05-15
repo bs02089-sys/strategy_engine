@@ -42,7 +42,7 @@ CURRENT_CASTS = config.get("CURRENT_CASTS", 0)
 ANNUAL_QUOTA = config.get("ANNUAL_QUOTA", 20)
 
 # ==========================================
-# 2. 핵심 계산 함수
+# 2. 핵심 계산 및 판별 함수
 # ==========================================
 def calculate_annual_sigma(closes, window=90):
     closes = np.array(closes).flatten().astype(float)
@@ -55,6 +55,14 @@ def calculate_annual_sigma(closes, window=90):
     
     if len(log_returns) < 5: return 0.70
     return np.std(log_returns, ddof=1) * np.sqrt(252)
+
+def is_triple_witching_week(d):
+    """매월 세 번째 금요일(세마녀의 날)이 포함된 주간인지 판별"""
+    # 세 번째 금요일은 항상 15일~21일 사이에 위치함
+    is_third_friday = (15 <= d.day <= 21) and (d.weekday() == 4)
+    # 변동성이 커지는 수, 목, 금요일 집중 모니터링 구간
+    is_witching_range = (13 <= d.day <= 21) and (2 <= d.weekday() <= 4)
+    return is_witching_range
 
 def get_vix_report():
     try:
@@ -114,15 +122,19 @@ def main():
     daily_vol = sigma_90 / np.sqrt(252)
     
     vix_val, vix_info = get_vix_report()
+    is_witching = is_triple_witching_week(now_est.date())
 
-    # [4] 매수 및 매도 예정가 결정 로직
-    # 매수 예정가 결정
+    # [4] 매수 및 매도 예정가 결정 로직 (세마녀 가중치 적용)
+    # 세마녀 주간에는 평소보다 0.5σ ~ 1.0σ 더 깊게 타점을 잡습니다.
     if vix_val >= 35.0:
         regime, t_name, recommend_buy = "🔴🔴 **VIX 비상**", "-2.5σ", base * (1 - daily_vol * 2.5)
-        guidance = "⚠️ 역사적 기회! -2.5σ 월척을 낚으세요."
+        guidance = "⚠️ 역사적 기회! 최저점 월척을 낚으세요."
+    elif is_witching:
+        regime, t_name, recommend_buy = "🧙 **세 마녀 주간**", "-2.5σ", base * (1 - daily_vol * 2.5)
+        guidance = "📉 마녀의 심술! 변동성이 크니 아주 깊은 곳(-2.5σ) 대기."
     elif is_regular_market and gap_ratio <= -0.01:
-        regime, t_name, recommend_buy = "📉 **갭하락 (기회)**", "-1.0σ", base * (1 - daily_vol * 1.0)
-        guidance = "💡 갭하락 날입니다. 평소보다 깊은 -1.0σ에서 대기!"
+        regime, t_name, recommend_buy = "📉 **갭하락 (기회)**", "-1.5σ", base * (1 - daily_vol * 1.5)
+        guidance = "💡 갭하락 날입니다. 평소보다 깊은 -1.5σ에서 대기!"
     elif vol_ratio >= 1.30:
         regime, t_name, recommend_buy = "🔴 **고변동성**", "-2.0σ", base * (1 - daily_vol * 2.0)
         guidance = "📉 변동성 폭발! 심해(-2.0σ)에 그물을 치세요."
@@ -130,7 +142,7 @@ def main():
         regime, t_name, recommend_buy = "🟢 **정상 변동성**", "-1.5σ", base * (1 - daily_vol * 1.5)
         guidance = "🚀 평범한 하락은 거릅니다. -1.5σ 월척만 노리세요."
 
-    # 매도 예정가 결정 (시장 과열 시 +2.0σ, 평상시 +1.5σ)
+    # 매도 예정가 결정
     if vix_val <= 15.0 or (not is_regular_market and base > prev_close * 1.02):
         sell_name, recommend_sell = "+2.0σ", base * (1 + daily_vol * 2.0)
     else:
@@ -138,7 +150,7 @@ def main():
 
     KST = pytz.timezone('Asia/Seoul')
 
-    # [5] 리포트 생성 (베프님 구성안 유지 + 매도 예정가 한 줄 추가)
+    # [5] 리포트 생성
     report = [
         f"━━━━━━━━━━━━━━━━━━━━",
         f"📊 **{ticker} 매매 전략[*월척 낚시 모드]**",
