@@ -36,8 +36,10 @@ def get_combined_market_data(tickers: list, est_tz: pytz.timezone):
         # 여러 종목 데이터 일괄 다운로드(멀티인덱스 자동 생성)
         df = yf.download(tickers, period="130d", interval="1d", auto_adjust=True, timeout=30)
         
-        if df.empty:
-            raise ValueError("데이터 다운로드 실패")
+        # 데이터 다운로드 후 즉시 확인
+        if df.empty or len(df) < 5: # 데이터가 너무 적거나 없으면
+            logger.error("❌ 야후 파이낸스에서 데이터를 가져오지 못했습니다.")
+            return {}, False
 
         results = {}
         now_est = datetime.now(est_tz)
