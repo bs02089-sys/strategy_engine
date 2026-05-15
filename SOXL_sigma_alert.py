@@ -63,11 +63,18 @@ def get_vix_report():
     return 0.0, "N/A"
 
 def send_discord(message):
-    if not WEBHOOK_URL: return
+    if not WEBHOOK_URL:
+        return
     ping = f"<@{DISCORD_USER_ID}>\n" if DISCORD_USER_ID else ""
     try:
-        requests.post(WEBHOOK_URL, json={"content": ping + message}, timeout=15)
-    except Exception as e: print(f"❌ 전송 오류: {e}")
+        payload = {
+            "username": "SeanBot",          # '알 수 없는 사용자' 대신 표시될 이름
+            "content": ping + message
+        }
+        requests.post(WEBHOOK_URL, json=payload, timeout=15)
+    except Exception as e:
+        print(f"❌ 전송 오류: {e}")
+
 
 # ==========================================
 # 3. 메인 전략 실행 (대왕 고기 모드)
@@ -121,7 +128,6 @@ def main():
 
     vix_val, vix_info = get_vix_report()
     KST = pytz.timezone('Asia/Seoul')
-    profit_loss = ((base - MY_AVG_PRICE) / MY_AVG_PRICE * 100) if MY_AVG_PRICE > 0 else 0
 
     # [4] ★ 대왕 고기 선별 로직 ★
     if vix_val >= 35.0:
