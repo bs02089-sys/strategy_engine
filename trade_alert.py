@@ -26,7 +26,7 @@ def setup_environment():
 
 # ====================== 데이터 분석 로직 ======================
 def get_market_data(ticker: str, est_tz: pytz.timezone):
-    """시장 데이터를 가져와 정규장 시간 체크 및 하이브리드 타점 계산"""
+    """시장 데이터를 가져와 정규장 시간 체크 및 하이브리드 포인트 계산"""
     try:
         # 시그마 계산을 위해 충분한 데이터 로드
         ticker_obj = yf.Ticker(ticker)
@@ -70,17 +70,17 @@ def get_market_data(ticker: str, est_tz: pytz.timezone):
         if pd.isna(std_20d_avg) or std_20d_avg <= 0:
             std_20d_avg = 1.8
 
-        # [3] 하이브리드 타점 계산
+        # [3] 하이브리드 포인트 계산
         gap_ratio = (today_open - prev_close) / prev_close
         
-        # 장 중이면서 갭 하락 시에만 타점 하향 보정
+        # 장 중이면서 갭 하락 시에만 포인트 하향 보정
         if is_market_open and gap_ratio < 0:
             rem_std = max(0, std_20d_avg + (gap_ratio * 100))
             buy_target = today_open * (1 - rem_std / 100)
             sub_msg = f"📉 갭 하락 보정 (-{abs(gap_ratio*100):.2f}% 반영)"
         else:
             buy_target = prev_close * (1 - std_20d_avg / 100)
-            sub_msg = "📈 기존 타점 유지"
+            sub_msg = "📈 기존 포인트 유지"
 
         take_profit = prev_close * (1 + std_20d_avg / 100)
 
@@ -111,10 +111,10 @@ def create_base_message(data: dict, kst_now: str, ticker: str):
         f"🚀 금일 시가 : ${data['today_open']:.2f} (Gap: {data['gap_ratio']*100:+.2f}%)\n"
         f"📊 평균 변동성 : ±{data['std']:.2f}%\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"🛒 **매수 타점 : ${data['buy_target']:.2f}**\n"
-        f"🎯 **익절 목표 : ${data['take_profit']:.2f}**\n"
+        f"🛒 **매수 목표가 : ${data['buy_target']:.2f}**\n"
+        f"🎯 **익절 목표가 : ${data['take_profit']:.2f}**\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"⏰ 분석시각: {kst_now}"
+        f"⏰ 분석 시각: {kst_now}"
     )
 
 def send_discord_message(content: str, webhook_url: str, user_id: str):
@@ -127,13 +127,12 @@ def send_discord_message(content: str, webhook_url: str, user_id: str):
     except: return False
 
 # ====================== 메인 실행부 ======================
-# ====================== 메인 실행부 수정 ======================
 def main():
     config = setup_environment()
     kst_now = datetime.now(config["kst"]).strftime('%Y-%m-%d %H:%M:%S')
     
     try:
-        # 1. 시장 데이터 분석 및 하이브리드 타점 계산 (EST 시간대 전달)
+        # 1. 시장 데이터 분석 및 하이브리드 포인트 계산 (EST 시간대 전달)
         data = get_market_data(config["ticker"], config["est"])
 
         # 2. 메시지 생성 및 전송
