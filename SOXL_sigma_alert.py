@@ -63,16 +63,12 @@ def get_vix_report():
     return 0.0, "N/A"
 
 def send_discord(message):
-    if not WEBHOOK_URL:
+    if not WEBHOOK_URL: 
         return
     ping = f"<@{DISCORD_USER_ID}>\n" if DISCORD_USER_ID else ""
     try:
-        payload = {
-            "username": "SeanBot",          # '알 수 없는 사용자' 대신 표시될 이름
-            "content": ping + message
-        }
-        requests.post(WEBHOOK_URL, json=payload, timeout=15)
-    except Exception as e:
+        requests.post(WEBHOOK_URL, json={"content": ping + message}, timeout=15)
+    except Exception as e: 
         print(f"❌ 전송 오류: {e}")
 
 
