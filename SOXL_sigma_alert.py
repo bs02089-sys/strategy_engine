@@ -37,8 +37,8 @@ else:
         "LAST_RUN_TIME": "N/A"
     }
 
-MY_AVG_PRICE = config.get("MY_AVG_PRICE", 0.0)
-CURRENT_CASTS = config.get("CURRENT_CASTS", 0)
+MY_AVG_PRICE = config.get("MY_AVG_PRICE", 0.0) # 초기값
+CURRENT_CASTS = config.get("CURRENT_CASTS", 0) # 초기값
 ANNUAL_QUOTA = config.get("ANNUAL_QUOTA", 20)  # 초기값
 
 # ==========================================
