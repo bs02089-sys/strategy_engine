@@ -115,7 +115,7 @@ def create_combined_message(results: dict, is_open: bool, kst_now: str):
         msg += f"📍 {val['sub_msg']}\n"
         msg += f"💰 전일 종가: ${val['prev_close']:.2f}\n"
         msg += f"📊 20일 변동성: ±{val['std']:.2f}%\n"
-        msg += f"🛒 **매수 시그마(σ): ${val['buy_target']:.2f}**\n"
+        msg += f"🛒 매수 예정가: ${val['buy_target']:.2f}**\n"
     
     msg += f"\n━━━━━━━━━━━━━━━━━━━━━━\n"
     msg += f"⏰ 분석 시각: {kst_now}"
