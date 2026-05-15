@@ -54,8 +54,8 @@ def get_combined_market_data(tickers: list, est_tz: pytz.timezone):
         m_close = now_est.replace(hour=16, minute=0, second=0, microsecond=0)
         is_regular_market = m_open <= now_est <= m_close and now_est.weekday() < 5
 
-        # 세 마녀 주간 (수, 목, 금) 여부 감지
-        is_witching = is_triple_witching_week(now_est.date())
+        # 💡 [수정] 날짜상 세마녀 주간이더라도, 실제 본 정규장 중(is_regular_market)일 때만 세마녀 보정을 켭니다.
+        is_witching = is_triple_witching_week(now_est.date()) and is_regular_market
 
         for ticker in tickers:
             if len(tickers) > 1:
@@ -86,12 +86,11 @@ def get_combined_market_data(tickers: list, est_tz: pytz.timezone):
 
             gap_ratio = (today_open - prev_close) / prev_close
 
-            # [3] 매수 예정가 계산 (세 마녀 주간 반영)
+            # [3] 매수 예정가 계산
             if is_witching:
-                # 세 마녀 주간일 때는 기본적으로 1.5σ 하단에서 그물 대기
+                # 세 마녀 정규장 중에는 1.5σ 하단 대기
                 base_sigma = std_20d * 1.5
                 if is_regular_market and gap_ratio < 0:
-                    # 세 마녀 주간에 장중 갭하락까지 겹치면 최대 2.0σ 수준까지 깊게 보정
                     rem_std = max(0, base_sigma + (gap_ratio * 100))
                     buy_target = today_open * (1 - rem_std / 100)
                     sigma_mult = rem_std / std_20d if std_20d > 0 else 0
@@ -102,7 +101,7 @@ def get_combined_market_data(tickers: list, est_tz: pytz.timezone):
                     buy_name = "-1.5σ"
                     sub_msg = "🧙 세 마녀 주간 하단 그물 대기"
             else:
-                # 평상시 로직 (기존 유지)
+                # 평상시 및 주말/장외 대기 모드 로직
                 if is_regular_market and gap_ratio < 0:
                     rem_std = max(0, std_20d + (gap_ratio * 100))
                     buy_target = today_open * (1 - rem_std / 100)

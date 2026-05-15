@@ -122,10 +122,12 @@ def main():
     daily_vol = sigma_90 / np.sqrt(252)
     
     vix_val, vix_info = get_vix_report()
-    is_witching = is_triple_witching_week(now_est.date())
+    
+    # 💡 [수정] 날짜상 세마녀 주간이더라도, 정규장 중(is_regular_market)일 때만 세마녀 깊은 보정을 적용합니다.
+    # 장전 대기 모드이거나 주말 장후에는 평상시 시그마로 리셋됩니다.
+    is_witching = is_triple_witching_week(now_est.date()) and is_regular_market
 
-    # [4] 매수 및 매도 예정가 결정 로직 (세마녀 가중치 적용)
-    # 세마녀 주간에는 평소보다 0.5σ ~ 1.0σ 더 깊게 타점을 잡습니다.
+    # [4] 매수 및 매도 예정가 결정 로직
     if vix_val >= 35.0:
         regime, t_name, recommend_buy = "🔴🔴 **VIX 비상**", "-2.5σ", base * (1 - daily_vol * 2.5)
         guidance = "⚠️ 역사적 기회! 최저점 월척을 낚으세요."
