@@ -5,8 +5,13 @@ import pandas as pd
 import requests
 import yfinance as yf
 import pytz
-from datetime import datetime
+from datetime import datetime, date, timedelta
 from dotenv import load_dotenv
+
+try:
+    import holidays
+except ImportError:
+    holidays = None
 
 # ==========================================
 # 1. 환경 설정 및 데이터 로드 
@@ -72,6 +77,29 @@ def send_discord(message):
         print(f"❌ 전송 오류: {e}")
 
 
+# ==========================================
+# ★ Ping 로직 추가 
+# ==========================================
+def first_business_day(year, month):
+    if holidays is not None:
+        kr_holidays = holidays.KR(years=[year])
+    else:
+        kr_holidays = set()
+
+    day = date(year, month, 1)
+    while True:
+        # 평일(월~금)이고 공휴일이 아니면 반환
+        if day.weekday() < 5 and day not in kr_holidays:
+            return day
+        day += timedelta(days=1)
+
+def monthly_ping():
+    today = date.today()
+    first_day = first_business_day(today.year, today.month)
+    if today == first_day:
+        send_discord("✅ Ping: 서버 계정 활성 상태 확인")
+        
+        
 # ==========================================
 # 3. 메인 전략 실행 (대왕 고기 모드)
 # ==========================================
