@@ -101,7 +101,7 @@ def monthly_ping():
         
         
 # ==========================================
-# 3. 메인 전략 실행 (대왕 고기 모드)
+# 3. 메인 전략 실행 (월척 낚시 모드)
 # ==========================================
 def main():
     ticker = "SOXL"
@@ -153,10 +153,10 @@ def main():
     vix_val, vix_info = get_vix_report()
     KST = pytz.timezone('Asia/Seoul')
 
-    # [4] ★ 대왕 고기 선별 로직 ★
+    # [4] ★ 월척 낚시 선별 로직 ★
     if vix_val >= 35.0:
         regime, target_name, recommend_price = "🔴🔴 **VIX 비상**", "-2.5σ", t_2_5
-        guidance = "⚠️ 역사적 기회! 대왕 고기(-2.5σ)를 낚으세요."
+        guidance = "⚠️ 역사적 기회! -2.5σ 월척을 낚으세요."
     elif is_regular_market and gap_ratio <= -0.01:
         regime, target_name, recommend_price = "📉 **갭하락 (기회)**", "-1.0σ", t_1_0
         guidance = "💡 갭하락 날입니다. 평소보다 깊은 -1.0σ에서 대기!"
@@ -165,23 +165,23 @@ def main():
         guidance = "📉 변동성 폭발! 심해(-2.0σ)에 그물을 치세요."
     else:
         regime, target_name, recommend_price = "🟢 **정상 변동성**", "-1.5σ", t_1_5
-        guidance = "🚀 평범한 하락은 거릅니다. -1.5σ 대왕 고기만 노리세요."
+        guidance = "🚀 평범한 하락은 거릅니다. -1.5σ 월척만 노리세요."
 
     # [5] 리포트 생성
     report = [
         f"━━━━━━━━━━━━━━━━━━━━",
-        f"📊 **{ticker} 원칙 매매 [대왕고기 모드]**",
+        f"📊 **{ticker} 매매 전략[*월척 낚시 모드]**",
         f"━━━━━━━━━━━━━━━━━━━━",
         f"{mode_msg} | {regime}",
         f"{price_info}",
         f"━━━━━━━━━━━━━━━━━━━━",
-        f"🎯 **오늘의 캐스팅 포인트**",
+        f"🎯 **오늘의 낚시 포인트**",
         f"👉 **{target_name} : ${recommend_price:.2f}**", 
-        f"\n📍 익절 목표(+1.5σ) : ${target_profit:.2f}",
+        f"\n📍 익절 목표가(+1.5σ) : ${target_profit:.2f}",
         f"━━━━━━━━━━━━━━━━━━━━",
         f"📉 VIX 상태 : {vix_info}",
         f"🔎 가이드: {guidance}",
-        f"◆ 캐스팅 : {CURRENT_CASTS}/{ANNUAL_QUOTA} 회",
+        f"◆ 낚시 횟수 : {CURRENT_CASTS}/{ANNUAL_QUOTA} 회",
         f"⏰ {datetime.now(KST).strftime('%m/%d %H:%M')}"
     ]
 
