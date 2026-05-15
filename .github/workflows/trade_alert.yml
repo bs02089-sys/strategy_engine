@@ -5,10 +5,9 @@ on:
     branches:
       - main
     paths: 
-      - "trade_alert.yml"
+      - "trade_alert.py"
         
   schedule:
-    - cron: '0 0 * * 1-5'
     - cron: '0 10 * * 1-5'
   workflow_dispatch:
 
