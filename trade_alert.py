@@ -31,14 +31,18 @@ def setup_environment():
 
 # ====================== 데이터 분석 로직 ======================
 def get_combined_market_data(tickers: list, est_tz: pytz.timezone):
-    """멀티인덱스를 활용하여 여러 종목의 타점을 한 번에 계산"""
     try:
-        # 여러 종목 데이터 일괄 다운로드(멀티인덱스 자동 생성)
+        # 데이터 다운로드
         df = yf.download(tickers, period="130d", interval="1d", auto_adjust=True, timeout=30)
         
-        # 데이터 다운로드 후 즉시 확인
-        if df.empty or len(df) < 5: # 데이터가 너무 적거나 없으면
-            logger.error("❌ 야후 파이낸스에서 데이터를 가져오지 못했습니다.")
+        # 데이터가 제대로 안 왔을 때 에러 방지
+        if df is None or df.empty:
+            logger.error("❌ 야후 파이낸스 서버 응답 없음 (데이터 비어있음)")
+            return {}, False
+
+        # 멀티인덱스 컬럼 존재 여부 체크 (에러 방어)
+        if len(tickers) > 1 and "Close" not in df.columns:
+            logger.error("❌ 데이터 컬럼이 올바르지 않습니다.")
             return {}, False
 
         results = {}
