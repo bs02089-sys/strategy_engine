@@ -32,7 +32,7 @@ def setup_environment():
 # ====================== 데이터 분석 로직 ======================
 def get_combined_market_data(tickers: list, est_tz: pytz.timezone):
     try:
-        # 데이터 다운로드
+        # [1] 데이터 다운로드
         df = yf.download(tickers, period="130d", interval="1d", auto_adjust=True, timeout=30)
         
         # 데이터가 제대로 안 왔을 때 에러 방지
@@ -54,8 +54,7 @@ def get_combined_market_data(tickers: list, est_tz: pytz.timezone):
         is_regular_market = m_open <= now_est <= m_close and now_est.weekday() < 5
 
         for ticker in tickers:
-            # 멀티인덱스에서 특정 티커 데이터 추출
-            # 한 종목만 넣었을 때와 여러 종목 넣었을 때의 인덱스 구조 대응
+            # 멀티인덱스 대응 데이터 추출
             if len(tickers) > 1:
                 ticker_df = pd.DataFrame({
                     "Close": df["Close"][ticker],
@@ -64,41 +63,53 @@ def get_combined_market_data(tickers: list, est_tz: pytz.timezone):
             else:
                 ticker_df = df.copy().dropna()
 
+            if ticker_df.empty: continue
+
             if is_regular_market:
-                mode_msg = "🚀 장 개시 후 (실시간 보정)"
                 prev_close = float(ticker_df["Close"].iloc[-2])
                 today_open = float(ticker_df["Open"].iloc[-1])
+                base = today_open
             else:
-                mode_msg = "⏳ 장 개시 전 (대기/전일 기준)"
                 prev_close = float(ticker_df["Close"].iloc[-1])
                 today_open = prev_close
+                base = prev_close
 
-            # 변동성 계산(20일 시그마 반영)
+            # [2] 변동성 계산 (가족 조언용 20일 시그마 적용)
             daily_returns = ticker_df["Close"].pct_change().dropna()
             std_20d = float(daily_returns.tail(20).std() * 100)
 
             if pd.isna(std_20d) or std_20d <= 0:
                 std_20d = 2.0  # 기본 방어값
 
-            # 하이브리드 시그마 계산
+            # [3] 매수 예정가 계산 (하이브리드 갭 하락 보정)
             gap_ratio = (today_open - prev_close) / prev_close
             
-            # 장 중이면서 갭 하락 시에만 시그마 하향 보정
             if is_regular_market and gap_ratio < 0:
                 rem_std = max(0, std_20d + (gap_ratio * 100))
                 buy_target = today_open * (1 - rem_std / 100)
-                sub_msg = f"📉 갭 하락 보정 (-{abs(gap_ratio*100):.2f}% 반영)"
+                buy_name = f"-{std_20d:.1f}σ (보정)"
+                sub_msg = f"📉 갭 하락 보정 반영"
             else:
                 buy_target = prev_close * (1 - std_20d / 100)
+                buy_name = f"-{std_20d:.1f}σ"
                 sub_msg = "📈 기존 시그마 유지"
+
+            # [4] 매도 예정가 계산 (과열 시 +2.0σ, 평상시 +1.5σ)
+            # 단기 급등 시(2% 이상)에는 목표가를 높게 잡음
+            if gap_ratio >= 0.02:
+                sell_target = base * (1 + (std_20d * 2.0 / 1.5) / 100) # 비율상 2.0시그마 수준
+                sell_name = "+2.0σ"
+            else:
+                sell_target = base * (1 + std_20d / 100) # 1.0시그마 수준(단기 대응용)
+                sell_name = "+1.0σ"
 
             results[ticker] = {
                 "prev_close": prev_close,
-                "today_open": today_open,
-                "gap": gap_ratio * 100,
                 "std": std_20d,
                 "buy_target": buy_target,
-                "mode_msg": mode_msg,
+                "buy_name": buy_name,
+                "sell_target": sell_target,
+                "sell_name": sell_name,
                 "sub_msg": sub_msg
             }
             
@@ -119,7 +130,8 @@ def create_combined_message(results: dict, is_open: bool, kst_now: str):
         msg += f"📍 {val['sub_msg']}\n"
         msg += f"💰 전일 종가 : ${val['prev_close']:.2f}\n"
         msg += f"📊 20일 변동성 : ±{val['std']:.2f}%\n"
-        msg += f"🛒 매수 예정가 : ${val['buy_target']:.2f}\n"
+        msg += f"🛒 매수 예정가({val['buy_name']}) : ${val['buy_target']:.2f}\n"
+        msg += f"💰 매도 예정가({val['sell_name']}) : ${val['sell_target']:.2f}\n"
     
     msg += f"\n━━━━━━━━━━━━━━━━━━━━━━\n"
     msg += f"⏰ 분석 시각: {kst_now}"
@@ -139,19 +151,12 @@ def main():
     kst_now = datetime.now(config["kst"]).strftime('%Y-%m-%d %H:%M:%S')
     
     try:
-        # 멀티 데이터 분석
         results, is_open = get_combined_market_data(config["tickers"], config["est"])
+        if not results: return
 
-        # 통합 메시지 생성
         final_msg = create_combined_message(results, is_open, kst_now)
-        
-        # 전송
-        success = send_discord_message(f"```\n{final_msg}```", config["webhook"], config["user_id"])
-        
-        if success:
-            logger.info(f"✅ 알림 전송 완료")
-        else:
-            logger.error("❌ 전송 실패")
+        send_discord_message(f"```\n{final_msg}```", config["webhook"], config["user_id"])
+        logger.info(f"✅ 알림 전송 완료")
 
     except Exception as e:
         logger.error(f"⚠️ 실행 오류: {e}")
