@@ -39,8 +39,9 @@ def setup_environment():
     config = {
         "webhook": config_dict.get("DISCORD_WEBHOOK"),
         "user_id": config_dict.get("DISCORD_USER_ID"),
+        # 💡 config.json의 대문자 키값과 정확히 일치시킵니다!
         "tickers": config_dict.get("TICKERS", ["TSLA"]),
-        "positions": config_dict.get("POSITIONS", {"TSLA": 11}),
+        "positions": config_dict.get("POSITIONS", {"TSLA": 0}),
         "kst": pytz.timezone('Asia/Seoul'),
         "est": pytz.timezone('US/Eastern'),
     }
@@ -79,10 +80,12 @@ def calculate_split_sell_targets(base_price: float, std_20d: float, shares: int)
 
 # ====================== 기타 유틸 함수 ======================
 def is_triple_witching_week(d):
+    """매월 세 번째 금요일 주간 판별"""
     return (13 <= d.day <= 21) and (2 <= d.weekday() <= 4)
 
 
 def get_vix_report():
+    """VIX 지수 분석"""
     try:
         df_vix = yf.download("^VIX", period="2d", auto_adjust=True, progress=False)
         if not df_vix.empty:
@@ -96,13 +99,17 @@ def get_vix_report():
     return 0.0, "N/A"
 
 
-# ====================== 시장 데이터 분석 ======================
+# ====================== 시장 데이터 및 공수 대통합 분석 ======================
 def get_combined_market_data(tickers: list, config: dict, est_tz: pytz.timezone):
     df = yf.download(tickers, period="130d", interval="1d", auto_adjust=True, progress=False)
-    
+
+    if df is None or df.empty:
+        logger.error("❌ 야후 파이낸스 서버 응답 없음")
+        return {}, False, "N/A"
+
     results = {}
     now_est = datetime.now(est_tz)
-    
+
     m_open = now_est.replace(hour=9, minute=30, second=0, microsecond=0)
     m_close = now_est.replace(hour=16, minute=0, second=0, microsecond=0)
     is_regular_market = m_open <= now_est <= m_close and now_est.weekday() < 5
@@ -128,19 +135,62 @@ def get_combined_market_data(tickers: list, config: dict, est_tz: pytz.timezone)
             base = today_open
         else:
             prev_close = float(ticker_df["Close"].iloc[-1])
+            today_open = prev_close
             base = prev_close
 
+        # 변동성 계산 (std_20d = 1.0σ)
         daily_returns = ticker_df["Close"].pct_change().dropna()
         std_20d = float(daily_returns.tail(20).std() * 100)
         if pd.isna(std_20d) or std_20d <= 0:
             std_20d = 2.0
 
+        gap_ratio = (today_open - prev_close) / prev_close
+
+        # 🎯 매수 예정가 그물망 알고리즘 (VIX & 세마녀 & 갭하락 연동)
+        if vix_val >= 35.0:
+            base_sigma = std_20d * 2.0
+            sub_msg = "🔴🔴 VIX 극단적 공포 (초심해 방어)"
+            buy_target = base * (1 - base_sigma / 100)
+            buy_name = "-2.0σ"
+        elif is_witching:
+            base_sigma = std_20d * 1.5
+            if is_regular_market and gap_ratio < 0:
+                rem_std = max(0, base_sigma + (gap_ratio * 100))
+                buy_target = today_open * (1 - rem_std / 100)
+                sigma_mult = rem_std / std_20d if std_20d > 0 else 0
+                buy_name = f"-{sigma_mult:.1f}σ"
+                sub_msg = "🧙 세 마녀 주간 갭 하락 보정"
+            else:
+                buy_target = prev_close * (1 - base_sigma / 100)
+                buy_name = "-1.5σ"
+                sub_msg = "🧙 세 마녀 주간 하단 그물 대기"
+        elif vix_val > 25.0:
+            base_sigma = std_20d * 1.5
+            sub_msg = "⚠️ VIX 공포지수 상승 (타점 심화)"
+            buy_target = base * (1 - base_sigma / 100)
+            buy_name = "-1.5σ"
+        else:
+            if is_regular_market and gap_ratio < 0:
+                rem_std = max(0, std_20d + (gap_ratio * 100))
+                buy_target = today_open * (1 - rem_std / 100)
+                sigma_mult = rem_std / std_20d if std_20d > 0 else 0
+                buy_name = f"-{sigma_mult:.1f}σ"
+                sub_msg = "📉 갭 하락 보정 반영"
+            else:
+                buy_target = prev_close * (1 - std_20d / 100)
+                buy_name = "-1.0σ"
+                sub_msg = "📈 기존 시그마 유지"
+
+        # 🎯 3단계 분할 매도 계획 계산 호출
         shares = config.get("positions", {}).get(ticker, 0)
         split_plan = calculate_split_sell_targets(base, std_20d, shares)
 
         results[ticker] = {
             "prev_close": prev_close,
             "std": std_20d,
+            "buy_target": buy_target,
+            "buy_name": buy_name,
+            "sub_msg": sub_msg,
             "split_sell_plan": split_plan,
             "total_shares": shares
         }
@@ -157,12 +207,17 @@ def create_combined_message(results: dict, is_open: bool, kst_now: str, vix_info
     for ticker, val in results.items():
         msg += f"\n━━━━━━━━━━━━━━━━━━━━━━\n"
         msg += f"📍 **종목 : {ticker}** (보유: {val.get('total_shares', 0)}주)\n"
+        msg += f"📍 {val['sub_msg']}\n"
+        msg += f"💰 전일 종가 : ${val['prev_close']:.2f}\n"
         msg += f"📊 20일 변동성(1σ) : ±{val['std']:.2f}%\n"
+        msg += f"🛒 **매수 예정가({val['buy_name']}) : ${val['buy_target']:.2f}**\n"
         
         if val.get("split_sell_plan"):
             msg += f"📌 **3단계 분할 매도 계획**\n"
             for plan in val["split_sell_plan"]:
-                msg += f"   • {plan['level']:18} → ${plan['price']:.2f}  ({plan['qty']}주)\n"
+                msg += f"   • {plan['level']:16} → ${plan['price']:.2f}  ({plan['qty']}주)\n"
+        else:
+            msg += f"📌 **분할 매도 계획** : 보유 주수가 없어 계산되지 않았습니다.\n"
     
     msg += f"\n━━━━━━━━━━━━━━━━━━━━━━\n"
     msg += f"⏰ 분석 시각: {kst_now}"
