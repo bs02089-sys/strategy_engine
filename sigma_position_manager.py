@@ -91,7 +91,7 @@ def calculate_split_sell_targets(base_price: float, std_20d: float, shares: int)
     return split_plan
 
 
-# ====================== 📅 [신규] 매월 마지막 영업일 판별기 ======================
+# ====================== 📅 매월 마지막 영업일 판별기 ======================
 def is_last_business_day_of_month(today_date):
     """
     오늘이 이번 달의 '마지막 영업일(주말 및 미국 공휴일 제외)'인지 판별합니다.
@@ -268,7 +268,7 @@ def get_combined_market_data(tickers: list, config: dict, est_tz: pytz.timezone)
 def create_combined_message(results: dict, is_open: bool, kst_now: str, vix_info: str, is_last_day: bool):
     mode_str = "🚀 실시간 모드" if is_open else "⏳ 장전 대기 모드"
     msg = f"🔔 **통합 자산 관리 시스템 리포트 ({mode_str})**\n"
-    msg += f"🎬 VIX 지수 : {vix_info}\n"
+    msg += f"🎬 VIX : {vix_info}\n"
     
     for ticker, val in results.items():
         msg += f"\n━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -298,7 +298,7 @@ def create_combined_message(results: dict, is_open: bool, kst_now: str, vix_info
     
     msg += f"\n━━━━━━━━━━━━━━━━━━━━━━\n"
     
-    # 💡 [신규] 월말 마지막 영업일 생존 핑 안내 주입!
+    # 💡 월말 마지막 영업일 생존 핑 안내
     if is_last_day:
         msg += f"📡 **[🤖 디스코드 계정 만료 방지 생존 핑 발송 완료]**\n"
         msg += f"📢 본 메시지는 휴면 계정 전환을 막기 위한 월간 정기 핑입니다.\n"
@@ -338,7 +338,7 @@ def main():
             logger.info(f"📅 미국 공휴일 휴장입니다.")
             return
 
-    # 💡 [신규] 오늘이 이번 달의 마지막 영업일인지 판별
+    # 💡 오늘이 이번 달의 마지막 영업일인지 판별
     is_last_day = is_last_business_day_of_month(today_date)
 
     try:
