@@ -180,7 +180,7 @@ def main():
         f"👉 **매수 예정가({t_name}) : ${recommend_buy:.2f}**", 
         f"👉 **매도 예정가({sell_name}) : ${recommend_sell:.2f}**",
         f"━━━━━━━━━━━━━━━━━━━━",
-        f"📉 VIX 상태 : {vix_info}",
+        f"📉 VIX : {vix_info}",
         f"🔎 가이드: {guidance}",
         f"◆ 낚시 횟수 : {CURRENT_CASTS}/{ANNUAL_QUOTA} 회",
         f"⏰ {datetime.now(KST).strftime('%m/%d %H:%M')}"

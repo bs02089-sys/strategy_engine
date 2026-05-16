@@ -169,7 +169,7 @@ def get_combined_market_data(tickers: list, est_tz: pytz.timezone):
 def create_combined_message(results: dict, is_open: bool, kst_now: str, vix_info: str):
     mode = "🚀 실시간 모드" if is_open else "⏳ 장전 대기 모드"
     msg = f"🔔 **자산 관리 리포트 ({mode})**\n"
-    msg += f"🎬 시장 VIX 상태 : {vix_info}\n"  # 상단에 VIX 브리핑 추가
+    msg += f"🎬 VIX : {vix_info}\n"  # 상단에 VIX 브리핑 추가
     
     for ticker, val in results.items():
         msg += f"\n━━━━━━━━━━━━━━━━━━━━━━\n"
