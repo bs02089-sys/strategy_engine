@@ -5,7 +5,7 @@ import pandas as pd
 import requests
 import yfinance as yf
 import pytz
-from datetime import datetime, date, timedelta
+from datetime import datetime
 from dotenv import load_dotenv
 
 try:
@@ -58,9 +58,8 @@ def calculate_annual_sigma(closes, window=90):
 
 def is_triple_witching_week(d):
     """매월 세 번째 금요일(세마녀의 날)이 포함된 주간인지 판별"""
-    # 세 번째 금요일은 항상 15일~21일 사이에 위치함
-    is_third_friday = (15 <= d.day <= 21) and (d.weekday() == 4)
-    # 변동성이 커지는 수, 목, 금요일 집중 모니터링 구간
+    # 💡 세 번째 금요일(15일~21일) 주간의 변동성이 커지는 수, 목, 금요일 집중 모니터링 구간
+    # (세 번째 금요일이 가장 빠를 때가 15일이므로 해당 주 수요일은 13일이 됩니다)
     is_witching_range = (13 <= d.day <= 21) and (2 <= d.weekday() <= 4)
     return is_witching_range
 
@@ -87,6 +86,26 @@ def send_discord(message):
 # ==========================================
 def main():
     ticker = "SOXL"
+    
+    tz_est = pytz.timezone('US/Eastern')
+    now_est = datetime.now(tz_est)
+    today_date = now_est.date()
+
+    # [방어막 1] 주말(토, 일) 체크
+    if now_est.weekday() >= 5:
+        print("📅 오늘은 즐거운 주말입니다. 미국 시장이 열리지 않습니다.")
+        return
+
+    # [방어막 2] 미국 연방 공휴일 체크 (정밀 알맹이 로직)
+    if holidays is not None:
+        us_holidays = holidays.US(years=today_date.year)
+        if today_date in us_holidays:
+            holiday_name = us_holidays.get(today_date)
+            holiday_msg = f"📅 오늘은 미국 공휴일 [{holiday_name}]로 인해 휴장입니다. 편안한 하루 되세요!"
+            print(holiday_msg)
+            send_discord(f"━━━━━━━━━━━━━━━━━━━━\n📊 **{ticker} 휴장 안내**\n━━━━━━━━━━━━━━━━━━━━\n{holiday_msg}")
+            return
+
     try:
         df = yf.download(ticker, period="130d", auto_adjust=True, progress=False)
         if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(1)
@@ -94,8 +113,6 @@ def main():
     except Exception as e:
         print(f"데이터 오류: {e}"); return
 
-    tz_est = pytz.timezone('US/Eastern')
-    now_est = datetime.now(tz_est)
     m_open = now_est.replace(hour=9, minute=30, second=0, microsecond=0)
     m_close = now_est.replace(hour=16, minute=0, second=0, microsecond=0)
     is_regular_market = m_open <= now_est <= m_close and now_est.weekday() < 5
@@ -123,9 +140,8 @@ def main():
     
     vix_val, vix_info = get_vix_report()
     
-    # 💡 [수정] 날짜상 세마녀 주간이더라도, 정규장 중(is_regular_market)일 때만 세마녀 깊은 보정을 적용합니다.
-    # 장전 대기 모드이거나 주말 장후에는 평상시 시그마로 리셋됩니다.
-    is_witching = is_triple_witching_week(now_est.date()) and is_regular_market
+    # 세마녀 주간이더라도 본 정규장 중일 때만 특수 시그마 보정을 발동합니다.
+    is_witching = is_triple_witching_week(today_date) and is_regular_market
 
     # [4] 매수 및 매도 예정가 결정 로직
     if vix_val >= 35.0:
