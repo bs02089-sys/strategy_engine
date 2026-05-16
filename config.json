@@ -1,12 +1,18 @@
 {
-    "MY_AVG_PRICE": 165.1124,
-    "CURRENT_CASTS": 4,
-    "ANNUAL_QUOTA": 20,
-    "HOLD_DATE": "2028년 05월 07일",
-    "LAST_RUN_TIME": "2026-05-08 18:14:07",
-    
-    "TICKERS": ["TSLA"],
-    "POSITIONS": {
-        "TSLA": 11
+"DISCORD_WEBHOOK": "https: //discord.com/api/webhooks/1499609112122626150/A_EMqtNHG3GGXs8kgERjXYc-WiJJ3ZC0_rXCvicDCuxucREWafwaZsJrBoo6zOElJ8KN",
+"DISCORD_USER_ID": "1431474369196064868",
+"TICKERS": ["SOXL","TSLA"],
+"POSITIONS": {
+    "SOXL": {
+        "MODE": "LONG",
+        "CURRENT_CASTS": 4,
+        "ANNUAL_QUOTA": 20,
+        "TOTAL_SHARES": 150,
+        "MY_AVG_PRICE": 165.1124
+    },
+    "TSLA": {
+        "MODE": "SHORT",
+        "TOTAL_SHARES": 11
     }
+}
 }
