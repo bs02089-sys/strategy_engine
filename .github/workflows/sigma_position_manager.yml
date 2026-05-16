@@ -20,7 +20,7 @@ env:
   PYTHONIOENCODING: utf-8
 
 jobs:
-  trade_alert:
+  sigma_position_manager:
     runs-on: ubuntu-latest
     
     steps:
