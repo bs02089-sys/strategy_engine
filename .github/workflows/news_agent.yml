@@ -5,7 +5,7 @@ on:
     branches:
       - main
     paths:
-      - "news_agent.py"
+      - news_agent.py
       
 schedule:
     # [미국 장 마감 브리핑] 목표: KST 오전 6시~7시 사이 수신
