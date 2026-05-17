@@ -231,7 +231,7 @@ def get_rating(percentile: float) -> Tuple[str, str]:
     elif percentile <= 70:
         return "🔴 비싼 편", "평균보다 불리합니다. 대기를 권장합니다."
     else:
-        return "🔴 매우 비씀", "최근 1년 중 고점 구간입니다."
+        return "🔴 매우 비쌈", "최근 1년 중 고점 구간입니다."
     
 
 # =============================================
