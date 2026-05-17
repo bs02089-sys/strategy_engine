@@ -32,8 +32,8 @@ jobs:
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # 🚀 SSH 대신 secrets 토큰을 활용해 HTTPS 주소로 원격지(Origin)를 재설정합니다.
-          git remote set-url origin https://x-access-token:${{ secrets.vscode_push_token_2026 }}@github.com/bs02089-sys/strategy_engine.git
+          # 💡 주소 전체를 큰따옴표(")로 감싸서 리눅스 서버가 오해하지 않도록 보호합니다!
+          git remote set-url origin "https://x-access-token:${{ secrets.vscode_push_token_2026 }}@github.com/bs02089-sys/strategy_engine.git"
 
       - name: Python 3.12 설정
         uses: actions/setup-python@v5
