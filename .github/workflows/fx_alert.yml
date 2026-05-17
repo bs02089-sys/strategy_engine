@@ -32,15 +32,14 @@ jobs:
 
       - name: Configure Git (토큰 기반 주소 설정)
         env:
-          # 💡 토큰 값을 이 단계의 환경 변수로 먼저 안전하게 빼두어 주소 문자열과의 충돌을 원천 차단합니다!
+          # 💡 가져온 토큰 값에서 눈에 안 보이는 줄바꿈(\r, \n)을 강제로 지워버리는 치트키입니다!
           PUSH_TOKEN: ${{ secrets.vscode_push_token_2026 }}
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          
-          # 💡 리눅스 환경 변수($PUSH_TOKEN) 스타일로 주소를 깔끔하게 조립합니다.
-          git remote set-url origin "https://x-access-token:${PUSH_TOKEN}@github.com/bs02089-sys/strategy_engine.git"
-    
+          CLEAN_TOKEN=$(echo "$PUSH_TOKEN" | tr -d '\r\n')    
+          git remote set-url origin "https://x-access-token:${CLEAN_TOKEN}@github.com/bs02089-sys/strategy_engine.git"
+
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
