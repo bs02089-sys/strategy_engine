@@ -38,7 +38,7 @@ def setup_environment() -> dict:
     return {
         "webhook":   cfg.get("DISCORD_WEBHOOK"),
         "user_id":   cfg.get("DISCORD_USER_ID"),
-        "tickers":   cfg.get("TICKERS", ["TSLA"]),
+        "tickers":   cfg.get("TICKERS", ["SOXL", "TSLA"]),
         "positions": cfg.get("POSITIONS", {}),
         "kst":       pytz.timezone('Asia/Seoul'),
         "est":       pytz.timezone('US/Eastern'),
