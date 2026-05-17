@@ -16,6 +16,10 @@ venv/
 .env
 *.env
 
+# 데이터 파일 (로컬/원격 충돌 방지를 위해 기본 추적 제외)
+# 파이썬 내부 소스코드가 동적으로 커밋/푸시하므로 깃허브의 자동 추적은 끕니다.
+config.json
+
 # 캐시 / 임시 파일
 *.log.tmp
 *.cache
@@ -29,14 +33,12 @@ venv/
 !trade_alert.py
 !fx_alert.py  
 !news_agent.py        
-!config.json
 !requirements.txt
 !README.md
 
 # GitHub Actions 워크플로우
 !.github/
 !.github/**
-
 # ====================== 추가 추천 ======================
 # 필요 시 활성화
 # !.env.example
