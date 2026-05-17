@@ -5,8 +5,7 @@ on:
     branches:
       - main
     paths: 
-      - sigma_position_manager.py
-      - config.json
+      - sigma_position_manager.py # 💡 config.json은 gitignore 처리되었으므로 paths에서 제외합니다.
         
   schedule:
     # 💡 월~금 한국 시간 저녁 7시 정각마다 자동 실행 (장전 대기 모드 브리핑)
@@ -28,12 +27,19 @@ jobs:
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0 # 💡 중요: 전체 커밋 히스토리를 가져와야 파이썬 내부의 git push가 충돌 나지 않습니다.
 
+      # 💡 파이썬 내부의 subprocess.run(["git", ...])과 봇 계정 정보를 일치시킵니다.
       - name: Configure Git
         run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "Automated Bot"
+          git config --global user.email "bot@example.com"
           git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/bs02089-sys/strategy_engine.git
+
+      # 💡 깃허브 액션 서버에 최신 config.json이 유실되는 걸 막기 위해 실행 전 무조건 pull을 먼저 땡깁니다.
+      - name: Sync latest data
+        run: |
+          git pull origin main || echo "Already up to date or no remote changes."
 
       - name: Python 3.12 설정
         uses: actions/setup-python@v5
@@ -46,9 +52,9 @@ jobs:
           pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Discord 알림 실행 (sigma_position_manager)
+      - name: Discord 알림 및 자동 데이터 동기화 실행
         run: |
           for i in {1..3}; do
-            # 💡 한글 파일명과 공백 처리를 위해 반드시 쌍따옴표를 씌워 실행합니다!
+            # 💡 이제 이 파이썬 코드가 실행되면서 파일 수정 + Git Push까지 원스톱으로 처리합니다.
             python sigma_position_manager.py && break || echo "Retry $i failed..." && sleep 10
           done
