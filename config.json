@@ -24,5 +24,16 @@
     "LAST_CHECK_DATE": "2026-05-17 01:58:22",
     "CURRENT_APPLIED_RATE": 1499.15,
     "CURRENT_PERCENTILE": 95.7
+  },
+  "news_settings": {
+    "KEYWORDS": [
+      "AI Infrastructure",
+      "semiconductor stock",
+      "NVDA",
+      "SOXL ETF",
+      "TSLA stock",
+      "IONQ stock"
+    ],
+    "MAX_NEWS_PER_KEYWORD": 5
   }
 }
