@@ -35,10 +35,10 @@ logger = logging.getLogger(__name__)
 @dataclass
 class Config:
     # 💡 나무증권의 실제 달러 기본 스프레드는 달러당 10.0원 또는 11.5원입니다.
-    # 본인의 앱 화면(매매기준율과 적용환율의 차이)을 확인하고 맞추시면 오차가 0원이 됩니다.
+    # 본인의 앱 화면(매매기준율과 적용환율의 차이)을 확인하고 맞추면 오차가 0원이 됩니다.
     NAMUH_SPREAD: float = 10.0       # 달러당 기본 스프레드 (10.0원 또는 11.5원)
     PREFER_RATE: float = 95.0        # 우대율 (%)
-    PERCENTILE_THRESHOLD: float = 25.0
+    PERCENTILE_THRESHOLD: float = 33.0
     CHECK_INTERVAL: int = 300
     CACHE_HOURS: int = 6
 
@@ -263,16 +263,20 @@ def send_discord_alert(rate_info: RateInfo, percentile: float, median_applied: f
 # [양방향 동기화 엔진] fx_config.json 업데이트 및 Git Push
 # =============================================
 def sync_config_to_git(rate_info: dict, percentile: float):
-    config_path = Path("fx_config.json")
+    """기존 config.json의 다른 설정은 그대로 유지하고, exchange_status만 안전하게 업데이트합니다."""
+    config_path = Path("config.json") # 💡 통합 설정 파일명으로 변경
     
+    # 1. 기존 파일이 있으면 먼저 읽어와서 다른 설정들을 보존합니다.
     if config_path.exists():
         try:
             full_config = json.loads(config_path.read_text(encoding='utf-8'))
-        except Exception:
+        except Exception as e:
+            logger.error(f"❌ config.json 읽기 실패 (포맷 오류 가능성): {e}")
             full_config = {}
     else:
         full_config = {}
 
+    # 2. 다른 키값(설정들)은 건드리지 않고, exchange_status 구조만 만들거나 업데이트합니다.
     if "exchange_status" not in full_config:
         full_config["exchange_status"] = {}
         
@@ -280,14 +284,15 @@ def sync_config_to_git(rate_info: dict, percentile: float):
     full_config["exchange_status"]["CURRENT_APPLIED_RATE"] = rate_info['applied_rate']
     full_config["exchange_status"]["CURRENT_PERCENTILE"] = percentile
 
+    # 3. 다른 설정들이 포함된 전체 데이터를 다시 안전하게 저장합니다.
     config_path.write_text(json.dumps(full_config, ensure_ascii=False, indent=2), encoding='utf-8')
-    logger.info("📝 fx_config.json에 최신 환율 정보 기록 완료.")
+    logger.info("📝 config.json의 환율 정보 업데이트 완료 (기존 설정 보존).")
 
+    # 4. Git Push 작업 (동일)
     try:
-        # 데이터가 정확히 일치하여 무의미한 커밋 시 에러가 나는 것을 사전에 방지
         status = subprocess.run(["git", "status", "--porcelain", str(config_path)], capture_output=True, text=True)
         if not status.stdout.strip():
-            logger.info("ℹ️ 변경된 환율 변동 사항이 없어 Git 커밋을 생략합니다.")
+            logger.info("ℹ️ 환율 변동 사항이 없어 Git 커밋을 생략합니다.")
             return
 
         is_github_action = os.getenv("GITHUB_ACTIONS") == "true"
@@ -295,17 +300,17 @@ def sync_config_to_git(rate_info: dict, percentile: float):
         subprocess.run(["git", "config", "--local", "user.name", "Automated Bot"], check=True)
         subprocess.run(["git", "config", "--local", "user.email", "bot@example.com"], check=True)
         subprocess.run(["git", "add", str(config_path)], check=True)
-        subprocess.run(["git", "commit", "-m", f"🤖 Auto-update fx_config.json [Rate: {rate_info['applied_rate']}]"], check=True)
+        subprocess.run(["git", "commit", "-m", f"🤖 Auto-update config.json [Rate: {rate_info['applied_rate']}]"], check=True)
         
         if is_github_action:
             subprocess.run(["git", "push"], check=True)
         else:
             subprocess.run(["git", "push", "origin", "main"], check=True)
-        logger.info("🚀 Git Push 완료.")
+        logger.info("🚀 config.json 깃허브 푸시 완료.")
             
     except Exception as git_err:
-        logger.error(f"❌ FX 전용 Git 동기화 중 에러 발생: git이 초기화되지 않았거나 권한이 부족할 수 있습니다. ({git_err})")
-
+        logger.error(f"❌ Git 동기화 중 에러 발생: {git_err}")
+        
 
 # =============================================
 # 분석
