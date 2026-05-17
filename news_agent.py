@@ -1,44 +1,74 @@
+"""
+글로벌 시장 뉴스 수집 및 AI 번역 에러 핸들링 봇 (config.json 통합 버전)
+"""
+
 import os
+import sys
+import json
 import requests
 import xml.etree.ElementTree as ET
 import google.genai as genai
+from pathlib import Path
 from dotenv import load_dotenv
 
-# 1. .env 파일의 환경 변수를 로드합니다.
+# 1. .env 파일의 환경 변수를 로드합니다. (Gemini API Key용)
 load_dotenv()
-
-# 2. 환경 변수 로드
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
-DISCORD_USER_ID = os.getenv("DISCORD_USER_ID")
 
-# 키워드 한글 매핑
-KEYWORDS_MAP = {
-    "Semiconductor": "반도체",
-    "AI Infrastructure": "AI 인프라",
-    "NVIDIA": "엔비디아",
-    "CapEx": "설비투자(CapEx)"
-}
+# 2. 통합 설정 파일(config.json) 로드 로직
+CONFIG_PATH = Path("config.json")
+
+if not CONFIG_PATH.exists():
+    print("❌ 에러: config.json 파일이 존재하지 않습니다. 파일을 먼저 생성해 주세요.")
+    sys.exit(1)
+
+try:
+    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+        config_data = json.load(f)
+except Exception as e:
+    print(f"❌ 에러: config.json 파일을 읽는 도중 오류가 발생했습니다: {e}")
+    sys.exit(1)
+
+# 3. config.json에서 실시간 설정 추출
+DISCORD_WEBHOOK = config_data.get("DISCORD_WEBHOOK", "")
+DISCORD_USER_ID = config_data.get("DISCORD_USER_ID", "")
+
+# 💡 주말에 새로 합친 뉴스 설정을 안전하게 가져옵니다.
+NEWS_SETTINGS = config_data.get("news_settings", {})
+KEYWORDS = NEWS_SETTINGS.get("KEYWORDS", [
+    "AI Infrastructure",
+    "semiconductor stock",
+    "NVDA",
+    "SOXL ETF",
+    "TSLA stock",
+    "IONQ stock"
+])
+MAX_NEWS_PER_KEYWORD = NEWS_SETTINGS.get("MAX_NEWS_PER_KEYWORD", 5)
+
 
 def fetch_latest_news():
     all_news_text = ""
     headers = {"User-Agent": "Mozilla/5.0"}
     
-    for en_kw, ko_kw in KEYWORDS_MAP.items():
-        rss_url = f"https://news.google.com/rss/search?q={en_kw}+when:1d&hl=en-US&gl=US&ceid=US:en"
+    # 💡 config.json에 저장된 최신 키워드 리스트를 기반으로 루프를 돕니다.
+    for kw in KEYWORDS:
+        rss_url = f"https://news.google.com/rss/search?q={kw}+when:1d&hl=en-US&gl=US&ceid=US:en"
         try:
             resp = requests.get(rss_url, headers=headers, timeout=15)
             if resp.status_code == 200:
                 root = ET.fromstring(resp.text)
-                all_news_text += f"\n### 📂 섹터: {ko_kw}\n"
+                all_news_text += f"\n### 📂 검색 키워드: {kw}\n"
                 items = root.findall(".//item")
-                for item in items[:3]:
+                
+                # 💡 config.json에서 가져온 MAX_NEWS_PER_KEYWORD 값으로 개수를 제한합니다.
+                for item in items[:MAX_NEWS_PER_KEYWORD]:
                     title = item.find('title').text or ""
                     all_news_text += f"- {title}\n"
         except Exception as e:
-            print(f"뉴스 수집 에러 ({en_kw}): {e}")
+            print(f"뉴스 수집 에러 ({kw}): {e}")
             continue
     return all_news_text
+
 
 def main():
     # 뉴스 수집
@@ -84,6 +114,7 @@ def main():
             print(f"디스코드 전송 실패: {e}")
     else:
         print("디스코드 웹후크 URL이 설정되지 않았습니다.")
+
 
 if __name__ == "__main__":
     main()
