@@ -34,7 +34,8 @@ jobs:
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git remote set-url origin https://x-access-token:${{ secrets.vscode_push_token_2026 }}@github.com/bs02089-sys/strategy_engine.git
+          # 💡 주소 전체를 큰따옴표(")로 감싸서 리눅스 서버의 문법 오해를 풀어줍니다!
+          git remote set-url origin "https://x-access-token:${{ secrets.vscode_push_token_2026 }}@github.com/bs02089-sys/strategy_engine.git"ken_2026 }}@github.com/bs02089-sys/strategy_engine.git
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
