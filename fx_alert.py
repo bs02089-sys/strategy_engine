@@ -47,7 +47,7 @@ class Config:
         return cls(
             NAMUH_SPREAD=float(os.getenv("NAMUH_SPREAD", "10.0")),
             PREFER_RATE=float(os.getenv("PREFER_RATE", "95")),
-            PERCENTILE_THRESHOLD=float(os.getenv("PERCENTILE_THRESHOLD", "25")),
+            PERCENTILE_THRESHOLD=float(os.getenv("PERCENTILE_THRESHOLD", "33")),
             CHECK_INTERVAL=int(os.getenv("CHECK_INTERVAL", "300")),
         )
 
@@ -188,17 +188,16 @@ def get_median_applied_rate(sorted_base_rates: list[float]) -> float:
 
 
 def get_rating(percentile: float) -> Tuple[str, str]:
-    if percentile <= 20:
-        return "🟢 매우 저렴", "최근 1년 중 상위권 매수 기회입니다."
-    elif percentile <= 25:
-        return "🟡 저렴한 편", "평소보다 유리한 환율입니다."
+    # 🎯 33% 이하면 무조건 초록불! 아주 심플하고 명확해집니다.
+    if percentile <= 33:
+        return "🟢 매수 적기", "최근 1년 중 상위권 매수 기회입니다."
     elif percentile <= 50:
         return "🟠 보통", "평균 수준입니다."
     elif percentile <= 70:
         return "🔴 비싼 편", "평균보다 불리합니다. 대기를 권장합니다."
     else:
-        return "🔴 매우 비쌈", "최근 1년 중 고점 구간입니다."
-
+        return "🔴 매우 비씀", "최근 1년 중 고점 구간입니다."
+    
 
 # =============================================
 # Discord 알림
