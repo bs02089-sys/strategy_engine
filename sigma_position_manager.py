@@ -1,7 +1,7 @@
 import logging
 import json
-import os          
-import subprocess  
+import os
+import subprocess
 from datetime import datetime, timedelta
 
 import numpy as np
@@ -9,7 +9,6 @@ import pandas as pd
 import requests
 import yfinance as yf
 import pytz
-from dotenv import load_dotenv
 
 try:
     import holidays
@@ -21,16 +20,23 @@ logger = logging.getLogger(__name__)
 
 # ====================== 설정 로드 ======================
 def load_config() -> dict:
-    load_dotenv()
     try:
         with open('config.json', 'r', encoding='utf-8') as f:
-            return json.load(f)
+            cfg = json.load(f)
     except FileNotFoundError:
         logger.error("❌ config.json 파일을 찾을 수 없습니다.")
         raise
     except json.JSONDecodeError:
         logger.error("❌ config.json 형식이 잘못되었습니다.")
         raise
+
+    # ✅ config.json에 없으면 깃허브 시크릿에서 자동으로 가져옴
+    if not cfg.get("DISCORD_WEBHOOK"):
+        cfg["DISCORD_WEBHOOK"] = os.getenv("DISCORD_WEBHOOK", "")
+    if not cfg.get("DISCORD_USER_ID"):
+        cfg["DISCORD_USER_ID"] = os.getenv("DISCORD_USER_ID", "")
+
+    return cfg
 
 
 def setup_environment() -> dict:
@@ -118,7 +124,7 @@ def is_triple_witching_week(d) -> bool:
 
 # ====================== ticker 단위 분석 ======================
 def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
-                   vix_val: float, is_open: bool) -> dict:
+                   vix_val: float, is_open: bool, today_est) -> dict:
     """ticker 1개의 매수/매도 전략 계산 (변동성 연동형 시간 가드 장착)"""
     prev_close = float(ticker_df["Close"].iloc[-2 if is_open else -1])
     today_open = float(ticker_df["Open"].iloc[-1]) if is_open else prev_close
@@ -137,7 +143,8 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
     if vix_val >= 35.0:
         buy_target = base * (1 - std_20d * 2.0 / 100)
         buy_name, sub_msg = "-2.0σ", "🔴🔴 VIX 극단적 공포 (초심해 방어)"
-    elif is_triple_witching_week(datetime.now().date()):
+    # ✅ 중복 수정: datetime.now() → today_est (EST 기준 통일)
+    elif is_triple_witching_week(today_est):
         if is_open and gap_ratio < 0:
             rem = max(0, std_20d * 1.5 + gap_ratio * 100)
             buy_target = today_open * (1 - rem / 100)
@@ -159,8 +166,8 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
         buy_name, sub_msg = "-1.0σ", "📈 기존 시그마 유지"
 
     result = {
-        "mode": mode, "prev_close": prev_close, "std": std_20d,
-        "buy_target": buy_target, "buy_name": buy_name,
+        "mode": mode, "prev_close": prev_close, "today_open": today_open,
+        "std": std_20d, "buy_target": buy_target, "buy_name": buy_name,
         "sub_msg": sub_msg, "total_shares": shares,
     }
 
@@ -186,13 +193,15 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
         try:
             last_cast_date = datetime.strptime(last_cast_str, "%Y-%m-%d").date()
         except ValueError:
-            last_cast_date = datetime.date(1970, 1, 1)
+            last_cast_date = datetime(1970, 1, 1).date()
         
-        days_since_last_cast = (datetime.now().date() - last_cast_date).days
+        # ✅ 중복 수정: datetime.now() → today_est 인자 사용 (EST 기준 통일)
+        days_since_last_cast = (today_est - last_cast_date).days
         is_time_gate_passed = days_since_last_cast >= min_days_gate
 
         # 만약 가격 타점은 도달했으나, 시간 가드가 풀리지 않았다면 강제로 상태 변경 및 진입 보류
-        if is_open and (ticker_df["Close"].iloc[-1] <= long_buy) and not is_time_gate_passed:
+        # ✅ 버그 수정: Series vs float 타입 불일치 → float() 명시
+        if is_open and (float(ticker_df["Close"].iloc[-1]) <= long_buy) and not is_time_gate_passed:
             sub_msg = f"⏳ 시간 가드 가동 중 ({min_days_gate - days_since_last_cast}일 대기 필요)"
             # 알림 메시지 업데이트를 위해 결과창에 반영
             result["time_guard_locked"] = True
@@ -250,7 +259,8 @@ def get_combined_market_data(tickers: list, config: dict, est_tz) -> tuple[dict,
                 continue
 
             results[ticker] = analyze_ticker(
-                ticker, t_df, positions_cfg.get(ticker, {}), vix_val, is_open
+                ticker, t_df, positions_cfg.get(ticker, {}), vix_val, is_open,
+                now_est.date()   # ✅ EST 기준 날짜 전달
             )
         except Exception as e:
             logger.warning(f"⚠️ {ticker} 분석 실패: {e}")
@@ -341,50 +351,26 @@ def main():
         )
         if not results:
             return
-            
-        json_changed = False
-        if is_open:
-            for ticker, v in results.items():
-                if v["mode"] == "LONG" and not v.get("time_guard_locked", False):
-                    current_price = v["prev_close"]
-                    if current_price <= v["buy_target"]:
-                        today_str = today.strftime("%Y-%m-%d")
-                        
-                        if config["positions"][ticker].get("LAST_CAST_DATE") != today_str:
-                            config["positions"][ticker]["LAST_CAST_DATE"] = today_str
-                            config["positions"][ticker]["CURRENT_CASTS"] = config["positions"][ticker].get("CURRENT_CASTS", 0) + 1
-                            json_changed = True
-                            logger.info(f"💾 {ticker} 매수 조건 충족! 데이터 갱신.")
 
-            if json_changed:
-                # 1. 파일 시스템에 우선 저장
-                with open('config.json', 'w', encoding='utf-8') as f:
-                    json.dump(config, f, ensure_ascii=False, indent=2)
-                logger.info("📝 config.json 로컬 저장 완료.")
+        # 🚀 config.json 수동 수정 후 Git Commit & Push (환경 자동 감지)
+        try:
+            today_str = today.strftime("%Y-%m-%d")
+            is_github_action = os.getenv("GITHUB_ACTIONS") == "true"
 
-                # 🚀 2. [양방향 동기화 엔진] 환경 감지 후 자동 Git Commit & Push
-                try:
-                    # 깃허브 액션 환경인지 판별 (GITHUB_ACTIONS 환경변수 체크)
-                    is_github_action = os.getenv("GITHUB_ACTIONS") == "true"
-                    
-                    # 공통 커밋 명령행 구축
-                    subprocess.run(["git", "config", "user.name", "Automated Bot"], check=True)
-                    subprocess.run(["git", "config", "user.email", "bot@example.com"], check=True)
-                    subprocess.run(["git", "add", "config.json"], check=True)
-                    subprocess.run(["git", "commit", "-m", f"🤖 Auto-update config.json [{today_str}]"], check=True)
-                    
-                    if is_github_action:
-                        # A. 깃허브 액션 환경일 때의 Push (기존 대안 B 방식 유지)
-                        logger.info("📡 깃허브 액션 환경 감지: 원격 저장소에 자동으로 푸시합니다.")
-                        subprocess.run(["git", "push"], check=True)
-                    else:
-                        # B. 질문자님 개인 PC(로컬) 환경일 때의 Push (대안 C 확장)
-                        logger.info("💻 로컬 PC 환경 감지: 깃허브 원격 저장소로 동기화(Push)를 시도합니다.")
-                        # 로컬 PC에 이미 깃 권한이 인증되어 있으므로 그대로 push 가능
-                        subprocess.run(["git", "push", "origin", "main"], check=True) 
-                        
-                except Exception as git_err:
-                    logger.error(f"❌ Git 동기화 실패 (권한 또는 충돌 문제): {git_err}")
+            subprocess.run(["git", "config", "user.name", "Automated Bot"], check=True)
+            subprocess.run(["git", "config", "user.email", "bot@example.com"], check=True)
+            subprocess.run(["git", "add", "config.json"], check=True)
+            subprocess.run(["git", "commit", "-m", f"🤖 Auto-update config.json [{today_str}]"], check=True)
+
+            if is_github_action:
+                logger.info("📡 깃허브 액션 환경 감지: 원격 저장소에 자동으로 푸시합니다.")
+                subprocess.run(["git", "push"], check=True)
+            else:
+                logger.info("💻 로컬 PC 환경 감지: 깃허브 원격 저장소로 동기화(Push)를 시도합니다.")
+                subprocess.run(["git", "push", "origin", "main"], check=True)
+
+        except Exception as git_err:
+            logger.error(f"❌ Git 동기화 실패: {git_err}")
 
         msg = create_combined_message(results, is_open, kst_now, vix_info, is_last)
         send_discord_message(msg, config["webhook"], config["user_id"])
