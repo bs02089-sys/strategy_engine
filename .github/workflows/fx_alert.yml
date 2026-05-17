@@ -5,7 +5,7 @@ on:
     branches:
       - main
     paths:
-      - "fx_alert.py"
+      - fx_alert.py
 
 schedule:
     # 💡 UTC 기준 (한국 시간 = UTC + 9시간)
