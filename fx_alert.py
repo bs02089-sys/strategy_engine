@@ -1,5 +1,5 @@
 """
-나무증권 원화 → 달러 환율 적정성 알림 봇 (최종 단순화 + 양방향 동기화 엔진 장착 버전)
+나무증권 원화 → 달러 환율 적정성 알림 봇 (fx_config.json 전용 파일 분리 버전)
 """
 
 import os
@@ -7,7 +7,7 @@ import sys
 import json
 import logging
 import time
-import subprocess  # 💡 자동 Git Push를 위해 추가
+import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 from dataclasses import dataclass
@@ -235,21 +235,23 @@ def send_discord_alert(rate_info: RateInfo, percentile: float, median_applied: f
 
 
 # =============================================
-# [양방향 동기화 엔진] 데이터 업데이트 및 Git Push 분기 로직
+# [양방향 동기화 엔진] fx_config.json 업데이트 및 Git Push
 # =============================================
 def sync_config_to_git(rate_info: dict, percentile: float):
-    """환율 분석 정보를 config.json에 업데이트하고 원격 저장소에 Push합니다."""
-    config_path = Path("config.json")
-    if not config_path.exists():
-        logger.warning("⚠️ config.json 파일이 존재하지 않아 환율 상태 저장을 건너뜁니다.")
-        return
+    """환율 전용 설정 파일(fx_config.json)을 생성/수정하고 깃허브로 Push합니다."""
+    config_path = Path("fx_config.json") # 💡 독립된 환율 전용 파일명 지정
+    
+    # 파일이 없으면 빈 제이슨 구조를 메모리에 생성
+    if config_path.exists():
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                full_config = json.load(f)
+        except Exception:
+            full_config = {}
+    else:
+        full_config = {}
 
     try:
-        # 1. 기존 데이터 로드
-        with open(config_path, 'r', encoding='utf-8') as f:
-            full_config = json.load(f)
-        
-        # 2. 환율 상태 업데이트 기록 마련
         if "exchange_status" not in full_config:
             full_config["exchange_status"] = {}
             
@@ -257,28 +259,25 @@ def sync_config_to_git(rate_info: dict, percentile: float):
         full_config["exchange_status"]["CURRENT_APPLIED_RATE"] = rate_info['applied_rate']
         full_config["exchange_status"]["CURRENT_PERCENTILE"] = percentile
 
-        # 3. 로컬 파일 시스템 저장
+        # 전용 파일에 데이터 저장
         with open(config_path, 'w', encoding='utf-8') as f:
             json.dump(full_config, f, ensure_ascii=False, indent=2)
-        logger.info("📝 config.json에 최신 환율 정보 기록 완료.")
+        logger.info("📝 fx_config.json에 최신 환율 정보 기록 완료.")
 
-        # 4. 깃허브 원격 동기화
         is_github_action = os.getenv("GITHUB_ACTIONS") == "true"
         
         subprocess.run(["git", "config", "user.name", "Automated Bot"], check=True)
         subprocess.run(["git", "config", "user.email", "bot@example.com"], check=True)
-        subprocess.run(["git", "add", "config.json"], check=True)
-        subprocess.run(["git", "commit", "-m", f"🤖 Auto-update config.json by fx_alert [Rate: {rate_info['applied_rate']}]"], check=True)
+        subprocess.run(["git", "add", "fx_config.json"], check=True) # 💡 fx_config.json만 명시하여 add
+        subprocess.run(["git", "commit", "-m", f"🤖 Auto-update fx_config.json [Rate: {rate_info['applied_rate']}]"], check=True)
         
         if is_github_action:
-            logger.info("📡 깃허브 액션 환경: 원격 저장소로 환율 정보 푸시 중...")
             subprocess.run(["git", "push"], check=True)
         else:
-            logger.info("💻 로컬 PC 환경: 깃허브 원격 저장소로 환율 정보 동기화(Push) 중...")
             subprocess.run(["git", "push", "origin", "main"], check=True)
             
     except Exception as git_err:
-        logger.error(f"❌ FX 자동 Git 동기화 중 에러 발생: {git_err}")
+        logger.error(f"❌ FX 전용 Git 동기화 중 에러 발생: {git_err}")
 
 
 # =============================================
@@ -313,10 +312,9 @@ def run_once():
 
         logger.info(f"적용환율: ₩{rate_info['applied_rate']:,.2f} | 하위 {percentile:.1f}%")
         
-        # 디스코드 전송
         send_discord_alert(rate_info, percentile, median_applied, is_recommended)
         
-        # 🚀 [엔진 작동] 데이터 변동 상태 기록 및 자동 푸시 수행
+        # 🚀 전용 제이슨 저장 및 자동 푸시 엔진 작동
         sync_config_to_git(rate_info, percentile)
 
     except Exception as e:
@@ -345,7 +343,7 @@ def run_monitor():
                     logger.info("✅ 매수 적기 감지! Discord 알림 전송")
                     send_discord_alert(rate_info, percentile, median_applied, True)
                     
-                    # 🚀 [엔진 작동] 추천 조건 달성 시 상태 저장 및 자동 푸시 수행
+                    # 🚀 추천 조건 도달 시 전용 제이슨 저장 및 자동 푸시
                     sync_config_to_git(rate_info, percentile)
                     
                     logger.info("매수 적기 알림 전송 후 모니터링 종료")
