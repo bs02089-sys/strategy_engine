@@ -32,8 +32,8 @@ except Exception as e:
 
 # 3. config.json에서 실시간 설정 추출 및 안전화
 # 💡 [.strip()] 주소 앞뒤의 보이지 않는 공백/줄바꿈을 완벽히 도려내어 'Invalid URL' 버그를 차단합니다.
-DISCORD_WEBHOOK = config_data.get("DISCORD_WEBHOOK", "").strip()
-DISCORD_USER_ID = config_data.get("DISCORD_USER_ID", "").strip()
+DISCORD_WEBHOOK = os.environ.get("DISCORD_WEBHOOK", "").strip() or config_data.get("DISCORD_WEBHOOK", "").strip()
+DISCORD_USER_ID = os.environ.get("DISCORD_USER_ID", "").strip() or config_data.get("DISCORD_USER_ID", "").strip()
 
 # 주말에 새로 합친 뉴스 설정을 안전하게 가져옵니다.
 NEWS_SETTINGS = config_data.get("news_settings", {})
