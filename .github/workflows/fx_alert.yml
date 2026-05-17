@@ -8,9 +8,11 @@ on:
       - "fx_alert.py"
 
   schedule:
-    - cron: "0 0 * * 1-5"    
-    - cron: "0 2 * * 1-5"   
-    - cron: "0 3 * * 1-5"  
+    # 💡 UTC 기준 (한국 시간 = UTC + 9시간)
+    # 💡 GitHub 서버 지연(약 30분~1시간 반)을 계산하여 시간을 대폭 당겼습니다.
+    - cron: "0 23 * * 0-4"    # 1. 한국 시간 오전 08:00 지정을 통해 👉 실제 오전 9시~9시 반 개장 직후 실행 유도
+    - cron: "0 3 * * 1-5"     # 2. 한국 시간 낮 12:00 지정을 통해 👉 실제 오후 1시~1시 반 점심 시장 실행 유도
+    - cron: "0 5 * * 1-5"     # 3. ⭐️ 한국 시간 오후 02:00 지정을 통해 👉 실제 오후 3시~3시 반 주간 마감 직전 골든타임 실행 유도!
 
   workflow_dispatch:
 
@@ -44,8 +46,8 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install --upgrade pip
-          pip install requests
+          python -m pip install --upgrade pip
+          pip install requests yfinance
 
       - name: Run fx_alert
         env:
