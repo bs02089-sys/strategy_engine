@@ -3,6 +3,7 @@
 """
 
 import os
+from dataclasses import dataclass
 import sys
 import json
 import logging
@@ -28,34 +29,68 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-
-# =============================================
-# 설정 (나무증권 달러 스프레드는 '원' 기준 고정값)
-# =============================================
 @dataclass
 class Config:
     # 💡 나무증권의 실제 달러 기본 스프레드는 달러당 10.0원 또는 11.5원입니다.
     # 본인의 앱 화면(매매기준율과 적용환율의 차이)을 확인하고 맞추면 오차가 0원이 됩니다.
-    NAMUH_SPREAD: float = 10.0       # 달러당 기본 스프레드 (10.0원 또는 11.5원)
-    PREFER_RATE: float = 95.0        # 우대율 (%)
+    NAMUH_SPREAD: float = 10.0  # 달러당 기본 스프레드 (10.0원 또는 11.5원)
+    PREFER_RATE: float = 95.0  # 우대율 (%)
     PERCENTILE_THRESHOLD: float = 33.0
     CHECK_INTERVAL: int = 300
     CACHE_HOURS: int = 6
+    DISCORD_WEBHOOK: str = ""  # 👈 디스코드 웹훅용 공간을 클래스에 깔끔하게 추가!
+    DISCORD_USER_ID: str = ""  # 👈 디스코드 유저 ID용 공간도 추가!
 
     @classmethod
     def load(cls) -> "Config":
+        # 1. 기본값으로 먼저 뼈대를 만듭니다.
+        config_data = {
+            "NAMUH_SPREAD": 10.0,
+            "PREFER_RATE": 95.0,
+            "PERCENTILE_THRESHOLD": 33.0,
+            "CHECK_INTERVAL": 300,
+            "CACHE_HOURS": 6,
+            "DISCORD_WEBHOOK": "",
+            "DISCORD_USER_ID": "",
+        }
+
+        # 2. 만약 PC에 config.json 파일이 존재하면 파일 안의 값을 읽어와 덮어씁니다.
+        if os.path.exists("config.json"):
+            try:
+                with open("config.json", "r", encoding="utf-8") as f:
+                    file_data = json.load(f)
+                    for key in config_data.keys():
+                        # 대문자, 소문자(discord_webhook 등) 상관없이 다 뺴오도록 매칭
+                        val = file_data.get(key) or file_data.get(key.lower())
+                        if val is not None:
+                            config_data[key] = val
+            except Exception as e:
+                print(f"config.json 읽기 실패: {e}")
+
+        # 3. 만약 깃허브 환경변수(os.getenv)에 값이 설정되어 있다면 그것을 최우선으로 적용합니다.
+        # 환경변수 이름은 대문자 기준입니다 (예: DISCORD_WEBHOOK)
+        for key in config_data.keys():
+            env_val = os.getenv(key)
+            if env_val is not None:
+                config_data[key] = env_val
+
+        # 4. 완벽하게 정제된 데이터로 Config 객체를 리턴합니다.
         return cls(
-            NAMUH_SPREAD=float(os.getenv("NAMUH_SPREAD", "10.0")),
-            PREFER_RATE=float(os.getenv("PREFER_RATE", "95")),
-            PERCENTILE_THRESHOLD=float(os.getenv("PERCENTILE_THRESHOLD", "33")),
-            CHECK_INTERVAL=int(os.getenv("CHECK_INTERVAL", "300")),
+            NAMUH_SPREAD=float(config_data["NAMUH_SPREAD"]),
+            PREFER_RATE=float(config_data["PREFER_RATE"]),
+            PERCENTILE_THRESHOLD=float(config_data["PERCENTILE_THRESHOLD"]),
+            CHECK_INTERVAL=int(config_data["CHECK_INTERVAL"]),
+            CACHE_HOURS=int(config_data["CACHE_HOURS"]),
+            DISCORD_WEBHOOK=str(config_data["DISCORD_WEBHOOK"]),
+            DISCORD_USER_ID=str(config_data["DISCORD_USER_ID"]),
         )
 
-
+# 🎯 클래스를 실행하여 설정을 로드합니다.
 config = Config.load()
 
-WEBHOOK_URL     = os.getenv("DISCORD_WEBHOOK", "")
-DISCORD_USER_ID = os.getenv("DISCORD_USER_ID", "")
+# 🎯 기존 코드 아래쪽에서 사용하던 변수명들과 100% 호환되도록 연결해 줍니다.
+WEBHOOK_URL = config.DISCORD_WEBHOOK
+DISCORD_USER_ID = config.DISCORD_USER_ID
 
 COLOR_GREEN = 0x1D9E75
 COLOR_AMBER = 0xBA7517
