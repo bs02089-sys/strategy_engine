@@ -99,10 +99,16 @@ def main():
     else:
         final_message = f"⚠️ **AI 번역 실패 (뉴스 원문)**\n\n{news_content}"
 
+    # 📌 매월 1일 하트비트/핑 기능 (계정 만료 방지)
+    from datetime import datetime
+    ping_prefix = ""
+    if datetime.now().day == 1:
+        ping_prefix = "📡 **[System Ping]** 디스코드 계정 활성화 유지 신호 송신 중 (정상 작동)\n\n"
+        
     # 디스코드 전송 (2000자 제한 처리)
     if DISCORD_WEBHOOK:
         mention = f"<@{DISCORD_USER_ID}>\n" if DISCORD_USER_ID else ""
-        full_message = f"{mention}{final_message}"
+        full_message = f"{mention}{ping_prefix}{final_message}"
         
         if len(full_message) > 2000:
             full_message = full_message[:1997] + "..."
