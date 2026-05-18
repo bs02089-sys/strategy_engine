@@ -10,10 +10,14 @@ import requests
 import yfinance as yf
 import pytz
 
-# 휴장일 체크는 트레이딩에서 필수이므로 강제 임포트 권장
-import holidays
-
 logger = logging.getLogger(__name__)
+
+# 🚀 패키지가 없어도 봇이 죽지 않도록 방어 로직 추가
+try:
+    import holidays
+except ImportError:
+    holidays = None
+    logger.warning("⚠️ 'holidays' 패키지가 설치되지 않았습니다. 휴장일 체크가 비활성화됩니다.")
 
 # ====================== 설정 로드 및 저장 ======================
 def load_config() -> dict:
@@ -27,7 +31,6 @@ def load_config() -> dict:
         logger.error("❌ config.json 형식이 잘못되었습니다.")
         raise
 
-    # 환경변수에서 가져온 값을 cfg에 업데이트 (필요시)
     updated = False
     if not cfg.get("DISCORD_WEBHOOK") and os.getenv("DISCORD_WEBHOOK"):
         cfg["DISCORD_WEBHOOK"] = os.getenv("DISCORD_WEBHOOK")
@@ -36,14 +39,12 @@ def load_config() -> dict:
         cfg["DISCORD_USER_ID"] = os.getenv("DISCORD_USER_ID")
         updated = True
 
-    # 변경사항이 있으면 파일에 다시 저장 (다른 모듈과 동기화)
     if updated:
         save_config(cfg)
 
     return cfg
 
 def save_config(cfg: dict):
-    """config.json을 안전하게 덮어쓰기 (다른 파일과 공유되는 데이터 보존)"""
     with open('config.json', 'w', encoding='utf-8') as f:
         json.dump(cfg, f, indent=2, ensure_ascii=False)
 
@@ -56,11 +57,12 @@ def setup_environment() -> dict:
         "positions": cfg.get("POSITIONS", {}),
         "kst":       pytz.timezone('Asia/Seoul'),
         "est":       pytz.timezone('US/Eastern'),
-        "full_cfg":  cfg # 원본 config 유지 (저장용)
+        "full_cfg":  cfg
     }
 
 # ====================== 유틸 함수 ======================
 def calculate_annual_sigma(closes, window: int = 90) -> float:
+    """90일 로그수익률 기반 연환산 시그마 (표본표준편차, ddof=1)"""
     arr = np.array(closes).flatten().astype(float)
     arr = arr[~np.isnan(arr)]
     window = min(window, len(arr) - 1)
@@ -72,7 +74,9 @@ def calculate_annual_sigma(closes, window: int = 90) -> float:
         return 0.70
     daily_sigma = float(np.std(log_ret, ddof=1))
     annual_sigma = daily_sigma * np.sqrt(252)
-    return min(annual_sigma, 0.80)
+    
+    # 🚀 수정: 3배 레버리지의 실제 변동성을 반영하기 위해 한계치를 2.0(200%)으로 상향
+    return min(annual_sigma, 2.0)
 
 def calculate_split_sell_targets(base_price: float, std_20d: float, shares: int) -> list:
     if shares <= 0:
@@ -105,6 +109,8 @@ def get_vix_report() -> tuple[float, str]:
     return 0.0, "N/A"
 
 def is_us_holiday(d) -> bool:
+    if holidays is None:
+        return False
     us_holidays = holidays.US(years=d.year)
     return d in us_holidays
 
@@ -117,7 +123,7 @@ def is_last_business_day_of_month(today) -> bool:
     return True
 
 def is_triple_witching_week(d) -> bool:
-    """✅ 버그 수정: 3, 6, 9, 12월에만 세 마녀의 날이 존재함"""
+    # 🚀 수정: 3, 6, 9, 12월에만 세 마녀의 날이 존재함
     if d.month not in [3, 6, 9, 12]:
         return False
     return (13 <= d.day <= 21) and (2 <= d.weekday() <= 4)
@@ -138,7 +144,6 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
     mode   = pos_cfg.get("MODE", "SHORT")
     shares = pos_cfg.get("TOTAL_SHARES", 0)
 
-    # ── [기본 매수 타점 연산] ──
     if vix_val >= 35.0:
         buy_target = base * (1 - std_20d * 2.0 / 100)
         buy_name, sub_msg = "-2.0σ", "🔴🔴 VIX 극단적 공포 (초심해 방어)"
@@ -169,10 +174,14 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
         "sub_msg": sub_msg, "total_shares": shares,
     }
 
-    # ── LONG 모드 전용 ──
     if mode == "LONG":
         annual_sig = calculate_annual_sigma(ticker_df["Close"].values)
-        long_buy = prev_close * (1 - annual_sig * 1.5)
+        
+        # 🚀 [금융공학적 타점 보정] 연간 변동성을 월간 변동성으로 환산
+        monthly_sig = annual_sig / np.sqrt(12)
+        
+        # 월간 변동성의 1.5배 하락을 장기 적립 방어선으로 설정 (현실적인 딥다이브 타점)
+        long_buy = prev_close * (1 - monthly_sig * 1.5)
         long_buy = max(long_buy, prev_close * 0.10)
 
         normal_std = 4.0 if "SOXL" in ticker else 2.5 
@@ -211,7 +220,6 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
             "exhaustion_rate": pos_cfg.get("CURRENT_CASTS", 0) / max(pos_cfg.get("ANNUAL_QUOTA", 20), 1) * 100,
         })
 
-    # ── SHORT 모드 전용 ──
     elif mode == "SHORT":
         result["split_sell_plan"] = calculate_split_sell_targets(base, std_20d, shares)
 
@@ -249,7 +257,7 @@ def get_combined_market_data(tickers: list, config: dict, est_tz, target_date) -
 
             results[ticker] = analyze_ticker(
                 ticker, t_df, positions_cfg.get(ticker, {}), vix_val, is_open,
-                target_date # ✅ 수정됨: 단순 오늘 날짜가 아닌 보정된 target_date 주입
+                target_date
             )
         except Exception as e:
             logger.warning(f"⚠️ {ticker} 분석 실패: {e}")
@@ -322,7 +330,7 @@ def main():
     config  = setup_environment()
     now_est = datetime.now(config["est"])
     
-    # 🚀 한국 시간 월요일 오전(미국 일요일 저녁) 수동 실행 대응
+    # 🚀 [핵심 수정] 한국 시간 월요일 오전(미국 일요일 저녁) 수동 실행 대응
     # 미국 시간 기준 일요일 오후 6시(선물장 개장) 이후라면, 타겟 날짜를 '월요일'로 간주합니다.
     target_date = now_est.date()
     if now_est.weekday() == 6 and now_est.hour >= 18:
@@ -337,7 +345,6 @@ def main():
     is_last    = is_last_business_day_of_month(target_date)
 
     try:
-        # 보정된 target_date를 분석 함수로 전달
         results, is_open, vix_info = get_combined_market_data(
             config["tickers"], config, config["est"], target_date
         )
@@ -348,6 +355,7 @@ def main():
             today_str = target_date.strftime("%Y-%m-%d")
             is_github_action = os.getenv("GITHUB_ACTIONS") == "true"
 
+            # 🚀 Git 변경 사항이 있을 때만 Commit 수행 (Crash 방지)
             status = subprocess.run(["git", "status", "--porcelain", "config.json"], capture_output=True, text=True)
             
             if status.stdout.strip(): 
@@ -374,7 +382,6 @@ def main():
     except Exception as e:
         logger.error(f"⚠️ 실행 오류: {e}")
         
-                
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format='%(message)s')
     main()
