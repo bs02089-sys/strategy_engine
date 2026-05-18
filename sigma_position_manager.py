@@ -218,7 +218,7 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
     return result
 
 # ====================== 데이터 수집 및 분석 ======================
-def get_combined_market_data(tickers: list, config: dict, est_tz) -> tuple[dict, bool, str]:
+def get_combined_market_data(tickers: list, config: dict, est_tz, target_date) -> tuple[dict, bool, str]:
     df = yf.download(tickers, period="150d", interval="1d", progress=False)
     if df is None or df.empty:
         logger.error("❌ 야후 파이낸스 서버 응답 없음")
@@ -236,7 +236,6 @@ def get_combined_market_data(tickers: list, config: dict, est_tz) -> tuple[dict,
 
     for ticker in tickers:
         try:
-            # ✅ YFinance MultiIndex 견고한 처리
             if isinstance(df.columns, pd.MultiIndex):
                 if ticker in df.columns.levels[1]:
                     t_df = df.xs(ticker, level=1, axis=1)[["Close", "Open"]].dropna()
@@ -250,7 +249,7 @@ def get_combined_market_data(tickers: list, config: dict, est_tz) -> tuple[dict,
 
             results[ticker] = analyze_ticker(
                 ticker, t_df, positions_cfg.get(ticker, {}), vix_val, is_open,
-                now_est.date()
+                target_date # ✅ 수정됨: 단순 오늘 날짜가 아닌 보정된 target_date 주입
             )
         except Exception as e:
             logger.warning(f"⚠️ {ticker} 분석 실패: {e}")
@@ -322,31 +321,36 @@ def send_discord_message(content: str, webhook_url: str, user_id: str) -> bool:
 def main():
     config  = setup_environment()
     now_est = datetime.now(config["est"])
-    today   = now_est.date()
+    
+    # 🚀 한국 시간 월요일 오전(미국 일요일 저녁) 수동 실행 대응
+    # 미국 시간 기준 일요일 오후 6시(선물장 개장) 이후라면, 타겟 날짜를 '월요일'로 간주합니다.
+    target_date = now_est.date()
+    if now_est.weekday() == 6 and now_est.hour >= 18:
+        target_date += timedelta(days=1)
 
-    if now_est.weekday() >= 5 or is_us_holiday(today):
+    # target_date 기준으로 주말 및 휴장일 체크
+    if target_date.weekday() >= 5 or is_us_holiday(target_date):
         logger.info("📅 휴장일 - 브리핑 건너뜀")
         return
 
     kst_now    = datetime.now(config["kst"]).strftime('%Y-%m-%d %H:%M:%S')
-    is_last    = is_last_business_day_of_month(today)
+    is_last    = is_last_business_day_of_month(target_date)
 
     try:
+        # 보정된 target_date를 분석 함수로 전달
         results, is_open, vix_info = get_combined_market_data(
-            config["tickers"], config, config["est"]
+            config["tickers"], config, config["est"], target_date
         )
         if not results:
             return
 
-        # 🚀 ✅ 버그 수정: Git 변경 사항이 있을 때만 Commit 수행 (Crash 방지)
         try:
-            today_str = today.strftime("%Y-%m-%d")
+            today_str = target_date.strftime("%Y-%m-%d")
             is_github_action = os.getenv("GITHUB_ACTIONS") == "true"
 
-            # config.json 변경 여부 확인
             status = subprocess.run(["git", "status", "--porcelain", "config.json"], capture_output=True, text=True)
             
-            if status.stdout.strip(): # 변경 사항이 존재할 경우에만 커밋
+            if status.stdout.strip(): 
                 subprocess.run(["git", "config", "user.name", "Automated Bot"], check=True)
                 subprocess.run(["git", "config", "user.email", "bot@example.com"], check=True)
                 subprocess.run(["git", "add", "config.json"], check=True)
@@ -370,6 +374,7 @@ def main():
     except Exception as e:
         logger.error(f"⚠️ 실행 오류: {e}")
         
+                
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format='%(message)s')
     main()
