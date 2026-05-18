@@ -177,10 +177,13 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
     if mode == "LONG":
         annual_sig = calculate_annual_sigma(ticker_df["Close"].values)
         
-        # 🚀 [금융공학적 타점 보정] 연간 변동성을 '주간(Weekly)' 변동성으로 환산 (루트 52)
+        # 🚀 [금융공학적 타점 보정] 연간 변동성을 일간 변동성(루트 252)으로 역산
+        daily_sig_pct = (annual_sig / np.sqrt(252)) * 100
+        
+        # 주간(Weekly) 변동성 환산 (루트 52)
         weekly_sig = annual_sig / np.sqrt(52)
         
-        # 주간 변동성의 1.5배 하락을 장기 적립 방어선으로 설정 (현실적인 딥다이브 타점)
+        # 주간 변동성의 1.5배 하락을 장기 적립 방어선으로 설정
         long_buy = prev_close * (1 - weekly_sig * 1.5)
         long_buy = max(long_buy, prev_close * 0.10)
 
@@ -210,6 +213,7 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
 
         result.update({
             "annual_sigma":    annual_sig * 100,
+            "daily_sigma":     daily_sig_pct,  # 결과 구조에 일간 변동성 데이터 추가
             "buy_target":      long_buy,
             "buy_name":        "장기 적립 방어선",
             "sub_msg":         sub_msg,
@@ -284,6 +288,7 @@ def create_combined_message(results: dict, is_open: bool,
         if v["mode"] == "LONG":
             lines += [
                 f"📊 90일 연간 변동성(σ) : ±{v['annual_sigma']:.2f}%",
+                f"📊 90일 일간 평균 변동성(σ) : ±{v['daily_sigma']:.2f}%",  # 🚀 요청하신 연간 변동성 아랫줄에 출력 반영
                 f"🛒 **매수 예정가({v['buy_name']}) : ${v['buy_target']:.2f}**",
                 f"⚙️ 타임엔진 : {v['time_guard_info']}",
                 f"📊 계좌 집행 현황 : {v['current_casts']}/{v['annual_quota']}회",
