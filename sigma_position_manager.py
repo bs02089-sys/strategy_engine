@@ -10,15 +10,12 @@ import requests
 import yfinance as yf
 import pytz
 
-try:
-    import holidays
-except ImportError:
-    holidays = None
+# 휴장일 체크는 트레이딩에서 필수이므로 강제 임포트 권장
+import holidays
 
 logger = logging.getLogger(__name__)
 
-
-# ====================== 설정 로드 ======================
+# ====================== 설정 로드 및 저장 ======================
 def load_config() -> dict:
     try:
         with open('config.json', 'r', encoding='utf-8') as f:
@@ -30,14 +27,25 @@ def load_config() -> dict:
         logger.error("❌ config.json 형식이 잘못되었습니다.")
         raise
 
-    # ✅ config.json에 없으면 깃허브 시크릿에서 자동으로 가져옴
-    if not cfg.get("DISCORD_WEBHOOK"):
-        cfg["DISCORD_WEBHOOK"] = os.getenv("DISCORD_WEBHOOK", "")
-    if not cfg.get("DISCORD_USER_ID"):
-        cfg["DISCORD_USER_ID"] = os.getenv("DISCORD_USER_ID", "")
+    # 환경변수에서 가져온 값을 cfg에 업데이트 (필요시)
+    updated = False
+    if not cfg.get("DISCORD_WEBHOOK") and os.getenv("DISCORD_WEBHOOK"):
+        cfg["DISCORD_WEBHOOK"] = os.getenv("DISCORD_WEBHOOK")
+        updated = True
+    if not cfg.get("DISCORD_USER_ID") and os.getenv("DISCORD_USER_ID"):
+        cfg["DISCORD_USER_ID"] = os.getenv("DISCORD_USER_ID")
+        updated = True
+
+    # 변경사항이 있으면 파일에 다시 저장 (다른 모듈과 동기화)
+    if updated:
+        save_config(cfg)
 
     return cfg
 
+def save_config(cfg: dict):
+    """config.json을 안전하게 덮어쓰기 (다른 파일과 공유되는 데이터 보존)"""
+    with open('config.json', 'w', encoding='utf-8') as f:
+        json.dump(cfg, f, indent=2, ensure_ascii=False)
 
 def setup_environment() -> dict:
     cfg = load_config()
@@ -48,12 +56,11 @@ def setup_environment() -> dict:
         "positions": cfg.get("POSITIONS", {}),
         "kst":       pytz.timezone('Asia/Seoul'),
         "est":       pytz.timezone('US/Eastern'),
+        "full_cfg":  cfg # 원본 config 유지 (저장용)
     }
-
 
 # ====================== 유틸 함수 ======================
 def calculate_annual_sigma(closes, window: int = 90) -> float:
-    """90일 로그수익률 기반 연환산 시그마 (표본표준편차, ddof=1)"""
     arr = np.array(closes).flatten().astype(float)
     arr = arr[~np.isnan(arr)]
     window = min(window, len(arr) - 1)
@@ -67,9 +74,7 @@ def calculate_annual_sigma(closes, window: int = 90) -> float:
     annual_sigma = daily_sigma * np.sqrt(252)
     return min(annual_sigma, 0.80)
 
-
 def calculate_split_sell_targets(base_price: float, std_20d: float, shares: int) -> list:
-    """단기(SHORT)용 3단계 분할 매도 계획"""
     if shares <= 0:
         return []
     levels = [(0.9, "1단계 +0.9σ"), (1.3, "2단계 +1.3σ"), (1.8, "3단계 +1.8σ")]
@@ -77,8 +82,7 @@ def calculate_split_sell_targets(base_price: float, std_20d: float, shares: int)
     plan, remaining = [], shares
     for i, (mult, name) in enumerate(levels):
         qty = per_level if i < len(levels) - 1 else remaining
-        if qty <= 0:
-            break
+        if qty <= 0: break
         plan.append({
             "level": name,
             "price": round(base_price * (1 + std_20d * mult / 100), 2),
@@ -87,29 +91,24 @@ def calculate_split_sell_targets(base_price: float, std_20d: float, shares: int)
         remaining -= qty
     return plan
 
-
 def get_vix_report() -> tuple[float, str]:
     try:
-        df = yf.download("^VIX", period="2d", auto_adjust=True, progress=False)
+        df = yf.download("^VIX", period="2d", progress=False)
         if not df.empty:
             if isinstance(df.columns, pd.MultiIndex):
                 df.columns = df.columns.droplevel(1)
             v = float(df["Close"].iloc[-1])
             status = "안정" if v <= 15 else "주의" if v <= 25 else "공포" if v <= 35 else "극단적 공포"
             return v, f"{v:.1f} ({status})"
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"VIX 데이터 수집 실패: {e}")
     return 0.0, "N/A"
 
-
 def is_us_holiday(d) -> bool:
-    if holidays is None:
-        return False
-    return d in holidays.US(years=d.year)
-
+    us_holidays = holidays.US(years=d.year)
+    return d in us_holidays
 
 def is_last_business_day_of_month(today) -> bool:
-    """오늘이 이번 달 마지막 영업일인지 판별"""
     check = today + timedelta(days=1)
     while check.month == today.month:
         if check.weekday() < 5 and not is_us_holiday(check):
@@ -117,15 +116,15 @@ def is_last_business_day_of_month(today) -> bool:
         check += timedelta(days=1)
     return True
 
-
 def is_triple_witching_week(d) -> bool:
+    """✅ 버그 수정: 3, 6, 9, 12월에만 세 마녀의 날이 존재함"""
+    if d.month not in [3, 6, 9, 12]:
+        return False
     return (13 <= d.day <= 21) and (2 <= d.weekday() <= 4)
-
 
 # ====================== ticker 단위 분석 ======================
 def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
                    vix_val: float, is_open: bool, today_est) -> dict:
-    """ticker 1개의 매수/매도 전략 계산 (변동성 연동형 시간 가드 장착)"""
     prev_close = float(ticker_df["Close"].iloc[-2 if is_open else -1])
     today_open = float(ticker_df["Open"].iloc[-1]) if is_open else prev_close
     base = today_open if is_open else prev_close
@@ -143,7 +142,6 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
     if vix_val >= 35.0:
         buy_target = base * (1 - std_20d * 2.0 / 100)
         buy_name, sub_msg = "-2.0σ", "🔴🔴 VIX 극단적 공포 (초심해 방어)"
-    # ✅ 중복 수정: datetime.now() → today_est (EST 기준 통일)
     elif is_triple_witching_week(today_est):
         if is_open and gap_ratio < 0:
             rem = max(0, std_20d * 1.5 + gap_ratio * 100)
@@ -171,39 +169,32 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
         "sub_msg": sub_msg, "total_shares": shares,
     }
 
-    # ── LONG 모드 전용 (혁신적 동적 시간 가드 시스템 연동) ──
+    # ── LONG 모드 전용 ──
     if mode == "LONG":
         annual_sig = calculate_annual_sigma(ticker_df["Close"].values)
         long_buy = prev_close * (1 - annual_sig * 1.5)
-        long_buy = max(long_buy, prev_close * 0.10)  # 최소 10% 안전장치
+        long_buy = max(long_buy, prev_close * 0.10)
 
-        # 🚀 [동적 시간 가드 엔진 구현]
-        # SOXL 평상시 20일 변동성(1σ) 기준값 대략 3.5%~4.0%로 설정 (종목별 매칭 가능)
         normal_std = 4.0 if "SOXL" in ticker else 2.5 
         
         if std_20d > normal_std * 1.3:
-            min_days_gate = 14  # 시장 폭발 및 급락기 -> 2주(14일) 대기 가드 발동
+            min_days_gate = 14
             time_guard_status = "🛡️ 고변동성 모니터링 (14일 제한)"
         else:
-            min_days_gate = 5   # 시장 평온 및 완만한 조정기 -> 1주(5일) 가드 발동
+            min_days_gate = 5
             time_guard_status = "🟢 정상 변동성 모니터링 (5일 제한)"
 
-        # 마지막 집행일로부터 경과 일수 계산
         last_cast_str = pos_cfg.get("LAST_CAST_DATE", "1970-01-01")
         try:
             last_cast_date = datetime.strptime(last_cast_str, "%Y-%m-%d").date()
         except ValueError:
             last_cast_date = datetime(1970, 1, 1).date()
         
-        # ✅ 중복 수정: datetime.now() → today_est 인자 사용 (EST 기준 통일)
         days_since_last_cast = (today_est - last_cast_date).days
         is_time_gate_passed = days_since_last_cast >= min_days_gate
 
-        # 만약 가격 타점은 도달했으나, 시간 가드가 풀리지 않았다면 강제로 상태 변경 및 진입 보류
-        # ✅ 버그 수정: Series vs float 타입 불일치 → float() 명시
         if is_open and (float(ticker_df["Close"].iloc[-1]) <= long_buy) and not is_time_gate_passed:
             sub_msg = f"⏳ 시간 가드 가동 중 ({min_days_gate - days_since_last_cast}일 대기 필요)"
-            # 알림 메시지 업데이트를 위해 결과창에 반영
             result["time_guard_locked"] = True
         else:
             result["time_guard_locked"] = False
@@ -226,11 +217,9 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
 
     return result
 
-
 # ====================== 데이터 수집 및 분석 ======================
 def get_combined_market_data(tickers: list, config: dict, est_tz) -> tuple[dict, bool, str]:
-    df = yf.download(tickers, period="150d", interval="1d",
-                     auto_adjust=True, progress=False)
+    df = yf.download(tickers, period="150d", interval="1d", progress=False)
     if df is None or df.empty:
         logger.error("❌ 야후 파이낸스 서버 응답 없음")
         return {}, False, "N/A"
@@ -247,11 +236,12 @@ def get_combined_market_data(tickers: list, config: dict, est_tz) -> tuple[dict,
 
     for ticker in tickers:
         try:
-            if len(tickers) > 1:
-                t_df = pd.DataFrame({
-                    "Close": df["Close"][ticker],
-                    "Open":  df["Open"][ticker],
-                }).dropna()
+            # ✅ YFinance MultiIndex 견고한 처리
+            if isinstance(df.columns, pd.MultiIndex):
+                if ticker in df.columns.levels[1]:
+                    t_df = df.xs(ticker, level=1, axis=1)[["Close", "Open"]].dropna()
+                else:
+                    continue
             else:
                 t_df = df[["Close", "Open"]].copy().dropna()
 
@@ -260,13 +250,12 @@ def get_combined_market_data(tickers: list, config: dict, est_tz) -> tuple[dict,
 
             results[ticker] = analyze_ticker(
                 ticker, t_df, positions_cfg.get(ticker, {}), vix_val, is_open,
-                now_est.date()   # ✅ EST 기준 날짜 전달
+                now_est.date()
             )
         except Exception as e:
             logger.warning(f"⚠️ {ticker} 분석 실패: {e}")
 
     return results, is_open, vix_info
-
 
 # ====================== 리포트 생성 ======================
 def create_combined_message(results: dict, is_open: bool,
@@ -315,14 +304,12 @@ def create_combined_message(results: dict, is_open: bool,
     lines.append(f"⏰ 분석 시각: {kst_now}")
     return "\n".join(lines)
 
-
 # ====================== Discord 전송 ======================
 def send_discord_message(content: str, webhook_url: str, user_id: str) -> bool:
     if not webhook_url:
         return False
     mention = f"<@{user_id}>\n" if user_id else ""
     try:
-        # 💡 삼중 따옴표(''' 또는 """)를 사용해 개행과 백틱을 안전하게 감싸줍니다.
         payload = {
             "content": f"{mention}```\n{content}\n```"
         }
@@ -330,9 +317,8 @@ def send_discord_message(content: str, webhook_url: str, user_id: str) -> bool:
         return r.status_code in (200, 204)
     except Exception:
         return False
-    
 
-# ====================== 메인 (로컬/원격 양방향 자동 Git Push 장착) ======================
+# ====================== 메인 ======================
 def main():
     config  = setup_environment()
     now_est = datetime.now(config["est"])
@@ -352,22 +338,28 @@ def main():
         if not results:
             return
 
-        # 🚀 config.json 수동 수정 후 Git Commit & Push (환경 자동 감지)
+        # 🚀 ✅ 버그 수정: Git 변경 사항이 있을 때만 Commit 수행 (Crash 방지)
         try:
             today_str = today.strftime("%Y-%m-%d")
             is_github_action = os.getenv("GITHUB_ACTIONS") == "true"
 
-            subprocess.run(["git", "config", "user.name", "Automated Bot"], check=True)
-            subprocess.run(["git", "config", "user.email", "bot@example.com"], check=True)
-            subprocess.run(["git", "add", "config.json"], check=True)
-            subprocess.run(["git", "commit", "-m", f"🤖 Auto-update config.json [{today_str}]"], check=True)
+            # config.json 변경 여부 확인
+            status = subprocess.run(["git", "status", "--porcelain", "config.json"], capture_output=True, text=True)
+            
+            if status.stdout.strip(): # 변경 사항이 존재할 경우에만 커밋
+                subprocess.run(["git", "config", "user.name", "Automated Bot"], check=True)
+                subprocess.run(["git", "config", "user.email", "bot@example.com"], check=True)
+                subprocess.run(["git", "add", "config.json"], check=True)
+                subprocess.run(["git", "commit", "-m", f"🤖 Auto-update config.json [{today_str}]"], check=True)
 
-            if is_github_action:
-                logger.info("📡 깃허브 액션 환경 감지: 원격 저장소에 자동으로 푸시합니다.")
-                subprocess.run(["git", "push"], check=True)
+                if is_github_action:
+                    logger.info("📡 깃허브 액션 환경 감지: 원격 저장소에 자동으로 푸시합니다.")
+                    subprocess.run(["git", "push"], check=True)
+                else:
+                    logger.info("💻 로컬 PC 환경 감지: 깃허브 원격 저장소로 동기화(Push)를 시도합니다.")
+                    subprocess.run(["git", "push", "origin", "main"], check=True)
             else:
-                logger.info("💻 로컬 PC 환경 감지: 깃허브 원격 저장소로 동기화(Push)를 시도합니다.")
-                subprocess.run(["git", "push", "origin", "main"], check=True)
+                logger.info("📝 config.json 변경 사항이 없어 Git Commit을 생략합니다.")
 
         except Exception as git_err:
             logger.error(f"❌ Git 동기화 실패: {git_err}")
@@ -377,7 +369,6 @@ def main():
         logger.info("✅ 알림 전송 완료")
     except Exception as e:
         logger.error(f"⚠️ 실행 오류: {e}")
-        
         
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format='%(message)s')
