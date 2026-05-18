@@ -177,11 +177,11 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
     if mode == "LONG":
         annual_sig = calculate_annual_sigma(ticker_df["Close"].values)
         
-        # 🚀 [금융공학적 타점 보정] 연간 변동성을 월간 변동성으로 환산
-        monthly_sig = annual_sig / np.sqrt(12)
+        # 🚀 [금융공학적 타점 보정] 연간 변동성을 '주간(Weekly)' 변동성으로 환산 (루트 52)
+        weekly_sig = annual_sig / np.sqrt(52)
         
-        # 월간 변동성의 1.5배 하락을 장기 적립 방어선으로 설정 (현실적인 딥다이브 타점)
-        long_buy = prev_close * (1 - monthly_sig * 1.5)
+        # 주간 변동성의 1.5배 하락을 장기 적립 방어선으로 설정 (현실적인 딥다이브 타점)
+        long_buy = prev_close * (1 - weekly_sig * 1.5)
         long_buy = max(long_buy, prev_close * 0.10)
 
         normal_std = 4.0 if "SOXL" in ticker else 2.5 
