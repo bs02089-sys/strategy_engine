@@ -1,0 +1,70 @@
+name: news_agent
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - news_agent.py
+      
+  schedule:
+    # 서버 지연을 감안하여 본장 개장 한참 전인 KST 오후 6시 17분(UTC 09:17)에 저격 실행합니다.
+    - cron: '17 09 * * 1-5'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  news_agent:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # 💡 최신 커밋 이력을 완벽히 추적하여 충돌을 방지합니다.
+
+      - name: Configure Git (토큰 기반 주소 설정)
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # 💡 주소 전체를 큰따옴표(")로 감싸서 리눅스 서버가 오해하지 않도록 보호합니다!
+          git remote set-url origin "https://x-access-token:${{ secrets.vscode_push_token_2026 }}@github.com/bs02089-sys/strategy_engine.git"
+
+      - name: Python 3.12 설정
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: 패키지 설치
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Discord 알림 실행
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python news_agent.py
+
+      - name: 실행 결과 최종 커밋 & 푸시
+        if: always() # 💡 에러가 나거나 수집된 뉴스가 없더라도 상태를 안전하게 보존합니다.
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          
+          # 💡 혹시 실행 과정에서 config.json에 변동 사항이 생겼다면 바구니에 담습니다.
+          if [ -f config.json ]; then
+            git add config.json
+          fi
+          
+          # 실제로 데이터 변경이 감지되었을 때만 안전하게 커밋하고 푸시합니다.
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: news_agent 실행 후 config.json 자동 동기화 ($(date -u +'%Y-%m-%d %H:%M UTC'))"
+            git push --force-with-lease || git push
+          else
+            echo "✅ 새로 변경된 설정 데이터가 없어 동기화를 건너뜁니다."
+          fi

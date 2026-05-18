@@ -1,0 +1,79 @@
+name: fx_alert
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - fx_alert.py
+
+  schedule:
+    # 💡 UTC 기준 (한국 시간 = UTC + 9시간)
+    # 💡 오전은 과감히 패스! 통계적으로 가장 유리한 '오후 시장'만 타깃합니다.
+    - cron: "0 1 * * 1-5"     # 한국 시간 낮 10:00 지정
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  PYTHONIOENCODING: utf-8
+
+jobs:
+  fx_alert:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git (토큰 기반 주소 설정)
+        env:
+          # 💡 가져온 토큰 값에서 눈에 안 보이는 줄바꿈(\r, \n)을 강제로 지워버리는 치트키입니다!
+          PUSH_TOKEN: ${{ secrets.vscode_push_token_2026 }}
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          CLEAN_TOKEN=$(echo "$PUSH_TOKEN" | tr -d '\r\n')    
+          git remote set-url origin "https://x-access-token:${CLEAN_TOKEN}@github.com/bs02089-sys/strategy_engine.git"
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests yfinance
+
+      - name: Run fx_alert
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
+        run: python fx_alert.py
+
+      - name: 실행 결과 및 로그 최종 커밋 & 푸시
+        if: always()
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          
+          # 💡 매니저 파일과 격리된 환율 전용 제이슨 파일(fx_config.json)을 장바구니에 담습니다.
+          if [ -f fx_config.json ]; then
+            git add fx_config.json
+          fi
+          
+          if [ -f fx_alert.log ]; then
+            git add -f fx_alert.log
+          fi
+          
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: fx_alert 전용 데이터 및 로그 동기화 ($(date -u +'%Y-%m-%d %H:%M UTC'))"
+            git push --force-with-lease || git push
+          else
+            echo "✅ 새로 변경된 환율 전용 데이터나 로그가 없어 동기화를 건너뜁니다."
+          fi
