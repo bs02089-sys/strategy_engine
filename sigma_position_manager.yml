@@ -1,0 +1,74 @@
+name: sigma_position_manager
+
+on:
+  push:
+    branches:
+      - main
+    paths: 
+      - sigma_position_manager.py 
+        
+  schedule:
+    # [미국 본장 개장 전 점검] ★핵심★
+    # 목표: 서머타임 개장(KST 오후 10시 30분) 훨씬 전에 수집 → KST 오후 9시~10시 사이 최종 수신
+    # 계산: KST 오후 8시 17분(UTC 11:17)에 저격 실행
+    - cron: '17 11 * * 1-5'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  PYTHONIOENCODING: utf-8
+
+jobs:
+  sigma_position_manager:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0 # 💡 중요: 전체 커밋 히스토리를 가져와야 파이썬 내부의 git push가 충돌 나지 않습니다.
+
+      # 💡 파이썬 내부의 subprocess.run(["git", ...])과 봇 계정 정보를 일치시킵니다.
+      - name: Configure Git
+        run: |
+          git config --global user.name "Automated Bot"
+          git config --global user.email "bot@example.com"
+          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/bs02089-sys/strategy_engine.git
+
+      # 💡 깃허브 액션 서버에 최신 config.json이 유실되는 걸 막기 위해 실행 전 무조건 pull을 먼저 땡깁니다.
+      - name: Sync latest data
+        run: |
+          git pull origin main || echo "Already up to date or no remote changes."
+
+      - name: Python 3.12 설정
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      # 🚀 requirements.txt를 사용하되, 누락된 패키지 에러를 방지하는 이중 안전장치 적용
+      - name: 패키지 설치
+        run: |
+          python -m pip install --upgrade pip
+          
+          # 1. requirements.txt 파일이 존재하면 우선적으로 설치합니다.
+          if [ -f requirements.txt ]; then
+            echo "📦 requirements.txt 파일을 읽어 패키지를 설치합니다."
+            pip install -r requirements.txt
+          else
+            echo "⚠️ requirements.txt 파일이 존재하지 않습니다."
+          fi
+          
+          # 2. requirements.txt에 holidays가 누락되었을 경우를 대비해 강제로 한 번 더 확인/설치합니다.
+          # (이미 설치되어 있다면 Requirement already satisfied 메시지와 함께 빠르게 넘어갑니다)
+          pip install holidays yfinance pandas numpy requests pytz
+
+      - name: Discord 알림 및 자동 데이터 동기화 실행
+        run: |
+          for i in {1..3}; do
+            # 💡 이제 이 파이썬 코드가 실행되면서 파일 수정 + Git Push까지 원스톱으로 처리합니다.
+            python sigma_position_manager.py && break || echo "Retry $i failed..." && sleep 10
+          done
