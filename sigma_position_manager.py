@@ -197,15 +197,15 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
         daily_sig_pct = (annual_sigma_val / np.sqrt(252)) * 100
         weekly_sig_pct = (annual_sigma_val / np.sqrt(52)) * 100
         
-        # 🎯 [시그마 배수 동적 정렬 수정] 평시 눈금을 1.0 -> 0.6으로 하향 정렬하여 매수 가능성 극대화
+        # 🎯 [실증 갭 분포 반영 정밀화] 선장님의 특명에 의거하여 하락갭 실증 통계 수치 반영
         if vix_val >= 35.0:
-            calculated_multiplier = 1.5
-            vix_status_msg = "🔴🔴 VIX 극단 공포 (공포 방어 1.5배수)"
+            calculated_multiplier = 1.47  # 극단적 공포 실증 평균 갭 폭락 반영 (-1.47σ)
+            vix_status_msg = "🔴🔴 VIX 극단 공포 (실증 하락갭 반영 1.47배수)"
         elif vix_val > 25.0:
-            calculated_multiplier = 1.0
-            vix_status_msg = "⚠️ VIX 공포 상승 (경계 1.0배수)"
+            calculated_multiplier = 0.74  # 공포 장세 실증 평균 갭 폭락 반영 (-0.74σ)
+            vix_status_msg = "⚠️ VIX 공포 상승 (실증 하락갭 반영 0.74배수)"
         else:
-            calculated_multiplier = 0.6
+            calculated_multiplier = 0.6  # 평시 최적 장세 황금비율 0.6배수 유지
             vix_status_msg = "✨ 평시 최적 장세 (황금비율 0.6배수)"
 
         long_buy_ratio = (daily_sig_pct / 100) * calculated_multiplier
@@ -214,7 +214,7 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
         # 📊 [장세 상태 관제 고도화 및 타점 추출]
         if is_open:
             long_buy = today_open * (1 - long_buy_ratio)
-            sub_msg = f"📉 [시가 기준선 연동] 오늘 시가 (${today_open:.2f}) ➔ {calculated_multiplier:.1f}배수(-{target_drop_pct:.2f}%) 감산 타점 조준"
+            sub_msg = f"📉 [시가 기준선 연동] 오늘 시가 (${today_open:.2f}) ➔ {calculated_multiplier:.2f}배수(-{target_drop_pct:.2f}%) 감산 타점 조준"
         else:
             long_buy = prev_close * (1 - long_buy_ratio)
             sub_msg = f"{vix_status_msg} ➔ [장전] 전일 종가 기준 대기 중"
@@ -270,7 +270,7 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
             "drop_rate":        drop_rate_from_prev,
             "multiplier":       calculated_multiplier,
             "buy_target":       long_buy,
-            "buy_name":         f"LONG 변동성 방어선 ({calculated_multiplier:.1f}x)",
+            "buy_name":         f"LONG 변동성 방어선 ({calculated_multiplier:.2f}x)",
             "sub_msg":          sub_msg,
             "time_guard_info":  time_guard_status,
             "my_avg_price":     pos_cfg.get("MY_AVG_PRICE", 0.0),
@@ -353,14 +353,24 @@ def create_combined_message(results: dict, is_open: bool,
             f"🛒 [매수 예정가] : ${v.get('buy_target', 0.0):.2f}",
         ]
         
+        # 🎯 LONG 모드(SOXL) 진입 시 선장님의 과학적 +0.5σ 익절선 정밀 이식
         if v.get("mode") == "LONG":
+            base_for_up = v.get("today_open", 0.0) if is_open else v.get("prev_close", 0.0)
+            daily_sig = v.get("daily_sigma", 0.0)
+            
+            # 상승 +0.5σ 익절 가이드라인 산출 공식
+            take_profit_target = base_for_up * (1 + (daily_sig / 100) * 0.5)
+            mult = v.get("multiplier", 0.6)
+            
             lines += [
+                f"💰 [익절 권장가] : ${take_profit_target:.2f} (+0.5σ 돌파 시)",
                 f"-----------------------------------------",
                 f"📊 [🔍 90일 자산 데이터]",
                 f" └─ 연간 환산 변동성 (Annual σ) : {v.get('annual_sigma', 0.0):.1f}%",
-                f" └─ 일간 평균 변동성 (Daily σ)  : ±{v.get('daily_sigma', 0.0):.2f}% (★핵심 지표)",
+                f" └─ 일간 평균 변동성 (Daily σ)  : ±{daily_sig:.2f}% (★핵심 지표)",
                 f"-----------------------------------------",
-                f"💡 [안심 가이드] : 오늘 설정된 그물망은 {ticker} 최근 2년 실증 데이터 검증 결과, 약 33.8%의 가장 높은 체결 빈도율과 +3.85%의 최적 탈출 효율을 증명한 황금 타점(-0.6σ배수)에 정교하게 포진했습니다.",
+                f"💡 [안심 가이드] : 오늘 설정된 그물망은 {ticker}의 최근 실증 하락 갭 통계를 반영하여 현재 VIX 장세 레벨에 맞춘 최적화 타점(-{mult:.2f}σ 배수)에 정교하게 포진했습니다.",
+                f"💡 [익절 데이터] : 아침 상승 갭 발생 시 +0.5σ 저항선을 돌파할 통계적 확률은 36.4%입니다. 반등 장세에서 평단가 방어 및 단기 현금 확보를 원하실 경우 상기 익절 권장가 (${take_profit_target:.2f}) 부근을 활용하십시오.",
                 f"-----------------------------------------",
                 f"⚙️ 타임 엔진 제어 : {v.get('time_guard_info', '정보 없음')}",
                 f"📊 계좌 집행 현황 : {v.get('current_casts', 0)}/{v.get('annual_quota', 24)}회 집행 완료",
@@ -369,6 +379,7 @@ def create_combined_message(results: dict, is_open: bool,
             if v.get("my_avg_price", 0.0) > 0:
                 lines.append(f"🍏 가문 평단가 : ${v.get('my_avg_price', 0.0):.2f}")
         else:
+            # SHORT 모드 (TSLA, IONQ 오리지널 아키텍처 완벽 유지)
             short_std = v.get("std", 0.0) if v.get("std") is not None else 0.0
             lines.append(f"📊 20일 기준 변동성(1σ) : ±{short_std:.2f}%")
             
