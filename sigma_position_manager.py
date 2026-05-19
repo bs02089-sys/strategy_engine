@@ -205,24 +205,26 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
         # 📊 [선장님 직관 반영: 동적 배율 엔진] VIX 수치에 따라 화력 배율 자동 조절
         if vix_val >= 35.0:
             calculated_multiplier = 2.0  # 🔴 VIX 35 이상 = 2시그마 초심해 타점
-            vix_status_msg = "🔴🔴 VIX 극단 공포 (초심해 2배수 타점)"
+            vix_status_msg = "🔴🔴 VIX 극단 공포"
         elif vix_val > 25.0:
             calculated_multiplier = 1.5  # ⚠️ VIX 25~35 = 1.5시그마 심화 타점
-            vix_status_msg = "⚠️ VIX 공포 상승 (1.5배수 타점)"
+            vix_status_msg = "⚠️ VIX 공포 상승"
         else:
             calculated_multiplier = 1.0  # ✨ 평시 장세 = 1.0시그마 기본 철벽 타점
-            vix_status_msg = "✨ 평시 장세 (1.0배수 기본 타점)"
+            vix_status_msg = "✨ 평시 장세"
 
         long_buy_ratio = (daily_sig_pct / 100) * calculated_multiplier
+        # 예: 7.48% 형태의 직관적인 퍼센트 숫자로 변환
+        display_drop_pct = long_buy_ratio * 100
         
         # 🛡️ [선장님 갭 보정 현실화 핵심] gap_ratio < 0 조건을 과감히 깨부수고,
-        # 정규장이 열렸다면(is_open) 시가가 높든 낮든 무조건 '오늘 실시간 시가' 기준으로 방어선 전개!
+        # 정규장이 열렸다면(is_open) 시가가 높든 낮든 무조건 '오늘 실시간 시가' 기준으로 방어선 전개하고 문구에 수식을 노출합니다!
         if is_open:
             long_buy = today_open * (1 - long_buy_ratio)
-            sub_msg = f"📉 {vix_status_msg} + 실시간 시가(Open) 기준 타점 배치 완료"
+            sub_msg = f"📉 [시가 기준선 연동] 오늘 시가(${today_open:.2f}) ➔ {calculated_multiplier:.1f}배수(-{display_drop_pct:.2f}%) 감산 타점 조준"
         else:
             long_buy = prev_close * (1 - long_buy_ratio)
-            sub_msg = f"{vix_status_msg} 대기 중 (전일 종가 기준)"
+            sub_msg = f"⏳ [장전 대기 모드] 전일 종가(${prev_close:.2f}) ➔ {vix_status_msg} (-{display_drop_pct:.2f}%) 배치 예고"
             
         # 10% 최하단 리스크 안전 가드
         long_buy = max(long_buy, prev_close * 0.10)
@@ -264,7 +266,7 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
                 else:
                     time_guard_status = f"🔥 [규제 강제 파괴] VIX 연동 장벽 돌파! 시간 규제를 무력화하고 실탄을 집행합니다!"
             else:
-                time_guard_status = f"🛡️ [평시 경계 태세] 시간 가드 잠김 ({days_remaining}일 남음) ➔ 오늘 정규장 {ticker} 최종 타점({vix_status_msg}) 도달 시 자동 락업 해제 및 집행!"
+                time_guard_status = f"🛡️ [평시 경계 태세] 시간 가드 잠김 ({days_remaining}일 남음) ➔ 오늘 정규장 {ticker} 최종 타점({vix_status_msg} -{display_drop_pct:.2f}%) 도달 시 자동 락업 해제 및 집행!"
         else:
             time_guard_status = f"🟢 [진입 제약 없음] 시간 가드 해제 상태 (안심하고 타점 조준 가능)"
 
