@@ -137,8 +137,20 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
     else:
         today_est_date = today_est
 
-    prev_close = float(ticker_df["Close"].iloc[-2 if is_open else -1])
-    today_open = float(ticker_df["Open"].iloc[-1]) if is_open else prev_close
+    # 🛡️ [장 초반 데이터 공백 방어선] 데이터 개수가 부족하면 안전하게 0.70 기본 변동성 리턴
+    if len(ticker_df) < 2:
+        prev_close = float(ticker_df["Close"].iloc[-1]) if not ticker_df.empty else 10.0
+        today_open = prev_close
+    else:
+        prev_close = float(ticker_df["Close"].iloc[-2 if is_open else -1])
+        # 장이 열렸으나 yfinance에 오늘 시가 데이터가 아직 안 올라왔을 때를 대비한 방어
+        try:
+            today_open = float(ticker_df["Open"].iloc[-1]) if is_open else prev_close
+            if pd.isna(today_open):
+                today_open = prev_close
+        except Exception:
+            today_open = prev_close
+
     base = today_open if is_open else prev_close
     gap_ratio = (today_open - prev_close) / prev_close
 
@@ -150,6 +162,7 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
     mode   = pos_cfg.get("MODE", "SHORT")
     shares = pos_cfg.get("TOTAL_SHARES", 0)
 
+    # ------------------ [SHORT 모드 및 기존 VIX/갭하락 로직] ------------------
     if vix_val >= 35.0:
         buy_target = base * (1 - std_20d * 2.0 / 100)
         buy_name, sub_msg = "-2.0σ", "🔴🔴 VIX 극단적 공포 (초심해 방어)"
@@ -180,25 +193,36 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
         "sub_msg": sub_msg, "total_shares": shares,
     }
 
+    # ------------------ [LONG 모드: 선장님 맞춤형 진화 완전체] ------------------
     if mode == "LONG":
         annual_sig = calculate_annual_sigma(ticker_df["Close"].values)
         
-        # 🚀 [금융공학적 역산] 연간 변동성을 일간 및 주간 변동성 수치로 변환
+        # 🚀 연간 변동성을 일간 및 주간 변동성 수치로 변환
         annual_sigma_val = annual_sig
         daily_sig_pct = (annual_sigma_val / np.sqrt(252)) * 100
         weekly_sig_pct = (annual_sigma_val / np.sqrt(52)) * 100
         
-        # 🚀 90일 일간 평균 변동성(최근 1년 24회 발작)을 타점의 핵심 뼈대로 직접 채택
-        calculated_multiplier = 1.0
-        long_buy_ratio = daily_sig_pct / 100
-        
-        # 장세에 따른 시가 갭하락 보정 로직을 일간 평균 변동성 방어선에도 완벽 동기화
-        if is_open and gap_ratio < 0:
-            long_buy = today_open * (1 - long_buy_ratio * calculated_multiplier)
-            sub_msg = "📉 장중 시가 갭하락 보정 적용"
+        # 📊 [선장님 직관 반영: 동적 배율 엔진] VIX 수치에 따라 화력 배율 자동 조절
+        if vix_val >= 35.0:
+            calculated_multiplier = 2.0  # 🔴 VIX 35 이상 = 2시그마 초심해 타점
+            vix_status_msg = "🔴🔴 VIX 극단 공포 (초심해 2배수 타점)"
+        elif vix_val > 25.0:
+            calculated_multiplier = 1.5  # ⚠️ VIX 25~35 = 1.5시그마 심화 타점
+            vix_status_msg = "⚠️ VIX 공포 상승 (1.5배수 타점)"
         else:
-            long_buy = prev_close * (1 - long_buy_ratio * calculated_multiplier)
-            sub_msg = "✨ 정상 대기 모드 (1시그마 타점)"
+            calculated_multiplier = 1.0  # ✨ 평시 장세 = 1.0시그마 기본 철벽 타점
+            vix_status_msg = "✨ 평시 장세 (1.0배수 기본 타점)"
+
+        long_buy_ratio = (daily_sig_pct / 100) * calculated_multiplier
+        
+        # 🛡️ [선장님 갭 보정 현실화 핵심] gap_ratio < 0 조건을 과감히 깨부수고,
+        # 정규장이 열렸다면(is_open) 시가가 높든 낮든 무조건 '오늘 실시간 시가' 기준으로 방어선 전개!
+        if is_open:
+            long_buy = today_open * (1 - long_buy_ratio)
+            sub_msg = f"📉 {vix_status_msg} + 실시간 시가(Open) 기준 타점 배치 완료"
+        else:
+            long_buy = prev_close * (1 - long_buy_ratio)
+            sub_msg = f"{vix_status_msg} 대기 중 (전일 종가 기준)"
             
         # 10% 최하단 리스크 안전 가드
         long_buy = max(long_buy, prev_close * 0.10)
@@ -217,15 +241,17 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
         except ValueError:
             last_cast_date = datetime(2025, 5, 7).date()
         
-        # today_est_date(date 객체)와 last_cast_date(date 객체)로 통일하여 연산
         days_since_last_cast = (today_est_date - last_cast_date).days
         is_time_gate_passed = days_since_last_cast >= min_days_gate
-
-        # 락업 남은 일수 계산
         days_remaining = min_days_gate - days_since_last_cast
 
-        if is_open and (float(ticker_df["Close"].iloc[-1]) <= long_buy) and not is_time_gate_passed:
-            sub_msg = f"⏳ 시간 가드 가동 중 ({days_remaining}일 대기 필요)"
+        # 실시간 가격 안전 추출 (데이터 딜레이 방어)
+        try:
+            current_live_price = float(ticker_df["Close"].iloc[-1])
+        except Exception:
+            current_live_price = prev_close
+
+        if is_open and (current_live_price <= long_buy) and not is_time_gate_passed:
             result["time_guard_locked"] = True
         else:
             result["time_guard_locked"] = False
@@ -233,30 +259,20 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
         # 🚀 실제 엔진 가동 원리와 100% 일치하는 동적 관제 문구 생성
         if not is_time_gate_passed:
             if is_open:
-                # 🎯 정규장 개시 후 주가가 타점보다 위에 있을 때 (진짜 대기 상태)
-                if float(ticker_df["Close"].iloc[-1]) > long_buy:
-                    time_guard_status = f"⏳ [시간규제 가동 중] 잔파도 매수 제한 ({days_remaining}일 대기 필요) ➔ 1시그마 폭락선(${long_buy:.2f}) 터치 시 즉시 강제 락업 해제 및 기습 포격!"
+                if current_live_price > long_buy:
+                    time_guard_status = f"⏳ [시간규제 가동 중] 잔파도 매수 제한 ({days_remaining}일 대기 필요) ➔ 최종 타점(${long_buy:.2f}) 터치 시 강제 락업 해제 및 기습 포격!"
                 else:
-                    # 🎯 타점을 깨고 내려가서 진짜 매수가 집행되는 역사적인 순간
-                    time_guard_status = f"🔥 [규제 강제 파괴] 1시그마 장벽 돌파! 시간 규제를 무력화하고 실탄을 기민하게 집행합니다!"
+                    time_guard_status = f"🔥 [규제 강제 파괴] VIX 연동 장벽 돌파! 시간 규제를 무력화하고 실탄을 집행합니다!"
             else:
-                # ⏳ 장 시작 전 대기 모드일 때
-                time_guard_status = f"🛡️ [평시 경계 태세] 시간 가드 잠김 ({days_remaining}일 남음) ➔ 오늘 정규장 {ticker} 변동성 한계선(-7.5% 대폭락) 도달 시 자동 락업 해제 및 집행!"
+                time_guard_status = f"🛡️ [평시 경계 태세] 시간 가드 잠김 ({days_remaining}일 남음) ➔ 오늘 정규장 {ticker} 최종 타점({vix_status_msg}) 도달 시 자동 락업 해제 및 집행!"
         else:
-            # 🟢 14일 규제 기간이 완전히 지나서 언제든 사도 되는 평화로운 상태
             time_guard_status = f"🟢 [진입 제약 없음] 시간 가드 해제 상태 (안심하고 타점 조준 가능)"
 
         # 전일 종가 대비 최종 매수 예정가의 대폭락 하락률 실시간 역산
         drop_rate_from_prev = ((long_buy - prev_close) / prev_close) * 100
-
-        # 환경설정 파일(config.json)에 세팅된 계좌별 고유 할당 쿼터 동적 연동 (기본값 24회)
         current_quota = max(pos_cfg.get("ANNUAL_QUOTA", 24), 1)
         current_casts = pos_cfg.get("CURRENT_CASTS", 0)
-
-        # 소진율 100% 초과 방지 클램핑 및 경고
         exhaustion_rate = min(current_casts / current_quota * 100, 100.0)
-        if current_casts > current_quota:
-            logger.warning(f"⚠️ {ticker} CURRENT_CASTS({current_casts})가 ANNUAL_QUOTA({current_quota})를 초과했습니다!")
 
         result.update({
             "annual_sigma":     annual_sig * 100,
@@ -265,7 +281,7 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
             "drop_rate":        drop_rate_from_prev,
             "multiplier":       calculated_multiplier,
             "buy_target":       long_buy,
-            "buy_name":         "일간 평균 변동성 방어선",
+            "buy_name":         f"LONG 변동성 방어선 ({calculated_multiplier:.1f}x)",
             "sub_msg":          sub_msg,
             "time_guard_info":  time_guard_status,
             "my_avg_price":     pos_cfg.get("MY_AVG_PRICE", 0.0),
@@ -275,10 +291,9 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
         })
 
     else:
-        # SHORT 모드에서 split_sell_plan 키 누락 버그 수정
         result["split_sell_plan"] = calculate_split_sell_targets(base, std_20d, shares)
 
-    return result       
+    return result
 
 # ====================== 데이터 수집 및 분석 ======================
 def get_combined_market_data(tickers: list, config: dict, est_tz, target_date) -> tuple[dict, bool, str]:
