@@ -131,7 +131,7 @@ def is_triple_witching_week(d) -> bool:
 # ====================== ticker 단위 분석 ======================
 def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
                    vix_val: float, is_open: bool, today_est) -> dict:
-    # [BUG #4 FIX] today_est가 date 객체일 때와 datetime 객체일 때 모두 date()로 통일
+    # today_est가 date 객체일 때와 datetime 객체일 때 모두 date()로 통일
     if isinstance(today_est, datetime):
         today_est_date = today_est.date()
     else:
@@ -217,7 +217,7 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
         except ValueError:
             last_cast_date = datetime(2025, 5, 7).date()
         
-        # [BUG #4 FIX] today_est_date(date 객체)와 last_cast_date(date 객체)로 통일하여 연산
+        # today_est_date(date 객체)와 last_cast_date(date 객체)로 통일하여 연산
         days_since_last_cast = (today_est_date - last_cast_date).days
         is_time_gate_passed = days_since_last_cast >= min_days_gate
 
@@ -253,7 +253,7 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
         current_quota = max(pos_cfg.get("ANNUAL_QUOTA", 24), 1)
         current_casts = pos_cfg.get("CURRENT_CASTS", 0)
 
-        # [BUG #6 FIX] 소진율 100% 초과 방지 클램핑 및 경고
+        # 소진율 100% 초과 방지 클램핑 및 경고
         exhaustion_rate = min(current_casts / current_quota * 100, 100.0)
         if current_casts > current_quota:
             logger.warning(f"⚠️ {ticker} CURRENT_CASTS({current_casts})가 ANNUAL_QUOTA({current_quota})를 초과했습니다!")
@@ -275,7 +275,7 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
         })
 
     else:
-        # [BUG #3 FIX] SHORT 모드에서 split_sell_plan 키 누락 버그 수정
+        # SHORT 모드에서 split_sell_plan 키 누락 버그 수정
         result["split_sell_plan"] = calculate_split_sell_targets(base, std_20d, shares)
 
     return result       
@@ -289,15 +289,15 @@ def get_combined_market_data(tickers: list, config: dict, est_tz, target_date) -
 
     now_est = datetime.now(est_tz)
 
-    # [BUG #5 FIX] target_date 기준으로 is_open 판정 (일요일 저녁 수동 실행 시 날짜 보정 반영)
+    # target_date 기준으로 is_open 판정 (일요일 저녁 수동 실행 시 날짜 보정 반영)
     # target_date가 실제 거래일이라면, 현재 시각(now_est)의 시/분만 사용해 장 여부 판단
-    # [BUG #1 FIX] 공휴일 체크 추가
+    # 공휴일 체크 추가
     market_open_time  = now_est.replace(hour=9,  minute=30, second=0, microsecond=0)
     market_close_time = now_est.replace(hour=16, minute=0,  second=0, microsecond=0)
     is_open = (
         market_open_time <= now_est <= market_close_time
         and target_date.weekday() < 5          # target_date 기준 평일 체크
-        and not is_us_holiday(target_date)     # [BUG #1 FIX] 공휴일 체크
+        and not is_us_holiday(target_date)     # 공휴일 체크
     )
 
     vix_val, vix_info = get_vix_report()
