@@ -51,13 +51,13 @@ def save_config(cfg: dict):
 def setup_environment() -> dict:
     cfg = load_config()
     return {
-        "webhook":   cfg.get("DISCORD_WEBHOOK"),
-        "user_id":   cfg.get("DISCORD_USER_ID"),
-        "tickers":   cfg.get("TICKERS", ["SOXL", "TSLA"]),
-        "positions": cfg.get("POSITIONS", {}),
-        "kst":       pytz.timezone('Asia/Seoul'),
-        "est":       pytz.timezone('US/Eastern'),
-        "full_cfg":  cfg
+        "webhook":       cfg.get("DISCORD_WEBHOOK"),
+        "user_id":       cfg.get("DISCORD_USER_ID"),
+        "tickers":       cfg.get("TICKERS", ["SOXL", "TSLA"]),
+        "positions":     cfg.get("POSITIONS", {}),
+        "kst":           pytz.timezone('Asia/Seoul'),
+        "est":           pytz.timezone('US/Eastern'),
+        "full_cfg":      cfg
     }
 
 # ====================== 유틸 함수 ======================
@@ -75,7 +75,7 @@ def calculate_annual_sigma(closes, window: int = 90) -> float:
     daily_sigma = float(np.std(log_ret, ddof=1))
     annual_sigma = daily_sigma * np.sqrt(252)
     
-    # 🚀 수정: 3배 레버리지의 실제 변동성을 반영하기 위해 한계치를 2.0(200%)으로 상향
+    # 🚀 3배 레버리지의 실제 변동성을 반영하기 위해 한계치를 2.0(200%)으로 상향
     return min(annual_sigma, 2.0)
 
 def calculate_split_sell_targets(base_price: float, std_20d: float, shares: int) -> list:
@@ -123,14 +123,14 @@ def is_last_business_day_of_month(today) -> bool:
     return True
 
 def is_triple_witching_week(d) -> bool:
-    # 🚀 수정: 3, 6, 9, 12월에만 세 마녀의 날이 존재함
+    # 🚀 3, 6, 9, 12월에만 세 마녀의 날이 존재함
     if d.month not in [3, 6, 9, 12]:
         return False
     return (13 <= d.day <= 21) and (2 <= d.weekday() <= 4)
 
 # ====================== ticker 단위 분석 ======================
 def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
-                   vix_val: float, is_open: bool, today_est) -> dict:
+                    vix_val: float, is_open: bool, today_est) -> dict:
     prev_close = float(ticker_df["Close"].iloc[-2 if is_open else -1])
     today_open = float(ticker_df["Open"].iloc[-1]) if is_open else prev_close
     base = today_open if is_open else prev_close
@@ -177,14 +177,22 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
     if mode == "LONG":
         annual_sig = calculate_annual_sigma(ticker_df["Close"].values)
         
-        # 🚀 [금융공학적 타점 보정] 연간 변동성을 일간 변동성(루트 252)으로 역산
-        daily_sig_pct = (annual_sig / np.sqrt(252)) * 100
+        # 🚀 연간 변동성을 일간 및 주간 변동성으로 정밀 역산
+        annual_sigma_val = annual_sig
+        daily_sig_pct = (annual_sigma_val / np.sqrt(252)) * 100
+        weekly_sig_pct = (annual_sigma_val / np.sqrt(52)) * 100
         
-        # 주간(Weekly) 변동성 환산 (루트 52)
-        weekly_sig = annual_sig / np.sqrt(52)
+        # 🚀 주간 변동성(Weekly σ)의 정확히 1.5배 자리에 동적 그물망 포진
+        calculated_multiplier = 1.5
         
-        # 주간 변동성의 1.5배 하락을 장기 적립 방어선으로 설정
-        long_buy = prev_close * (1 - weekly_sig * 1.5)
+        # 장세에 따른 시가 갭하락 보정 로직을 장기 적립 방어선에도 동기화
+        if is_open and gap_ratio < 0:
+            long_buy = today_open * (1 - (weekly_sig_pct / 100) * calculated_multiplier)
+            sub_msg = "📉 장중 시가 갭하락 보정 적용"
+        else:
+            long_buy = prev_close * (1 - (weekly_sig_pct / 100) * calculated_multiplier)
+            
+        # 10% 최하단 리스크 안전 가드
         long_buy = max(long_buy, prev_close * 0.10)
 
         normal_std = 4.0 if "SOXL" in ticker else 2.5 
@@ -196,13 +204,13 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
             min_days_gate = 5
             time_guard_status = "🟢 정상 변동성 모니터링 (5일 제한)"
 
-        # 🚀실제 역사적인 첫 투자 시작일로 기록
+        # 🚀 실제 첫 투자 시작일로 생명력 불어넣기
         last_cast_str = pos_cfg.get("LAST_CAST_DATE", "2025-05-07")
         try:
             last_cast_date = datetime.strptime(last_cast_str, "%Y-%m-%d").date()
         except ValueError:
             last_cast_date = datetime(2025, 5, 7).date()
-       
+        
         days_since_last_cast = (today_est - last_cast_date).days
         is_time_gate_passed = days_since_last_cast >= min_days_gate
 
@@ -212,17 +220,23 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
         else:
             result["time_guard_locked"] = False
 
+        # 전일 종가 대비 최종 매수 예정가의 대폭락 하락률 실시간 역산
+        drop_rate_from_prev = ((long_buy - prev_close) / prev_close) * 100
+
         result.update({
-            "annual_sigma":    annual_sig * 100,
-            "daily_sigma":     daily_sig_pct,  # 결과 구조에 일간 변동성 데이터 추가
-            "buy_target":      long_buy,
-            "buy_name":        "장기 적립 방어선",
-            "sub_msg":         sub_msg,
-            "time_guard_info": f"{time_guard_status} | 마지막 매수 후 {days_since_last_cast}일 경과",
-            "my_avg_price":    pos_cfg.get("MY_AVG_PRICE", 0.0),
-            "current_casts":   pos_cfg.get("CURRENT_CASTS", 0),
-            "annual_quota":    pos_cfg.get("ANNUAL_QUOTA", 20),
-            "exhaustion_rate": pos_cfg.get("CURRENT_CASTS", 0) / max(pos_cfg.get("ANNUAL_QUOTA", 20), 1) * 100,
+            "annual_sigma":     annual_sig * 100,
+            "daily_sigma":      daily_sig_pct,
+            "weekly_sigma":     weekly_sig_pct,  # 결과 구조에 주간 변동성 추가
+            "drop_rate":        drop_rate_from_prev,  # 전일비 하락률 추가
+            "multiplier":       calculated_multiplier,
+            "buy_target":       long_buy,
+            "buy_name":         "장기 적립 방어선",
+            "sub_msg":          sub_msg,
+            "time_guard_info":  f"{time_guard_status} | 마지막 매수 후 {days_since_last_cast}일 경과",
+            "my_avg_price":     pos_cfg.get("MY_AVG_PRICE", 0.0),
+            "current_casts":    pos_cfg.get("CURRENT_CASTS", 0),
+            "annual_quota":     pos_cfg.get("ANNUAL_QUOTA", 20),
+            "exhaustion_rate":  pos_cfg.get("CURRENT_CASTS", 0) / max(pos_cfg.get("ANNUAL_QUOTA", 20), 1) * 100,
         })
 
     elif mode == "SHORT":
@@ -274,47 +288,54 @@ def create_combined_message(results: dict, is_open: bool,
                             kst_now: str, vix_info: str, is_last_day: bool) -> str:
     mode_str = "🚀 실시간 모드" if is_open else "⏳ 장전 대기 모드"
     lines = [
-        f"🔔 **통합 자산 관리 시스템 리포트 ({mode_str})**",
-        f"🎬 VIX : {vix_info}",
+        f"=== 🎯 실전 매매엔진 관제탑 통합 리포트 ({mode_str}) ===",
+        f"🎬 시장 VIX 변동성 지수 : {vix_info}",
     ]
 
     for ticker, v in results.items():
-        opt_mode = "📈 장기적립" if v["mode"] == "LONG" else "⚡ 단기타격"
+        opt_mode = "📈 LONG (장기 적립)" if v["mode"] == "LONG" else "⚡ SHORT (단기 타격)"
         lines += [
-            "━━━━━━━━━━━━━━━━━━━━━━",
-            f"📍 **종목 : {ticker}** [{opt_mode}] (보유: {v['total_shares']}주)",
-            f"📍 상태 : {v['sub_msg']}",
-            f"💰 전일 종가 : ${v['prev_close']:.2f}",
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+            f"● 분석 종목 : {ticker} [{opt_mode}] (현재 보유: {v['total_shares']}주)",
+            f"● 장세 상태 : {v['sub_msg']}",
+            f"● 전일 최종 종가 : ${v['prev_close']:.2f}",
         ]
         if v["mode"] == "LONG":
             lines += [
-                f"📊 90일 연간 변동성(σ) : ±{v['annual_sigma']:.2f}%",
-                f"📊 90일 일간 평균 변동성(σ) : ±{v['daily_sigma']:.2f}%", 
-                f"🛒 **매수 예정가({v['buy_name']}) : ${v['buy_target']:.2f}**",
-                f"⚙️ 타임엔진 : {v['time_guard_info']}",
-                f"📊 계좌 집행 현황 : {v['current_casts']}/{v['annual_quota']}회",
-                f"🔥 자금 소진율 : {v['exhaustion_rate']:.1f}%",
+                f"-----------------------------------------",
+                f"📊 [🔍 90일 자산 체력 검진 데이터]",
+                f" └─ 연간 환산 변동성 (Annual σ) : {v['annual_sigma']:.1f}%",
+                f" └─ 일간 평균 변동성 (Daily σ)  : ±{v['daily_sigma']:.2f}%",
+                f" └─ 기준 주간 변동성 (Weekly σ) : ±{v['weekly_sigma']:.2f}% (★핵심 지표)",
+                f"-----------------------------------------",
+                f"🛒 [최종 매수 예정가] : ${v['buy_target']:.2f}",
+                f"📉 [타점 수치 분석]   : 전일 종가 대비 **{v['drop_rate']:.2f}%** 대폭락 시 집행",
+                f"💡 [안심 가이드]      : 오늘 설정된 그물망은 {ticker} 주간 기초 체력(±{v['weekly_sigma']:.2f}%)의 정확히 {v['multiplier']}배 하락 자리에 완벽하게 배치되었습니다. 흔한 잔파도에는 절대 속지 않는 철벽 방어선입니다.",
+                f"-----------------------------------------",
+                f"⚙️ 타임엔진 제어 : {v['time_guard_info']}",
+                f"📊 계좌 집행 현황 : {v['current_casts']}/{v['annual_quota']}회 집행 완료",
+                f"🔥 현재 자금 소진율 : {v['exhaustion_rate']:.1f}%",
             ]
             if v.get("time_guard_locked"):
-                lines.append("⚠️ **[경고] 가격 조건은 충족했으나 시간 가드에 의해 진입 보류 중**")
+                lines.append("⚠️ **[진입 보류] 가격 조건은 도달했으나 최소 일수 조건 미달로 시간 가드 가동 중**")
             if v["my_avg_price"] > 0:
-                lines.append(f"🍏 평단가 : ${v['my_avg_price']:.2f}")
+                lines.append(f"🍏 가문 평단가 : ${v['my_avg_price']:.2f}")
         else:
-            lines.append(f"📊 20일 변동성(1σ) : ±{v['std']:.2f}%")
+            lines.append(f"📊 20일 기준 변동성(1σ) : ±{v['std']:.2f}%")
             lines.append(f"🛒 **매수 예정가({v['buy_name']}) : ${v['buy_target']:.2f}**")
             plan = v.get("split_sell_plan", [])
             lines.append("📌 **3단계 분할 매도 계획**" if plan else "📌 분할 매도 계획 : 보유 주수 없음")
             for p in plan:
                 lines.append(f"   • {p['level']:16} → ${p['price']:.2f}  ({p['qty']}주)")
 
-    lines.append("━━━━━━━━━━━━━━━━━━━━━━")
+    lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     if is_last_day:
         lines += [
             "📡 **[🤖 디스코드 계정 만료 방지 생존 핑 발송 완료]**",
             "📢 본 메시지는 휴면 계정 전환을 막기 위한 월간 정기 핑입니다.",
-            "━━━━━━━━━━━━━━━━━━━━━━",
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
         ]
-    lines.append(f"⏰ 분석 시각: {kst_now}")
+    lines.append(f"⏰ 시각: {kst_now}")
     return "\n".join(lines)
 
 # ====================== Discord 전송 ======================
@@ -336,7 +357,7 @@ def main():
     config  = setup_environment()
     now_est = datetime.now(config["est"])
     
-    # 🚀 [핵심 수정] 한국 시간 월요일 오전(미국 일요일 저녁) 수동 실행 대응
+    # 🚀 한국 시간 월요일 오전(미국 일요일 저녁) 수동 실행 대응
     # 미국 시간 기준 일요일 오후 6시(선물장 개장) 이후라면, 타겟 날짜를 '월요일'로 간주합니다.
     target_date = now_est.date()
     if now_est.weekday() == 6 and now_est.hour >= 18:
