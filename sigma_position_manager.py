@@ -199,22 +199,24 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
         
         if vix_val >= 35.0:
             calculated_multiplier = 2.0
-            vix_status_msg = "🔴🔴 VIX 극단 공포 (초심해 2배수 타점)"
+            vix_status_msg = "🔴🔴 VIX 극단 공포 (초심해 2배수)"
         elif vix_val > 25.0:
             calculated_multiplier = 1.5
-            vix_status_msg = "⚠️ VIX 공포 상승 (1.5배수 타점)"
+            vix_status_msg = "⚠️ VIX 공포 상승 (1.5배수)"
         else:
             calculated_multiplier = 1.0
-            vix_status_msg = "✨ 평시 장세 (1.0배수 기본 타점)"
+            vix_status_msg = "✨ 평시 장세 (1.0배수 기본)"
 
         long_buy_ratio = (daily_sig_pct / 100) * calculated_multiplier
+        target_drop_pct = long_buy_ratio * 100
         
+        # 📊 [장세 상태 관제 필드 고도화 커스텀 완료]
         if is_open:
             long_buy = today_open * (1 - long_buy_ratio)
-            sub_msg = f"📉 {vix_status_msg} + 실시간 시가(Open) 기준 타점 배치 완료"
+            sub_msg = f"📉 [시가 기준선 연동] 오늘 시가(${today_open:.2f}) ➔ {calculated_multiplier:.1f}배수(-{target_drop_pct:.2f}%) 감산 타점 조준"
         else:
             long_buy = prev_close * (1 - long_buy_ratio)
-            sub_msg = f"{vix_status_msg} 대기 중 (전일 종가 기준)"
+            sub_msg = f"{vix_status_msg} ➔ [장전] 전일 종가 기준 대기 중"
             
         long_buy = max(long_buy, prev_close * 0.10)
 
@@ -342,17 +344,17 @@ def create_combined_message(results: dict, is_open: bool,
 
         opt_mode = "📈 LONG (장기 적립)" if v.get("mode") == "LONG" else "⚡ SHORT (단기 타격)"
         
-        # 🛡️ [선장님 논리 흐름 순서 교정 적용 단락]
+        # 🛡️ 선장님 요청에 따른 필드 출력 순서 동기화 완료
         lines += [
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
             f"● 종목 : {ticker} [{opt_mode}] (보유량 : {v.get('total_shares', 0)}주)",
             f"● 전일 종가 : ${v.get('prev_close', 0.0):.2f}",
             f"● 장세 상태 : {v.get('sub_msg', 'Normal')}",
+            f"🛒 [매수 예정가] : ${v.get('buy_target', 0.0):.2f}",
         ]
         
         if v.get("mode") == "LONG":
             lines += [
-                f"🛒 [매수 예정가] : ${v.get('buy_target', 0.0):.2f}",
                 f"-----------------------------------------",
                 f"📊 [🔍 90일 자산 데이터]",
                 f" └─ 연간 환산 변동성 (Annual σ) : {v.get('annual_sigma', 0.0):.1f}%",
@@ -367,10 +369,8 @@ def create_combined_message(results: dict, is_open: bool,
             if v.get("my_avg_price", 0.0) > 0:
                 lines.append(f"🍏 가문 평단가 : ${v.get('my_avg_price', 0.0):.2f}")
         else:
-            buy_target_val = v.get("buy_target", 0.0)
             short_std = v.get("std", 0.0) if v.get("std") is not None else 0.0
             
-            lines.append(f"🛒 **매수 예정가({v.get('buy_name', '단기 타격선')}) : ${buy_target_val:.2f}**")
             lines.append(f"📊 20일 기준 변동성(1σ) : ±{short_std:.2f}%")
             
             plan = v.get("split_sell_plan", [])
