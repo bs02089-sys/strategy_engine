@@ -131,6 +131,12 @@ def is_triple_witching_week(d) -> bool:
 # ====================== ticker 단위 분석 ======================
 def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
                    vix_val: float, is_open: bool, today_est) -> dict:
+    # [BUG #4 FIX] today_est가 date 객체일 때와 datetime 객체일 때 모두 date()로 통일
+    if isinstance(today_est, datetime):
+        today_est_date = today_est.date()
+    else:
+        today_est_date = today_est
+
     prev_close = float(ticker_df["Close"].iloc[-2 if is_open else -1])
     today_open = float(ticker_df["Open"].iloc[-1]) if is_open else prev_close
     base = today_open if is_open else prev_close
@@ -147,7 +153,7 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
     if vix_val >= 35.0:
         buy_target = base * (1 - std_20d * 2.0 / 100)
         buy_name, sub_msg = "-2.0σ", "🔴🔴 VIX 극단적 공포 (초심해 방어)"
-    elif is_triple_witching_week(today_est):
+    elif is_triple_witching_week(today_est_date):
         if is_open and gap_ratio < 0:
             rem = max(0, std_20d * 1.5 + gap_ratio * 100)
             buy_target = today_open * (1 - rem / 100)
@@ -211,7 +217,8 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
         except ValueError:
             last_cast_date = datetime(2025, 5, 7).date()
         
-        days_since_last_cast = (today_est - last_cast_date).days
+        # [BUG #4 FIX] today_est_date(date 객체)와 last_cast_date(date 객체)로 통일하여 연산
+        days_since_last_cast = (today_est_date - last_cast_date).days
         is_time_gate_passed = days_since_last_cast >= min_days_gate
 
         # 락업 남은 일수 계산
@@ -244,6 +251,12 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
 
         # 환경설정 파일(config.json)에 세팅된 계좌별 고유 할당 쿼터 동적 연동 (기본값 24회)
         current_quota = max(pos_cfg.get("ANNUAL_QUOTA", 24), 1)
+        current_casts = pos_cfg.get("CURRENT_CASTS", 0)
+
+        # [BUG #6 FIX] 소진율 100% 초과 방지 클램핑 및 경고
+        exhaustion_rate = min(current_casts / current_quota * 100, 100.0)
+        if current_casts > current_quota:
+            logger.warning(f"⚠️ {ticker} CURRENT_CASTS({current_casts})가 ANNUAL_QUOTA({current_quota})를 초과했습니다!")
 
         result.update({
             "annual_sigma":     annual_sig * 100,
@@ -256,10 +269,14 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
             "sub_msg":          sub_msg,
             "time_guard_info":  time_guard_status,
             "my_avg_price":     pos_cfg.get("MY_AVG_PRICE", 0.0),
-            "current_casts":    pos_cfg.get("CURRENT_CASTS", 0),
-            "annual_quota":     current_quota, 
-            "exhaustion_rate":  pos_cfg.get("CURRENT_CASTS", 0) / current_quota * 100,
+            "current_casts":    current_casts,
+            "annual_quota":     current_quota,
+            "exhaustion_rate":  exhaustion_rate,
         })
+
+    else:
+        # [BUG #3 FIX] SHORT 모드에서 split_sell_plan 키 누락 버그 수정
+        result["split_sell_plan"] = calculate_split_sell_targets(base, std_20d, shares)
 
     return result       
 
@@ -271,11 +288,18 @@ def get_combined_market_data(tickers: list, config: dict, est_tz, target_date) -
         return {}, False, "N/A"
 
     now_est = datetime.now(est_tz)
+
+    # [BUG #5 FIX] target_date 기준으로 is_open 판정 (일요일 저녁 수동 실행 시 날짜 보정 반영)
+    # target_date가 실제 거래일이라면, 현재 시각(now_est)의 시/분만 사용해 장 여부 판단
+    # [BUG #1 FIX] 공휴일 체크 추가
+    market_open_time  = now_est.replace(hour=9,  minute=30, second=0, microsecond=0)
+    market_close_time = now_est.replace(hour=16, minute=0,  second=0, microsecond=0)
     is_open = (
-        now_est.replace(hour=9, minute=30, second=0, microsecond=0) <= now_est
-        <= now_est.replace(hour=16, minute=0, second=0, microsecond=0)
-        and now_est.weekday() < 5
+        market_open_time <= now_est <= market_close_time
+        and target_date.weekday() < 5          # target_date 기준 평일 체크
+        and not is_us_holiday(target_date)     # [BUG #1 FIX] 공휴일 체크
     )
+
     vix_val, vix_info = get_vix_report()
     positions_cfg = config.get("positions", {})
     results = {}
