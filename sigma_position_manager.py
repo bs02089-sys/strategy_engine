@@ -327,25 +327,18 @@ def create_combined_message(results: dict, is_open: bool,
                 lines.append(f"🍏 가문 평단가 : ${v['my_avg_price']:.2f}")
                 
         else:
-            lines.append(f"📊 20일 기준 변동성(1σ) : ±{v['std']:.2f}%")
-            lines.append(f"🛒 **매수 예정가({v['buy_name']}) : ${v['buy_target']:.2f}**")
+            # 🛡️ [안전 가드] SHORT 데이터가 불완전하거나 비어있을 때 터지는 버그 완벽 방어
+            short_std = v.get("std", 0.0) if v.get("std") is not None else 0.0
+            buy_name_str = v.get("buy_name", "단기 타격선")
+            buy_target_val = v.get("buy_target", 0.0)
+
+            lines.append(f"📊 20일 기준 변동성(1σ) : ±{short_std:.2f}%")
+            lines.append(f"🛒 **매수 예정가({buy_name_str}) : ${buy_target_val:.2f}**")
+            
             plan = v.get("split_sell_plan", [])
             lines.append("📌 **3단계 분할 매도 계획**" if plan else "📌 분할 매도 계획 : 보유 주수 없음")
             for p in plan:
                 lines.append(f"   • {p['level']:16} → ${p['price']:.2f}  ({p['qty']}주)")
-
-    # 🚀 디스코드 계정 만료 방지 및 시각 정보 조립 (return 위로 올바르게 배치)
-    lines.append("-----------------------------------------")
-    if is_last_day:
-        lines += [
-            "📡 **[🤖 디스코드 계정 만료 방지 생존 핑 발송 완료]**",
-            "📢 본 메시지는 휴면 계정 전환을 막기 위한 월간 정기 핑입니다.",
-            "-----------------------------------------",
-        ]
-        
-    lines.append(f"⏰ 통합 분석 관제탑 시각: {kst_now}")
-    
-    return "\n".join(lines)
 
 # ====================== Discord 전송 ======================
 def send_discord_message(content: str, webhook_url: str, user_id: str) -> bool:
