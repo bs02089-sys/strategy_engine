@@ -177,33 +177,33 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
     if mode == "LONG":
         annual_sig = calculate_annual_sigma(ticker_df["Close"].values)
         
-        # 🚀 연간 변동성을 일간 및 주간 변동성으로 정밀 역산
+        # 🚀 [금융공학적 역산] 연간 변동성을 일간 및 주간 변동성 수치로 변환
         annual_sigma_val = annual_sig
         daily_sig_pct = (annual_sigma_val / np.sqrt(252)) * 100
         weekly_sig_pct = (annual_sigma_val / np.sqrt(52)) * 100
         
-        # 🚀 주간 변동성(Weekly σ)의 정확히 1.5배 자리에 동적 그물망 포진
-        calculated_multiplier = 1.5
+        # 🚀 [최종 확정] 90일 일간 평균 변동성(최근 1년 24회 발작)을 타점의 핵심 뼈대로 직접 채택
+        calculated_multiplier = 1.0
+        long_buy_ratio = daily_sig_pct / 100
         
-        # 장세에 따른 시가 갭하락 보정 로직을 장기 적립 방어선에도 동기화
+        # 장세에 따른 시가 갭하락 보정 로직을 일간 평균 변동성 방어선에도 완벽 동기화
         if is_open and gap_ratio < 0:
-            long_buy = today_open * (1 - (weekly_sig_pct / 100) * calculated_multiplier)
+            long_buy = today_open * (1 - long_buy_ratio * calculated_multiplier)
             sub_msg = "📉 장중 시가 갭하락 보정 적용"
         else:
-            long_buy = prev_close * (1 - (weekly_sig_pct / 100) * calculated_multiplier)
+            long_buy = prev_close * (1 - long_buy_ratio * calculated_multiplier)
             
         # 10% 최하단 리스크 안전 가드
         long_buy = max(long_buy, prev_close * 0.10)
 
+        # 20일 표준편차 기반 고변동성 장세 시간 가드 필터링
         normal_std = 4.0 if "SOXL" in ticker else 2.5 
-        
         if std_20d > normal_std * 1.3:
             min_days_gate = 14
-            time_guard_status = "🛡️ 고변동성 모니터링 (14일 제한)"
         else:
             min_days_gate = 5
-            time_guard_status = "🟢 정상 변동성 모니터링 (5일 제한)"
 
+        # 🚀 역사적 첫 투자 시작일 유령 날짜 방어선 교정
         last_cast_str = pos_cfg.get("LAST_CAST_DATE", "2025-05-07")
         try:
             last_cast_date = datetime.strptime(last_cast_str, "%Y-%m-%d").date()
@@ -222,14 +222,17 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
         else:
             result["time_guard_locked"] = False
 
-        # 사용자가 단번에 상태를 오독 없이 인지할 수 있도록 멘트 동적 생성
+        # 🚀 선장님 제안: 사용자가 직관적으로 정신 번쩍 들게 만드는 동적 가이드 멘트 생성
         if not is_time_gate_passed:
             time_guard_status = f"❌ [진입잠금] 고변동성 {min_days_gate}일 규제 중 ({days_remaining}일 더 지나 투자하세요!)"
         else:
             time_guard_status = f"🟢 [진입가능] 시간 규제 해제 (안심하고 투자하세요!)"
 
-        # 전일 종가 대비 매수 예정가의 대폭락 하락률 실시간 역산
+        # 전일 종가 대비 최종 매수 예정가의 대폭락 하락률 실시간 역산
         drop_rate_from_prev = ((long_buy - prev_close) / prev_close) * 100
+
+        # 환경설정 파일(config.json)에 세팅된 계좌별 고유 할당 쿼터 동적 연동
+        current_quota = max(pos_cfg.get("ANNUAL_QUOTA", 24), 1)
 
         result.update({
             "annual_sigma":     annual_sig * 100,
@@ -238,19 +241,15 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
             "drop_rate":        drop_rate_from_prev,
             "multiplier":       calculated_multiplier,
             "buy_target":       long_buy,
-            "buy_name":         "장기 적립 방어선",
+            "buy_name":         "일간 평균 변동성 방어선",
             "sub_msg":          sub_msg,
-            "time_guard_info":  time_guard_status,  # 직관적으로 교정된 멘트 주입
+            "time_guard_info":  time_guard_status,
             "my_avg_price":     pos_cfg.get("MY_AVG_PRICE", 0.0),
             "current_casts":    pos_cfg.get("CURRENT_CASTS", 0),
-            "annual_quota":     pos_cfg.get("ANNUAL_QUOTA", 20),
-            "exhaustion_rate":  pos_cfg.get("CURRENT_CASTS", 0) / max(pos_cfg.get("ANNUAL_QUOTA", 20), 1) * 100,
+            "annual_quota":     current_quota, 
+            "exhaustion_rate":  pos_cfg.get("CURRENT_CASTS", 0) / current_quota * 100,
         })
-
-    elif mode == "SHORT":
-        result["split_sell_plan"] = calculate_split_sell_targets(base, std_20d, shares)
-
-    return result
+        
 
 # ====================== 데이터 수집 및 분석 ======================
 def get_combined_market_data(tickers: list, config: dict, est_tz, target_date) -> tuple[dict, bool, str]:
@@ -297,7 +296,7 @@ def create_combined_message(results: dict, is_open: bool,
     mode_str = "🚀 실시간 모드" if is_open else "⏳ 장전 대기 모드"
     lines = [
         f"=== 🎯 매매엔진 통합 리포트 ({mode_str}) ===",
-        f"🎬 VIX : {vix_info}",
+        f"🎬 VIX 지수 : {vix_info}",
     ]
 
     for ticker, v in results.items():
@@ -308,26 +307,25 @@ def create_combined_message(results: dict, is_open: bool,
             f"● 장세 상태 : {v['sub_msg']}",
             f"● 전일 종가 : ${v['prev_close']:.2f}",
         ]
+        
         if v["mode"] == "LONG":
             lines += [
                 f"-----------------------------------------",
                 f"📊 [🔍 90일 자산 데이터]",
                 f" └─ 연간 환산 변동성 (Annual σ) : {v['annual_sigma']:.1f}%",
-                f" └─ 일간 평균 변동성 (Daily σ)  : ±{v['daily_sigma']:.2f}%",
-                f" └─ 기준 주간 변동성 (Weekly σ) : ±{v['weekly_sigma']:.2f}% (★핵심 지표)",
+                f" └─ 일간 평균 변동성 (Daily σ)  : ±{v['daily_sigma']:.2f}% (★핵심 지표)",
                 f"-----------------------------------------",
                 f"🛒 [매수 예정가] : ${v['buy_target']:.2f}",
                 f"📉 [타점 분석]   : 전일 종가 대비 **{v['drop_rate']:.2f}%** 대폭락 시 집행",
-                f"💡 [안심 가이드]      : 오늘 설정된 그물망은 {ticker} 주간 기초 체력(±{v['weekly_sigma']:.2f}%)의 정확히 {v['multiplier']}배 하락 자리에 완벽하게 배치되었습니다. 흔한 잔파도에는 절대 속지 않는 철벽 방어선입니다.",
+                f"💡 [안심 가이드] : 오늘 설정된 그물망은 {ticker} 일간 평균 변동성(±{v['daily_sigma']:.2f}%) 자리에 정교하게 포진했습니다. 선장님의 실증 데이터 검증(최근 1년 24회 발생)을 거친 맞춤형 실전 타점입니다.",
                 f"-----------------------------------------",
                 f"⚙️ 타임 엔진 제어 : {v['time_guard_info']}",
                 f"📊 계좌 집행 현황 : {v['current_casts']}/{v['annual_quota']}회 집행 완료",
                 f"🔥 자금 소진율 : {v['exhaustion_rate']:.1f}%",
             ]
-            if v.get("time_guard_locked"):
-                lines.append("⚠️ **[진입 보류] 가격 조건은 도달했으나 최소 일수 조건 미달로 시간 가드 가동 중**")
             if v["my_avg_price"] > 0:
                 lines.append(f"🍏 가문 평단가 : ${v['my_avg_price']:.2f}")
+                
         else:
             lines.append(f"📊 20일 기준 변동성(1σ) : ±{v['std']:.2f}%")
             lines.append(f"🛒 **매수 예정가({v['buy_name']}) : ${v['buy_target']:.2f}**")
@@ -336,14 +334,17 @@ def create_combined_message(results: dict, is_open: bool,
             for p in plan:
                 lines.append(f"   • {p['level']:16} → ${p['price']:.2f}  ({p['qty']}주)")
 
-    lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    # 🚀 디스코드 계정 만료 방지 및 시각 정보 조립 (return 위로 올바르게 배치)
+    lines.append("-----------------------------------------")
     if is_last_day:
         lines += [
             "📡 **[🤖 디스코드 계정 만료 방지 생존 핑 발송 완료]**",
             "📢 본 메시지는 휴면 계정 전환을 막기 위한 월간 정기 핑입니다.",
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+            "-----------------------------------------",
         ]
-    lines.append(f"⏰ 시각: {kst_now}")
+        
+    lines.append(f"⏰ 통합 분석 관제탑 시각: {kst_now}")
+    
     return "\n".join(lines)
 
 # ====================== Discord 전송 ======================
