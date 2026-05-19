@@ -223,10 +223,21 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
         else:
             result["time_guard_locked"] = False
 
+        # 🚀 실제 엔진 가동 원리와 100% 일치하는 동적 관제 문구 생성
         if not is_time_gate_passed:
-            time_guard_status = f"❌ [진입잠금] 고변동성 {min_days_gate}일 규제 중 ({days_remaining}일 더 지나 투자하세요!)"
+            if is_open:
+                # 🎯 정규장 개시 후 주가가 타점보다 위에 있을 때 (진짜 대기 상태)
+                if float(ticker_df["Close"].iloc[-1]) > long_buy:
+                    time_guard_status = f"⏳ [시간규제 가동 중] 잔파도 매수 제한 ({days_remaining}일 대기 필요) ➔ 1시그마 폭락선(${long_buy:.2f}) 터치 시 즉시 강제 락업 해제 및 기습 포격!"
+                else:
+                    # 🎯 타점을 깨고 내려가서 진짜 매수가 집행되는 역사적인 순간
+                    time_guard_status = f"🔥 [규제 강제 파괴] 1시그마 장벽 돌파! 시간 규제를 무력화하고 실탄을 기민하게 집행합니다!"
+            else:
+                # ⏳ 장 시작 전 대기 모드일 때
+                time_guard_status = f"🛡️ [평시 경계 태세] 시간 가드 잠김 ({days_remaining}일 남음) ➔ 오늘 정규장 {ticker} 변동성 한계선(-7.5% 대폭락) 도달 시 자동 락업 해제 및 집행!"
         else:
-            time_guard_status = f"🟢 [진입가능] 시간 규제 해제 (안심하고 투자하세요!)"
+            # 🟢 14일 규제 기간이 완전히 지나서 언제든 사도 되는 평화로운 상태
+            time_guard_status = f"🟢 [진입 제약 없음] 시간 가드 해제 상태 (안심하고 타점 조준 가능)"
 
         # 전일 종가 대비 최종 매수 예정가의 대폭락 하락률 실시간 역산
         drop_rate_from_prev = ((long_buy - prev_close) / prev_close) * 100
