@@ -289,7 +289,7 @@ def create_combined_message(results: dict, is_open: bool,
         if v["mode"] == "LONG":
             lines += [
                 f"📊 90일 연간 변동성(σ) : ±{v['annual_sigma']:.2f}%",
-                f"📊 90일 일간 평균 변동성(σ) : ±{v['daily_sigma']:.2f}%",  # 🚀 요청하신 연간 변동성 아랫줄에 출력 반영
+                f"📊 90일 일간 평균 변동성(σ) : ±{v['daily_sigma']:.2f}%", 
                 f"🛒 **매수 예정가({v['buy_name']}) : ${v['buy_target']:.2f}**",
                 f"⚙️ 타임엔진 : {v['time_guard_info']}",
                 f"📊 계좌 집행 현황 : {v['current_casts']}/{v['annual_quota']}회",
