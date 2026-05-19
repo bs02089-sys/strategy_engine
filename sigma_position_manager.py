@@ -204,7 +204,6 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
             min_days_gate = 5
             time_guard_status = "🟢 정상 변동성 모니터링 (5일 제한)"
 
-        # 🚀 실제 첫 투자 시작일로 생명력 불어넣기
         last_cast_str = pos_cfg.get("LAST_CAST_DATE", "2025-05-07")
         try:
             last_cast_date = datetime.strptime(last_cast_str, "%Y-%m-%d").date()
@@ -214,11 +213,20 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
         days_since_last_cast = (today_est - last_cast_date).days
         is_time_gate_passed = days_since_last_cast >= min_days_gate
 
+        # 락업 남은 일수 계산
+        days_remaining = min_days_gate - days_since_last_cast
+
         if is_open and (float(ticker_df["Close"].iloc[-1]) <= long_buy) and not is_time_gate_passed:
-            sub_msg = f"⏳ 시간 가드 가동 중 ({min_days_gate - days_since_last_cast}일 대기 필요)"
+            sub_msg = f"⏳ 시간 가드 가동 중 ({days_remaining}일 대기 필요)"
             result["time_guard_locked"] = True
         else:
             result["time_guard_locked"] = False
+
+        # 사용자가 단번에 상태를 오독 없이 인지할 수 있도록 멘트 동적 생성
+        if not is_time_gate_passed:
+            time_guard_status = f"❌ [진입잠금] 고변동성 {min_days_gate}일 규제 중 ({days_remaining}일 더 지나 투자하세요!)"
+        else:
+            time_guard_status = f"🟢 [진입가능] 시간 규제 해제 (안심하고 투자하세요!)"
 
         # 전일 종가 대비 최종 매수 예정가의 대폭락 하락률 실시간 역산
         drop_rate_from_prev = ((long_buy - prev_close) / prev_close) * 100
@@ -226,13 +234,13 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
         result.update({
             "annual_sigma":     annual_sig * 100,
             "daily_sigma":      daily_sig_pct,
-            "weekly_sigma":     weekly_sig_pct,  # 결과 구조에 주간 변동성 추가
-            "drop_rate":        drop_rate_from_prev,  # 전일비 하락률 추가
+            "weekly_sigma":     weekly_sig_pct,
+            "drop_rate":        drop_rate_from_prev,
             "multiplier":       calculated_multiplier,
             "buy_target":       long_buy,
             "buy_name":         "장기 적립 방어선",
             "sub_msg":          sub_msg,
-            "time_guard_info":  f"{time_guard_status} | 마지막 매수 후 {days_since_last_cast}일 경과",
+            "time_guard_info":  time_guard_status,  # 직관적으로 교정된 멘트 주입
             "my_avg_price":     pos_cfg.get("MY_AVG_PRICE", 0.0),
             "current_casts":    pos_cfg.get("CURRENT_CASTS", 0),
             "annual_quota":     pos_cfg.get("ANNUAL_QUOTA", 20),
