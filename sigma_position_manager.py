@@ -300,34 +300,43 @@ def create_combined_message(results: dict, is_open: bool,
     ]
 
     for ticker, v in results.items():
-        opt_mode = "📈 LONG (장기 적립)" if v["mode"] == "LONG" else "⚡ SHORT (단기 타격)"
+        # 🛡️ [최강 방어 가드] 만약 특정 종목의 데이터(v)가 통째로 None이면 안전하게 예외 처리하고 패스
+        if v is None:
+            lines += [
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+                f"● 종목 : {ticker} [⚠️ 데이터 없음]",
+                f"📢 해당 계좌 또는 종목의 연산 데이터가 비어 있습니다. 설정을 확인하세요.",
+            ]
+            continue  # 에러를 내지 않고 다음 종목 계산으로 안전하게 토스!
+
+        # 🟢 데이터가 존재할 때만 정상적으로 리포트 조립 시작
+        opt_mode = "📈 LONG (장기 적립)" if v.get("mode") == "LONG" else "⚡ SHORT (단기 타격)"
         lines += [
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
-            f"● 종목 : {ticker} [{opt_mode}] (보유량 : {v['total_shares']}주)",
-            f"● 장세 상태 : {v['sub_msg']}",
-            f"● 전일 종가 : ${v['prev_close']:.2f}",
+            f"● 종목 : {ticker} [{opt_mode}] (보유량 : {v.get('total_shares', 0)}주)",
+            f"● 장세 상태 : {v.get('sub_msg', 'Normal')}",
+            f"● 전일 종가 : ${v.get('prev_close', 0.0):.2f}",
         ]
         
-        if v["mode"] == "LONG":
+        if v.get("mode") == "LONG":
             lines += [
                 f"-----------------------------------------",
                 f"📊 [🔍 90일 자산 데이터]",
-                f" └─ 연간 환산 변동성 (Annual σ) : {v['annual_sigma']:.1f}%",
-                f" └─ 일간 평균 변동성 (Daily σ)  : ±{v['daily_sigma']:.2f}% (★핵심 지표)",
+                f" └─ 연간 환산 변동성 (Annual σ) : {v.get('annual_sigma', 0.0):.1f}%",
+                f" └─ 일간 평균 변동성 (Daily σ)  : ±{v.get('daily_sigma', 0.0):.2f}% (★핵심 지표)",
                 f"-----------------------------------------",
-                f"🛒 [매수 예정가] : ${v['buy_target']:.2f}",
-                f"📉 [타점 분석]   : 전일 종가 대비 **{v['drop_rate']:.2f}%** 대폭락 시 집행",
-                f"💡 [안심 가이드] : 오늘 설정된 그물망은 {ticker} 일간 평균 변동성(±{v['daily_sigma']:.2f}%) 자리에 정교하게 포진했습니다. 선장님의 실증 데이터 검증(최근 1년 24회 발생)을 거친 맞춤형 실전 타점입니다.",
+                f"🛒 [매수 예정가] : ${v.get('buy_target', 0.0):.2f}",
+                f"📉 [타점 분석]   : 전일 종가 대비 **{v.get('drop_rate', 0.0):.2f}%** 대폭락 시 집행",
+                f"💡 [안심 가이드] : 오늘 설정된 그물망은 {ticker} 일간 평균 변동성(±{v.get('daily_sigma', 0.0):.2f}%) 자리에 정교하게 포진했습니다. 선장님의 실증 데이터 검증(최근 1년 24회 발생)을 거친 맞춤형 실전 타점입니다.",
                 f"-----------------------------------------",
-                f"⚙️ 타임 엔진 제어 : {v['time_guard_info']}",
-                f"📊 계좌 집행 현황 : {v['current_casts']}/{v['annual_quota']}회 집행 완료",
-                f"🔥 자금 소진율 : {v['exhaustion_rate']:.1f}%",
+                f"⚙️ 타임 엔진 제어 : {v.get('time_guard_info', '정보 없음')}",
+                f"📊 계좌 집행 현황 : {v.get('current_casts', 0)}/{v.get('annual_quota', 24)}회 집행 완료",
+                f"🔥 자금 소진율 : {v.get('exhaustion_rate', 0.0):.1f}%",
             ]
-            if v["my_avg_price"] > 0:
-                lines.append(f"🍏 가문 평단가 : ${v['my_avg_price']:.2f}")
+            if v.get("my_avg_price", 0.0) > 0:
+                lines.append(f"🍏 가문 평단가 : ${v.get('my_avg_price', 0.0):.2f}")
                 
         else:
-            # 🛡️ [안전 가드] SHORT 데이터가 불완전하거나 비어있을 때 터지는 버그 완벽 방어
             short_std = v.get("std", 0.0) if v.get("std") is not None else 0.0
             buy_name_str = v.get("buy_name", "단기 타격선")
             buy_target_val = v.get("buy_target", 0.0)
@@ -339,6 +348,19 @@ def create_combined_message(results: dict, is_open: bool,
             lines.append("📌 **3단계 분할 매도 계획**" if plan else "📌 분할 매도 계획 : 보유 주수 없음")
             for p in plan:
                 lines.append(f"   • {p['level']:16} → ${p['price']:.2f}  ({p['qty']}주)")
+
+    # 🚀 디스코드 계정 만료 방지 및 시각 정보 조립 (위치 고정)
+    lines.append("-----------------------------------------")
+    if is_last_day:
+        lines += [
+            "📡 **[🤖 디스코드 계정 만료 방지 생존 핑 발송 완료]**",
+            "📢 본 메시지는 휴면 계정 전환을 막기 위한 월간 정기 핑입니다.",
+            "-----------------------------------------",
+        ]
+        
+    lines.append(f"⏰ 통합 분석 관제탑 시각: {kst_now}")
+    
+    return "\n".join(lines)
 
 # ====================== Discord 전송 ======================
 def send_discord_message(content: str, webhook_url: str, user_id: str) -> bool:
