@@ -228,7 +228,7 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
         else:
             time_guard_status = f"🟢 [진입가능] 시간 규제 해제 (안심하고 투자하세요!)"
 
-        # 전일 종가 대비 최종 매수 예정가의 대폭락 하락률 실시간 역산
+        # 전일 종가 대비 매수 예정가의 대폭락 하락률 실시간 역산
         drop_rate_from_prev = ((long_buy - prev_close) / prev_close) * 100
 
         result.update({
@@ -296,33 +296,33 @@ def create_combined_message(results: dict, is_open: bool,
                             kst_now: str, vix_info: str, is_last_day: bool) -> str:
     mode_str = "🚀 실시간 모드" if is_open else "⏳ 장전 대기 모드"
     lines = [
-        f"=== 🎯 실전 매매엔진 관제탑 통합 리포트 ({mode_str}) ===",
-        f"🎬 시장 VIX 변동성 지수 : {vix_info}",
+        f"=== 🎯 매매엔진 통합 리포트 ({mode_str}) ===",
+        f"🎬 VIX : {vix_info}",
     ]
 
     for ticker, v in results.items():
         opt_mode = "📈 LONG (장기 적립)" if v["mode"] == "LONG" else "⚡ SHORT (단기 타격)"
         lines += [
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
-            f"● 분석 종목 : {ticker} [{opt_mode}] (현재 보유: {v['total_shares']}주)",
+            f"● 종목 : {ticker} [{opt_mode}] (보유량 : {v['total_shares']}주)",
             f"● 장세 상태 : {v['sub_msg']}",
-            f"● 전일 최종 종가 : ${v['prev_close']:.2f}",
+            f"● 전일 종가 : ${v['prev_close']:.2f}",
         ]
         if v["mode"] == "LONG":
             lines += [
                 f"-----------------------------------------",
-                f"📊 [🔍 90일 자산 체력 검진 데이터]",
+                f"📊 [🔍 90일 자산 데이터]",
                 f" └─ 연간 환산 변동성 (Annual σ) : {v['annual_sigma']:.1f}%",
                 f" └─ 일간 평균 변동성 (Daily σ)  : ±{v['daily_sigma']:.2f}%",
                 f" └─ 기준 주간 변동성 (Weekly σ) : ±{v['weekly_sigma']:.2f}% (★핵심 지표)",
                 f"-----------------------------------------",
-                f"🛒 [최종 매수 예정가] : ${v['buy_target']:.2f}",
-                f"📉 [타점 수치 분석]   : 전일 종가 대비 **{v['drop_rate']:.2f}%** 대폭락 시 집행",
+                f"🛒 [매수 예정가] : ${v['buy_target']:.2f}",
+                f"📉 [타점 분석]   : 전일 종가 대비 **{v['drop_rate']:.2f}%** 대폭락 시 집행",
                 f"💡 [안심 가이드]      : 오늘 설정된 그물망은 {ticker} 주간 기초 체력(±{v['weekly_sigma']:.2f}%)의 정확히 {v['multiplier']}배 하락 자리에 완벽하게 배치되었습니다. 흔한 잔파도에는 절대 속지 않는 철벽 방어선입니다.",
                 f"-----------------------------------------",
-                f"⚙️ 타임엔진 제어 : {v['time_guard_info']}",
+                f"⚙️ 타임 엔진 제어 : {v['time_guard_info']}",
                 f"📊 계좌 집행 현황 : {v['current_casts']}/{v['annual_quota']}회 집행 완료",
-                f"🔥 현재 자금 소진율 : {v['exhaustion_rate']:.1f}%",
+                f"🔥 자금 소진율 : {v['exhaustion_rate']:.1f}%",
             ]
             if v.get("time_guard_locked"):
                 lines.append("⚠️ **[진입 보류] 가격 조건은 도달했으나 최소 일수 조건 미달로 시간 가드 가동 중**")
