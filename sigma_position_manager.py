@@ -196,12 +196,13 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
             min_days_gate = 5
             time_guard_status = "🟢 정상 변동성 모니터링 (5일 제한)"
 
-        last_cast_str = pos_cfg.get("LAST_CAST_DATE", "1970-01-01")
+        # 🚀실제 역사적인 첫 투자 시작일로 기록
+        last_cast_str = pos_cfg.get("LAST_CAST_DATE", "2025-05-07")
         try:
             last_cast_date = datetime.strptime(last_cast_str, "%Y-%m-%d").date()
         except ValueError:
-            last_cast_date = datetime(1970, 1, 1).date()
-        
+            last_cast_date = datetime(2025, 5, 7).date()
+       
         days_since_last_cast = (today_est - last_cast_date).days
         is_time_gate_passed = days_since_last_cast >= min_days_gate
 
