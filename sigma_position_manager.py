@@ -210,7 +210,7 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
         long_buy_ratio = (daily_sig_pct / 100) * calculated_multiplier
         target_drop_pct = long_buy_ratio * 100
         
-        # 📊 [장세 상태 관제 필드 고도화 커스텀 완료]
+        # 📊 [장세 상태 관제 고도화 커스텀 완료]
         if is_open:
             long_buy = today_open * (1 - long_buy_ratio)
             sub_msg = f"📉 [시가 기준선 연동] 오늘 시가(${today_open:.2f}) ➔ {calculated_multiplier:.1f}배수(-{target_drop_pct:.2f}%) 감산 타점 조준"
@@ -344,7 +344,7 @@ def create_combined_message(results: dict, is_open: bool,
 
         opt_mode = "📈 LONG (장기 적립)" if v.get("mode") == "LONG" else "⚡ SHORT (단기 타격)"
         
-        # 🛡️ 선장님 요청에 따른 필드 출력 순서 동기화 완료
+        # 🛡️ 선장님 요청에 따른 필드 출력 순서 동기화 (종목 ➔ 전일종가 ➔ 장세상태 ➔ 매수예정가)
         lines += [
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
             f"● 종목 : {ticker} [{opt_mode}] (보유량 : {v.get('total_shares', 0)}주)",
@@ -370,7 +370,6 @@ def create_combined_message(results: dict, is_open: bool,
                 lines.append(f"🍏 가문 평단가 : ${v.get('my_avg_price', 0.0):.2f}")
         else:
             short_std = v.get("std", 0.0) if v.get("std") is not None else 0.0
-            
             lines.append(f"📊 20일 기준 변동성(1σ) : ±{short_std:.2f}%")
             
             plan = v.get("split_sell_plan", [])
