@@ -130,7 +130,7 @@ def is_triple_witching_week(d) -> bool:
 
 # ====================== ticker 단위 분석 ======================
 def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
-                    vix_val: float, is_open: bool, today_est) -> dict:
+                   vix_val: float, is_open: bool, today_est) -> dict:
     prev_close = float(ticker_df["Close"].iloc[-2 if is_open else -1])
     today_open = float(ticker_df["Open"].iloc[-1]) if is_open else prev_close
     base = today_open if is_open else prev_close
@@ -182,7 +182,7 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
         daily_sig_pct = (annual_sigma_val / np.sqrt(252)) * 100
         weekly_sig_pct = (annual_sigma_val / np.sqrt(52)) * 100
         
-        # 🚀 [최종 확정] 90일 일간 평균 변동성(최근 1년 24회 발작)을 타점의 핵심 뼈대로 직접 채택
+        # 🚀 90일 일간 평균 변동성(최근 1년 24회 발작)을 타점의 핵심 뼈대로 직접 채택
         calculated_multiplier = 1.0
         long_buy_ratio = daily_sig_pct / 100
         
@@ -192,6 +192,7 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
             sub_msg = "📉 장중 시가 갭하락 보정 적용"
         else:
             long_buy = prev_close * (1 - long_buy_ratio * calculated_multiplier)
+            sub_msg = "✨ 정상 대기 모드 (1시그마 타점)"
             
         # 10% 최하단 리스크 안전 가드
         long_buy = max(long_buy, prev_close * 0.10)
@@ -222,7 +223,6 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
         else:
             result["time_guard_locked"] = False
 
-        # 🚀 선장님 제안: 사용자가 직관적으로 정신 번쩍 들게 만드는 동적 가이드 멘트 생성
         if not is_time_gate_passed:
             time_guard_status = f"❌ [진입잠금] 고변동성 {min_days_gate}일 규제 중 ({days_remaining}일 더 지나 투자하세요!)"
         else:
@@ -231,7 +231,7 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
         # 전일 종가 대비 최종 매수 예정가의 대폭락 하락률 실시간 역산
         drop_rate_from_prev = ((long_buy - prev_close) / prev_close) * 100
 
-        # 환경설정 파일(config.json)에 세팅된 계좌별 고유 할당 쿼터 동적 연동
+        # 환경설정 파일(config.json)에 세팅된 계좌별 고유 할당 쿼터 동적 연동 (기본값 24회)
         current_quota = max(pos_cfg.get("ANNUAL_QUOTA", 24), 1)
 
         result.update({
@@ -249,7 +249,8 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
             "annual_quota":     current_quota, 
             "exhaustion_rate":  pos_cfg.get("CURRENT_CASTS", 0) / current_quota * 100,
         })
-        
+
+    return result       
 
 # ====================== 데이터 수집 및 분석 ======================
 def get_combined_market_data(tickers: list, config: dict, est_tz, target_date) -> tuple[dict, bool, str]:
