@@ -40,7 +40,7 @@ def verify_long_term_hold_logic():
     df['Daily_Sigma'] = df['Log_Ret'].rolling(window=90).std(ddof=1)
     df = df.dropna().copy()
 
-    # 🎯 선장님 확정 VIX 눈금 및 황금 배수
+    # 🎯 VIX 눈금 및 황금 배수
     conditions = [
         (df['VIX'] >= 30.0),
         (df['VIX'] >= 20.0) & (df['VIX'] < 30.0),
