@@ -118,20 +118,23 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
     else:
         today_est_date = today_est
 
-    if len(ticker_df) < 2:
-        prev_close = float(ticker_df["Close"].iloc[-1]) if not ticker_df.empty else 10.0
-        today_open = prev_close
-    else:
-        prev_close = float(ticker_df["Close"].iloc[-2 if is_open else -1])
-        try:
-            today_open = float(ticker_df["Open"].iloc[-1]) if is_open else prev_close
-            if pd.isna(today_open):
-                today_open = prev_close
-        except Exception:
+    # [BUG #1 FIX] get_combined_market_data에서 len < 2 진입 차단하므로 데드코드 제거
+    # 단순하게 직접 추출
+    prev_close = float(ticker_df["Close"].iloc[-2 if is_open else -1])
+    try:
+        today_open = float(ticker_df["Open"].iloc[-1]) if is_open else prev_close
+        if pd.isna(today_open):
             today_open = prev_close
+    except Exception:
+        today_open = prev_close
 
     base = today_open if is_open else prev_close
-    gap_ratio = (today_open - prev_close) / prev_close
+
+    # [BUG #2 FIX] prev_close == 0 시 ZeroDivisionError 방어
+    gap_ratio = (today_open - prev_close) / prev_close if prev_close != 0 else 0.0
+
+    # [BUG #5 FIX] vix_status_msg 기본값 선언 — LONG 블록 진입 전 미정의 참조 방지
+    vix_status_msg = "✨ 평시 안정 장세"
 
     daily_ret = ticker_df["Close"].pct_change().dropna()
     std_20d = float(daily_ret.tail(20).std() * 100)
@@ -243,6 +246,9 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
         current_quota = max(pos_cfg.get("ANNUAL_QUOTA", 24), 1)
         current_casts = pos_cfg.get("CURRENT_CASTS", 0)
         exhaustion_rate = min(current_casts / current_quota * 100, 100.0)
+        # [BUG #4 FIX] 소진율 100% 초과 시 경고 로그 추가
+        if current_casts > current_quota:
+            logger.warning(f"⚠️ {ticker} CURRENT_CASTS({current_casts})가 ANNUAL_QUOTA({current_quota})를 초과했습니다!")
 
         result.update({
             "daily_sigma":      daily_sig_pct,
