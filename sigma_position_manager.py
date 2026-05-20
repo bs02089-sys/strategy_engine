@@ -50,11 +50,24 @@ def save_config(cfg: dict):
 
 def setup_environment() -> dict:
     cfg = load_config()
+
+    # config.json의 VIX_CONFIG 기본값 (파일에 없을 경우 대비)
+    default_vix = {
+        "LEVEL_LOW":    20.0,
+        "LEVEL_HIGH":   30.0,
+        "MULT_NORMAL":  0.60,
+        "MULT_FEAR":    1.95,
+        "MULT_EXTREME": 2.45,
+    }
+    raw_vix_cfg = cfg.get("VIX_CONFIG", {})
+
     return {
         "webhook":       cfg.get("DISCORD_WEBHOOK"),
         "user_id":       cfg.get("DISCORD_USER_ID"),
         "tickers":       cfg.get("TICKERS", ["SOXL", "TSLA"]),
         "positions":     cfg.get("POSITIONS", {}),
+        "vix_long":      {**default_vix, **raw_vix_cfg.get("LONG",  {})},
+        "vix_short":     {**default_vix, **raw_vix_cfg.get("SHORT", {})},
         "kst":           pytz.timezone('Asia/Seoul'),
         "est":           pytz.timezone('US/Eastern'),
         "full_cfg":      cfg
@@ -112,14 +125,12 @@ def is_triple_witching_week(d) -> bool:
 
 # ====================== ticker 단위 분석 ======================
 def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
-                   vix_val: float, is_open: bool, today_est) -> dict:
+                   vix_val: float, is_open: bool, today_est, vix_cfg: dict) -> dict:
     if isinstance(today_est, datetime):
         today_est_date = today_est.date()
     else:
         today_est_date = today_est
 
-    # [BUG #1 FIX] get_combined_market_data에서 len < 2 진입 차단하므로 데드코드 제거
-    # 단순하게 직접 추출
     prev_close = float(ticker_df["Close"].iloc[-2 if is_open else -1])
     try:
         today_open = float(ticker_df["Open"].iloc[-1]) if is_open else prev_close
@@ -129,45 +140,52 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
         today_open = prev_close
 
     base = today_open if is_open else prev_close
-
-    # [BUG #2 FIX] prev_close == 0 시 ZeroDivisionError 방어
     gap_ratio = (today_open - prev_close) / prev_close if prev_close != 0 else 0.0
-
-    # [BUG #5 FIX] vix_status_msg 기본값 선언 — LONG 블록 진입 전 미정의 참조 방지
     vix_status_msg = "✨ 평시 안정 장세"
+
+    # SHORT 모드에서 사용할 VIX 임계값 및 배수 로드
+    v_extreme = vix_cfg.get("MULT_EXTREME", 2.45)
+    v_fear    = vix_cfg.get("MULT_FEAR",    1.95)
+    v_normal  = vix_cfg.get("MULT_NORMAL",  0.60)
+    v_high    = vix_cfg.get("LEVEL_HIGH",  30.0)
+    v_low     = vix_cfg.get("LEVEL_LOW",   20.0)
 
     daily_ret = ticker_df["Close"].pct_change().dropna()
     std_20d = float(daily_ret.tail(20).std() * 100)
     if pd.isna(std_20d) or std_20d <= 0:
-        std_20d = 2.0
+        # allow override via environment variable SIGMA_DEFAULT, otherwise fallback to 2.0
+        try:
+            std_20d = float(os.getenv("SIGMA_DEFAULT", "2.0"))
+        except Exception:
+            std_20d = 2.0
 
     mode   = pos_cfg.get("MODE", "SHORT")
     shares = pos_cfg.get("TOTAL_SHARES", 0)
 
     # ------------------ [SHORT 모드 및 VIX/갭하락 로직 영점 정렬] ------------------
-    if vix_val >= 30.0:  
-        buy_target = base * (1 - std_20d * 2.45 / 100)
-        buy_name, sub_msg = "-2.45σ", "🔴🔴 VIX 극단적 공포 (SHORT 초심해 타점 방어)"
+    if vix_val >= v_high:
+        buy_target = base * (1 - std_20d * v_extreme / 100)
+        buy_name, sub_msg = f"-{v_extreme}σ", "🔴🔴 VIX 극단적 공포 (SHORT 초심해 타점 방어)"
     elif is_triple_witching_week(today_est_date):
         if is_open and gap_ratio < 0:
-            rem = max(0, std_20d * 1.95 + gap_ratio * 100)
+            rem = max(0, std_20d * v_fear + gap_ratio * 100)
             buy_target = today_open * (1 - rem / 100)
             buy_name = f"-{rem/std_20d:.1f}σ"
             sub_msg = "🧙 세 마녀 주간 갭 하락 보정"
         else:
-            buy_target = prev_close * (1 - std_20d * 1.95 / 100)
-            buy_name, sub_msg = "-1.95σ", "🧙 세 마녀 주간 하단 그물 대기"
-    elif vix_val >= 20.0:  
-        buy_target = base * (1 - std_20d * 1.95 / 100)
-        buy_name, sub_msg = "-1.95σ", "⚠️ VIX 공포지수 상승 (SHORT 타점 깊이 강화)"
+            buy_target = prev_close * (1 - std_20d * v_fear / 100)
+            buy_name, sub_msg = f"-{v_fear}σ", "🧙 세 마녀 주간 하단 그물 대기"
+    elif vix_val >= v_low:
+        buy_target = base * (1 - std_20d * v_fear / 100)
+        buy_name, sub_msg = f"-{v_fear}σ", "⚠️ VIX 공포지수 상승 (SHORT 타점 깊이 강화)"
     elif is_open and gap_ratio < 0:
         rem = max(0, std_20d + gap_ratio * 100)
         buy_target = today_open * (1 - rem / 100)
         buy_name = f"-{rem/std_20d:.1f}σ"
         sub_msg = "📉 갭 하락 보정 반영"
     else:
-        buy_target = prev_close * (1 - std_20d * 0.60 / 100)
-        buy_name, sub_msg = "-0.60σ", "📈 기존 시그마 유지"
+        buy_target = prev_close * (1 - std_20d * v_normal / 100)
+        buy_name, sub_msg = f"-{v_normal}σ", "📈 기존 시그마 유지"
 
     result = {
         "mode": mode, "prev_close": prev_close, "today_open": today_open,
@@ -184,14 +202,21 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
 
         daily_sig_pct = daily_sigma_val * 100
         
-        if vix_val >= 30.0:
-            calculated_multiplier = 2.45  
+        # config.json VIX_CONFIG[LONG]에서 배수 로드 (하드코딩 제거)
+        lv_extreme = vix_cfg.get("MULT_EXTREME", 2.45)
+        lv_fear    = vix_cfg.get("MULT_FEAR",    1.95)
+        lv_normal  = vix_cfg.get("MULT_NORMAL",  0.60)
+        lv_high    = vix_cfg.get("LEVEL_HIGH",  30.0)
+        lv_low     = vix_cfg.get("LEVEL_LOW",   20.0)
+
+        if vix_val >= lv_high:
+            calculated_multiplier = lv_extreme
             vix_status_msg = "🔴🔴 VIX 극단 공포 장세"
-        elif vix_val >= 20.0:
-            calculated_multiplier = 1.95  
+        elif vix_val >= lv_low:
+            calculated_multiplier = lv_fear
             vix_status_msg = "⚠️ VIX 공포 상승 장세"
         else:
-            calculated_multiplier = 0.60  
+            calculated_multiplier = lv_normal
             vix_status_msg = "✨ 평시 안정 장세"
 
         long_buy_ratio = float(np.exp(-daily_sigma_val * calculated_multiplier))
@@ -246,7 +271,6 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
         current_quota = max(pos_cfg.get("ANNUAL_QUOTA", 24), 1)
         current_casts = pos_cfg.get("CURRENT_CASTS", 0)
         exhaustion_rate = min(current_casts / current_quota * 100, 100.0)
-        # [BUG #4 FIX] 소진율 100% 초과 시 경고 로그 추가
         if current_casts > current_quota:
             logger.warning(f"⚠️ {ticker} CURRENT_CASTS({current_casts})가 ANNUAL_QUOTA({current_quota})를 초과했습니다!")
 
@@ -286,6 +310,9 @@ def get_combined_market_data(tickers: list, config: dict, est_tz, target_date) -
 
     vix_val, vix_info = get_vix_report()
     positions_cfg = config.get("positions", {})
+    # config.json VIX_CONFIG — LONG/SHORT 모드별 배수 딕셔너리
+    vix_long_cfg  = config.get("vix_long",  {})
+    vix_short_cfg = config.get("vix_short", {})
     results = {}
 
     for ticker in tickers:
@@ -301,9 +328,14 @@ def get_combined_market_data(tickers: list, config: dict, est_tz, target_date) -
             if len(t_df) < 2:
                 continue
 
+            pos_cfg_ticker = positions_cfg.get(ticker, {})
+            # 종목 모드에 따라 알맞은 VIX 배수 딕셔너리 선택
+            mode = pos_cfg_ticker.get("MODE", "SHORT")
+            vix_cfg_ticker = vix_long_cfg if mode == "LONG" else vix_short_cfg
+
             results[ticker] = analyze_ticker(
-                ticker, t_df, positions_cfg.get(ticker, {}), vix_val, is_open,
-                target_date
+                ticker, t_df, pos_cfg_ticker, vix_val, is_open,
+                target_date, vix_cfg_ticker
             )
         except Exception as e:
             logger.warning(f"⚠️ {ticker} 분석 실패: {e}")
@@ -339,7 +371,6 @@ def create_combined_message(results: dict, is_open: bool,
         ]
         
         if v.get("mode") == "LONG":
-            # 🛠️ 선장님 명령 수용: 익절 권장가 관련 출력 로직 흔적도 없이 삭제 완료
             daily_sig = v.get("daily_sigma", 0.0)
             mult = v.get("multiplier", 0.60)
             
