@@ -7,7 +7,7 @@ import warnings
 warnings.filterwarnings('ignore')
 
 def run_vix_multiplier_final_optimizer():
-    print("📡 [vix_multiplier_optimizer_v2.py] 2027년 새해 새 출발 영점 조절 엔진 가동...")
+    print("📡 [vix_multiplier_optimizer.py] 2027년 새해 새 출발 영점 조절 엔진 가동...")
     print("🎬 최근 3개년 최신 시장 데이터를 수집하여 통계적 황금 배수를 역산합니다.\n")
     
     # 1. 최근 3개년 데이터 확보 (실전 엔진과 데이터 동기화)
