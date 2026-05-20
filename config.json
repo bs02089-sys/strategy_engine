@@ -52,17 +52,17 @@
     "LONG": {
       "LEVEL_LOW": 20.0,
       "LEVEL_HIGH": 30.0,
-      "MULT_NORMAL": 0.60,
+      "MULT_NORMAL": 0.65,
       "MULT_FEAR": 1.95,
-      "MULT_EXTREME": 2.45
+      "MULT_EXTREME": 2.40
     },
 
     "SHORT": {
       "LEVEL_LOW": 20.0,
       "LEVEL_HIGH": 30.0,
-      "MULT_NORMAL": 0.60,
+      "MULT_NORMAL": 0.65,
       "MULT_FEAR": 1.95,
-      "MULT_EXTREME": 2.45
+      "MULT_EXTREME": 2.40
     }
   }
 }
