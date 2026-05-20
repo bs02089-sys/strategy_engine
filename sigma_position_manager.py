@@ -372,14 +372,18 @@ def create_combined_message(results: dict, is_open: bool,
     lines = [
         f"=== 🎯 매매엔진 통합 리포트 ({mode_str}) ===",
         f"🎬 VIX 지수 : {vix_info}",
+        ""
     ]
+
+    if not results:
+        lines.append("⚠️ 분석 결과가 없습니다.")
+        return "\n".join(lines)
 
     for ticker, v in results.items():
         if v is None:
             lines += [
                 "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
                 f"● 종목 : {ticker} [⚠️ 데이터 없음]",
-                f"📢 해당 계좌 또는 종목의 연산 데이터가 비어 있습니다. 설정을 확인하세요.",
             ]
             continue
 
@@ -394,38 +398,27 @@ def create_combined_message(results: dict, is_open: bool,
         ]
         
         if v.get("mode") == "LONG":
-            daily_sig = v.get("daily_sigma", 0.0)
-            mult = v.get("multiplier", 0.60)
-            
             lines += [
                 f"-----------------------------------------",
-                f"📊 [🔍 90일 자산 데이터]",
-                f" └─ 일간 평균 변동성 (Daily σ)  : ±{daily_sig:.2f}% (★절대 기준축)",
-                f"-----------------------------------------",
-                f"💡 [안심 가이드] : 오늘 설정된 그물망은 {ticker}의 90일 일간 평균 변동성 지표를 직결한 순수 기하학 공식에 기반하며, 현재 VIX 등급의 실증 배수(-{mult:.2f}σ)로 영점이 정렬되었습니다.",
-                f"-----------------------------------------",
-                f"⚙️ 타임 엔진 제어 : {v.get('time_guard_info', '정보 없음')}",
-                f"📊 계좌 집행 현황 : {v.get('current_casts', 0)}/{v.get('annual_quota', 24)}회 집행 완료",
-                f"🔥 자금 소진율 : {v.get('exhaustion_rate', 0.0):.1f}%",
+                f"📊 일간 평균 변동성 : ±{v.get('daily_sigma', 0.0):.2f}%",
+                f"💡 배수 : {v.get('multiplier', 0.0):.2f}x",
+                f"⚙️ 타임 엔진 : {v.get('time_guard_info', '정보 없음')}",
+                f"📊 집행 현황 : {v.get('current_casts', 0)}/{v.get('annual_quota', 24)}회",
             ]
-            if v.get("my_avg_price", 0.0) > 0:
-                lines.append(f"🍏 가문 평단가 : ${v.get('my_avg_price', 0.0):.2f}")
+            if v.get("my_avg_price"):
+                lines.append(f"🍏 평단가 : ${v.get('my_avg_price'):.2f}")
         else:
-            short_std = v.get("std", 0.0) if v.get("std") is not None else 0.0
-            lines.append(f"📊 20일 기준 변동성(1σ) : ±{short_std:.2f}%")
-            
+            lines.append(f"📊 20일 변동성(1σ) : ±{v.get('std', 0.0):.2f}%")
             plan = v.get("split_sell_plan", [])
-            lines.append("📌 **3단계 분할 매도 계획**" if plan else "📌 분할 매도 계획 : 보유 주수 없음")
-            for p in plan:
-                lines.append(f"   • {p['level']:16} → ${p['price']:.2f}  ({p['qty']}주)")
+            if plan:
+                lines.append("📌 **3단계 분할 매도 계획**")
+                for p in plan:
+                    lines.append(f"   • {p['level']:16} → ${p['price']:.2f}  ({p['qty']}주)")
 
     lines.append("-----------------------------------------")
     if is_last_day:
-        lines += [
-            "📡 **[🤖 디스코드 계정 만료 방지 생존 핑 발송 완료]**",
-            "📢 본 메시지는 휴면 계정 전환을 막기 위한 월간 정기 핑입니다.",
-            "-----------------------------------------",
-        ]
+        lines.append("📡 **[🤖 디스코드 계정 만료 방지 생존 핑 발송 완료]**")
+    
     lines.append(f"⏰ 통합 분석 관제탑 시각: {kst_now}")
     return "\n".join(lines)
 
