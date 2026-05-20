@@ -375,16 +375,8 @@ def create_combined_message(results: dict, is_open: bool,
         ""
     ]
 
-    if not results:
-        lines.append("⚠️ 분석 결과가 없습니다.")
-        return "\n".join(lines)
-
     for ticker, v in results.items():
         if v is None:
-            lines += [
-                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
-                f"● 종목 : {ticker} [⚠️ 데이터 없음]",
-            ]
             continue
 
         opt_mode = "📈 LONG (장기 적립)" if v.get("mode") == "LONG" else "⚡ SHORT (단기 타격)"
@@ -393,10 +385,18 @@ def create_combined_message(results: dict, is_open: bool,
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
             f"● 종목 : {ticker} [{opt_mode}] (보유량 : {v.get('total_shares', 0)}주)",
             f"● 전일 종가 : ${v.get('prev_close', 0.0):.2f}",
-            f"● 장세 상태 : {v.get('sub_msg', 'Normal')}",
-            f"🛒 [매수 예정가] : ${v.get('buy_target', 0.0):.2f}",
         ]
-        
+
+        # ==================== 장세 상태 문구 개선 ====================
+        sub_msg = v.get('sub_msg', '')
+        if v.get("mode") == "LONG":
+            lines.append(f"● 장세 상태 : {sub_msg}")
+        else:
+            lines.append(f"● 장세 상태 : {sub_msg}")
+
+        lines.append(f"🛒 [매수 예정가] : ${v.get('buy_target', 0.0):.2f}")
+
+        # LONG 모드 상세
         if v.get("mode") == "LONG":
             lines += [
                 f"-----------------------------------------",
@@ -405,8 +405,10 @@ def create_combined_message(results: dict, is_open: bool,
                 f"⚙️ 타임 엔진 : {v.get('time_guard_info', '정보 없음')}",
                 f"📊 집행 현황 : {v.get('current_casts', 0)}/{v.get('annual_quota', 24)}회",
             ]
-            if v.get("my_avg_price"):
+            if v.get("my_avg_price", 0) > 0:
                 lines.append(f"🍏 평단가 : ${v.get('my_avg_price'):.2f}")
+        
+        # SHORT 모드 분할 매도
         else:
             lines.append(f"📊 20일 변동성(1σ) : ±{v.get('std', 0.0):.2f}%")
             plan = v.get("split_sell_plan", [])
@@ -417,7 +419,7 @@ def create_combined_message(results: dict, is_open: bool,
 
     lines.append("-----------------------------------------")
     if is_last_day:
-        lines.append("📡 **[🤖 디스코드 계정 만료 방지 생존 핑 발송 완료]**")
+        lines += ["📡 **[🤖 디스코드 계정 만료 방지 생존 핑 발송 완료]**", "-----------------------------------------"]
     
     lines.append(f"⏰ 통합 분석 관제탑 시각: {kst_now}")
     return "\n".join(lines)
