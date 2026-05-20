@@ -85,7 +85,7 @@ def get_vix_report() -> tuple[float, str]:
             if isinstance(df.columns, pd.MultiIndex):
                 df.columns = df.columns.droplevel(1)
             v = float(df["Close"].iloc[-1])
-            status = "안정" if v <= 15 else "주의" if v <= 25 else "공포" if v <= 35 else "극단적 공포"
+            status = "안정" if v <= 15 else "주의" if v <= 20 else "공포" if v <= 30 else "극단적 공포"
             return v, f"{v:.1f} ({status})"
     except Exception as e:
         logger.warning(f"VIX 데이터 수집 실패: {e}")
@@ -141,30 +141,30 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
     mode   = pos_cfg.get("MODE", "SHORT")
     shares = pos_cfg.get("TOTAL_SHARES", 0)
 
-    # ------------------ [SHORT 모드 및 기존 VIX/갭하락 로직] ------------------
-    if vix_val >= 35.0:
-        buy_target = base * (1 - std_20d * 2.0 / 100)
-        buy_name, sub_msg = "-2.0σ", "🔴🔴 VIX 극단적 공포 (초심해 방어)"
+    # ------------------ [SHORT 모드 및 VIX/갭하락 로직 영점 정렬] ------------------
+    if vix_val >= 30.0:  
+        buy_target = base * (1 - std_20d * 2.45 / 100)
+        buy_name, sub_msg = "-2.45σ", "🔴🔴 VIX 극단적 공포 (SHORT 초심해 타점 방어)"
     elif is_triple_witching_week(today_est_date):
         if is_open and gap_ratio < 0:
-            rem = max(0, std_20d * 1.5 + gap_ratio * 100)
+            rem = max(0, std_20d * 1.95 + gap_ratio * 100)
             buy_target = today_open * (1 - rem / 100)
             buy_name = f"-{rem/std_20d:.1f}σ"
             sub_msg = "🧙 세 마녀 주간 갭 하락 보정"
         else:
-            buy_target = prev_close * (1 - std_20d * 1.5 / 100)
-            buy_name, sub_msg = "-1.5σ", "🧙 세 마녀 주간 하단 그물 대기"
-    elif vix_val > 25.0:
-        buy_target = base * (1 - std_20d * 1.5 / 100)
-        buy_name, sub_msg = "-1.5σ", "⚠️ VIX 공포지수 상승 (타점 심화)"
+            buy_target = prev_close * (1 - std_20d * 1.95 / 100)
+            buy_name, sub_msg = "-1.95σ", "🧙 세 마녀 주간 하단 그물 대기"
+    elif vix_val >= 20.0:  
+        buy_target = base * (1 - std_20d * 1.95 / 100)
+        buy_name, sub_msg = "-1.95σ", "⚠️ VIX 공포지수 상승 (SHORT 타점 깊이 강화)"
     elif is_open and gap_ratio < 0:
         rem = max(0, std_20d + gap_ratio * 100)
         buy_target = today_open * (1 - rem / 100)
         buy_name = f"-{rem/std_20d:.1f}σ"
         sub_msg = "📉 갭 하락 보정 반영"
     else:
-        buy_target = prev_close * (1 - std_20d / 100)
-        buy_name, sub_msg = "-1.0σ", "📈 기존 시그마 유지"
+        buy_target = prev_close * (1 - std_20d * 0.60 / 100)
+        buy_name, sub_msg = "-0.60σ", "📈 기존 시그마 유지"
 
     result = {
         "mode": mode, "prev_close": prev_close, "today_open": today_open,
@@ -172,28 +172,25 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
         "sub_msg": sub_msg, "total_shares": shares,
     }
 
-    # ------------------ [LONG 모드: 선장님 오리지널 일간 평균 변동성 축 완벽 일체화] ------------------
+    # ------------------ [LONG 모드: 2년 모아가기 특화형 무매도 구조] ------------------
     if mode == "LONG":
-        # 📐 주간/연간 변동성 경로 전면 삭제 ➔ 90일 로그수익률 기반 순수 일간 표준편차(Daily Sigma) 산출
         log_ret_90d = np.log(ticker_df["Close"] / ticker_df["Close"].shift(1)).dropna().tail(90)
-        daily_sigma_val = float(log_ret_90d.std(ddof=1)) # 표본표준편차로 영점 정렬
+        daily_sigma_val = float(log_ret_90d.std(ddof=1)) 
         if pd.isna(daily_sigma_val) or daily_sigma_val <= 0:
-            daily_sigma_val = 0.04 # 방어용 기본 디폴트값 (4%)
+            daily_sigma_val = 0.04 
 
         daily_sig_pct = daily_sigma_val * 100
         
-        # 🎯 [1순위 특명 조치] VIX 레이어 분기 멀티플라이어 눈금 정밀 적용
-        if vix_val >= 35.0:
-            calculated_multiplier = 1.47  # 극단적 공포 실증 평균 반영 (-1.47σ)
+        if vix_val >= 30.0:
+            calculated_multiplier = 2.45  
             vix_status_msg = "🔴🔴 VIX 극단 공포 장세"
-        elif vix_val > 25.0:
-            calculated_multiplier = 0.74  # 공포 장세 실증 평균 반영 (-0.74σ)
+        elif vix_val >= 20.0:
+            calculated_multiplier = 1.95  
             vix_status_msg = "⚠️ VIX 공포 상승 장세"
         else:
-            calculated_multiplier = 0.60  # 평시 안정 장세 황금 비율 (-0.60σ)
+            calculated_multiplier = 0.60  
             vix_status_msg = "✨ 평시 안정 장세"
 
-        # 📐 [선장님 오리지널 로그 복리 공식 100% 동기화] 주간 변동성을 제거하고 순수 일간 변동성 축으로 직결
         long_buy_ratio = float(np.exp(-daily_sigma_val * calculated_multiplier))
         
         if is_open:
@@ -336,16 +333,11 @@ def create_combined_message(results: dict, is_open: bool,
         ]
         
         if v.get("mode") == "LONG":
-            # 📐 [순수 일간 변동성 축에 마킹하는 정대칭 상방 +0.5σ 익절선]
-            base_for_up = v.get("today_open", 0.0) if is_open else v.get("prev_close", 0.0)
+            # 🛠️ 선장님 명령 수용: 익절 권장가 관련 출력 로직 흔적도 없이 삭제 완료
             daily_sig = v.get("daily_sigma", 0.0)
-            
-            # 오리지널 복리 로직과 거울처럼 대칭되는 일간 +0.5σ 청산 저항선 도출 수식
-            take_profit_target = base_for_up * float(np.exp((daily_sig / 100) * 0.5))
-            mult = v.get("multiplier", 0.6)
+            mult = v.get("multiplier", 0.60)
             
             lines += [
-                f"🎯 [익절 권장가] : ${take_profit_target:.2f} (일간 +0.5σ 청산 저항선)",
                 f"-----------------------------------------",
                 f"📊 [🔍 90일 자산 데이터]",
                 f" └─ 일간 평균 변동성 (Daily σ)  : ±{daily_sig:.2f}% (★절대 기준축)",
