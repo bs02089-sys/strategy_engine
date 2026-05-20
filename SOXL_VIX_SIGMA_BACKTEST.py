@@ -10,7 +10,8 @@ warnings.filterwarnings('ignore', category=UserWarning)
 pd.set_option('future.no_silent_downcasting', True)
 
 def verify_long_term_hold_logic():
-    print("📡 [vix_sigma_open_guard.py] 장기 보유(2028년 관점) 엔진 기동...")
+    # [BUG #6 FIX] 출력 메시지 파일명을 실제 파일명으로 교정
+    print("📡 [SOXL_VIX_SIGMA_BACKTEST.py] 장기 보유(2028년 관점) 엔진 기동...")
     print("🎬 매수 후 매도 없이 최종 시점까지 홀딩했을 때의 진짜 성과를 측정합니다.\n")
     
     # 1. 최근 3개년 데이터 확보
@@ -26,12 +27,15 @@ def verify_long_term_hold_logic():
     if isinstance(vix.columns, pd.MultiIndex): 
         vix.columns = vix.columns.droplevel(1)
 
+    # [BUG #1 FIX] VIX 인덱스를 SOXL 기준으로 정렬 후 ffill → 날짜 불일치로 인한 샘플 누락 방지
+    vix_close = vix['Close'].reindex(soxl.index).ffill()
+
     df = pd.DataFrame({
-        'Open': soxl['Open'].astype(float),
-        'High': soxl['High'].astype(float),
-        'Low': soxl['Low'].astype(float),
+        'Open':  soxl['Open'].astype(float),
+        'High':  soxl['High'].astype(float),
+        'Low':   soxl['Low'].astype(float),
         'Close': soxl['Close'].astype(float),
-        'VIX': vix['Close'].astype(float)
+        'VIX':   vix_close.astype(float),
     }).dropna()
 
     # 📐 90일 로그수익률 기반 일간 표준편차(Daily Sigma)
@@ -39,6 +43,9 @@ def verify_long_term_hold_logic():
     df['Log_Ret'] = np.log(df['Close'] / df['Prev_Close'])
     df['Daily_Sigma'] = df['Log_Ret'].rolling(window=90).std(ddof=1)
     df = df.dropna().copy()
+
+    # [BUG #2 FIX] reset_index로 정수 위치 기반 iloc 접근을 안전하게 통일
+    df = df.reset_index(drop=True)
 
     # 🎯 VIX 눈금 및 황금 배수
     conditions = [
@@ -69,15 +76,19 @@ def verify_long_term_hold_logic():
         if sub_total == 0:
             continue
             
-        hit_count = sub_df['Is_Triggered'].sum()
-        hit_ratio = (hit_count / sub_total) * 100
-        
-        triggered_indices = np.where(df['Is_Triggered'] & cond)[0]
+        hit_count  = int(sub_df['Is_Triggered'].sum())  # [BUG #4 FIX] int 명시적 변환
+        hit_ratio  = (hit_count / sub_total) * 100
+
+        # [BUG #2 FIX] DatetimeIndex 혼용 방지 — df 전체 기준 정수 위치 인덱스로 통일
+        triggered_indices = np.where((df['Is_Triggered'] & cond).values)[0]
         returns_to_present = []
         
         for idx in triggered_indices:
             # 진입 가격 계산
             buy_p = df['Open'].iloc[idx] * np.exp(-df['Daily_Sigma'].iloc[idx] * multiplier)
+            # [BUG #3 FIX] buy_p == 0 시 ZeroDivisionError 방어
+            if buy_p <= 0:
+                continue
             # 매도 없이 '최종일 종가'로 수익률 계산
             ret = (final_close_price - buy_p) / buy_p
             returns_to_present.append(ret * 100)
@@ -114,7 +125,8 @@ def verify_long_term_hold_logic():
     
     print("📦 [VectorBT 엔진 종합 성과지표 (2년 장기 투자 Hold 축)]")
     try:
-        total_trades_count = entries_series.sum()
+        # [BUG #5 FIX] entries_series.sum() = Is_Triggered True 날 수 = 추매 집행 횟수 (동일 날 중복 없음)
+        total_trades_count = int(entries_series.sum())
         print(f" • 총 기습 포격 집행(추매) 횟수 : {total_trades_count}회")
         print(f" • 포트폴리오 최종 누적 수익률 : {pf.total_return() * 100:+.2f}%")
         print(f" • 포트폴리오 최종 자산 가치 : ${pf.value().iloc[-1]:.2f}")
