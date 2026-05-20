@@ -38,9 +38,9 @@ def setup_environment() -> dict:
     default_vix = {
         "LEVEL_LOW": 20.0,
         "LEVEL_HIGH": 30.0,
-        "MULT_NORMAL": 0.60,
+        "MULT_NORMAL": 0.65,
         "MULT_FEAR": 1.95,
-        "MULT_EXTREME": 2.45,
+        "MULT_EXTREME": 2.40,
     }
 
     # 공통 기본값 설정 (config.json에서 관리)
