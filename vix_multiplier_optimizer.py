@@ -1,449 +1,137 @@
-import logging
-import json
-import os
-import subprocess
-from datetime import datetime, timedelta
-
 import numpy as np
 import pandas as pd
-import requests
 import yfinance as yf
-import pytz
+import warnings
 
-logger = logging.getLogger(__name__)
+# 🛡️ 시스템 경고 메시지 제어
+warnings.filterwarnings('ignore')
 
-# 🚀 패키지가 없어도 봇이 죽지 않도록 방어 로직 추가
-try:
-    import holidays
-except ImportError:
-    holidays = None
-    logger.warning("⚠️ 'holidays' 패키지가 설치되지 않았습니다. 휴장일 체크가 비활성화됩니다.")
-
-# ====================== 설정 로드 및 저장 ======================
-def load_config() -> dict:
-    try:
-        with open('config.json', 'r', encoding='utf-8') as f:
-            cfg = json.load(f)
-    except FileNotFoundError:
-        logger.error("❌ config.json 파일을 찾을 수 없습니다.")
-        raise
-    except json.JSONDecodeError:
-        logger.error("❌ config.json 형식이 잘못되었습니다.")
-        raise
-
-    updated = False
-    if not cfg.get("DISCORD_WEBHOOK") and os.getenv("DISCORD_WEBHOOK"):
-        cfg["DISCORD_WEBHOOK"] = os.getenv("DISCORD_WEBHOOK")
-        updated = True
-    if not cfg.get("DISCORD_USER_ID") and os.getenv("DISCORD_USER_ID"):
-        cfg["DISCORD_USER_ID"] = os.getenv("DISCORD_USER_ID")
-        updated = True
-
-    if updated:
-        save_config(cfg)
-
-    return cfg
-
-def save_config(cfg: dict):
-    with open('config.json', 'w', encoding='utf-8') as f:
-        json.dump(cfg, f, indent=2, ensure_ascii=False)
-
-def setup_environment() -> dict:
-    cfg = load_config()
-    return {
-        "webhook":       cfg.get("DISCORD_WEBHOOK"),
-        "user_id":       cfg.get("DISCORD_USER_ID"),
-        "tickers":       cfg.get("TICKERS", ["SOXL", "TSLA"]),
-        "positions":     cfg.get("POSITIONS", {}),
-        "kst":           pytz.timezone('Asia/Seoul'),
-        "est":           pytz.timezone('US/Eastern'),
-        "full_cfg":      cfg
-    }
-
-# ====================== 유틸 함수 ======================
-def calculate_split_sell_targets(base_price: float, std_20d: float, shares: int) -> list:
-    if shares <= 0:
-        return []
-    levels = [(0.9, "1단계 +0.9σ"), (1.3, "2단계 +1.3σ"), (1.8, "3단계 +1.8σ")]
-    per_level = max(1, shares // len(levels))
-    plan, remaining = [], shares
-    for i, (mult, name) in enumerate(levels):
-        qty = per_level if i < len(levels) - 1 else remaining
-        if qty <= 0: break
-        plan.append({
-            "level": name,
-            "price": round(base_price * (1 + std_20d * mult / 100), 2),
-            "qty":   qty,
-        })
-        remaining -= qty
-    return plan
-
-def get_vix_report() -> tuple[float, str]:
-    try:
-        df = yf.download("^VIX", period="2d", progress=False)
-        if not df.empty:
-            if isinstance(df.columns, pd.MultiIndex):
-                df.columns = df.columns.droplevel(1)
-            v = float(df["Close"].iloc[-1])
-            status = "안정" if v < 20 else "공포 상승" if v < 30 else "극단적 공포"
-            return v, f"{v:.1f} ({status})"
-    except Exception as e:
-        logger.warning(f"VIX 데이터 수집 실패: {e}")
-    return 0.0, "N/A"
-
-def is_us_holiday(d) -> bool:
-    if holidays is None:
-        return False
-    us_holidays = holidays.US(years=d.year)
-    return d in us_holidays
-
-def is_last_business_day_of_month(today) -> bool:
-    check = today + timedelta(days=1)
-    while check.month == today.month:
-        if check.weekday() < 5 and not is_us_holiday(check):
-            return False
-        check += timedelta(days=1)
-    return True
-
-def is_triple_witching_week(d) -> bool:
-    if d.month not in [3, 6, 9, 12]:
-        return False
-    return (13 <= d.day <= 21) and (2 <= d.weekday() <= 4)
-
-# ====================== ticker 단위 분석 ======================
-def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
-                   vix_val: float, is_open: bool, today_est) -> dict:
-    if isinstance(today_est, datetime):
-        today_est_date = today_est.date()
-    else:
-        today_est_date = today_est
-
-    if len(ticker_df) < 2:
-        prev_close = float(ticker_df["Close"].iloc[-1]) if not ticker_df.empty else 10.0
-        today_open = prev_close
-    else:
-        prev_close = float(ticker_df["Close"].iloc[-2 if is_open else -1])
-        try:
-            today_open = float(ticker_df["Open"].iloc[-1]) if is_open else prev_close
-            if pd.isna(today_open):
-                today_open = prev_close
-        except Exception:
-            today_open = prev_close
-
-    base = today_open if is_open else prev_close
-    gap_ratio = (today_open - prev_close) / prev_close
-
-    daily_ret = ticker_df["Close"].pct_change().dropna()
-    std_20d = float(daily_ret.tail(20).std() * 100)
-    if pd.isna(std_20d) or std_20d <= 0:
-        std_20d = 2.0
-
-    mode   = pos_cfg.get("MODE", "SHORT")
-    shares = pos_cfg.get("TOTAL_SHARES", 0)
-
-    # ------------------ [SHORT 모드 및 기존 로직 방어] ------------------
-    if vix_val >= 30.0:
-        buy_target = base * (1 - std_20d * 2.0 / 100)
-        buy_name, sub_msg = "-2.0σ", "🔴🔴 VIX 극단적 공포 (초심해 방어)"
-    elif is_triple_witching_week(today_est_date):
-        if is_open and gap_ratio < 0:
-            rem = max(0, std_20d * 1.5 + gap_ratio * 100)
-            buy_target = today_open * (1 - rem / 100)
-            buy_name = f"-{rem/std_20d:.1f}σ"
-            sub_msg = "🧙 세 마녀 주간 갭 하락 보정"
-        else:
-            buy_target = prev_close * (1 - std_20d * 1.5 / 100)
-            buy_name, sub_msg = "-1.5σ", "🧙 세 마녀 주간 하단 그물 대기"
-    elif vix_val >= 20.0:
-        buy_target = base * (1 - std_20d * 1.5 / 100)
-        buy_name, sub_msg = "-1.5σ", "⚠️ VIX 공포지수 상승 (타점 심화)"
-    elif is_open and gap_ratio < 0:
-        rem = max(0, std_20d + gap_ratio * 100)
-        buy_target = today_open * (1 - rem / 100)
-        buy_name = f"-{rem/std_20d:.1f}σ"
-        sub_msg = "📉 갭 하락 보정 반영"
-    else:
-        buy_target = prev_close * (1 - std_20d / 100)
-        buy_name, sub_msg = "-1.0σ", "📈 기존 시그마 유지"
-
-    result = {
-        "mode": mode, "prev_close": prev_close, "today_open": today_open,
-        "std": std_20d, "buy_target": buy_target, "buy_name": buy_name,
-        "sub_msg": sub_msg, "total_shares": shares,
-    }
-
-    # ------------------ [LONG 모드: 검증된 통계 최적화 스펙 적용] ------------------
-    if mode == "LONG":
-        # 📐 90일 로그수익률 기반 순수 일간 표준편차(Daily Sigma) 산출
-        log_ret_90d = np.log(ticker_df["Close"] / ticker_df["Close"].shift(1)).dropna().tail(90)
-        daily_sigma_val = float(log_ret_90d.std(ddof=1))
-        if pd.isna(daily_sigma_val) or daily_sigma_val <= 0:
-            daily_sigma_val = 0.04
-
-        daily_sig_pct = daily_sigma_val * 100
-        
-        # 🎯 [최적화 튜닝 적용] 새 VIX 경계선 및 황금 배수 3대 축 전면 이식
-        if vix_val >= 30.0:
-            calculated_multiplier = 2.05  # VIX 30 이상 극단적 공포 최적화 배수
-            vix_status_msg = "🔴🔴 VIX 극단적 패닉 장세"
-        elif vix_val >= 20.0:
-            calculated_multiplier = 1.55  # VIX 20~30 공포 상승 진입 최적화 배수
-            vix_status_msg = "⚠️ VIX 공포 조정 장세"
-        else:
-            calculated_multiplier = 0.60  # VIX 20 미만 평시 안정 황금 배수
-            vix_status_msg = "✨ VIX 평시 안정 장세"
-
-        # 📐 오리지널 로그 복리 기하학 공식 직결
-        long_buy_ratio = float(np.exp(-daily_sigma_val * calculated_multiplier))
-        
-        if is_open:
-            long_buy = today_open * long_buy_ratio
-            sub_msg = f"📉 [시가 기준선] 오늘 시가 (${today_open:.2f}) ➔ 최적화 방어 배수 -{calculated_multiplier:.2f}σ 조준"
-        else:
-            long_buy = prev_close * long_buy_ratio
-            sub_msg = f"{vix_status_msg} ➔ [장전] 전일 종가 기준 타점 대기 중"
-            
-        long_buy = max(long_buy, prev_close * 0.10)
-
-        # 🛡️ 변동성 가드 및 타임 제어 장치
-        normal_std = 4.0 if "SOXL" in ticker else 2.5 
-        if std_20d > normal_std * 1.3:
-            min_days_gate = 14
-        else:
-            min_days_gate = 5
-
-        last_cast_str = pos_cfg.get("LAST_CAST_DATE", "2025-05-07")
-        try:
-            last_cast_date = datetime.strptime(last_cast_str, "%Y-%m-%d").date()
-        except ValueError:
-            last_cast_date = datetime(2025, 5, 7).date()
-        
-        days_since_last_cast = (today_est_date - last_cast_date).days
-        is_time_gate_passed = days_since_last_cast >= min_days_gate
-        days_remaining = min_days_gate - days_since_last_cast
-
-        try:
-            current_live_price = float(ticker_df["Close"].iloc[-1])
-        except Exception:
-            current_live_price = prev_close
-
-        if is_open and (current_live_price <= long_buy) and not is_time_gate_passed:
-            result["time_guard_locked"] = True
-        else:
-            result["time_guard_locked"] = False
-
-        if not is_time_gate_passed:
-            if is_open:
-                if current_live_price > long_buy:
-                    time_guard_status = f"⏳ [시간규제 작동] ({days_remaining}일 대기 필요) ➔ 최종 타점(${long_buy:.2f}) 도달 시 기습 포격 집행!"
-                else:
-                    time_guard_status = f"🔥 [규제 강제 파괴] 실전 최적 타점 돌파! 시간 제한을 풀고 실탄을 장전합니다!"
-            else:
-                time_guard_status = f"🛡️ [경계 태세] 시간 가드 잠김 ({days_remaining}일 남음) ➔ {ticker} 지정 타점 도달 시 자동 락업 해제!"
-        else:
-            time_guard_status = f"🟢 [진입 제약 없음] 시간 가드가 완벽히 해제된 안전 구역입니다."
-
-        drop_rate_from_prev = ((long_buy - prev_close) / prev_close) * 100
-        current_quota = max(pos_cfg.get("ANNUAL_QUOTA", 24), 1)
-        current_casts = pos_cfg.get("CURRENT_CASTS", 0)
-        exhaustion_rate = min(current_casts / current_quota * 100, 100.0)
-
-        result.update({
-            "daily_sigma":      daily_sig_pct,
-            "drop_rate":        drop_rate_from_prev,
-            "multiplier":       calculated_multiplier,
-            "buy_target":       long_buy,
-            "buy_name":         f"LONG 최적화 방어선 (-{calculated_multiplier:.2f}σ)",
-            "sub_msg":          sub_msg,
-            "time_guard_info":  time_guard_status,
-            "my_avg_price":     pos_cfg.get("MY_AVG_PRICE", 0.0),
-            "current_casts":    current_casts,
-            "annual_quota":     current_quota,
-            "exhaustion_rate":  exhaustion_rate,
-        })
-    else:
-        result["split_sell_plan"] = calculate_split_sell_targets(base, std_20d, shares)
-
-    return result
-
-# ====================== 데이터 수집 및 분석 ======================
-def get_combined_market_data(tickers: list, config: dict, est_tz, target_date) -> tuple[dict, bool, str]:
-    df = yf.download(tickers, period="150d", interval="1d", progress=False)
-    if df is None or df.empty:
-        logger.error("❌ 야후 파이낸스 서버 응답 없음")
-        return {}, False, "N/A"
-
-    now_est = datetime.now(est_tz)
-    market_open_time  = now_est.replace(hour=9,  minute=30, second=0, microsecond=0)
-    market_close_time = now_est.replace(hour=16, minute=0,  second=0, microsecond=0)
-    is_open = (
-        market_open_time <= now_est <= market_close_time
-        and target_date.weekday() < 5
-        and not is_us_holiday(target_date)
-    )
-
-    vix_val, vix_info = get_vix_report()
-    positions_cfg = config.get("positions", {})
-    results = {}
-
-    for ticker in tickers:
-        try:
-            if isinstance(df.columns, pd.MultiIndex):
-                if ticker in df.columns.levels[1]:
-                    t_df = df.xs(ticker, level=1, axis=1)[["Close", "Open"]].dropna()
-                else:
-                    continue
-            else:
-                t_df = df[["Close", "Open"]].copy().dropna()
-
-            if len(t_df) < 2:
-                continue
-
-            results[ticker] = analyze_ticker(
-                ticker, t_df, positions_cfg.get(ticker, {}), vix_val, is_open,
-                target_date
-            )
-        except Exception as e:
-            logger.warning(f"⚠️ {ticker} 분석 실패: {e}")
-
-    return results, is_open, vix_info
-
-# ====================== 리포트 생성 ======================
-def create_combined_message(results: dict, is_open: bool,
-                            kst_now: str, vix_info: str, is_last_day: bool) -> str:
-    mode_str = "🚀 실시간 모드" if is_open else "⏳ 장전 대기 모드"
-    lines = [
-        f"=== 🎯 매매엔진 통합 리포트 ({mode_str}) ===",
-        f"🎬 VIX 지수 : {vix_info}",
-    ]
-
-    for ticker, v in results.items():
-        if v is None:
-            lines += [
-                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
-                f"● 종목 : {ticker} [⚠️ 데이터 없음]",
-                f"📢 계좌 설정을 다시 확인해 주십시오.",
-            ]
-            continue
-
-        opt_mode = "📈 LONG (장기 적립)" if v.get("mode") == "LONG" else "⚡ SHORT (단기 타격)"
-        
-        lines += [
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
-            f"● 종목 : {ticker} [{opt_mode}] (보유량 : {v.get('total_shares', 0)}주)",
-            f"● 전일 종가 : ${v.get('prev_close', 0.0):.2f}",
-            f"● 장세 상태 : {v.get('sub_msg', 'Normal')}",
-            f"🛒 [매수 예정가] : ${v.get('buy_target', 0.0):.2f}",
-        ]
-        
-        if v.get("mode") == "LONG":
-            base_for_up = v.get("today_open", 0.0) if is_open else v.get("prev_close", 0.0)
-            daily_sig = v.get("daily_sigma", 0.0)
-            
-            # 📐 오리지널 복리 로직에 완벽 정대칭되는 상방 +0.5σ 청산 저항선 산출
-            take_profit_target = base_for_up * float(np.exp((daily_sig / 100) * 0.5))
-            mult = v.get("multiplier", 0.6)
-            
-            lines += [
-                f"🎯 [익절 권장가] : ${take_profit_target:.2f} (일간 +0.5σ 청산 저항선)",
-                f"-----------------------------------------",
-                f"📊 [🔍 90일 자산 데이터]",
-                f" └─ 일간 평균 변동성 (Daily σ)  : ±{daily_sig:.2f}% (★절대 기준축)",
-                f"-----------------------------------------",
-                f"💡 [안심 가이드] : 본 타점은 샘플 수 30일 이상 조건 충족 및 최근 3개년 승률/PF가 극대화된 다이내믹 황금 배수(-{mult:.2f}σ)가 반영된 무결점 방어선입니다.",
-                f"-----------------------------------------",
-                f"⚙️ 타임 엔진 제어 : {v.get('time_guard_info', '정보 없음')}",
-                f"📊 계좌 집행 현황 : {v.get('current_casts', 0)}/{v.get('annual_quota', 24)}회 집행 완료",
-                f"🔥 자금 소진율 : {v.get('exhaustion_rate', 0.0):.1f}%",
-            ]
-            if v.get("my_avg_price", 0.0) > 0:
-                lines.append(f"🍏 가문 평단가 : ${v.get('my_avg_price', 0.0):.2f}")
-        else:
-            short_std = v.get("std", 0.0) if v.get("std") is not None else 0.0
-            lines.append(f"📊 20일 기준 변동성(1σ) : ±{short_std:.2f}%")
-            
-            plan = v.get("split_sell_plan", [])
-            lines.append("📌 **3단계 분할 매도 계획**" if plan else "📌 분할 매도 계획 : 보유 주수 없음")
-            for p in plan:
-                lines.append(f"   • {p['level']:16} → ${p['price']:.2f}  ({p['qty']}주)")
-
-    lines.append("-----------------------------------------")
-    if is_last_day:
-        lines += [
-            "📡 **[🤖 디스코드 계정 만료 방지 생존 핑 발송 완료]**",
-            "📢 본 메시지는 휴면 계정 전환을 막기 위한 월간 정기 핑입니다.",
-            "-----------------------------------------",
-        ]
-    lines.append(f"⏰ 통합 분석 관제탑 시각: {kst_now}")
-    return "\n".join(lines)
-
-# ====================== Discord 전송 ======================
-def send_discord_message(content: str, webhook_url: str, user_id: str) -> bool:
-    if not webhook_url:
-        return False
-    mention = f"<@{user_id}>\n" if user_id else ""
-    try:
-        payload = {
-            "content": f"{mention}```\n{content}\n```"
-        }
-        r = requests.post(webhook_url, json=payload, timeout=15)
-        return r.status_code in (200, 204)
-    except Exception:
-        return False
-
-# ====================== 메인 ======================
-def main():
-    config  = setup_environment()
-    now_est = datetime.now(config["est"])
+def run_vix_multiplier_final_optimizer():
+    print("📡 [vix_multiplier_optimizer_v2.py] 2027년 새해 새 출발 영점 조절 엔진 가동...")
+    print("🎬 최근 3개년 최신 시장 데이터를 수집하여 통계적 황금 배수를 역산합니다.\n")
     
-    target_date = now_est.date()
-    if now_est.weekday() == 6 and now_est.hour >= 18:
-        target_date += timedelta(days=1)
-
-    if target_date.weekday() >= 5 or is_us_holiday(target_date):
-        logger.info("📅 휴장일 - 브리핑 건너뜀")
+    # 1. 최근 3개년 데이터 확보 (실전 엔진과 데이터 동기화)
+    soxl = yf.download("SOXL", period="3y", interval="1d", progress=False)
+    vix = yf.download("^VIX", period="3y", interval="1d", progress=False)
+    
+    if soxl.empty or vix.empty:
+        print("❌ 야후 파이낸스 데이터 수집에 실패했습니다. 네트워크를 확인하세요.")
         return
 
-    kst_now    = datetime.now(config["kst"]).strftime('%Y-%m-%d %H:%M:%S')
-    is_last    = is_last_business_day_of_month(target_date)
+    if isinstance(soxl.columns, pd.MultiIndex): soxl.columns = soxl.columns.droplevel(1)
+    if isinstance(vix.columns, pd.MultiIndex): vix.columns = vix.columns.droplevel(1)
 
-    try:
-        results, is_open, vix_info = get_combined_market_data(
-            config["tickers"], config, config["est"], target_date
-        )
-        if not results:
-            return
+    df = pd.DataFrame({
+        'Open': soxl['Open'].astype(float),
+        'High': soxl['High'].astype(float),
+        'Low': soxl['Low'].astype(float),
+        'Close': soxl['Close'].astype(float),
+        'VIX': vix['Close'].astype(float)
+    }).dropna()
 
-        try:
-            today_str = target_date.strftime("%Y-%m-%d")
-            is_github_action = os.getenv("GITHUB_ACTIONS") == "true"
+    # 📐 [실전 완벽 동기화] 90일 로그수익률 기반 순수 일간 표준편차(Daily Sigma) 산출
+    df['Prev_Close'] = df['Close'].shift(1)
+    df['Log_Ret'] = np.log(df['Close'] / df['Prev_Close'])
+    df['Daily_Sigma'] = df['Log_Ret'].rolling(window=90).std(ddof=1)
+    df = df.dropna().copy()
 
-            status = subprocess.run(["git", "status", "--porcelain", "config.json"], capture_output=True, text=True)
-            
-            if status.stdout.strip(): 
-                subprocess.run(["git", "config", "user.name", "Automated Bot"], check=True)
-                subprocess.run(["git", "config", "user.email", "bot@example.com"], check=True)
-                subprocess.run(["git", "add", "config.json"], check=True)
-                subprocess.run(["git", "commit", "-m", f"🤖 Auto-update config.json [{today_str}]"], check=True)
+    # 🎯 선장님 확정 사상: VIX 3대 축 눈금 동기화 (30 / 20)
+    vix_zones = [
+        {
+            "name": "🔴 극단적 공포 장세 (VIX 30.0 이상)", 
+            "cond": df['VIX'] >= 30.0, 
+            "search_range": np.arange(1.0, 2.5, 0.05) # 더 넓은 심해 탐색을 위해 범위 확장
+        },
+        {
+            "name": "⚠️ 공포 상승 장세 (VIX 20.0 이상 ~ 30.0 미만)", 
+            "cond": (df['VIX'] >= 20.0) & (df['VIX'] < 30.0), 
+            "search_range": np.arange(0.5, 2.0, 0.05)
+        },
+        {
+            "name": "✨ 평시 안정 장세 (VIX 20.0 미만)", 
+            "cond": df['VIX'] < 20.0, 
+            "search_range": np.arange(0.3, 1.2, 0.05)
+        }
+    ]
 
-                if is_github_action:
-                    logger.info("📡 깃허브 액션 환경 감지: 원격 저장소에 자동으로 푸시합니다.")
-                    subprocess.run(["git", "push"], check=True)
-                else:
-                    logger.info("💻 로컬 PC 환경 감지: 깃허브 원격 저장소로 동기화(Push)를 시도합니다.")
-                    subprocess.run(["git", "push", "origin", "main"], check=True)
-            else:
-                logger.info("📝 config.json 변경 사항이 없어 Git Commit을 생략합니다.")
+    print(f"📊 총 분석 거래일수 : {len(df)}일")
+    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
-        except Exception as git_err:
-            logger.error(f"❌ Git 동기화 실패: {git_err}")
-
-        msg = create_combined_message(results, is_open, kst_now, vix_info, is_last)
-        send_discord_message(msg, config["webhook"], config["user_id"])
-        logger.info("✅ 알림 전송 완료")
-    except Exception as e:
-        logger.error(f"⚠️ 실행 오류: {e}")
+    for zone in vix_zones:
+        zone_df = df[zone["cond"]].copy()
+        zone_indices = np.where(zone["cond"])[0]
+        total_zone_days = len(zone_df)
         
+        if total_zone_days == 0:
+            print(f"{zone['name']} 구간에 해당하는 거래일이 없습니다.\n")
+            continue
+            
+        best_multiplier = None
+        best_score = -1
+        best_metrics = {}
+
+        # 그리드 탐색 루프
+        for mult in zone["search_range"]:
+            mult = round(mult, 2)
+            triggered_count = 0
+            wins = 0
+            losses = 0
+            total_profit = 0.0
+            total_loss = 0.0
+            
+            # 🔥 [실전 완벽 복사] 오리지널 기하학적 로그 복리 공식을 백테스트 타점에 직결
+            target_prices = zone_df['Open'] * np.exp(-zone_df['Daily_Sigma'] * mult)
+            is_triggered = zone_df['Low'] <= target_prices
+            
+            triggered_positions = np.where(is_triggered)[0]
+            
+            for pos in triggered_positions:
+                idx = zone_indices[pos]
+                if idx + 5 < len(df): # 5일 보유 후 청산 패러다임
+                    triggered_count += 1
+                    # 진입가 역시 로그 복리 타점으로 정밀 산출
+                    buy_price = df['Open'].iloc[idx] * np.exp(-df['Daily_Sigma'].iloc[idx] * mult)
+                    sell_price = df['Close'].iloc[idx + 5]
+                    ret = (sell_price - buy_price) / buy_price
+                    
+                    if ret > 0:
+                        wins += 1
+                        total_profit += ret
+                    else:
+                        losses += 1
+                        total_loss += abs(ret)
+            
+            # 통계적 최소 유의성 필터 (최소 3회 이상 체결된 배수만 인정)
+            if triggered_count < 3: 
+                continue
+                
+            win_rate = (wins / triggered_count) * 100 if triggered_count > 0 else 0
+            profit_factor = total_profit / total_loss if total_loss > 0 else (total_profit if total_profit > 0 else 1.0)
+            
+            # 성과 지표 점수화 (승률과 PF의 기하학적 균형점)
+            score = win_rate * profit_factor
+            
+            if score > best_score:
+                best_score = score
+                best_multiplier = mult
+                best_metrics = {
+                    "total_days": total_zone_days,
+                    "hits": triggered_count,
+                    "hit_ratio": (triggered_count / total_zone_days) * 100,
+                    "win_rate": win_rate,
+                    "pf": profit_factor
+                }
+        
+        print(f"{zone['name']}")
+        if best_multiplier is not None:
+            print(f"  🏆 최적 황금 배수 : -{best_multiplier:.2f}σ")
+            print(f"  └─ 장세 발생일수 : {best_metrics['total_days']}일 중 {best_metrics['hits']}회 체결")
+            print(f"  └─ 타점 체결 확률 : {best_metrics['hit_ratio']:.1f}%")
+            print(f"  └─ 5일 청산 승률  : {best_metrics['win_rate']:.2f}%")
+            print(f"  └─ 프로핏 팩터(PF) : {best_metrics['pf']:.2f}")
+        else:
+            print("  ⚠️ 통계적 조건(샘플 하한선)을 충족하는 최적 배수를 찾지 못했습니다.")
+        print("------------------------------------------------------------")
+
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format='%(message)s')
-    main()
+    run_vix_multiplier_final_optimizer()
