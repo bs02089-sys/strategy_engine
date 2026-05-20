@@ -61,23 +61,6 @@ def setup_environment() -> dict:
     }
 
 # ====================== 유틸 함수 ======================
-def calculate_annual_sigma(closes, window: int = 90) -> float:
-    """90일 로그수익률 기반 연환산 시그마 (표본표준편차, ddof=1)"""
-    arr = np.array(closes).flatten().astype(float)
-    arr = arr[~np.isnan(arr)]
-    window = min(window, len(arr) - 1)
-    if window < 5:
-        return 0.70
-    log_ret = np.diff(np.log(arr[-(window + 1):]))
-    log_ret = log_ret[np.isfinite(log_ret)]
-    if len(log_ret) < 5:
-        return 0.70
-    daily_sigma = float(np.std(log_ret, ddof=1))
-    annual_sigma = daily_sigma * np.sqrt(252)
-    
-    # 🚀 3배 레버리지의 실제 변동성을 반영하기 위해 한계치를 2.0(200%)으로 상향
-    return min(annual_sigma, 2.0)
-
 def calculate_split_sell_targets(base_price: float, std_20d: float, shares: int) -> list:
     if shares <= 0:
         return []
@@ -189,31 +172,33 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
         "sub_msg": sub_msg, "total_shares": shares,
     }
 
-    # ------------------ [LONG 모드: 선장님 오리지널 로그/복리 엔진 기하학 복원] ------------------
+    # ------------------ [LONG 모드: 선장님 오리지널 일간 평균 변동성 축 완벽 일체화] ------------------
     if mode == "LONG":
-        annual_sig = calculate_annual_sigma(ticker_df["Close"].values)
-        annual_sigma_val = annual_sig
-        daily_sig_pct = (annual_sigma_val / np.sqrt(252)) * 100
-        weekly_sig_pct = (annual_sigma_val / np.sqrt(52)) * 100
+        # 📐 주간/연간 변동성 경로 전면 삭제 ➔ 90일 로그수익률 기반 순수 일간 표준편차(Daily Sigma) 산출
+        log_ret_90d = np.log(ticker_df["Close"] / ticker_df["Close"].shift(1)).dropna().tail(90)
+        daily_sigma_val = float(log_ret_90d.std(ddof=1)) # 표본표준편차로 영점 정렬
+        if pd.isna(daily_sigma_val) or daily_sigma_val <= 0:
+            daily_sigma_val = 0.04 # 방어용 기본 디폴트값 (4%)
+
+        daily_sig_pct = daily_sigma_val * 100
         
-        # 🎯 [1순위 특명 조치] 오리지널 알고리즘 구조 안에서 멀티플라이어 눈금만 실증 데이터로 정밀 교정
+        # 🎯 [1순위 특명 조치] VIX 레이어 분기 멀티플라이어 눈금 정밀 적용
         if vix_val >= 35.0:
-            calculated_multiplier = 1.47  # 극단적 공포 갭 실증 평균 반영 (기존 1.5 ➔ 1.47)
+            calculated_multiplier = 1.47  # 극단적 공포 실증 평균 반영 (-1.47σ)
             vix_status_msg = "🔴🔴 VIX 극단 공포 장세"
         elif vix_val > 25.0:
-            calculated_multiplier = 0.74  # 공포 장세 갭 실증 평균 반영 (기존 1.0 ➔ 0.74)
+            calculated_multiplier = 0.74  # 공포 장세 실증 평균 반영 (-0.74σ)
             vix_status_msg = "⚠️ VIX 공포 상승 장세"
         else:
-            calculated_multiplier = 0.60  # 평시 최적 장세 황금 비율 유지
+            calculated_multiplier = 0.60  # 평시 안정 장세 황금 비율 (-0.60σ)
             vix_status_msg = "✨ 평시 안정 장세"
 
-        # 📐 [선장님 오리지널 로그 복리 수식 100% 원형 복원]
-        # np.exp()를 이용한 기하학적 감산 구조 원형 보존
-        long_buy_ratio = float(np.exp(-(weekly_sig_pct / 100) * calculated_multiplier))
+        # 📐 [선장님 오리지널 로그 복리 공식 100% 동기화] 주간 변동성을 제거하고 순수 일간 변동성 축으로 직결
+        long_buy_ratio = float(np.exp(-daily_sigma_val * calculated_multiplier))
         
         if is_open:
             long_buy = today_open * long_buy_ratio
-            sub_msg = f"📉 [시가 기준선 연동] 오늘 시가 (${today_open:.2f}) ➔ 실증 {calculated_multiplier:.2f}배수 하방 그물 조준"
+            sub_msg = f"📉 [시가 기준선 연동] 오늘 시가 (${today_open:.2f}) ➔ 일간 변동성 {calculated_multiplier:.2f}배수 하방 그물 조준"
         else:
             long_buy = prev_close * long_buy_ratio
             sub_msg = f"{vix_status_msg} ➔ [장전] 전일 종가 기준 대기 중"
@@ -263,9 +248,7 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
         exhaustion_rate = min(current_casts / current_quota * 100, 100.0)
 
         result.update({
-            "annual_sigma":     annual_sig * 100,
             "daily_sigma":      daily_sig_pct,
-            "weekly_sigma":     weekly_sig_pct,
             "drop_rate":        drop_rate_from_prev,
             "multiplier":       calculated_multiplier,
             "buy_target":       long_buy,
@@ -353,22 +336,21 @@ def create_combined_message(results: dict, is_open: bool,
         ]
         
         if v.get("mode") == "LONG":
-            # 📐 [선장님의 복리 로그 공식 원형 유지 상방 저항선 연산]
+            # 📐 [순수 일간 변동성 축에 마킹하는 정대칭 상방 +0.5σ 익절선]
             base_for_up = v.get("today_open", 0.0) if is_open else v.get("prev_close", 0.0)
-            weekly_sig = v.get("weekly_sigma", 0.0)
+            daily_sig = v.get("daily_sigma", 0.0)
             
-            # 오리지널 복리 로직과 거울처럼 대칭되는 +0.5σ 청산 저항선 도출 수식
-            take_profit_target = base_for_up * float(np.exp((weekly_sig / 100) * 0.5))
+            # 오리지널 복리 로직과 거울처럼 대칭되는 일간 +0.5σ 청산 저항선 도출 수식
+            take_profit_target = base_for_up * float(np.exp((daily_sig / 100) * 0.5))
             mult = v.get("multiplier", 0.6)
             
             lines += [
-                f"🎯 [익절 권장가] : ${take_profit_target:.2f} (진입 건별 +0.5σ 청산 스쿼트 저항선)",
+                f"🎯 [익절 권장가] : ${take_profit_target:.2f} (일간 +0.5σ 청산 저항선)",
                 f"-----------------------------------------",
                 f"📊 [🔍 90일 자산 데이터]",
-                f" └─ 연간 환산 변동성 (Annual σ) : {v.get('annual_sigma', 0.0):.1f}%",
-                f" └─ 주간 평균 변동성 (Weekly σ) : ±{weekly_sig:.2f}% (★핵심 로그 기본 축)",
+                f" └─ 일간 평균 변동성 (Daily σ)  : ±{daily_sig:.2f}% (★절대 기준축)",
                 f"-----------------------------------------",
-                f"💡 [안심 가이드] : 오늘 설정된 그물망은 {ticker} 최근 실증 하락 갭 통계에 기반하여, 장세 성격에 맞춤형 분포도(-{mult:.2f}σ 배수)로 정교하게 동적 교정된 영점 타점입니다.",
+                f"💡 [안심 가이드] : 오늘 설정된 그물망은 {ticker}의 90일 일간 평균 변동성 지표를 직결한 순수 기하학 공식에 기반하며, 현재 VIX 등급의 실증 배수(-{mult:.2f}σ)로 영점이 정렬되었습니다.",
                 f"-----------------------------------------",
                 f"⚙️ 타임 엔진 제어 : {v.get('time_guard_info', '정보 없음')}",
                 f"📊 계좌 집행 현황 : {v.get('current_casts', 0)}/{v.get('annual_quota', 24)}회 집행 완료",
