@@ -402,13 +402,12 @@ def get_combined_market_data(tickers: list, config: dict, est_tz, target_date: d
 
 
 # ====================== 리포트 생성 ======================
-# ====================== 리포트 생성 ======================
 def create_combined_message(results: dict, is_open: bool,
                             kst_now: str, vix_info: str, is_last_day: bool) -> str:
     mode_str = "🚀 실시간 모드" if is_open else "⏳ 장전 대기 모드"
     lines = [
         f"=== 🎯 매매엔진 통합 리포트 ({mode_str}) ===",
-        f"🎬 VIX 지수 : {vix_info}",
+        f"🎬 VIX : {vix_info}",
         ""
     ]
 
