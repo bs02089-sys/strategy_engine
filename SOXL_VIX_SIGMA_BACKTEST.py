@@ -38,14 +38,13 @@ def verify_long_term_hold_logic():
     df['Log_Ret'] = np.log(df['Close'] / df['Close'].shift(1))
     df['Daily_Sigma'] = df['Log_Ret'].rolling(window=90, min_periods=60).std(ddof=1)
     df['Prev_Close'] = df['Close'].shift(1)
-    # 갭 비율 계산 (전일 종가 대비 당일 시가)
+    # 갭 비율: 전일 종가 대비 당일 시가 (음수 = 갭 하락)
     df['Gap_Ratio'] = np.where(
         df['Prev_Close'] != 0,
         (df['Open'] - df['Prev_Close']) / df['Prev_Close'],
         0.0
     )
-    df = df.dropna().copy()
-    df = df.reset_index(drop=False)  # 날짜 인덱스 보존하면서 정수 위치도 활용
+    df = df.dropna().copy()  # DatetimeIndex 유지 (reset_index 사용 안 함)
 
     final_price = df['Close'].iloc[-1]
 
@@ -53,24 +52,18 @@ def verify_long_term_hold_logic():
     print(f"📈 SOXL 최종 종가 : ${final_price:.2f}\n")
 
     # ====================== 갭 하락 구간별 계단식 배수 보정 ======================
-    # sigma_position_manager.py의 실전 로직과 완전 동기화
+    # sigma_position_manager.py 실전 로직과 완전 동기화
     #   0%  ~ -3%  : 배수 유지
-    #  -3%  ~ -5%  : 배수 0.45
-    #  -5%  ~ -7%  : 배수 0.25
-    #  -7%  ~ -10% : 배수 0.10
-    #  -10% 초과   : 배수 0.0
+    #  -3%  ~ -5%  : 0.45
+    #  -5%  ~ -7%  : 0.25
+    #  -7%  ~ -10% : 0.10
+    #  -10% 초과   : 0.0
     def apply_gap_correction(base_mult: float, gap_ratio: float) -> float:
-        """갭 하락 비율에 따라 배수를 계단식으로 보정"""
-        if gap_ratio >= -0.03:
-            return base_mult          # 0% ~ -3% : 보정 없음
-        elif gap_ratio >= -0.05:
-            return 0.45               # -3% ~ -5%
-        elif gap_ratio >= -0.07:
-            return 0.25               # -5% ~ -7%
-        elif gap_ratio >= -0.10:
-            return 0.10               # -7% ~ -10%
-        else:
-            return 0.0                # -10% 초과
+        if gap_ratio >= -0.03: return base_mult
+        elif gap_ratio >= -0.05: return 0.45
+        elif gap_ratio >= -0.07: return 0.25
+        elif gap_ratio >= -0.10: return 0.10
+        else: return 0.0
 
     # ====================== 안전 범위 정의 (매년 업데이트해도 과도하게 변하지 않도록) ======================
     SAFETY_BOUNDS = {
