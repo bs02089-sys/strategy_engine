@@ -2,7 +2,7 @@
 # OS / IDE / Python 관련
 .DS_Store
 Thumbs.db
-config.py
+config.json
 *.pyc
 __pycache__/
 *.pyo
@@ -29,10 +29,10 @@ config.json
 !.gitignore
 
 # 핵심 소스 파일
-!SOXL_sigma_alert.py
-!trade_alert.py
+!vix_sigma_manager.py
 !fx_alert.py  
-!news_agent.py        
+!news_agent.py 
+!SOXL_VIX_SIGMA_BACKTEST.py
 !requirements.txt
 !README.md
 
