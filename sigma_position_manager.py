@@ -407,8 +407,7 @@ def create_combined_message(results: dict, is_open: bool,
     mode_str = "🚀 실시간 모드" if is_open else "⏳ 장전 대기 모드"
     lines = [
         f"=== 🎯 매매엔진 통합 리포트 ({mode_str}) ===",
-        f"🎬 VIX : {vix_info}",
-        ""
+        f"🎬 {vix_info}",
     ]
 
     for ticker, v in results.items():
