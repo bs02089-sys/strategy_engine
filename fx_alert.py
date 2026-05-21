@@ -1,5 +1,5 @@
 """
-나무증권 원화 → 달러 환율 적정성 알림 봇 (yfinance 연동 및 고정 스프레드 반영 버전 - 오차 보정 완료)
+나무증권 원화 → 달러 환율 적정성 알림 봇 (서울외국환중개 실시간 크롤링 및 고정 스프레드 반영 버전 - yf 에러 수정본)
 """
 
 import os
@@ -9,14 +9,16 @@ import json
 import logging
 import time
 import subprocess
+import re
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Tuple, TypedDict
 import bisect
 
-# 필수 라이브러리
+# 필수 라이브러리 (BeautifulSoup4 설치 필요: pip install beautifulsoup4)
 import requests
-import yfinance as yf
+from bs4 import BeautifulSoup
+import yfinance as yf  # 👈 [수정 완료] 과거 1년 통계 빌드용 yfinance 임포트 복원
 
 # =============================================
 # 로깅 설정
@@ -32,8 +34,7 @@ logger = logging.getLogger(__name__)
 class Config:
     NAMUH_SPREAD: float = 10.0  # 달러당 기본 스프레드 (10.0원 또는 11.5원)
     PREFER_RATE: float = 95.0  # 우대율 (%)
-    RATE_OFFSET: float = -2.47  # 👈 [업데이트] 기존 -1.62에서 0.85원을 추가로 더 깎아 오차를 맞췄습니다.
-    PERCENTILE_THRESHOLD: float = 33.0
+    PERCENTILE_THRESHOLD: float = 50.0  # 고환율 시국에 맞춘 50% 기준선 고정!
     CHECK_INTERVAL: int = 300
     CACHE_HOURS: int = 6
     DISCORD_WEBHOOK: str = ""  
@@ -41,19 +42,16 @@ class Config:
 
     @classmethod
     def load(cls) -> "Config":
-        # 1. 기본값으로 먼저 뼈대를 만듭니다.
         config_data = {
             "NAMUH_SPREAD": 10.0,
             "PREFER_RATE": 95.0,
-            "RATE_OFFSET": -2.47, # 업데이트된 보정치 반영
-            "PERCENTILE_THRESHOLD": 33.0,
+            "PERCENTILE_THRESHOLD": 50.0,
             "CHECK_INTERVAL": 300,
             "CACHE_HOURS": 6,
             "DISCORD_WEBHOOK": "",
             "DISCORD_USER_ID": "",
         }
 
-        # 2. 만약 PC에 config.json 파일이 존재하면 파일 안의 값을 읽어와 덮어씁니다.
         if os.path.exists("config.json"):
             try:
                 with open("config.json", "r", encoding="utf-8") as f:
@@ -65,17 +63,14 @@ class Config:
             except Exception as e:
                 print(f"config.json 읽기 실패: {e}")
 
-        # 3. 만약 깃허브 환경변수(os.getenv)에 값이 설정되어 있다면 그것을 최우선으로 적용합니다.
         for key in config_data.keys():
             env_val = os.getenv(key)
             if env_val is not None:
                 config_data[key] = env_val
 
-        # 4. 완벽하게 정제된 데이터로 Config 객체를 리턴합니다.
         return cls(
             NAMUH_SPREAD=float(config_data["NAMUH_SPREAD"]),
             PREFER_RATE=float(config_data["PREFER_RATE"]),
-            RATE_OFFSET=float(config_data["RATE_OFFSET"]), 
             PERCENTILE_THRESHOLD=float(config_data["PERCENTILE_THRESHOLD"]),
             CHECK_INTERVAL=int(config_data["CHECK_INTERVAL"]),
             CACHE_HOURS=int(config_data["CACHE_HOURS"]),
@@ -83,10 +78,9 @@ class Config:
             DISCORD_USER_ID=str(config_data["DISCORD_USER_ID"]),
         )
 
-# 🎯 클래스를 실행하여 설정을 로드합니다.
+# 설정 로드
 config = Config.load()
 
-# 🎯 기존 코드 아래쪽에서 사용하던 변수명들과 100% 호환되도록 연결해 줍니다.
 WEBHOOK_URL = config.DISCORD_WEBHOOK
 DISCORD_USER_ID = config.DISCORD_USER_ID
 
@@ -94,22 +88,13 @@ COLOR_GREEN = 0x1D9E75
 COLOR_AMBER = 0xBA7517
 COLOR_RED   = 0xA32D2D
 
-
-# =============================================
-# 타입 정의
-# =============================================
 class RateInfo(TypedDict):
     base_rate: float
     applied_rate: float
     spread_cost: float
     effective_spread: float
 
-
-# =============================================
-# 캐싱
-# =============================================
 CACHE_FILE = Path("historical_rates_cache.json")
-
 
 def save_cache(rates: list[float]):
     try:
@@ -117,7 +102,6 @@ def save_cache(rates: list[float]):
         CACHE_FILE.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
     except Exception as e:
         logger.warning(f"캐시 저장 실패: {e}")
-
 
 def load_cache() -> list[float] | None:
     if not CACHE_FILE.exists():
@@ -130,63 +114,87 @@ def load_cache() -> list[float] | None:
         pass
     return None
 
-
 # =============================================
-# 환율 조회 (yfinance 라이브러리 기반으로 통일)
+# 🎯 서울외국환중개 실시간 매매기준율 크롤링 엔진
 # =============================================
 def get_current_rate() -> float | None:
-    """야후 파이낸스에서 실시간 USDKRW 환율을 가져옵니다."""
+    """서울외국환중개(SMBS) 웹사이트에서 실시간 미국 달러(USD) 매매기준율을 크롤링합니다."""
+    url = "https://www.smbs.biz/ExRate/TodayExRate.jsp"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+    try:
+        resp = requests.get(url, headers=headers, timeout=15)
+        resp.raise_for_status()
+        
+        # 인코딩 방어코드 (EUC-KR 처리)
+        resp.encoding = resp.apparent_encoding or 'euc-kr'
+        
+        soup = BeautifulSoup(resp.text, "html.parser")
+        
+        tables = soup.find_all("table")
+        for table in tables:
+            text = table.get_text()
+            if "미국" in text or "USD" in text:
+                rows = table.find_all("tr")
+                for row in rows:
+                    cells = row.find_all(["td", "th"])
+                    cell_texts = [c.get_text(strip=True) for c in cells]
+                    
+                    if any("미국" in txt or "USD" in txt for txt in cell_texts):
+                        for txt in cell_texts:
+                            clean_txt = txt.replace(",", "")
+                            match = re.search(r"^\d+\.\d+$|^\d+$", clean_txt)
+                            if match:
+                                val = float(match.group())
+                                if 900 <= val <= 2000:
+                                    return val
+                                    
+    except Exception as e:
+        logger.error(f"❌ 서울외국환중개 실시간 환율 크롤링 실패: {e}")
+        
+    return get_backup_rate()
+
+def get_backup_rate() -> float | None:
+    """서울외국환중개 서버가 일시 오류일 때 작동하는 2차 백업 환율망"""
     try:
         ticker = yf.Ticker("KRW=X")
-        df = ticker.history(period="1d", interval="1m")
+        df = ticker.history(period="1d")
         if not df.empty:
             return float(df['Close'].iloc[-1])
-        
-        df_backup = ticker.history(period="1d")
-        if not df_backup.empty:
-            return float(df_backup['Close'].iloc[-1])
-            
-    except Exception as e:
-        logger.error(f"yfinance 실시간 환율 조회 실패: {e}")
+    except Exception:
+        pass
     return None
 
-
 def get_historical_rates(days: int = 365) -> list[float]:
-    """야후 파이낸스에서 과거 1년 치 환율 데이터를 가져와 정렬 후 반환합니다."""
+    """과거 1년 치 통계용 데이터셋을 안전하게 빌드합니다."""
     cached = load_cache()
     if cached:
         return cached
 
     try:
-        logger.info(f"yfinance를 통해 과거 {days}일간의 환율 데이터를 가져옵니다...")
+        logger.info(f"통계 분석을 위해 과거 {days}일간의 뼈대 환율 데이터를 빌드합니다...")
         ticker = yf.Ticker("KRW=X")
         df = ticker.history(period="1y")
-        
         if df.empty:
-            raise ValueError("과거 데이터가 비어 있습니다.")
-
+            raise ValueError("통계 데이터가 비어 있습니다.")
         rates = [float(val) for val in df['Close'].dropna().tolist()]
         sorted_rates = sorted(rates)
-        
         save_cache(sorted_rates)
         return sorted_rates
     except Exception as e:
-        logger.error(f"yfinance 과거 환율 조회 실패: {e}")
+        logger.error(f"통계 데이터 빌드 실패: {e}")
         return []
 
-
 # =============================================
-# 계산 함수 (실제 나무증권 원화 고정 스프레드 공식 + 오차 보정 반영)
+# 계산 및 비즈니스 로직
 # =============================================
 def calc_applied_rate(base_rate: float) -> RateInfo:
-    """나무증권의 실제 우대 환율 계산법 및 플랫폼 간 오차 보정치를 적용합니다."""
-    # 스프레드 비용 = 고정 스프레드(원) * (1 - 우대율)
+    """나무증권의 실제 우대 환율 계산법을 적용합니다."""
     spread_cost = config.NAMUH_SPREAD * (1 - config.PREFER_RATE / 100)
     spread_cost = round(spread_cost, 2)  
     
-    # 최종 적용 환율 = 매매기준율 + 스프레드 비용 + 오차보정치(-2.47)
-    applied_rate = base_rate + spread_cost + config.RATE_OFFSET
-    
+    applied_rate = base_rate + spread_cost
     effective_spread = (spread_cost / base_rate) * 100 
 
     return {
@@ -196,7 +204,6 @@ def calc_applied_rate(base_rate: float) -> RateInfo:
         "effective_spread": round(effective_spread, 4),
     }
 
-
 def calc_percentile(sorted_rates: list[float], current: float) -> float:
     n = len(sorted_rates)
     if n == 0:
@@ -204,13 +211,11 @@ def calc_percentile(sorted_rates: list[float], current: float) -> float:
     idx = bisect.bisect_right(sorted_rates, current)
     return round((idx / n) * 100, 1)
 
-
 def get_median_applied_rate(sorted_base_rates: list[float]) -> float:
     if not sorted_base_rates:
         return 0.0
     median_base = sorted_base_rates[len(sorted_base_rates) // 2]
     return calc_applied_rate(median_base)["applied_rate"]
-
 
 def get_rating(percentile: float) -> Tuple[str, str]:
     if percentile <= 33:
@@ -221,10 +226,9 @@ def get_rating(percentile: float) -> Tuple[str, str]:
         return "🔴 비싼 편", "평균보다 불리합니다. 대기를 권장합니다."
     else:
         return "🔴 매우 비쌈", "최근 1년 중 고점 구간입니다."
-    
 
 # =============================================
-# Discord 알림
+# Discord 알림 및 Git 동기화
 # =============================================
 def send_discord_alert(rate_info: RateInfo, percentile: float, median_applied: float, is_recommended: bool) -> bool:
     if not WEBHOOK_URL:
@@ -244,13 +248,13 @@ def send_discord_alert(rate_info: RateInfo, percentile: float, median_applied: f
     color = COLOR_GREEN if is_recommended else COLOR_AMBER
 
     payload = {
-        "username": "📉 나무증권 환전봇",
+        "username": "📉 나무증권 환전봇 (서울외국환 소스)",
         "embeds"  : [{
             "title"      : title,
             "description": f"현재 적용환율은 최근 1년 중 **하위 {percentile:.1f}%** 수준입니다.\n{comment}",
             "color"      : color,
             "fields"     : [
-                {"name": "💱 시장 기준율",       "value": f"**₩{rate_info['base_rate']:,.2f}**",  "inline": True},
+                {"name": "💱 서울외국환 기준율", "value": f"**₩{rate_info['base_rate']:,.2f}**",  "inline": True},
                 {"name": "🏦 나무증권 적용환율", "value": f"**₩{current_applied:,.2f}**",         "inline": True},
                 {"name": "💸 스프레드 수수료",   "value": f"₩{rate_info['spread_cost']:,.2f}",    "inline": True},
                 {
@@ -281,18 +285,13 @@ def send_discord_alert(rate_info: RateInfo, percentile: float, median_applied: f
         logger.error(f"Discord 알림 실패: {e}")
         return False
 
-
-# =============================================
-# [양방향 동기화 엔진] config.json 업데이트 및 Git Push
-# =============================================
 def sync_config_to_git(rate_info: dict, percentile: float):
-    config_path = Path("config.json") 
-    
+    config_path = Path("config.json")
     if config_path.exists():
         try:
             full_config = json.loads(config_path.read_text(encoding='utf-8'))
         except Exception as e:
-            logger.error(f"❌ config.json 읽기 실패 (포맷 오류 가능성): {e}")
+            logger.error(f"❌ config.json 읽기 실패: {e}")
             full_config = {}
     else:
         full_config = {}
@@ -305,7 +304,7 @@ def sync_config_to_git(rate_info: dict, percentile: float):
     full_config["exchange_status"]["CURRENT_PERCENTILE"] = percentile
 
     config_path.write_text(json.dumps(full_config, ensure_ascii=False, indent=2), encoding='utf-8')
-    logger.info("📝 config.json의 환율 정보 업데이트 완료 (기존 설정 보존).")
+    logger.info("📝 config.json의 실시간 환율 정보 자동 기입 완료.")
 
     try:
         status = subprocess.run(["git", "status", "--porcelain", str(config_path)], capture_output=True, text=True)
@@ -314,7 +313,6 @@ def sync_config_to_git(rate_info: dict, percentile: float):
             return
 
         is_github_action = os.getenv("GITHUB_ACTIONS") == "true"
-        
         subprocess.run(["git", "config", "--local", "user.name", "Automated Bot"], check=True)
         subprocess.run(["git", "config", "--local", "user.email", "bot@example.com"], check=True)
         subprocess.run(["git", "add", str(config_path)], check=True)
@@ -324,15 +322,10 @@ def sync_config_to_git(rate_info: dict, percentile: float):
             subprocess.run(["git", "push"], check=True)
         else:
             subprocess.run(["git", "push", "origin", "main"], check=True)
-        logger.info("🚀 config.json 깃허브 푸시 완료.")
-            
+        logger.info("🚀 깃허브 서버로 동기화 완료.")
     except Exception as git_err:
         logger.error(f"❌ Git 동기화 중 에러 발생: {git_err}")
-        
 
-# =============================================
-# 분석
-# =============================================
 def analyze() -> Tuple[bool, RateInfo | dict, float, float]:
     current = get_current_rate()
     if current is None:
@@ -346,64 +339,47 @@ def analyze() -> Tuple[bool, RateInfo | dict, float, float]:
 
     return is_recommended, rate_info, percentile, median_applied
 
-
 # =============================================
-# 실행 모드
+# 실행 컨트롤러
 # =============================================
 def run_once():
-    logger.info("=== 나무증권 환율 적정성 봇 (1회 실행) ===")
+    logger.info("=== 나무증권 환율 봇 (서울외국환 실시간 모드) ===")
     try:
         is_recommended, rate_info, percentile, median_applied = analyze()
-
-        if not rate_info or not isinstance(rate_info, dict) or len(rate_info) == 0:
-            logger.error("환율 조회 실패 - yfinance 응답 없음")
+        if not rate_info or len(rate_info) == 0:
+            logger.error("환율 조회 실패 - 서울외국환중개 서버 응답 없음")
             return
 
-        logger.info(f"적용환율: ₩{rate_info['applied_rate']:,.2f} | 하위 {percentile:.1f}%")
-        
+        logger.info(f"실시간 적용환율: ₩{rate_info['applied_rate']:,.2f} | 백분위: 하위 {percentile:.1f}%")
         send_discord_alert(rate_info, percentile, median_applied, is_recommended)
         sync_config_to_git(rate_info, percentile)
-
     except Exception as e:
-        logger.error(f"run_once 실행 중 오류 발생: {e}")
-
+        logger.error(f"run_once 오류 발생: {e}")
 
 def run_monitor():
-    logger.info("=== 나무증권 환율 적정성 봇 — 모니터링 모드 ===")
+    logger.info("=== 나무증권 환율 봇 — 서울외국환 모니터링 모드 ===")
     consecutive_errors = 0
-
     while True:
         try:
             is_recommended, rate_info, percentile, median_applied = analyze()
-
-            if not rate_info or not isinstance(rate_info, dict) or len(rate_info) == 0:
+            if not rate_info or len(rate_info) == 0:
                 consecutive_errors += 1
-                logger.warning(f"환율 조회 실패 ({consecutive_errors}회 연속)")
             else:
                 consecutive_errors = 0
-                logger.info(
-                    f"적용환율: ₩{rate_info['applied_rate']:,.2f} | "
-                    f"하위 {percentile:.1f}% | 추천: {is_recommended}"
-                )
+                logger.info(f"조회 성공 | 적용환율: ₩{rate_info['applied_rate']:,.2f} | 하위 {percentile:.1f}%")
 
                 if is_recommended:
-                    logger.info("✅ 매수 적기 감지! Discord 알림 전송")
                     send_discord_alert(rate_info, percentile, median_applied, True)
                     sync_config_to_git(rate_info, percentile)
-                    logger.info("매수 적기 알림 전송 후 모니터링 종료")
                     break
-
             time.sleep(config.CHECK_INTERVAL)
-
         except KeyboardInterrupt:
             logger.info("👋 사용자에 의해 모니터링이 종료되었습니다.")
             break
         except Exception as e:
-            consecutive_errors += 1
-            logger.error(f"예기치 못한 오류 발생 ({consecutive_errors}회): {e}")
+            # 💡 아래처럼 e를 로그 출력에 사용하면 비활성 상태가 깔끔하게 해결됩니다!
+            logger.error(f"⚠️ 모니터링 중 예기치 못한 오류 발생: {e}")
             time.sleep(60)
-
-
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "monitor":
         run_monitor()
