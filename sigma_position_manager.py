@@ -402,12 +402,13 @@ def get_combined_market_data(tickers: list, config: dict, est_tz, target_date: d
 
 
 # ====================== 리포트 생성 ======================
+# ====================== 리포트 생성 ======================
 def create_combined_message(results: dict, is_open: bool,
                             kst_now: str, vix_info: str, is_last_day: bool) -> str:
     mode_str = "🚀 실시간 모드" if is_open else "⏳ 장전 대기 모드"
     lines = [
         f"=== 🎯 매매엔진 통합 리포트 ({mode_str}) ===",
-        f"🎬 VIX : {vix_info}",
+        f"🎬 VIX 지수 : {vix_info}",
         ""
     ]
 
@@ -424,12 +425,11 @@ def create_combined_message(results: dict, is_open: bool,
         ]
 
         # ==================== VIX 상태 ====================
-        sub_msg = v.get('sub_msg', '')        
+        sub_msg = v.get('sub_msg', '')
         if v.get("mode") == "LONG":
             lines.append(f"● VIX 상태 : {sub_msg}")
         else:
             lines.append(f"● VIX 상태 : {sub_msg}")
-            
         lines.append(f"🛒 [매수 예정가] : ${v.get('buy_target', 0.0):.2f}")
 
         # ==================== LONG 모드 상세 ====================
