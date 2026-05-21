@@ -47,7 +47,7 @@ def setup_environment() -> dict:
     default_values = cfg.get("DEFAULTS", {
         "SIGMA_DEFAULT": 2.0,
         "LAST_CAST_DATE": "2026-05-07",
-        "ANNUAL_QUOTA": 24,
+        "ANNUAL_QUOTA": 24,   
         "MAX_DROP_PROTECTION": 0.10
     })
 
@@ -58,7 +58,7 @@ def setup_environment() -> dict:
         "positions":     cfg.get("POSITIONS", {}),
         "vix_long":      {**default_vix, **cfg.get("VIX_CONFIG", {}).get("LONG",  {})},
         "vix_short":     {**default_vix, **cfg.get("VIX_CONFIG", {}).get("SHORT", {})},
-        "defaults":      default_values,           # ← 추가
+        "defaults":      default_values,           
         "kst":           pytz.timezone('Asia/Seoul'),
         "est":           pytz.timezone('US/Eastern'),
         "full_cfg":      cfg
@@ -72,11 +72,23 @@ def get_vix_report() -> tuple[float, str]:
         if not df.empty:
             if isinstance(df.columns, pd.MultiIndex):
                 df = df.droplevel(1, axis=1)
+            
             v = float(df["Close"].iloc[-1])
-            status = "안정" if v <= 15 else "주의" if v <= 20 else "공포" if v <= 30 else "극단적 공포"
-            return v, f"{v:.1f} ({status})"
+
+            if v <= 15:
+                emoji, status = "✨", "안정"
+            elif v <= 20:
+                emoji, status = "⚠️", "주의"
+            elif 20 < v <= 30:                  
+                emoji, status = "🔴", "공포"
+            else:
+                emoji, status = "🔴🔴", "극단적 공포"
+
+            return v, f"{emoji} VIX {status} ({v:.1f})"
+            
     except Exception as e:
         logger.warning(f"VIX 데이터 수집 실패: {e}")
+    
     return 0.0, "N/A"
 
 
@@ -162,6 +174,7 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
         if vix_val >= v_high:
             buy_target = base * (1 - std_20d * v_extreme / 100)
             buy_name, sub_msg = f"-{v_extreme}σ", "🔴🔴 VIX 극단적 공포"
+
         elif is_triple_witching_week(today_date):
             if is_open and gap_ratio < -0.001:
                 rem = max(0, std_20d * v_fear + gap_ratio * 100)
@@ -171,17 +184,22 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
             else:
                 buy_target = prev_close * (1 - std_20d * v_fear / 100)
                 buy_name, sub_msg = f"-{v_fear}σ", "🧙 세 마녀 주간"
+
         elif vix_val >= v_low:
             buy_target = base * (1 - std_20d * v_fear / 100)
-            buy_name, sub_msg = f"-{v_fear}σ", "⚠️ VIX 공포 상승"
+            buy_name, sub_msg = f"-{v_fear}σ", "🔴 VIX 공포"
+
         elif is_open and gap_ratio < -0.001:
-            rem = max(0, std_20d + gap_ratio * 100)
+            # 갭 하락 보정 (gap_ratio가 음수일 때만 의미 있음)
+            gap_adjust = abs(gap_ratio) * 100 if gap_ratio < 0 else 0
+            rem = max(0, std_20d + gap_adjust)
             buy_target = today_open * (1 - rem / 100)
             buy_name = f"-{rem/std_20d:.1f}σ"
             sub_msg = "📉 갭 하락 보정"
+
         else:
             buy_target = prev_close * (1 - std_20d * v_normal / 100)
-            buy_name, sub_msg = f"-{v_normal}σ", "📈 평시 안정 장세"
+            buy_name, sub_msg = f"-{v_normal}σ", "✨ VIX 안정"
 
         result.update({
             "buy_target": buy_target,
@@ -190,7 +208,8 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
             "split_sell_plan": calculate_split_sell_targets(base, std_20d, shares)
         })
         return result
-
+    
+    
     # ====================== LONG 모드 ======================
     # 90일 로그 수익률 기반 daily sigma
     log_ret = np.log(ticker_df["Close"] / ticker_df["Close"].shift(1)).dropna().tail(90)
@@ -198,14 +217,13 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
 
     if vix_val >= v_high:
         multiplier = v_extreme
-        vix_status_msg = "🔴🔴 VIX 극단 공포 장세"
+        vix_status_msg = "🔴🔴 VIX 극단적 공포"
     elif vix_val >= v_low:
         multiplier = v_fear
-        vix_status_msg = "⚠️ VIX 공포 상승 장세"
+        vix_status_msg = "🔴 VIX 공포"
     else:
         multiplier = v_normal
-        vix_status_msg = "✨ 평시 안정 장세"
-
+        vix_status_msg = "✨ VIX 안정"            
     long_buy_ratio = float(np.exp(-daily_sigma_val * multiplier))
     long_buy = (today_open if is_open else prev_close) * long_buy_ratio
     
@@ -253,22 +271,40 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
 
 
 def calculate_split_sell_targets(base_price: float, std_20d: float, shares: int) -> list:
+    """
+    SOXL에 적합한 균형형 3단계 분할 매도 계획
+    - 1단계: 비교적 안정적인 상승에서 일부 매도
+    - 2단계: 상당한 상승 확인 후 추가 매도
+    - 3단계: 강한 상승장에서 최종 매도
+    """
     if shares <= 0:
         return []
-    levels = [(0.9, "1단계 +0.9σ"), (1.3, "2단계 +1.3σ"), (1.8, "3단계 +1.8σ")]
+    
+    # 균형형 시그마 레벨 
+    levels = [
+        (0.85, "1단계 +0.85σ"),   # 안정적 첫 매도
+        (1.30, "2단계 +1.30σ"),   # 중간 매도
+        (1.90, "3단계 +1.90σ")    # 강한 상승시 최종 매도
+    ]
+    
     per_level = max(1, shares // len(levels))
     plan = []
     remaining = shares
+    
     for i, (mult, name) in enumerate(levels):
         qty = per_level if i < len(levels) - 1 else remaining
         if qty <= 0:
             break
+            
+        target_price = round(base_price * (1 + std_20d * mult / 100), 2)
+        
         plan.append({
             "level": name,
-            "price": round(base_price * (1 + std_20d * mult / 100), 2),
+            "price": target_price,
             "qty": qty,
         })
         remaining -= qty
+    
     return plan
 
 
@@ -332,7 +368,7 @@ def get_combined_market_data(tickers: list, config: dict, est_tz, target_date: d
     positions_cfg = config.get("positions", {})
     vix_long_cfg = config.get("vix_long", {})
     vix_short_cfg = config.get("vix_short", {})
-    defaults = config.get("defaults", {})          # ← 추가
+    defaults = config.get("defaults", {})          
 
     results = {}
     for ticker in tickers:
@@ -357,7 +393,7 @@ def get_combined_market_data(tickers: list, config: dict, est_tz, target_date: d
                 is_open=is_open,
                 today_date=target_date,
                 vix_cfg=vix_cfg,
-                defaults=defaults          # ← defaults 전달
+                defaults=defaults         
             )
         except Exception as e:
             logger.warning(f"⚠️ {ticker} 분석 실패: {e}")
@@ -371,7 +407,7 @@ def create_combined_message(results: dict, is_open: bool,
     mode_str = "🚀 실시간 모드" if is_open else "⏳ 장전 대기 모드"
     lines = [
         f"=== 🎯 매매엔진 통합 리포트 ({mode_str}) ===",
-        f"🎬 VIX 지수 : {vix_info}",
+        f"🎬 VIX : {vix_info}",
         ""
     ]
 
@@ -387,12 +423,13 @@ def create_combined_message(results: dict, is_open: bool,
             f"● 전일 종가 : ${v.get('prev_close', 0.0):.2f}",
         ]
 
-        # 장세 상태
+        # ==================== VIX 상태 ====================
+        sub_msg = v.get('sub_msg', '')        
         if v.get("mode") == "LONG":
-            lines.append(f"● 장세 상태 : {v.get('sub_msg', '평시 안정 장세')}")
+            lines.append(f"● VIX 상태 : {sub_msg}")
         else:
-            lines.append(f"● 장세 상태 : {v.get('sub_msg', 'Normal')}")
-
+            lines.append(f"● VIX 상태 : {sub_msg}")
+            
         lines.append(f"🛒 [매수 예정가] : ${v.get('buy_target', 0.0):.2f}")
 
         # ==================== LONG 모드 상세 ====================
