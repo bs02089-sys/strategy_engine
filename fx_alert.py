@@ -1,5 +1,5 @@
 """
-나무증권 원화 → 달러 환율 적정성 알림 봇 (yfinance 연동 및 고정 스프레드 반영 버전)
+나무증권 원화 → 달러 환율 적정성 알림 봇 (yfinance 연동 및 고정 스프레드 반영 버전 - 오차 보정 완료)
 """
 
 import os
@@ -11,7 +11,6 @@ import time
 import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
-from dataclasses import dataclass
 from typing import Tuple, TypedDict
 import bisect
 
@@ -31,15 +30,14 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class Config:
-    # 💡 나무증권의 실제 달러 기본 스프레드는 달러당 10.0원 또는 11.5원입니다.
-    # 본인의 앱 화면(매매기준율과 적용환율의 차이)을 확인하고 맞추면 오차가 0원이 됩니다.
     NAMUH_SPREAD: float = 10.0  # 달러당 기본 스프레드 (10.0원 또는 11.5원)
     PREFER_RATE: float = 95.0  # 우대율 (%)
+    RATE_OFFSET: float = -1.62  # 👈 [업데이트] 야후파이낸스-나무증권 간의 실시간 환율 오차 보정치 (-1.62원)
     PERCENTILE_THRESHOLD: float = 33.0
     CHECK_INTERVAL: int = 300
     CACHE_HOURS: int = 6
-    DISCORD_WEBHOOK: str = ""  # 👈 디스코드 웹훅용 공간을 클래스에 깔끔하게 추가!
-    DISCORD_USER_ID: str = ""  # 👈 디스코드 유저 ID용 공간도 추가!
+    DISCORD_WEBHOOK: str = ""  
+    DISCORD_USER_ID: str = ""  
 
     @classmethod
     def load(cls) -> "Config":
@@ -47,6 +45,7 @@ class Config:
         config_data = {
             "NAMUH_SPREAD": 10.0,
             "PREFER_RATE": 95.0,
+            "RATE_OFFSET": -1.62, # 기본 보정치 탑재
             "PERCENTILE_THRESHOLD": 33.0,
             "CHECK_INTERVAL": 300,
             "CACHE_HOURS": 6,
@@ -60,7 +59,6 @@ class Config:
                 with open("config.json", "r", encoding="utf-8") as f:
                     file_data = json.load(f)
                     for key in config_data.keys():
-                        # 대문자, 소문자(discord_webhook 등) 상관없이 다 뺴오도록 매칭
                         val = file_data.get(key) or file_data.get(key.lower())
                         if val is not None:
                             config_data[key] = val
@@ -68,7 +66,6 @@ class Config:
                 print(f"config.json 읽기 실패: {e}")
 
         # 3. 만약 깃허브 환경변수(os.getenv)에 값이 설정되어 있다면 그것을 최우선으로 적용합니다.
-        # 환경변수 이름은 대문자 기준입니다 (예: DISCORD_WEBHOOK)
         for key in config_data.keys():
             env_val = os.getenv(key)
             if env_val is not None:
@@ -78,6 +75,7 @@ class Config:
         return cls(
             NAMUH_SPREAD=float(config_data["NAMUH_SPREAD"]),
             PREFER_RATE=float(config_data["PREFER_RATE"]),
+            RATE_OFFSET=float(config_data["RATE_OFFSET"]), # 형변환 추가
             PERCENTILE_THRESHOLD=float(config_data["PERCENTILE_THRESHOLD"]),
             CHECK_INTERVAL=int(config_data["CHECK_INTERVAL"]),
             CACHE_HOURS=int(config_data["CACHE_HOURS"]),
@@ -139,14 +137,11 @@ def load_cache() -> list[float] | None:
 def get_current_rate() -> float | None:
     """야후 파이낸스에서 실시간 USDKRW 환율을 가져옵니다."""
     try:
-        # 'KRW=X'는 야후 파이낸스의 달러/원 환율 티커입니다.
         ticker = yf.Ticker("KRW=X")
-        # 최근 1일 데이터를 분 단위로 신속하게 조회
         df = ticker.history(period="1d", interval="1m")
         if not df.empty:
             return float(df['Close'].iloc[-1])
         
-        # 분 단위 데이터가 일시적으로 빌 경우 일별 데이터로 백업 조회
         df_backup = ticker.history(period="1d")
         if not df_backup.empty:
             return float(df_backup['Close'].iloc[-1])
@@ -165,13 +160,11 @@ def get_historical_rates(days: int = 365) -> list[float]:
     try:
         logger.info(f"yfinance를 통해 과거 {days}일간의 환율 데이터를 가져옵니다...")
         ticker = yf.Ticker("KRW=X")
-        # 1년(1y) 치 일별 데이터를 조회
         df = ticker.history(period="1y")
         
         if df.empty:
             raise ValueError("과거 데이터가 비어 있습니다.")
 
-        # 종가(Close) 리스트 추출 후 정렬
         rates = [float(val) for val in df['Close'].dropna().tolist()]
         sorted_rates = sorted(rates)
         
@@ -183,19 +176,17 @@ def get_historical_rates(days: int = 365) -> list[float]:
 
 
 # =============================================
-# 계산 함수 (실제 나무증권 원화 고정 스프레드 공식)
+# 계산 함수 (실제 나무증권 원화 고정 스프레드 공식 + 오차 보정 반영)
 # =============================================
 def calc_applied_rate(base_rate: float) -> RateInfo:
-    """나무증권의 실제 우대 환율 계산법을 적용합니다."""
+    """나무증권의 실제 우대 환율 계산법 및 플랫폼 간 오차 보정치를 적용합니다."""
     # 스프레드 비용 = 고정 스프레드(원) * (1 - 우대율)
-    # 예: 10원 * (1 - 0.95) = 0.5원 수수료 발생
     spread_cost = config.NAMUH_SPREAD * (1 - config.PREFER_RATE / 100)
-    spread_cost = round(spread_cost, 2)  # 국내 금융 고시 기준 소수점 둘째 자리 반올림
+    spread_cost = round(spread_cost, 2)  
     
-    # 최종 적용 환율 = 매매기준율 + 스프레드 비용
-    applied_rate = base_rate + spread_cost
+    # 🎯 [핵심 보정] 최종 적용 환율 = 매매기준율 + 스프레드 비용 + 오차보정치(-1.62)
+    applied_rate = base_rate + spread_cost + config.RATE_OFFSET
     
-    # 역산한 백분율 수수료율 (참고용)
     effective_spread = (spread_cost / base_rate) * 100 
 
     return {
@@ -210,7 +201,6 @@ def calc_percentile(sorted_rates: list[float], current: float) -> float:
     n = len(sorted_rates)
     if n == 0:
         return 50.0
-    # 이진 탐색(bisect)을 활용하여 정확하고 빠른 하위 백분위 계산
     idx = bisect.bisect_right(sorted_rates, current)
     return round((idx / n) * 100, 1)
 
@@ -223,7 +213,6 @@ def get_median_applied_rate(sorted_base_rates: list[float]) -> float:
 
 
 def get_rating(percentile: float) -> Tuple[str, str]:
-    # 🎯 33% 이하면 무조건 초록불! 아주 심플하고 명확해집니다.
     if percentile <= 33:
         return "🟢 매수 적기", "최근 1년 중 상위권 매수 기회입니다."
     elif percentile <= 50:
@@ -294,13 +283,11 @@ def send_discord_alert(rate_info: RateInfo, percentile: float, median_applied: f
 
 
 # =============================================
-# [양방향 동기화 엔진] fx_config.json 업데이트 및 Git Push
+# [양방향 동기화 엔진] config.json 업데이트 및 Git Push
 # =============================================
 def sync_config_to_git(rate_info: dict, percentile: float):
-    """기존 config.json의 다른 설정은 그대로 유지하고, exchange_status만 안전하게 업데이트합니다."""
-    config_path = Path("config.json") # 💡 통합 설정 파일명으로 변경
+    config_path = Path("config.json") 
     
-    # 1. 기존 파일이 있으면 먼저 읽어와서 다른 설정들을 보존합니다.
     if config_path.exists():
         try:
             full_config = json.loads(config_path.read_text(encoding='utf-8'))
@@ -310,7 +297,6 @@ def sync_config_to_git(rate_info: dict, percentile: float):
     else:
         full_config = {}
 
-    # 2. 다른 키값(설정들)은 건드리지 않고, exchange_status 구조만 만들거나 업데이트합니다.
     if "exchange_status" not in full_config:
         full_config["exchange_status"] = {}
         
@@ -318,11 +304,9 @@ def sync_config_to_git(rate_info: dict, percentile: float):
     full_config["exchange_status"]["CURRENT_APPLIED_RATE"] = rate_info['applied_rate']
     full_config["exchange_status"]["CURRENT_PERCENTILE"] = percentile
 
-    # 3. 다른 설정들이 포함된 전체 데이터를 다시 안전하게 저장합니다.
     config_path.write_text(json.dumps(full_config, ensure_ascii=False, indent=2), encoding='utf-8')
     logger.info("📝 config.json의 환율 정보 업데이트 완료 (기존 설정 보존).")
 
-    # 4. Git Push 작업 (동일)
     try:
         status = subprocess.run(["git", "status", "--porcelain", str(config_path)], capture_output=True, text=True)
         if not status.stdout.strip():
