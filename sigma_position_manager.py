@@ -224,9 +224,37 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
     else:
         multiplier = v_normal
         vix_status_msg = "✨ VIX 안정"            
-    long_buy_ratio = float(np.exp(-daily_sigma_val * multiplier))
-    long_buy = (today_open if is_open else prev_close) * long_buy_ratio
-    
+    # ── 갭 하락 구간별 계단식 배수 보정 ────────────────────────────────────
+    # 갭 하락이 클수록 이미 많이 내려온 것이므로 배수를 구간별로 줄여
+    # 타점을 시가 가까이 당긴다. 갭 상승 시엔 원래 배수 유지.
+    #
+    # 구간 정의 (gap_ratio 음수 = 하락)
+    #   0%  ~ -3%  : 배수 유지          (multiplier 그대로)
+    #  -3%  ~ -5%  : 배수 0.45          (완만한 보정)
+    #  -5%  ~ -7%  : 배수 0.25          (중간 보정)
+    #  -7%  ~ -10% : 배수 0.10          (강한 보정)
+    #  -10% 초과   : 배수 0.0           (시가 바로 아래 체결)
+    if is_open and gap_ratio < -0.03:
+        gap_pct = abs(gap_ratio) * 100   # 양수 퍼센트로 변환
+        if gap_pct <= 5.0:
+            adjusted_multiplier = 0.45
+            gap_zone = f"-3%~-5% 구간"
+        elif gap_pct <= 7.0:
+            adjusted_multiplier = 0.25
+            gap_zone = f"-5%~-7% 구간"
+        elif gap_pct <= 10.0:
+            adjusted_multiplier = 0.10
+            gap_zone = f"-7%~-10% 구간"
+        else:
+            adjusted_multiplier = 0.0
+            gap_zone = f"-10% 초과 구간"
+        sub_msg_gap = f" (갭 {gap_ratio*100:.1f}% / {gap_zone} → 배수 {multiplier:.2f}→{adjusted_multiplier:.2f})"
+    else:
+        adjusted_multiplier = multiplier
+        sub_msg_gap = ""
+
+    long_buy = (today_open if is_open else prev_close) * float(np.exp(-daily_sigma_val * adjusted_multiplier))
+
     # config.json에서 최대 하락 보호 비율 가져오기
     max_drop_protection = defaults.get("MAX_DROP_PROTECTION", 0.10)
     long_buy = max(long_buy, prev_close * max_drop_protection)
@@ -258,8 +286,8 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
         "daily_sigma": daily_sigma_val * 100,
         "multiplier": multiplier,
         "buy_target": long_buy,
-        "buy_name": f"LONG 변동성 방어선 ({multiplier:.2f}x)",
-        "sub_msg": f"{vix_status_msg} ➔ {multiplier:.2f}배수 하방",
+        "buy_name": f"LONG 변동성 방어선 ({adjusted_multiplier:.2f}x)",
+        "sub_msg": f"{vix_status_msg} ➔ {adjusted_multiplier:.2f}배수 하방{sub_msg_gap}",
         "time_guard_info": time_guard_status,
         "my_avg_price": pos_cfg.get("MY_AVG_PRICE", 0.0),
         "current_casts": pos_cfg.get("CURRENT_CASTS", 0),
@@ -552,4 +580,4 @@ def main():
                         
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format='%(message)s')
-    main()  
+    main()
