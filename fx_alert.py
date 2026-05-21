@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 class Config:
     NAMUH_SPREAD: float = 10.0  # 달러당 기본 스프레드 (10.0원 또는 11.5원)
     PREFER_RATE: float = 95.0  # 우대율 (%)
-    RATE_OFFSET: float = -1.62  # 👈 [업데이트] 야후파이낸스-나무증권 간의 실시간 환율 오차 보정치 (-1.62원)
+    RATE_OFFSET: float = -2.47  # 👈 [업데이트] 기존 -1.62에서 0.85원을 추가로 더 깎아 오차를 맞췄습니다.
     PERCENTILE_THRESHOLD: float = 33.0
     CHECK_INTERVAL: int = 300
     CACHE_HOURS: int = 6
@@ -45,7 +45,7 @@ class Config:
         config_data = {
             "NAMUH_SPREAD": 10.0,
             "PREFER_RATE": 95.0,
-            "RATE_OFFSET": -1.62, # 기본 보정치 탑재
+            "RATE_OFFSET": -2.47, # 업데이트된 보정치 반영
             "PERCENTILE_THRESHOLD": 33.0,
             "CHECK_INTERVAL": 300,
             "CACHE_HOURS": 6,
@@ -75,7 +75,7 @@ class Config:
         return cls(
             NAMUH_SPREAD=float(config_data["NAMUH_SPREAD"]),
             PREFER_RATE=float(config_data["PREFER_RATE"]),
-            RATE_OFFSET=float(config_data["RATE_OFFSET"]), # 형변환 추가
+            RATE_OFFSET=float(config_data["RATE_OFFSET"]), 
             PERCENTILE_THRESHOLD=float(config_data["PERCENTILE_THRESHOLD"]),
             CHECK_INTERVAL=int(config_data["CHECK_INTERVAL"]),
             CACHE_HOURS=int(config_data["CACHE_HOURS"]),
@@ -184,7 +184,7 @@ def calc_applied_rate(base_rate: float) -> RateInfo:
     spread_cost = config.NAMUH_SPREAD * (1 - config.PREFER_RATE / 100)
     spread_cost = round(spread_cost, 2)  
     
-    # 🎯 [핵심 보정] 최종 적용 환율 = 매매기준율 + 스프레드 비용 + 오차보정치(-1.62)
+    # 최종 적용 환율 = 매매기준율 + 스프레드 비용 + 오차보정치(-2.47)
     applied_rate = base_rate + spread_cost + config.RATE_OFFSET
     
     effective_spread = (spread_cost / base_rate) * 100 
