@@ -23,6 +23,30 @@
     }
   },
 
+  "VIX_CONFIG": {
+    "LONG": {
+      "LEVEL_LOW": 20.0,
+      "LEVEL_HIGH": 30.0,
+      "MULT_NORMAL": 0.85,
+      "MULT_FEAR": 1.95,
+      "MULT_EXTREME": 2.40
+    },
+    "SHORT": {
+      "LEVEL_LOW": 20.0,
+      "LEVEL_HIGH": 30.0,
+      "MULT_NORMAL": 0.85,
+      "MULT_FEAR": 1.95,
+      "MULT_EXTREME": 2.40
+    }
+  },
+
+  "DEFAULTS": {
+    "SIGMA_DEFAULT": 2.0,
+    "LAST_CAST_DATE": "2026-01-01",
+    "ANNUAL_QUOTA": 24,
+    "MAX_DROP_PROTECTION": 0.10
+  },
+
   "exchange_status": {
     "LAST_CHECK_DATE": "2026-05-18 20:02:56",
     "CURRENT_APPLIED_RATE": 1501.48,
@@ -39,30 +63,5 @@
       "IONQ stock"
     ],
     "MAX_NEWS_PER_KEYWORD": 5
-  },
-
-  "DEFAULTS": {
-    "SIGMA_DEFAULT": 2.0,
-    "LAST_CAST_DATE": "2026-01-01",
-    "ANNUAL_QUOTA": 24,
-    "MAX_DROP_PROTECTION": 0.10
-  },
-
-  "VIX_CONFIG": {
-    "LONG": {
-      "LEVEL_LOW": 20.0,
-      "LEVEL_HIGH": 30.0,
-      "MULT_NORMAL": 0.65,
-      "MULT_FEAR": 1.95,
-      "MULT_EXTREME": 2.40
-    },
-
-    "SHORT": {
-      "LEVEL_LOW": 20.0,
-      "LEVEL_HIGH": 30.0,
-      "MULT_NORMAL": 0.65,
-      "MULT_FEAR": 1.95,
-      "MULT_EXTREME": 2.40
-    }
   }
 }

@@ -38,7 +38,7 @@ def setup_environment() -> dict:
     default_vix = {
         "LEVEL_LOW": 20.0,
         "LEVEL_HIGH": 30.0,
-        "MULT_NORMAL": 0.65,
+        "MULT_NORMAL": 0.85,
         "MULT_FEAR": 1.95,
         "MULT_EXTREME": 2.40,
     }
