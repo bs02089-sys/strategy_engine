@@ -1,6 +1,6 @@
 {
-    "DISCORD_WEBHOOK": "https://discord.com/api/webhooks/1503322322130440243/69uhhhQiRrEfFSUH4wPyGtZAJ5pgl6dcIbGmf7cE_TCgDfpRLk7w2h6jbczyC8WLQdlf",
-    "DISCORD_USER_ID": "1431474369196064868",
+    "DISCORD_WEBHOOK": "",
+    "DISCORD_USER_ID": "",
         "TICKERS": [
         "SOXL",
         "TSLA"
