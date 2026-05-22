@@ -319,8 +319,8 @@ def calculate_split_sell_targets(base_price: float, std_20d: float, shares: int)
     # 균형형 시그마 레벨 
     levels = [
         (0.85, "1단계 +0.85σ"),   # 안정적 첫 매도
-        (1.30, "2단계 +1.30σ"),   # 중간 매도
-        (1.90, "3단계 +1.90σ")    # 강한 상승시 최종 매도
+        (1.95, "2단계 +1.95σ"),   # 중간 매도
+        (2.40, "3단계 +2.40σ")    # 강한 상승시 최종 매도
     ]
     
     per_level = max(1, shares // len(levels))
