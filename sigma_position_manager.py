@@ -52,16 +52,17 @@ def setup_environment() -> dict:
     })
 
     return {
-        "webhook":       cfg.get("DISCORD_WEBHOOK"),
-        "user_id":       cfg.get("DISCORD_USER_ID"),
-        "tickers":       cfg.get("TICKERS", ["SOXL", "TSLA"]),
-        "positions":     cfg.get("POSITIONS", {}),
-        "vix_long":      {**default_vix, **cfg.get("VIX_CONFIG", {}).get("LONG",  {})},
-        "vix_short":     {**default_vix, **cfg.get("VIX_CONFIG", {}).get("SHORT", {})},
-        "defaults":      default_values,           
-        "kst":           pytz.timezone('Asia/Seoul'),
-        "est":           pytz.timezone('US/Eastern'),
-        "full_cfg":      cfg
+        # 💡 config.json에 주소가 없으면, 깃허브 서버 환경변수(OS 변수)에서 웹훅을 가져옵니다.
+        "webhook": cfg.get("DISCORD_WEBHOOK") or os.getenv("DISCORD_WEBHOOK"),
+        "user_id": cfg.get("DISCORD_USER_ID") or os.getenv("DISCORD_USER_ID"),
+        "tickers": cfg.get("TICKERS", ["SOXL", "TSLA"]),
+        "positions": cfg.get("POSITIONS", {}),
+        "vix_long": {**default_vix, **cfg.get("VIX_CONFIG", {}).get("LONG",  {})},
+        "vix_short": {**default_vix, **cfg.get("VIX_CONFIG", {}).get("SHORT", {})},
+        "defaults": default_values,           
+        "kst": pytz.timezone('Asia/Seoul'),
+        "est": pytz.timezone('US/Eastern'),
+        "full_cfg": cfg
     }
         
 
