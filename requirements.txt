@@ -4,6 +4,7 @@ requests
 pandas
 pytz
 feedparser
+python-dotenv
 google-genai>=0.3.0
 schedule
 holidays
