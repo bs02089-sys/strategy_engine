@@ -129,21 +129,36 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
         today_date = today_date.date()
 
     # ==================== 가격 데이터 안전 추출 ====================
+    last_row_date = ticker_df.index[-1]
+    if hasattr(last_row_date, "date"):
+        last_row_date = last_row_date.date()
+        
+    is_today_data_present = (last_row_date == today_date)
+
     try:
-        prev_close = float(ticker_df["Close"].iloc[-2 if (is_open and len(ticker_df) > 1) else -1])
+        if is_today_data_present and is_open and len(ticker_df) > 1:
+            prev_close = float(ticker_df["Close"].iloc[-2])
+        else:
+            prev_close = float(ticker_df["Close"].iloc[-1])
     except Exception:
         prev_close = float(ticker_df["Close"].iloc[-1])
 
     try:
-        today_open = float(ticker_df["Open"].iloc[-1]) if is_open and len(ticker_df) > 0 else prev_close
+        if is_today_data_present and is_open:
+            today_open = float(ticker_df["Open"].iloc[-1])
+        else:
+            today_open = prev_close
     except Exception:
         today_open = prev_close
 
-    base = today_open if is_open else prev_close
+    base = today_open if (is_open and is_today_data_present) else prev_close
     gap_ratio = (today_open - prev_close) / prev_close if prev_close != 0 else 0.0
 
+    # 변동성 계산 시 오늘 미확정 실시간 데이터는 제외하여 신뢰도 유지
+    hist_df = ticker_df.iloc[:-1] if is_today_data_present else ticker_df
+
     # ==================== 20일 변동성 계산 ====================
-    daily_ret = ticker_df["Close"].pct_change().dropna()
+    daily_ret = hist_df["Close"].pct_change().dropna()
     std_20d = float(daily_ret.tail(20).std() * 100)
     if pd.isna(std_20d) or std_20d <= 0:
         std_20d = float(defaults.get("SIGMA_DEFAULT", 2.0))
@@ -160,6 +175,9 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
     v_high    = vix_cfg.get("LEVEL_HIGH")
     v_low     = vix_cfg.get("LEVEL_LOW")
 
+    # 실시간 현재가 구하기
+    current_price = float(ticker_df["Close"].iloc[-1])
+
     # ==================== 결과 기본 구조 ====================
     result = {
         "mode": mode,
@@ -167,6 +185,7 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
         "today_open": today_open,
         "std": std_20d,
         "total_shares": shares,
+        "current_price": current_price,
     }
 
     # ====================== SHORT 모드 ======================
@@ -190,9 +209,9 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
             buy_name, sub_msg = f"-{v_fear}σ", "🔴 VIX 공포"
 
         elif is_open and gap_ratio < -0.001:
-            # 갭 하락 보정 (gap_ratio가 음수일 때만 의미 있음)
-            gap_adjust = abs(gap_ratio) * 100 if gap_ratio < 0 else 0
-            rem = max(0, std_20d + gap_adjust)
+            # 갭 하락 보정 (부호 오류 수정: + -> -)
+            gap_adjust = abs(gap_ratio) * 100
+            rem = max(0, std_20d - gap_adjust)
             buy_target = today_open * (1 - rem / 100)
             buy_name = f"-{rem/std_20d:.1f}σ"
             sub_msg = "📉 갭 하락 보정"
@@ -211,8 +230,8 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
     
     
     # ====================== LONG 모드 ======================
-    # 90일 로그 수익률 기반 daily sigma
-    log_ret = np.log(ticker_df["Close"] / ticker_df["Close"].shift(1)).dropna().tail(90)
+    # 90일 로그 수익률 기반 daily sigma (미확정 오늘 데이터 배제한 hist_df 사용)
+    log_ret = np.log(hist_df["Close"] / hist_df["Close"].shift(1)).dropna().tail(90)
     daily_sigma_val = float(log_ret.std(ddof=1)) if len(log_ret) > 0 else 0.04
 
     if vix_val >= v_high:
@@ -225,15 +244,6 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
         multiplier = v_normal
         vix_status_msg = "✨ VIX 안정"            
     # ── 갭 하락 구간별 계단식 배수 보정 ────────────────────────────────────
-    # 갭 하락이 클수록 이미 많이 내려온 것이므로 배수를 구간별로 줄여
-    # 타점을 시가 가까이 당긴다. 갭 상승 시엔 원래 배수 유지.
-    #
-    # 구간 정의 (gap_ratio 음수 = 하락)
-    #   0%  ~ -3%  : 배수 유지          (multiplier 그대로)
-    #  -3%  ~ -5%  : 배수 0.45          (완만한 보정)
-    #  -5%  ~ -7%  : 배수 0.25          (중간 보정)
-    #  -7%  ~ -10% : 배수 0.10          (강한 보정)
-    #  -10% 초과   : 배수 0.0           (시가 바로 아래 체결)
     if is_open and gap_ratio < -0.03:
         gap_pct = abs(gap_ratio) * 100   # 양수 퍼센트로 변환
         if gap_pct <= 5.0:
@@ -255,9 +265,9 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
 
     long_buy = (today_open if is_open else prev_close) * float(np.exp(-daily_sigma_val * adjusted_multiplier))
 
-    # config.json에서 최대 하락 보호 비율 가져오기
+    # config.json에서 최대 하락 보호 비율 가져오기 (부호 오류 수정: 1 - max_drop_protection)
     max_drop_protection = defaults.get("MAX_DROP_PROTECTION", 0.10)
-    long_buy = max(long_buy, prev_close * max_drop_protection)
+    long_buy = max(long_buy, prev_close * (1.0 - max_drop_protection))
 
     # 시간 가드 로직
     last_cast_str = pos_cfg.get("LAST_CAST_DATE", defaults.get("LAST_CAST_DATE", "2026-01-01"))
@@ -270,8 +280,6 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
     normal_std = 4.0 if "SOXL" in ticker.upper() else 2.5
     min_days_gate = 14 if std_20d > normal_std * 1.3 else 5
     is_time_gate_passed = days_since >= min_days_gate
-
-    current_price = float(ticker_df["Close"].iloc[-1])
 
     if is_open and current_price <= long_buy and not is_time_gate_passed:
         time_guard_status = "🔥 [시간 가드 강제 해제] 실탄 집행!"
@@ -447,16 +455,21 @@ def create_combined_message(results: dict, is_open: bool,
         lines += [
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
             f"● 종목 : {ticker} [{opt_mode}] (보유량 : {v.get('total_shares', 0)}주)",
+            f"● 현재가 : ${v.get('current_price', 0.0):.2f}",
             f"● 전일 종가 : ${v.get('prev_close', 0.0):.2f}",
         ]
 
         # ==================== VIX 상태 ====================
         sub_msg = v.get('sub_msg', '')
-        if v.get("mode") == "LONG":
-            lines.append(f"● VIX 상태 : {sub_msg}")
+        lines.append(f"● VIX 상태 : {sub_msg}")
+
+        # ==================== 매수 예정가 및 매수 시그널 포착 ====================
+        buy_target = v.get('buy_target', 0.0)
+        current_price = v.get('current_price', 0.0)
+        if is_open and current_price <= buy_target:
+            lines.append(f"🛒 [매수 예정가] : ${buy_target:.2f} (🚨 [매수 시그널 포착] 실탄 집행!)")
         else:
-            lines.append(f"● VIX 상태 : {sub_msg}")
-        lines.append(f"🛒 [매수 예정가] : ${v.get('buy_target', 0.0):.2f}")
+            lines.append(f"🛒 [매수 예정가] : ${buy_target:.2f}")
 
         # ==================== LONG 모드 상세 ====================
         if v.get("mode") == "LONG":
@@ -516,7 +529,7 @@ def main():
         
         # 타겟 날짜 결정
         target_date = now_est.date()
-        if now_est.weekday() == 6 and now_est.hour >= 18:  # 토요일 저녁
+        if now_est.weekday() == 6 and now_est.hour >= 18:  # 일요일 저녁
             target_date += timedelta(days=1)
 
         # 휴장일 스킵
@@ -536,32 +549,7 @@ def main():
             return
 
         # ==================== Git 동기화 (기존 로직 최대한 유지) ====================
-        try:
-            today_str = target_date.strftime("%Y-%m-%d")
-            is_github_action = os.getenv("GITHUB_ACTIONS") == "true"
-
-            status = subprocess.run(
-                ["git", "status", "--porcelain", "config.json"], 
-                capture_output=True, text=True, timeout=10
-            )
-            
-            if status.stdout.strip(): 
-                subprocess.run(["git", "config", "user.name", "Automated Bot"], check=True, timeout=10)
-                subprocess.run(["git", "config", "user.email", "bot@example.com"], check=True, timeout=10)
-                subprocess.run(["git", "add", "config.json"], check=True, timeout=10)
-                subprocess.run(["git", "commit", "-m", f"🤖 Auto-update config.json [{today_str}]"], check=True, timeout=10)
-
-                if is_github_action:
-                    logger.info("📡 GitHub Actions 환경 감지: 원격 저장소에 자동으로 푸시합니다.")
-                    subprocess.run(["git", "push"], check=True, timeout=15)
-                else:
-                    logger.info("💻 로컬 PC 환경 감지: 깃허브 원격 저장소로 동기화(Push)를 시도합니다.")
-                    subprocess.run(["git", "push", "origin", "main"], check=True, timeout=15)
-            else:
-                logger.info("📝 config.json 변경 사항이 없어 Git Commit을 생략합니다.")
-
-        except Exception as git_err:
-            logger.warning(f"⚠️ Git 동기화 실패 (계속 진행): {git_err}")
+        sync_config_to_git(target_date)
 
         # ==================== 리포트 생성 & Discord 전송 ====================
         kst_str = kst_now.strftime('%Y-%m-%d %H:%M:%S')
