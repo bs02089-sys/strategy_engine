@@ -38,26 +38,27 @@ def verify_long_term_hold_logic():
     df['Log_Ret'] = np.log(df['Close'] / df['Close'].shift(1))
     df['Daily_Sigma'] = df['Log_Ret'].rolling(window=90, min_periods=60).std(ddof=1)
     df['Prev_Close'] = df['Close'].shift(1)
+    
     # 갭 비율: 전일 종가 대비 당일 시가 (음수 = 갭 하락)
     df['Gap_Ratio'] = np.where(
         df['Prev_Close'] != 0,
         (df['Open'] - df['Prev_Close']) / df['Prev_Close'],
         0.0
     )
-    df = df.dropna().copy()  # DatetimeIndex 유지 (reset_index 사용 안 함)
+    df = df.dropna().copy()
 
     final_price = df['Close'].iloc[-1]
-
     print(f"📊 분석 기간 : {df.index[0].date()} ~ {df.index[-1].date()} ({len(df)} 거래일)")
     print(f"📈 SOXL 최종 종가 : ${final_price:.2f}\n")
 
-    # ====================== 갭 하락 구간별 계단식 배수 보정 ======================
-    # sigma_position_manager.py 실전 로직과 완전 동기화
-    #   0%  ~ -3%  : 배수 유지
-    #  -3%  ~ -5%  : 0.45
-    #  -5%  ~ -7%  : 0.25
-    #  -7%  ~ -10% : 0.10
-    #  -10% 초과   : 0.0
+    # ====================== 안전 범위 정의 및 조건 설정 ======================
+    SAFETY_BOUNDS = {
+        "MULT_NORMAL":  (0.65, 0.85),
+        "MULT_FEAR":    (1.95, 2.45),
+        "MULT_EXTREME": (2.40, 2.75)
+    }
+
+    # 갭 하락 구간별 계단식 배수 보정 매핑 (Vectorized 연산을 위해 딕셔너리 대신 조건 연산 유지)
     def apply_gap_correction(base_mult: float, gap_ratio: float) -> float:
         if gap_ratio >= -0.03: return base_mult
         elif gap_ratio >= -0.05: return 0.45
@@ -65,52 +66,21 @@ def verify_long_term_hold_logic():
         elif gap_ratio >= -0.10: return 0.10
         else: return 0.0
 
-    # ====================== 안전 범위 정의 (매년 업데이트해도 과도하게 변하지 않도록) ======================
-    SAFETY_BOUNDS = {
-        "MULT_NORMAL":  (0.65, 0.85),
-        "MULT_FEAR":    (1.95, 2.45),
-        "MULT_EXTREME": (2.40, 2.75)
-    }
-
-    # ====================== 백테스트 함수 ======================
-    def run_backtest(normal, fear, extreme, name):
-        def get_mult(v):
-            if v >= 30: return extreme
-            elif v >= 20: return fear
-            else: return normal
+    # ====================== 최적화 핵심 연산 함수 ======================
+    def evaluate_parameters(normal, fear, extreme):
+        """특정 파라미터 조합의 매수 횟수와 시그널 배열을 반환합니다."""
+        # VIX 조건 설정 최적화 (apply 대신 np.select로 속도 향상 가능하나 안전성 위해 로직 유지)
+        multipliers = np.where(df['VIX'] >= 30, extreme, np.where(df['VIX'] >= 20, fear, normal))
         
-        df_temp = df.copy()
-        df_temp['Multiplier'] = df_temp['VIX'].apply(get_mult)
-        # 갭 하락 보정 배수 적용 (실전 로직 동기화)
-        df_temp['Adj_Multiplier'] = df_temp.apply(
-            lambda r: apply_gap_correction(r['Multiplier'], r['Gap_Ratio']), axis=1
-        )
-        df_temp['Target_Price'] = df_temp['Open'] * np.exp(-df_temp['Daily_Sigma'] * df_temp['Adj_Multiplier'])
-        df_temp['Triggered'] = df_temp['Low'] <= df_temp['Target_Price']
+        # 갭 보정 적용
+        adj_multipliers = [apply_gap_correction(m, g) for m, g in zip(multipliers, df['Gap_Ratio'])]
+        
+        target_prices = df['Open'].values * np.exp(-df['Daily_Sigma'].values * adj_multipliers)
+        triggered = df['Low'].values <= target_prices
+        
+        return triggered, target_prices
 
-        entries = df_temp['Triggered']
-        pf = vbt.Portfolio.from_signals(
-            close=df_temp['Close'],
-            entries=entries,
-            exits=pd.Series(False, index=df_temp.index),
-            price=df_temp['Target_Price'],
-            init_cash=10000,
-            fees=0.0015,
-            freq='1D',
-            accumulate=True,
-            allow_partial=True
-        )
-
-        print(f"[{name}]")
-        print(f"   평시: {normal:.2f} | 공포: {fear:.2f} | 극단: {extreme:.2f}")
-        print(f"   총 매수 횟수 : {int(entries.sum())}회")
-        print(f"   최종 수익률  : {pf.total_return()*100:+.2f}%")
-        print(f"   최대 드로다운 : {pf.max_drawdown()*100:.2f}%")
-        print(f"   Calmar Ratio : {pf.calmar_ratio():.3f}\n")
-
-    run_backtest(0.75, 2.20, 2.60, "현재 추천 설정")
-
-    # ====================== 안전 범위 내 최적화 ======================
+    # ====================== 안전 범위 내 최적화 탐색 ======================
     print("🔍 안전 범위 내에서 최적 배수 탐색 중...\n")
 
     normal_range = np.arange(SAFETY_BOUNDS["MULT_NORMAL"][0], SAFETY_BOUNDS["MULT_NORMAL"][1] + 0.01, 0.05)
@@ -121,29 +91,18 @@ def verify_long_term_hold_logic():
     best_params = None
 
     for normal, fear, extreme in product(normal_range, fear_range, extreme_range):
-        def get_mult(v):
-            if v >= 30: return extreme
-            elif v >= 20: return fear
-            else: return normal
-
-        df_temp = df.copy()
-        df_temp['Multiplier'] = df_temp['VIX'].apply(get_mult)
-        # 갭 하락 보정 배수 적용 (실전 로직 동기화)
-        df_temp['Adj_Multiplier'] = df_temp.apply(
-            lambda r: apply_gap_correction(r['Multiplier'], r['Gap_Ratio']), axis=1
-        )
-        df_temp['Target_Price'] = df_temp['Open'] * np.exp(-df_temp['Daily_Sigma'] * df_temp['Adj_Multiplier'])
-        df_temp['Triggered'] = df_temp['Low'] <= df_temp['Target_Price']
-
-        trade_count = int(df_temp['Triggered'].sum())
-        if trade_count < 170 or trade_count > 240:   # 조금 더 여유롭게 설정
+        triggered, target_prices = evaluate_parameters(normal, fear, extreme)
+        trade_count = int(triggered.sum())
+        
+        # 매수 횟수 필터링 (조건 만족 안 하면 포트폴리오 연산 생략하여 속도 업)
+        if trade_count < 170 or trade_count > 240:
             continue
 
         pf = vbt.Portfolio.from_signals(
-            close=df_temp['Close'],
-            entries=df_temp['Triggered'],
-            exits=pd.Series(False, index=df_temp.index),
-            price=df_temp['Target_Price'],
+            close=df['Close'],
+            entries=pd.Series(triggered, index=df.index),
+            exits=pd.Series(False, index=df.index),
+            price=pd.Series(target_prices, index=df.index),
             init_cash=10000,
             fees=0.0015,
             freq='1D',
@@ -156,10 +115,11 @@ def verify_long_term_hold_logic():
 
         if score > best_score:
             best_score = score
-            best_params = (normal, fear, extreme, trade_count, calmar, pf.total_return()*100, pf)
+            best_params = (normal, fear, extreme, trade_count, calmar, pf.total_return() * 100)
 
+    # ====================== 결과 출력 ======================
     if best_params:
-        normal, fear, extreme, trades, calmar, ret, pf = best_params
+        normal, fear, extreme, trades, calmar, ret = best_params
         print("🏆 안전 범위 내 최적 배수 조합")
         print(f"   평시 : {normal:.2f}x | 공포 : {fear:.2f}x | 극단 : {extreme:.2f}x")
         print(f"   총 매수 횟수 : {trades}회 | Calmar : {calmar:.3f} | 수익률 : {ret:+.2f}%\n")
@@ -170,9 +130,10 @@ def verify_long_term_hold_logic():
         print(f'"MULT_FEAR": {fear:.2f},')
         print(f'"MULT_EXTREME": {extreme:.2f}')
         print("="*65)
+    else:
+        print("❌ 조건(매수 횟수 170~240회)을 만족하는 최적 배수 조합을 찾지 못했습니다.")
 
     print("\n✅ 백테스트 완료 - 매년 실행해도 안전한 범위 내에서 추천됩니다.")
-
 
 if __name__ == "__main__":
     verify_long_term_hold_logic()
