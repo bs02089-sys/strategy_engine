@@ -51,8 +51,8 @@ jobs:
 
       - name: 패키지 설치
         run: |
-          pip install --upgrade pip
-          pip install -r requirements.txt
+          python -m pip install --upgrade pip
+          pip install numpy pandas requests yfinance pytz holidays matplotlib
 
       - name: Discord 알림 및 자동 데이터 동기화 실행
         # 🔑 [핵심 수정]: 깃허브 금고(Secrets)에 저장한 디스코드 웹훅 주소를 파이썬 시스템 환경변수로 주입합니다.
