@@ -2,7 +2,23 @@ from datetime import datetime
 import unicodedata
 import numpy as np
 import pandas as pd
+import pandas_market_calendars as mcal
 import yfinance as yf
+
+
+# ====================== NYSE 거래일 캘린더 ======================
+
+def get_nyse_trading_days(start_date, n_days):
+    """NYSE 공휴일을 반영한 n번째 거래일 반환"""
+    end_estimate = pd.Timestamp(start_date) + pd.offsets.BDay(n_days + 20)
+    nyse = mcal.get_calendar('NYSE')
+    schedule = nyse.schedule(start_date=start_date, end_date=end_estimate.date())
+    future_days = [d for d in schedule.index.date if d > start_date]
+    while len(future_days) < n_days:
+        end_estimate += pd.offsets.BDay(10)
+        schedule = nyse.schedule(start_date=start_date, end_date=end_estimate.date())
+        future_days = [d for d in schedule.index.date if d > start_date]
+    return future_days[n_days - 1]
 
 
 # ====================== 출력 정렬 유틸 ======================
@@ -27,21 +43,19 @@ def pad_to_width(s, width, align='left'):
 def print_aligned_table(result_df):
     """한글 너비를 고려한 정렬 출력"""
     headers = ['종목', '시나리오', '현재가', '목표가', '필요 상승률',
-               '예상 영업일', '예상 도달일', '평균 일수익률', '연환산 변동성']
+               '예상 거래일', '예상 도달일', '평균 일수익률', '연환산 변동성']
     aligns  = ['left', 'left', 'right', 'right', 'right',
                'right', 'left', 'right', 'right']
 
-    # 인덱스 복원해서 행 데이터 구성
     rows = []
     for (ticker, scenario), row in result_df.iterrows():
         rows.append((
             ticker, scenario,
             row['현재가'], row['목표가'], row['필요 상승률'],
-            row['예상 영업일'], row['예상 도달일'],
+            row['예상 거래일'], row['예상 도달일'],
             row['평균 일수익률'], row['연환산 변동성']
         ))
 
-    # 컬럼별 최대 너비 계산
     col_widths = [str_width(h) for h in headers]
     for row in rows:
         for i, val in enumerate(row):
@@ -49,18 +63,15 @@ def print_aligned_table(result_df):
 
     sep = '=' * (sum(col_widths) + 2 * (len(headers) - 1))
 
-    # 헤더
     print(sep)
     print('  '.join(pad_to_width(h, col_widths[i], 'center') for i, h in enumerate(headers)))
     print(sep)
 
-    # 데이터 행
     prev_ticker = None
     for row in rows:
         ticker = row[0]
         display_ticker = ticker if ticker != prev_ticker else ''
         prev_ticker = ticker
-
         cells = [display_ticker] + [str(v) for v in row[1:]]
         print('  '.join(pad_to_width(cells[i], col_widths[i], aligns[i]) for i in range(len(cells))))
 
@@ -70,7 +81,7 @@ def print_aligned_table(result_df):
 # ====================== 분석 함수 ======================
 
 def calculate_target_dates(tickers, target_prices):
-    """보수적 목표가 도달 예측"""
+    """보수적 목표가 도달 예측 (NYSE 공휴일 반영)"""
 
     df = yf.download(tickers, period="2mo", progress=False)
     df = df.swaplevel(axis=1).sort_index(axis=1)
@@ -104,6 +115,8 @@ def calculate_target_dates(tickers, target_prices):
             "Conservative": max(avg_daily_return - 0.3 * daily_vol, avg_daily_return * 0.4)
         }
 
+        weekday_dict = {0: "월", 1: "화", 2: "수", 3: "목", 4: "금", 5: "토", 6: "일"}
+
         for scenario_name, daily_r in scenarios.items():
             if required_return <= 0:
                 days = 0
@@ -115,10 +128,7 @@ def calculate_target_dates(tickers, target_prices):
                 days = int(np.ceil(np.log(1 + required_return) / np.log(1 + daily_r)))
                 days = max(1, days)
 
-                b_days = pd.bdate_range(start=today, periods=days + 1)
-                target_date = b_days[-1]
-
-                weekday_dict = {0: "월", 1: "화", 2: "수", 3: "목", 4: "금", 5: "토", 6: "일"}
+                target_date = get_nyse_trading_days(today, days)
                 date_str = f"{target_date.strftime('%Y-%m-%d')} ({weekday_dict[target_date.weekday()]})"
 
             results.append({
@@ -127,7 +137,7 @@ def calculate_target_dates(tickers, target_prices):
                 "목표가": target_price,
                 "필요 상승률": f"{required_return:+.1%}",
                 "시나리오": scenario_name,
-                "예상 영업일": days,
+                "예상 거래일": days,
                 "예상 도달일": date_str,
                 "평균 일수익률": f"{avg_daily_return:+.3%}",
                 "연환산 변동성": f"{annualized_vol:.1%}"
@@ -135,7 +145,7 @@ def calculate_target_dates(tickers, target_prices):
 
     final_columns = [
         "종목", "현재가", "목표가", "필요 상승률",
-        "시나리오", "예상 영업일", "예상 도달일",
+        "시나리오", "예상 거래일", "예상 도달일",
         "평균 일수익률", "연환산 변동성"
     ]
 
@@ -153,7 +163,7 @@ if __name__ == "__main__":
 
     tickers_list = list(target_info.keys())
 
-    print("📅 보수적 목표가 도달 예측")
+    print("📅 보수적 목표가 도달 예측 (NYSE 공휴일 반영)")
     print("   → Conservative를 가장 현실적인 참고값으로 추천합니다.")
 
     analysis_result = calculate_target_dates(tickers_list, target_info)
@@ -164,4 +174,4 @@ if __name__ == "__main__":
     print("\n💡 해석 가이드:")
     print("   • Base         : 최근 20일 평균 추세")
     print("   • Conservative : 변동성 고려 보수적 예측 (추천)")
-    print("   • 예상 도달일은 주말 제외 영업일 기준입니다.")
+    print("   • 예상 도달일은 NYSE 공휴일 및 주말 제외 실제 거래일 기준입니다.")
