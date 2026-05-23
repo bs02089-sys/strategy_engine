@@ -60,7 +60,8 @@ def setup_environment() -> dict:
         "vix_long": {**default_vix, **cfg.get("VIX_CONFIG", {}).get("LONG",  {})},
         "vix_short": {**default_vix, **cfg.get("VIX_CONFIG", {}).get("SHORT", {})},
         "defaults": default_values,           
-        "kst": pytz.timezone('Asia/Seoul'),
+        "kst": pytz.timezone('Asia/Seoul')
+        ,
         "est": pytz.timezone('US/Eastern'),
         "full_cfg": cfg
     }
