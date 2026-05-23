@@ -1,12 +1,77 @@
 from datetime import datetime
+import unicodedata
 import numpy as np
 import pandas as pd
 import yfinance as yf
 
 
+# ====================== 출력 정렬 유틸 ======================
+
+def str_width(s):
+    """한글 등 전각 문자를 너비 2로 계산"""
+    return sum(2 if unicodedata.east_asian_width(c) in ('W', 'F') else 1 for c in str(s))
+
+
+def pad_to_width(s, width, align='left'):
+    """실제 문자 너비 기준으로 패딩"""
+    s = str(s)
+    padding = max(0, width - str_width(s))
+    if align == 'right':
+        return ' ' * padding + s
+    elif align == 'center':
+        left = padding // 2
+        return ' ' * left + s + ' ' * (padding - left)
+    return s + ' ' * padding
+
+
+def print_aligned_table(result_df):
+    """한글 너비를 고려한 정렬 출력"""
+    headers = ['종목', '시나리오', '현재가', '목표가', '필요 상승률',
+               '예상 영업일', '예상 도달일', '평균 일수익률', '연환산 변동성']
+    aligns  = ['left', 'left', 'right', 'right', 'right',
+               'right', 'left', 'right', 'right']
+
+    # 인덱스 복원해서 행 데이터 구성
+    rows = []
+    for (ticker, scenario), row in result_df.iterrows():
+        rows.append((
+            ticker, scenario,
+            row['현재가'], row['목표가'], row['필요 상승률'],
+            row['예상 영업일'], row['예상 도달일'],
+            row['평균 일수익률'], row['연환산 변동성']
+        ))
+
+    # 컬럼별 최대 너비 계산
+    col_widths = [str_width(h) for h in headers]
+    for row in rows:
+        for i, val in enumerate(row):
+            col_widths[i] = max(col_widths[i], str_width(str(val)))
+
+    sep = '=' * (sum(col_widths) + 2 * (len(headers) - 1))
+
+    # 헤더
+    print(sep)
+    print('  '.join(pad_to_width(h, col_widths[i], 'center') for i, h in enumerate(headers)))
+    print(sep)
+
+    # 데이터 행
+    prev_ticker = None
+    for row in rows:
+        ticker = row[0]
+        display_ticker = ticker if ticker != prev_ticker else ''
+        prev_ticker = ticker
+
+        cells = [display_ticker] + [str(v) for v in row[1:]]
+        print('  '.join(pad_to_width(cells[i], col_widths[i], aligns[i]) for i in range(len(cells))))
+
+    print(sep)
+
+
+# ====================== 분석 함수 ======================
+
 def calculate_target_dates(tickers, target_prices):
-    """보수적 목표가 도달 예측 - 컬럼 누락 완전 해결 버전"""
-    
+    """보수적 목표가 도달 예측"""
+
     df = yf.download(tickers, period="2mo", progress=False)
     df = df.swaplevel(axis=1).sort_index(axis=1)
 
@@ -49,14 +114,13 @@ def calculate_target_dates(tickers, target_prices):
             else:
                 days = int(np.ceil(np.log(1 + required_return) / np.log(1 + daily_r)))
                 days = max(1, days)
-                
+
                 b_days = pd.bdate_range(start=today, periods=days + 1)
                 target_date = b_days[-1]
-                
+
                 weekday_dict = {0: "월", 1: "화", 2: "수", 3: "목", 4: "금", 5: "토", 6: "일"}
                 date_str = f"{target_date.strftime('%Y-%m-%d')} ({weekday_dict[target_date.weekday()]})"
 
-            # 모든 컬럼을 명확히 포함
             results.append({
                 "종목": ticker,
                 "현재가": round(current_price, 2),
@@ -69,17 +133,13 @@ def calculate_target_dates(tickers, target_prices):
                 "연환산 변동성": f"{annualized_vol:.1%}"
             })
 
-    result_df = pd.DataFrame(results)
-
-    # 컬럼 순서 강제 재정렬 (이 방식이 가장 안전)
     final_columns = [
         "종목", "현재가", "목표가", "필요 상승률",
         "시나리오", "예상 영업일", "예상 도달일",
         "평균 일수익률", "연환산 변동성"
     ]
-    
-    result_df = result_df.reindex(columns=final_columns)
 
+    result_df = pd.DataFrame(results).reindex(columns=final_columns)
     return result_df.set_index(["종목", "시나리오"])
 
 
@@ -95,18 +155,12 @@ if __name__ == "__main__":
 
     print("📅 보수적 목표가 도달 예측")
     print("   → Conservative를 가장 현실적인 참고값으로 추천합니다.")
-    print("=" * 120)
 
     analysis_result = calculate_target_dates(tickers_list, target_info)
 
     print("\n[분석 결과]")
-    print("=" * 120)
-    pd.set_option("display.width", 200)
-    pd.set_option("display.max_columns", None)
-    pd.set_option("display.max_colwidth", None)
-    print(analysis_result.to_string())
-    print("=" * 120)
-    
+    print_aligned_table(analysis_result)
+
     print("\n💡 해석 가이드:")
     print("   • Base         : 최근 20일 평균 추세")
     print("   • Conservative : 변동성 고려 보수적 예측 (추천)")
