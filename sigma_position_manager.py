@@ -308,7 +308,7 @@ def calculate_split_sell_targets(base_price: float, std_20d: float, shares: int)
     return plan
 
 
-# ====================== 📊 시각화 엔진 (추가됨) ======================
+# ====================== 📊 시각화 엔진 ======================
 def generate_long_portfolio_chart(df: pd.DataFrame, config: dict, output_filename: str = "portfolio_trend.png"):
     """LONG 모드 계좌 전용 월별 누적수익률 및 계좌 평가액 추세 차트 생성"""
     positions_cfg = config.get("positions", {})
