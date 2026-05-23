@@ -5,87 +5,85 @@ import yfinance as yf
 
 
 def calculate_target_dates(tickers, target_prices):
-    """최근 20일 수익률 추세를 바탕으로 목표가 도달 예상 '실제 달력 날짜'를 계산합니다."""
-    # 1. 데이터 다운로드 및 멀티인덱스 정렬
+    """보수적 관점에서 목표가 도달 예상 날짜 계산 (현실적 참고용)"""
+    
     df = yf.download(tickers, period="2mo", progress=False)
     df = df.swaplevel(axis=1).sort_index(axis=1)
 
-    # 기준일 설정 (오늘 날짜)
     today = datetime.today().date()
-
     results = []
 
     for ticker in tickers:
         ticker_df = df[ticker].dropna()
-        recent_20 = ticker_df.tail(20).copy()
+        recent_20 = ticker_df.tail(20)
 
         if len(recent_20) < 20:
-            print(f"⚠️ {ticker} 데이터 부족")
+            print(f"⚠️ {ticker} 데이터 부족 (필요: 20일, 현재: {len(recent_20)}일)")
             continue
 
         current_price = recent_20["Close"].iloc[-1]
         target_price = target_prices.get(ticker)
 
-        if not target_price:
+        if not target_price or target_price <= current_price:
             continue
 
-        # 최근 20일 평균 수익률 계산
-        recent_20["Return"] = recent_20["Close"].pct_change()
-        avg_return = recent_20["Return"].mean()
+        # 수익률 및 변동성 계산
+        returns = recent_20["Close"].pct_change().dropna()
+        avg_daily_return = returns.mean()
+        daily_vol = returns.std()
+        annualized_vol = daily_vol * np.sqrt(252)
+
         required_return = (target_price / current_price) - 1
 
-        # 상태 분류 및 실제 달력 날짜 계산
-        if required_return <= 0:
-            realistic_days = 0
-            status = "0 영업일"
-            target_date_str = "오늘 (이미 달성)"
+        # ==================== 보수적 시나리오 계산 ====================
+        scenarios = {
+            "Base": avg_daily_return,                                   # 중립
+            "Conservative": avg_daily_return - 0.8 * daily_vol         # 강한 보수 (현실적 참고)
+        }
 
-        elif avg_return <= 0:
-            status = "측정 불가"
-            target_date_str = "하락 추세로 인해 추정 불가"
+        for scenario_name, daily_r in scenarios.items():
+            if required_return <= 0:
+                days = 0
+                date_str = "오늘 (이미 달성)"
+            elif daily_r <= 0:
+                days = "추정 불가"
+                date_str = "하락/변동성 과다"
+            else:
+                # 복리 방식 + 보수적 계산
+                days = int(np.ceil(
+                    np.log(1 + required_return) / np.log(1 + daily_r)
+                ))
+                
+                # 최소 1영업일 보장
+                days = max(1, days)
+                
+                b_days = pd.bdate_range(start=today, periods=days + 1)
+                target_date = b_days[-1]
+                
+                weekday_dict = {0: "월", 1: "화", 2: "수", 3: "목", 4: "금", 5: "토", 6: "일"}
+                date_str = f"{target_date.strftime('%Y-%m-%d')} ({weekday_dict[target_date.weekday()]})"
 
-        else:
-            # 필요 영업일 계산
-            days = int(np.ceil(required_return / avg_return))
-            status = f"{days} 영업일"
-
-            # 💡 [핵심] 주말을 제외한 '영업일 기준' 미래 날짜 계산
-            # 오늘(periods=1)부터 필요한 영업일수만큼 영업일 날짜 배열을 생성합니다.
-            # 주말을 건너뛰기 때문에 실질적으로 periods는 (days + 1)이 됩니다.
-            b_days = pd.bdate_range(start=today, periods=days + 1)
-            target_date = b_days[-1]  # 맨 마지막 영업일이 목표 날짜
-
-            # 출력 포맷팅 (예: 2026-05-25 (월))
-            weekday_dict = {
-                0: "월",
-                1: "화",
-                2: "수",
-                3: "목",
-                4: "금",
-                5: "토",
-                6: "일",
-            }
-            target_date_str = (
-                f"{target_date.strftime('%Y-%m-%d')} ({weekday_dict[target_date.weekday()]})"
-            )
-
-        results.append(
-            {
+            results.append({
                 "Ticker": ticker,
-                "Current Price": round(current_price, 2),
-                "Target Price": target_price,
-                "Days Required": status,
-                "Estimated Target Date": target_date_str,  # 📅 추가된 실제 날짜 컬럼
-            }
-        )
+                "현재가": round(current_price, 2),
+                "목표가": target_price,
+                "필요상승률": f"{required_return:+.1%}",
+                "평균일수익률": f"{avg_daily_return:+.3%}",
+                "연환산변동성": f"{annualized_vol:.1%}",
+                "시나리오": scenario_name,
+                "예상영업일": days,
+                "예상도달일": date_str
+            })
 
-    result_df = pd.DataFrame(results).set_index("Ticker")
-    return result_df
+    result_df = pd.DataFrame(results)
+    cols = ["Ticker", "현재가", "목표가", "필요상승률", "평균일수익률", 
+            "연환산변동성", "시나리오", "예상영업일", "예상도달일"]
+    
+    return result_df[cols].set_index(["Ticker", "시나리오"])
 
 
-# --- 실행 영역 ---
+# ====================== 실행 영역 ======================
 if __name__ == "__main__":
-    # 테스트할 종목과 목표가 (현재 가격보다 높게 설정해야 날짜가 계산됩니다)
     target_info = {
         "TSLA": 450.0,
         "IONQ": 100.0,
@@ -94,12 +92,14 @@ if __name__ == "__main__":
 
     tickers_list = list(target_info.keys())
 
-    print("📅 주말을 제외한 달력 기준 도달 예측 날짜 계산 중...")
-    print("-" * 75)
+    print("📅 보수적 관점 목표가 도달 예측 (가장 현실적인 참고용)")
+    print("   → Conservative 시나리오를 주로 참고하세요")
+    print("=" * 100)
 
     analysis_result = calculate_target_dates(tickers_list, target_info)
 
-    print("\n[최종 달력 날짜 반영 결과]")
-    print("=" * 75)
+    print("\n[분석 결과]")
+    print("=" * 100)
     print(analysis_result)
-    print("=" * 75)
+    print("=" * 100)
+    print("\n💡 사용 팁: Conservative 컬럼을 가장 현실적인 예측으로 보시는 것을 추천합니다.")
