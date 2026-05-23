@@ -559,15 +559,15 @@ def create_combined_message(results: dict, is_open: bool,
     return "\n".join(lines)
 
 
-# ====================== Discord 전송 (차트 파일 동시 전송 수정) ======================
+# ====================== Discord 전송 (오류 수정 완료) ======================
 def send_discord_message_with_file(content: str, webhook_url: str, user_id: str, file_path: str = None) -> bool:
     if not webhook_url:
         return False
     mention = f"<@{user_id}>\n" if user_id else ""
     try:
+        # 💡 끝부분 f-string 닫는 따옴표(") 및 백틱 보정 완료
         payload = {
-            "content": f"{mention}```\n{content}\n
-```"
+            "content": f"{mention}```\n{content}\n```"  
         }
         
         # 파일 첨부 여부에 따라 격리 전송 처리
@@ -585,7 +585,7 @@ def send_discord_message_with_file(content: str, webhook_url: str, user_id: str,
     except Exception as e:
         logger.error(f"❌ 디스코드 파일 웹훅 전송 중 장애 발생: {e}")
         return False
-
+    
 
 # ====================== 메인 ======================
 def main():
