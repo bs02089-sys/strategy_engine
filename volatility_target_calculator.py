@@ -5,7 +5,7 @@ import yfinance as yf
 
 
 def calculate_target_dates(tickers, target_prices):
-    """보수적 목표가 도달 예측 - 컬럼 누락 완전 방지 버전"""
+    """보수적 목표가 도달 예측 - 컬럼 누락 완전 해결 버전"""
     
     df = yf.download(tickers, period="2mo", progress=False)
     df = df.swaplevel(axis=1).sort_index(axis=1)
@@ -56,6 +56,7 @@ def calculate_target_dates(tickers, target_prices):
                 weekday_dict = {0: "월", 1: "화", 2: "수", 3: "목", 4: "금", 5: "토", 6: "일"}
                 date_str = f"{target_date.strftime('%Y-%m-%d')} ({weekday_dict[target_date.weekday()]})"
 
+            # 모든 컬럼을 명확히 포함
             results.append({
                 "종목": ticker,
                 "현재가": round(current_price, 2),
@@ -68,21 +69,16 @@ def calculate_target_dates(tickers, target_prices):
                 "연환산 변동성": f"{annualized_vol:.1%}"
             })
 
-    if not results:
-        return pd.DataFrame()
-
     result_df = pd.DataFrame(results)
 
-    # 컬럼 순서 강제 지정 (누락 방지)
-    desired_order = [
+    # 컬럼 순서 강제 재정렬 (이 방식이 가장 안전)
+    final_columns = [
         "종목", "현재가", "목표가", "필요 상승률",
         "시나리오", "예상 영업일", "예상 도달일",
         "평균 일수익률", "연환산 변동성"
     ]
-
-    # 존재하는 컬럼만 안전하게 선택
-    available_cols = [col for col in desired_order if col in result_df.columns]
-    result_df = result_df[available_cols]
+    
+    result_df = result_df.reindex(columns=final_columns)
 
     return result_df.set_index(["종목", "시나리오"])
 
@@ -98,7 +94,7 @@ if __name__ == "__main__":
     tickers_list = list(target_info.keys())
 
     print("📅 보수적 목표가 도달 예측")
-    print("   → Conservative를 가장 현실적인 참고값으로 보세요")
+    print("   → Conservative를 가장 현실적인 참고값으로 추천합니다.")
     print("=" * 120)
 
     analysis_result = calculate_target_dates(tickers_list, target_info)
@@ -109,6 +105,6 @@ if __name__ == "__main__":
     print("=" * 120)
     
     print("\n💡 해석 가이드:")
-    print("   • Base         : 최근 추세 그대로")
-    print("   • Conservative : 변동성 고려 보수 예측 (추천)")
-    print("   • 예상 도달일은 영업일 기준입니다.")
+    print("   • Base         : 최근 20일 평균 추세")
+    print("   • Conservative : 변동성 고려 보수적 예측 (추천)")
+    print("   • 예상 도달일은 주말 제외 영업일 기준입니다.")
