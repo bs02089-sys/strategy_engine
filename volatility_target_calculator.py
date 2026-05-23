@@ -62,21 +62,21 @@ def calculate_target_dates(tickers, target_prices):
                 "목표가": target_price,
                 "필요 상승률": f"{required_return:+.1%}",
                 "시나리오": scenario_name,
-                "평균 일수익률": f"{avg_daily_return:+.3%}",
-                "연환산 변동성": f"{annualized_vol:.1%}",
                 "예상 영업일": days,
-                "예상 도달일": date_str
+                "예상 도달일": date_str,
+                "평균 일수익률": f"{avg_daily_return:+.3%}",
+                "연환산 변동성": f"{annualized_vol:.1%}"
             })
 
     result_df = pd.DataFrame(results)
     
-    # 컬럼 순서 조정 (직관적으로 중요한 정보 먼저)
-    cols = ["종목", "현재가", "목표가", "필요 상승률", "시나리오", 
-            "예상 영업일", "예상 도달일", "평균 일수익률", "연환산 변동성"]
+    # 직관적인 컬럼 순서 (중요 정보 먼저)
+    cols = ["종목", "현재가", "목표가", "필요 상승률", 
+            "시나리오", "예상 영업일", "예상 도달일", 
+            "평균 일수익률", "연환산 변동성"]
     
     result_df = result_df[cols]
     
-    # MultiIndex로 보기 좋게 설정
     return result_df.set_index(["종목", "시나리오"])
 
 
@@ -92,16 +92,16 @@ if __name__ == "__main__":
 
     print("📅 보수적 목표가 도달 예측")
     print("   → Conservative 시나리오를 가장 현실적인 참고값으로 추천합니다.")
-    print("=" * 110)
+    print("=" * 115)
 
     analysis_result = calculate_target_dates(tickers_list, target_info)
 
     print("\n[분석 결과]")
-    print("=" * 110)
+    print("=" * 115)
     print(analysis_result)
-    print("=" * 110)
+    print("=" * 115)
     
     print("\n💡 해석 가이드:")
-    print("   • Base         : 최근 20일 평균 추세 그대로 반영")
+    print("   • Base         : 최근 20일 평균 추세 그대로")
     print("   • Conservative : 변동성을 고려한 보수적 예측 (추천)")
-    print("   • 예상 도달일은 주말을 제외한 영업일 기준입니다.")
+    print("   • 예상 도달일은 주말 제외 영업일 기준입니다.")
