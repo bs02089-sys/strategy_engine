@@ -5,7 +5,7 @@ import yfinance as yf
 
 
 def calculate_target_dates(tickers, target_prices):
-    """보수적 관점 목표가 도달 예측 (현실적 참고용)"""
+    """보수적 관점 목표가 도달 예측 - 직관적 가독성 중심"""
     
     df = yf.download(tickers, period="2mo", progress=False)
     df = df.swaplevel(axis=1).sort_index(axis=1)
@@ -37,7 +37,6 @@ def calculate_target_dates(tickers, target_prices):
         scenarios = {
             "Base": avg_daily_return,
             "Conservative": max(avg_daily_return - 0.3 * daily_vol, avg_daily_return * 0.4)
-            # 0.3배 변동성 차감 + 최소 40% 수준 보장
         }
 
         for scenario_name, daily_r in scenarios.items():
@@ -58,22 +57,27 @@ def calculate_target_dates(tickers, target_prices):
                 date_str = f"{target_date.strftime('%Y-%m-%d')} ({weekday_dict[target_date.weekday()]})"
 
             results.append({
-                "Ticker": ticker,
+                "종목": ticker,
                 "현재가": round(current_price, 2),
                 "목표가": target_price,
-                "필요상승률": f"{required_return:+.1%}",
-                "평균일수익률": f"{avg_daily_return:+.3%}",
-                "연환산변동성": f"{annualized_vol:.1%}",
+                "필요 상승률": f"{required_return:+.1%}",
                 "시나리오": scenario_name,
-                "예상영업일": days,
-                "예상도달일": date_str
+                "평균 일수익률": f"{avg_daily_return:+.3%}",
+                "연환산 변동성": f"{annualized_vol:.1%}",
+                "예상 영업일": days,
+                "예상 도달일": date_str
             })
 
     result_df = pd.DataFrame(results)
-    cols = ["Ticker", "현재가", "목표가", "필요상승률", "평균일수익률", 
-            "연환산변동성", "시나리오", "예상영업일", "예상도달일"]
     
-    return result_df[cols].set_index(["Ticker", "시나리오"])
+    # 컬럼 순서 조정 (직관적으로 중요한 정보 먼저)
+    cols = ["종목", "현재가", "목표가", "필요 상승률", "시나리오", 
+            "예상 영업일", "예상 도달일", "평균 일수익률", "연환산 변동성"]
+    
+    result_df = result_df[cols]
+    
+    # MultiIndex로 보기 좋게 설정
+    return result_df.set_index(["종목", "시나리오"])
 
 
 # ====================== 실행 영역 ======================
@@ -86,14 +90,18 @@ if __name__ == "__main__":
 
     tickers_list = list(target_info.keys())
 
-    print("📅 보수적 관점 목표가 도달 예측 (현실적 참고용)")
-    print("   → Conservative를 주 참고 시나리오로 사용하세요")
-    print("=" * 100)
+    print("📅 보수적 목표가 도달 예측")
+    print("   → Conservative 시나리오를 가장 현실적인 참고값으로 추천합니다.")
+    print("=" * 110)
 
     analysis_result = calculate_target_dates(tickers_list, target_info)
 
     print("\n[분석 결과]")
-    print("=" * 100)
+    print("=" * 110)
     print(analysis_result)
-    print("=" * 100)
-    print("\n💡 Conservative는 변동성을 고려한 보수적 예측입니다. (과도한 음수 방지)")
+    print("=" * 110)
+    
+    print("\n💡 해석 가이드:")
+    print("   • Base         : 최근 20일 평균 추세 그대로 반영")
+    print("   • Conservative : 변동성을 고려한 보수적 예측 (추천)")
+    print("   • 예상 도달일은 주말을 제외한 영업일 기준입니다.")
