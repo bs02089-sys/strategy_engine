@@ -5,7 +5,7 @@ import yfinance as yf
 
 
 def calculate_target_dates(tickers, target_prices):
-    """보수적 관점에서 목표가 도달 예상 날짜 계산 (현실적 참고용)"""
+    """보수적 관점 목표가 도달 예측 (현실적 참고용)"""
     
     df = yf.download(tickers, period="2mo", progress=False)
     df = df.swaplevel(axis=1).sort_index(axis=1)
@@ -18,7 +18,7 @@ def calculate_target_dates(tickers, target_prices):
         recent_20 = ticker_df.tail(20)
 
         if len(recent_20) < 20:
-            print(f"⚠️ {ticker} 데이터 부족 (필요: 20일, 현재: {len(recent_20)}일)")
+            print(f"⚠️ {ticker} 데이터 부족")
             continue
 
         current_price = recent_20["Close"].iloc[-1]
@@ -27,7 +27,6 @@ def calculate_target_dates(tickers, target_prices):
         if not target_price or target_price <= current_price:
             continue
 
-        # 수익률 및 변동성 계산
         returns = recent_20["Close"].pct_change().dropna()
         avg_daily_return = returns.mean()
         daily_vol = returns.std()
@@ -35,10 +34,9 @@ def calculate_target_dates(tickers, target_prices):
 
         required_return = (target_price / current_price) - 1
 
-        # ==================== 보수적 시나리오 계산 ====================
         scenarios = {
-            "Base": avg_daily_return,                                   # 중립
-            "Conservative": avg_daily_return - 0.8 * daily_vol         # 강한 보수 (현실적 참고)
+            "Base": avg_daily_return,
+            "Conservative": avg_daily_return - 0.5 * daily_vol   # 0.8 → 0.5로 완화
         }
 
         for scenario_name, daily_r in scenarios.items():
@@ -47,14 +45,9 @@ def calculate_target_dates(tickers, target_prices):
                 date_str = "오늘 (이미 달성)"
             elif daily_r <= 0:
                 days = "추정 불가"
-                date_str = "하락/변동성 과다"
+                date_str = "변동성 과다 (하락 가능성 높음)"
             else:
-                # 복리 방식 + 보수적 계산
-                days = int(np.ceil(
-                    np.log(1 + required_return) / np.log(1 + daily_r)
-                ))
-                
-                # 최소 1영업일 보장
+                days = int(np.ceil(np.log(1 + required_return) / np.log(1 + daily_r)))
                 days = max(1, days)
                 
                 b_days = pd.bdate_range(start=today, periods=days + 1)
@@ -92,8 +85,8 @@ if __name__ == "__main__":
 
     tickers_list = list(target_info.keys())
 
-    print("📅 보수적 관점 목표가 도달 예측 (가장 현실적인 참고용)")
-    print("   → Conservative 시나리오를 주로 참고하세요")
+    print("📅 보수적 관점 목표가 도달 예측 (현실적 참고용)")
+    print("   → Conservative를 주 참고 시나리오로 사용하세요")
     print("=" * 100)
 
     analysis_result = calculate_target_dates(tickers_list, target_info)
@@ -102,4 +95,4 @@ if __name__ == "__main__":
     print("=" * 100)
     print(analysis_result)
     print("=" * 100)
-    print("\n💡 사용 팁: Conservative 컬럼을 가장 현실적인 예측으로 보시는 것을 추천합니다.")
+    print("\n💡 Conservative는 변동성을 상당히 고려한 보수적 예측입니다.")
