@@ -36,7 +36,8 @@ def calculate_target_dates(tickers, target_prices):
 
         scenarios = {
             "Base": avg_daily_return,
-            "Conservative": avg_daily_return - 0.5 * daily_vol   # 0.8 → 0.5로 완화
+            "Conservative": max(avg_daily_return - 0.3 * daily_vol, avg_daily_return * 0.4)
+            # 0.3배 변동성 차감 + 최소 40% 수준 보장
         }
 
         for scenario_name, daily_r in scenarios.items():
@@ -45,7 +46,7 @@ def calculate_target_dates(tickers, target_prices):
                 date_str = "오늘 (이미 달성)"
             elif daily_r <= 0:
                 days = "추정 불가"
-                date_str = "변동성 과다 (하락 가능성 높음)"
+                date_str = "변동성 과다"
             else:
                 days = int(np.ceil(np.log(1 + required_return) / np.log(1 + daily_r)))
                 days = max(1, days)
@@ -95,4 +96,4 @@ if __name__ == "__main__":
     print("=" * 100)
     print(analysis_result)
     print("=" * 100)
-    print("\n💡 Conservative는 변동성을 상당히 고려한 보수적 예측입니다.")
+    print("\n💡 Conservative는 변동성을 고려한 보수적 예측입니다. (과도한 음수 방지)")
