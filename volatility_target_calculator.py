@@ -87,9 +87,9 @@ def calculate_target_dates(tickers, target_prices):
 if __name__ == "__main__":
     # 테스트할 종목과 목표가 (현재 가격보다 높게 설정해야 날짜가 계산됩니다)
     target_info = {
-        "TSLA": 470.0,
-        "IONQ": 75.0,
-        "AAPL": 150.0,
+        "TSLA": 450.0,
+        "IONQ": 100.0,
+        "SOXL": 200.0
     }
 
     tickers_list = list(target_info.keys())
