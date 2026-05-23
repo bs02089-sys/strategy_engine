@@ -101,7 +101,10 @@ if __name__ == "__main__":
 
     print("\n[분석 결과]")
     print("=" * 120)
-    print(analysis_result)
+    pd.set_option("display.width", 200)
+    pd.set_option("display.max_columns", None)
+    pd.set_option("display.max_colwidth", None)
+    print(analysis_result.to_string())
     print("=" * 120)
     
     print("\n💡 해석 가이드:")
