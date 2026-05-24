@@ -259,15 +259,20 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
     min_days_gate = 14 if std_20d > normal_std * 1.3 else 5
     is_time_gate_passed = days_since >= min_days_gate
 
+    # 1. 타임 가드 상태 및 직관적인 가이드 멘트 산출
     if is_open and current_price <= long_buy and not is_time_gate_passed:
-        time_guard_status = "🔥 [시간 가드 강제 해제] 실탄 집행!"
+        time_guard_status = "🔥 [시간 가드 강제 해제] 초저점 도달로 실탄 집행!"
+        action_ment = f"계산된 초저점 타깃가(${long_buy:.2f})를 터치하여 기계적으로 매수를 집행합니다."
     elif is_time_gate_passed:
-        time_guard_status = "🟢 [시간 가드 해제] 자유 매수 가능"
+        time_guard_status = "🟢 [시간 가드 해제] 자유 매수 가능 주간"
+        action_ment = f"대기 기간을 충족하여 실탄 장전이 완료되었습니다. 오늘 본장 매수 저격가는 ${long_buy:.2f}입니다."
     else:
-        time_guard_status = f"⏳ [시간 가드 작동 중] {min_days_gate - days_since}일 남음"
+        time_guard_status = f"⏳ [시간 가드 작동 중] {min_days_gate - days_since}일 대기 필요"
+        action_ment = f"조급한 실탄 고갈을 막기 위해 관망합니다. 가드 해제 후 유효 매수 예정가는 ${long_buy:.2f}입니다."
 
     annual_quota = pos_cfg.get("ANNUAL_QUOTA", defaults.get("ANNUAL_QUOTA", 24))
 
+    # 2. 결과 딕셔너리
     result.update({
         "daily_sigma": daily_sigma_val * 100,
         "multiplier": multiplier,
@@ -275,6 +280,7 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
         "buy_name": f"LONG 변동성 방어선 ({adjusted_multiplier:.2f}x)",
         "sub_msg": f"{vix_status_msg} ➔ {adjusted_multiplier:.2f}배수 하방{sub_msg_gap}",
         "time_guard_info": time_guard_status,
+        "time_guard_action": action_ment,  # <-- 직관적 지침 멘트!
         "my_avg_price": pos_cfg.get("MY_AVG_PRICE", 0.0),
         "current_casts": pos_cfg.get("CURRENT_CASTS", 0),
         "annual_quota": annual_quota,
@@ -560,11 +566,14 @@ def create_combined_message(results: dict, is_open: bool,
 def send_discord_message_with_file(content: str, webhook_url: str, user_id: str, file_path: str = None) -> bool:
     if not webhook_url:
         return False
-    mention = f"<@{user_id}>\n" if user_id else ""
+        
+    # 멘션 뒤에 한 줄 띄워 가독성 확보
+    mention = f"<@{user_id}>\n\n" if user_id else ""
+    
     try:
-        # 💡 끝부분 f-string 닫는 따옴표(") 및 백틱 보정 완료
+        # 마크다운 태그(##, **, 이모지)가 온전하게 작동하도록 수정
         payload = {
-            "content": f"{mention}```\n{content}\n```"  
+            "content": f"{mention}{content}"  
         }
         
         # 파일 첨부 여부에 따라 격리 전송 처리
@@ -576,6 +585,7 @@ def send_discord_message_with_file(content: str, webhook_url: str, user_id: str,
                 # multipart/form-data 형태로 payload와 file을 동시에 포스트
                 r = requests.post(webhook_url, data=payload, files=files, timeout=20)
         else:
+            # 파일이 없을 때는 json 형태로 일반 포스트
             r = requests.post(webhook_url, json=payload, timeout=15)
             
         return r.status_code in (200, 204)
