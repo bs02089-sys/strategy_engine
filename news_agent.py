@@ -1,5 +1,5 @@
 """
-글로벌 시장 뉴스 수집 및 AI 번역 에러 핸들링 봇 (config.json 통합 및 버그 방어 버전)
+글로벌 시장 뉴스 수집 및 AI 번역 에러 핸들링 봇 (로컬 콘솔 출력 보정 및 하이브리드 통합 버전)
 """
 
 import os
@@ -35,7 +35,7 @@ except Exception as e:
 DISCORD_WEBHOOK = os.environ.get("DISCORD_WEBHOOK", "").strip() or config_data.get("DISCORD_WEBHOOK", "").strip()
 DISCORD_USER_ID = os.environ.get("DISCORD_USER_ID", "").strip() or config_data.get("DISCORD_USER_ID", "").strip()
 
-# 주말에 새로 합친 뉴스 설정을 안전하게 가져옵니다.
+# 뉴스 수집 검색 키워드 및 개수 설정 가져오기
 NEWS_SETTINGS = config_data.get("news_settings", {})
 KEYWORDS = NEWS_SETTINGS.get("KEYWORDS", [
     "AI Infrastructure",
@@ -73,10 +73,6 @@ def fetch_latest_news():
 
 def send_to_discord(webhook_url, user_id, message_body, ping_prefix=""):
     """디스코드 2000자 제한을 우회하여 안전하게 분할 전송합니다."""
-    if not webhook_url:
-        print("⚠️ 디스코드 웹후크 URL이 설정되지 않았습니다.")
-        return
-
     # 멘션 및 시스템 핑 헤더 생성
     mention = f"<@{user_id}>\n" if user_id else ""
     header = f"{mention}{ping_prefix}"
@@ -104,7 +100,6 @@ def send_to_discord(webhook_url, user_id, message_body, ping_prefix=""):
 
     # 분할된 청크별 전송 진행
     for i, chunk in enumerate(chunks):
-        # 첫 번째 메시지에만 멘션과 헤더를 포함시킵니다.
         if i == 0:
             payload = {"content": f"{header}{chunk}"}
         else:
@@ -121,26 +116,19 @@ def send_to_discord(webhook_url, user_id, message_body, ping_prefix=""):
 
 
 def main():
-    # 💡 [하이브리드 환경을 위한 환경 변수 상호 해석 장치]
-    # 깃허브 서버(Action) 환경일 때는 Secrets에 등록된 값을 우선 추적하고, 
-    # 로컬 파워셸 환경일 때는 로컬 .env나 config.json에 등록된 API 키를 영리하게 보정합니다.
+    # 💡 [하이브리드 자격증명 교차 해석]
+    # 파워셸 환경 변수에 GEMINI_API_KEY가 있다면 그것을 쓰고, 없다면 config.json 내부를 스캔합니다.
     global GEMINI_API_KEY
     if not GEMINI_API_KEY:
         GEMINI_API_KEY = config_data.get("GEMINI_API_KEY")
 
-    # 💡 [마법 구문 변형 안전장치]
-    # 만약 로컬 PC에서 테스트나 개발 용도로 수동 실행할 때, 디스코드에 알림이 중복 전송되어 
-    # 채널이 도배되는 현상을 방지하고 싶다면 아래의 마법 구문 주석(#)을 해제하고 사용하시면 됩니다.
-    # if os.getenv("GITHUB_ACTIONS") != "true":
-    #     print("ℹ️ 로컬 편집기 환경 감지: 디스코드 도배 방지를 위해 시뮬레이션 모드로 전환하거나 종료할 수 있습니다.")
-
-    # 1. 뉴스 수집
+    # 1. 뉴스 수집 단계
     news_content = fetch_latest_news()
     if not news_content.strip():
         print("ℹ️ 수집된 뉴스가 없습니다.")
         return
 
-    # 2. Gemini AI 번역 및 요약 진행
+    # 2. Gemini AI 번역 및 요약 진행 단계
     if not GEMINI_API_KEY:
         print("❌ 에러: GEMINI_API_KEY가 환경 변수나 config.json에 설정되지 않았습니다.")
         return
@@ -153,20 +141,20 @@ def main():
         )
         
         prompt = (
-            f"너는 금융 전문 번역가야. 아래 뉴스 제목들을 한국어로 번역해줘. "
+            f"너는 금융 전문 번역가야. 아래 뉴스 제목들을 한국어로 번역해줘.\n"
             f"단, 회사명, 주식 티커, 고유명사는 영문 그대로 유지해. 섹터 구조는 그대로 유지해:\n\n{news_content}"
         )
         
         response = client.models.generate_content(
-            model="models/gemini-3.5-flash",
-            contents=prompt,
+            model="models/gemini-2.5-flash",
+            contents=prompt
         )
         report = response.text
 
     except Exception as e:
         print(f"❌ AI 분석 실패 상세: {e}")
 
-    # 3. 메시지 타이틀 세팅
+    # 3. 메시지 타이틀 및 본문 결합
     if report:
         final_message = f"📢 **오늘의 글로벌 시장 뉴스**\n\n{report}"
     else:
@@ -177,8 +165,18 @@ def main():
     if datetime.now().day == 1:
         ping_prefix = "📡 **[System Ping]** 디스코드 계정 활성화 유지 신호 송신 중 (정상 작동)\n\n"
         
-    # 5. 최종 안전 전송 실행
-    send_to_discord(DISCORD_WEBHOOK, DISCORD_USER_ID, final_message, ping_prefix)
+    # 5. ✨ 환경 맞춤형 최종 전송 및 화면 출력 제어
+    if DISCORD_WEBHOOK:
+        # 🚀 깃허브 Actions 서버 등 '디스코드 주소'가 실재하는 환경에서는 정상 발송 처리
+        send_to_discord(DISCORD_WEBHOOK, DISCORD_USER_ID, final_message, ping_prefix)
+    else:
+        # 💻 [로컬 파워셸 수동 구동용 마법 분기] 
+        # 경고 문구를 완전히 도려내고, AI 번역 결과를 화면에 이쁘고 시원하게 출력합니다.
+        print("\n" + "="*60)
+        print("ℹ️  로컬 편집기 환경 감지: 디스코드 웹훅이 없어 콘솔창에 결과를 출력합니다.")
+        print("="*60)
+        print(final_message)
+        print("="*60 + "\n")
 
 
 if __name__ == "__main__":
