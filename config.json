@@ -1,7 +1,7 @@
 {
     "DISCORD_WEBHOOK": "",
     "DISCORD_USER_ID": "",
-        "TICKERS": [
+    "TICKERS": [
         "SOXL",
         "TSLA"
     ],
@@ -26,14 +26,14 @@
             "LEVEL_HIGH": 30.0,
             "MULT_NORMAL": 0.85,
             "MULT_FEAR": 1.95,
-            "MULT_EXTREME": 2.40
+            "MULT_EXTREME": 2.4
         },
         "SHORT": {
             "LEVEL_LOW": 20.0,
             "LEVEL_HIGH": 30.0,
             "MULT_NORMAL": 0.85,
             "MULT_FEAR": 1.95,
-            "MULT_EXTREME": 2.40
+            "MULT_EXTREME": 2.4
         }
     },
     "DEFAULTS": {
