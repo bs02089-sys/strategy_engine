@@ -9,7 +9,6 @@ import pandas as pd
 import requests
 import yfinance as yf
 import pytz
-import matplotlib.pyplot as plt  # 차트 시각화용 추가
 
 logger = logging.getLogger(__name__)
 
@@ -196,8 +195,9 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
             buy_target = base * (1 - std_20d * v_fear / 100)
             buy_name, sub_msg = f"-{v_fear}σ", "🔴 VIX 공포"
         elif is_open and gap_ratio < -0.001:
+            # [BUG #2 FIX] gap_adjust를 더해야 시가 아래 타점이 잡힘 (- → +)
             gap_adjust = abs(gap_ratio) * 100
-            rem = max(0, std_20d - gap_adjust)
+            rem = max(0, std_20d + gap_adjust)
             buy_target = today_open * (1 - rem / 100)
             buy_name = f"-{rem/std_20d:.1f}σ"
             sub_msg = "📉 갭 하락 보정"
@@ -273,6 +273,12 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
     annual_quota = pos_cfg.get("ANNUAL_QUOTA", defaults.get("ANNUAL_QUOTA", 24))
 
     # 2. 결과 딕셔너리
+    current_casts = pos_cfg.get("CURRENT_CASTS", 0)
+    exhaustion_rate = min(current_casts / max(annual_quota, 1) * 100, 100.0)
+    # [BUG #6 FIX] 소진율 100% 초과 시 경고 로그
+    if current_casts > annual_quota:
+        logger.warning(f"⚠️ {ticker} CURRENT_CASTS({current_casts})가 ANNUAL_QUOTA({annual_quota})를 초과했습니다!")
+
     result.update({
         "daily_sigma": daily_sigma_val * 100,
         "multiplier": multiplier,
@@ -280,11 +286,11 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
         "buy_name": f"LONG 변동성 방어선 ({adjusted_multiplier:.2f}x)",
         "sub_msg": f"{vix_status_msg} ➔ {adjusted_multiplier:.2f}배수 하방{sub_msg_gap}",
         "time_guard_info": time_guard_status,
-        "time_guard_action": action_ment,  # <-- 직관적 지침 멘트!
+        "time_guard_action": action_ment,
         "my_avg_price": pos_cfg.get("MY_AVG_PRICE", 0.0),
-        "current_casts": pos_cfg.get("CURRENT_CASTS", 0),
+        "current_casts": current_casts,
         "annual_quota": annual_quota,
-        "exhaustion_rate": min(pos_cfg.get("CURRENT_CASTS", 0) / max(annual_quota, 1) * 100, 100.0),
+        "exhaustion_rate": exhaustion_rate,
     })
 
     return result
@@ -314,6 +320,12 @@ def calculate_split_sell_targets(base_price: float, std_20d: float, shares: int)
 # ====================== 📊 시각화 엔진 ======================
 def generate_long_portfolio_chart(df: pd.DataFrame, config: dict, output_filename: str = "portfolio_trend.png"):
     """LONG 모드 계좌 전용 월별 누적수익률 및 계좌 평가액 추세 차트 생성"""
+    # [BUG #1 FIX] matplotlib 미설치 시 차트만 스킵, 봇 전체 크래시 방지
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError:
+        logger.error("❌ matplotlib 미설치. pip install matplotlib 후 재실행하세요.")
+        return False
     positions_cfg = config.get("positions", {})
     long_tickers = [tk for tk, cfg in positions_cfg.items() if cfg.get("MODE") == "LONG"]
     
@@ -361,7 +373,7 @@ def generate_long_portfolio_chart(df: pd.DataFrame, config: dict, output_filenam
         
         if avg_price > 0 and shares > 0:
             # 월별 자산 가치 = 현재가 * 보유 주식 수
-            total_value_series += monthly_df[tk] * shares
+            total_value_series += (monthly_df[tk] * shares).fillna(0)  # [BUG #5 FIX] NaN 전파 방지
             total_cost += avg_price * shares
             # 종목별 수익률
             returns_dict[tk] = ((monthly_df[tk] - avg_price) / avg_price) * 100
@@ -383,10 +395,10 @@ def generate_long_portfolio_chart(df: pd.DataFrame, config: dict, output_filenam
     
     # [차트 1] 월별 누적 수익률 (%)
     for tk, ret_series in returns_dict.items():
-        ax1.plot(x_labels, ret_series, marker='o', linestyle='--', alpha=0.6, label=f"{tk} 수익률")
+        ax1.plot(monthly_df.index, ret_series, marker='o', linestyle='--', alpha=0.6, label=f"{tk} 수익률")  # [BUG #4 FIX]
     
     if total_cost > 0:
-        ax1.plot(x_labels, portfolio_return, marker='s', color='#d62728', linewidth=2.5, label="종합 포트폴리오")
+        ax1.plot(monthly_df.index, portfolio_return, marker='s', color='#d62728', linewidth=2.5, label="종합 포트폴리오")  # [BUG #4 FIX]
     ax1.axhline(0, color='black', linestyle='-', linewidth=0.8, alpha=0.5)
     ax1.set_title(f"📈 LONG 포트폴리오 누적 수익률 추세 {title_suffix}", fontsize=13, fontweight='bold')
     ax1.set_ylabel("수익률 (%)", fontsize=11)
@@ -394,15 +406,15 @@ def generate_long_portfolio_chart(df: pd.DataFrame, config: dict, output_filenam
 
     # [차트 2] 계좌 평가 금액 추세 ($)
     if total_cost > 0:
-        ax2.fill_between(x_labels, total_value_series, total_cost, where=(total_value_series >= total_cost), 
+        ax2.fill_between(monthly_df.index, total_value_series, total_cost, where=(total_value_series >= total_cost), 
                          interpolate=True, color='green', alpha=0.15, label='익절 구간')
-        ax2.fill_between(x_labels, total_value_series, total_cost, where=(total_value_series < total_cost), 
+        ax2.fill_between(monthly_df.index, total_value_series, total_cost, where=(total_value_series < total_cost), 
                          interpolate=True, color='red', alpha=0.15, label='손절 구간')
         ax2.axhline(total_cost, color='blue', linestyle=':', alpha=0.7, label=f'총 투자금 (${total_cost:,.2f})')
-        ax2.plot(x_labels, total_value_series, marker='o', color='#2ca02c', linewidth=2.5, label=f'계좌 평가액 (${total_value_series.iloc[-1]:,.2f})')
+        ax2.plot(monthly_df.index, total_value_series, marker='o', color='#2ca02c', linewidth=2.5, label=f'계좌 평가액 (${total_value_series.iloc[-1]:,.2f})')  # [BUG #4 FIX]
     else:
         # 기본 자산 가격 합산 그래프
-        ax2.plot(x_labels, total_value_series, marker='o', color='#7f7f7f', label='자산 가격 지수 합산')
+        ax2.plot(monthly_df.index, total_value_series, marker='o', color='#7f7f7f', label='자산 가격 지수 합산')  # [BUG #4 FIX]
         
     ax2.set_title("💰 LONG 포트폴리오 계좌 자산 평가액 추세", fontsize=13, fontweight='bold')
     ax2.set_ylabel("자산 가치 ($)", fontsize=11)
