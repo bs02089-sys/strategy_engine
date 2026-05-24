@@ -1,3 +1,4 @@
+import json
 import numpy as np
 import pandas as pd
 import yfinance as yf
@@ -52,7 +53,6 @@ def verify_long_term_hold_logic():
     print(f"📈 SOXL 최종 종가 : ${final_price:.2f}\n")
 
     # ====================== 안전 범위 정의 및 조건 설정 ======================
-    # config.json 기준값(MULT_EXTREME: 2.40)을 포함하도록 탐색 범위 설정
     SAFETY_BOUNDS = {
         "MULT_NORMAL":  (0.65, 0.85),
         "MULT_FEAR":    (1.95, 2.45),
@@ -74,7 +74,7 @@ def verify_long_term_hold_logic():
         multipliers = np.where(df['VIX'] >= 30, extreme, np.where(df['VIX'] >= 20, fear, normal))
         
         # 갭 보정 적용
-        # [BUG #1 FIX] np.array 변환으로 numpy 연산 속도 최적화
+        # [BUG#1-adj] np.array 변환으로 numpy 연산 속도 최적화
         adj_multipliers = np.array([apply_gap_correction(m, g) for m, g in zip(multipliers, df['Gap_Ratio'])])
         
         target_prices = df['Open'].values * np.exp(-df['Daily_Sigma'].values * adj_multipliers)
@@ -83,8 +83,17 @@ def verify_long_term_hold_logic():
         return triggered, target_prices
 
     # ====================== 현재 설정값 기준 성과 먼저 출력 ======================
-    # [BUG #3 FIX] 최적화 결과와 비교할 현재 config.json 설정 기준 성과 출력
-    CURRENT_NORMAL, CURRENT_FEAR, CURRENT_EXTREME = 0.85, 1.95, 2.40
+    # [BUG #1 FIX] 하드코딩 제거 → config.json VIX_CONFIG.LONG에서 자동 로드
+    try:
+        with open("config.json", "r", encoding="utf-8") as _f:
+            _cfg = json.load(_f)
+        _vix_long = _cfg.get("VIX_CONFIG", {}).get("LONG", {})
+        CURRENT_NORMAL  = _vix_long.get("MULT_NORMAL",  0.85)
+        CURRENT_FEAR    = _vix_long.get("MULT_FEAR",    1.95)
+        CURRENT_EXTREME = _vix_long.get("MULT_EXTREME", 2.40)
+    except Exception:
+        CURRENT_NORMAL, CURRENT_FEAR, CURRENT_EXTREME = 0.85, 1.95, 2.40
+        print("⚠️ config.json 로드 실패 — 기본값(0.85/1.95/2.40) 사용")
     cur_triggered, cur_target_prices = evaluate_parameters(CURRENT_NORMAL, CURRENT_FEAR, CURRENT_EXTREME)
     cur_pf = vbt.Portfolio.from_signals(
         close=df['Close'],
@@ -101,24 +110,34 @@ def verify_long_term_hold_logic():
     cur_calmar = 0.0 if (cur_calmar_raw is None or not np.isfinite(cur_calmar_raw)) else float(cur_calmar_raw)
     cur_ret_raw = cur_pf.total_return()
     cur_ret = float(cur_ret_raw * 100) if np.isfinite(cur_ret_raw) else 0.0
+    # [BUG #4 FIX] max_drawdown() nan 방어
+    mdd_raw = cur_pf.max_drawdown()
+    cur_mdd = float(mdd_raw * 100) if np.isfinite(mdd_raw) else 0.0
     print("[현재 config.json 설정값]")
     print(f"   평시: {CURRENT_NORMAL:.2f} | 공포: {CURRENT_FEAR:.2f} | 극단: {CURRENT_EXTREME:.2f}")
     print(f"   총 매수 횟수 : {int(cur_triggered.sum())}회")
     print(f"   최종 수익률  : {cur_ret:+.2f}%")
-    print(f"   최대 드로다운 : {cur_pf.max_drawdown()*100:.2f}%")
+    print(f"   최대 드로다운 : {cur_mdd:.2f}%")
     print(f"   Calmar Ratio : {cur_calmar:.3f}\n")
 
     # ====================== 안전 범위 내 최적화 탐색 ======================
     print("🔍 안전 범위 내에서 최적 배수 탐색 중...\n")
 
-    normal_range = np.arange(SAFETY_BOUNDS["MULT_NORMAL"][0], SAFETY_BOUNDS["MULT_NORMAL"][1] + 0.01, 0.05)
-    fear_range   = np.arange(SAFETY_BOUNDS["MULT_FEAR"][0], SAFETY_BOUNDS["MULT_FEAR"][1] + 0.01, 0.05)
-    extreme_range = np.arange(SAFETY_BOUNDS["MULT_EXTREME"][0], SAFETY_BOUNDS["MULT_EXTREME"][1] + 0.01, 0.05)
+    # [BUG #3 FIX] np.arange 부동소수점 오차로 마지막 값 누락 가능 → np.linspace로 교체
+    def _steps(lo, hi, step=0.05):
+        n = round((hi - lo) / step) + 1
+        return np.linspace(lo, hi, n)
+    normal_range  = _steps(SAFETY_BOUNDS["MULT_NORMAL"][0],  SAFETY_BOUNDS["MULT_NORMAL"][1])
+    fear_range    = _steps(SAFETY_BOUNDS["MULT_FEAR"][0],    SAFETY_BOUNDS["MULT_FEAR"][1])
+    extreme_range = _steps(SAFETY_BOUNDS["MULT_EXTREME"][0], SAFETY_BOUNDS["MULT_EXTREME"][1])
 
     best_score = -np.inf
     best_params = None
 
     for normal, fear, extreme in product(normal_range, fear_range, extreme_range):
+        # [BUG #2 FIX] 극단 배수는 반드시 공포 배수보다 커야 함 (비논리적 조합 제거)
+        if extreme <= fear:
+            continue
         triggered, target_prices = evaluate_parameters(normal, fear, extreme)
         trade_count = int(triggered.sum())
         
@@ -138,24 +157,26 @@ def verify_long_term_hold_logic():
             allow_partial=True
         )
 
-        # [BUG #2 FIX] nan or 0 → nan 그대로 반환되는 문제 수정
+        # [BUG #2 FIX] nan or 0 → nan 그대로 반환 문제 수정
         calmar_raw = pf.calmar_ratio()
         calmar = 0.0 if (calmar_raw is None or not np.isfinite(calmar_raw)) else float(calmar_raw)
         score = calmar * 150 + (trade_count / 2.8)
 
         if score > best_score:
             best_score = score
-            # [BUG #5 FIX] total_return() nan 방어
+            # [BUG #5 FIX] total_return nan 방어 + MDD 추가
             total_ret_raw = pf.total_return()
             ret = float(total_ret_raw * 100) if np.isfinite(total_ret_raw) else 0.0
-            best_params = (normal, fear, extreme, trade_count, calmar, ret)
+            mdd_opt_raw = pf.max_drawdown()
+            mdd_opt = float(mdd_opt_raw * 100) if np.isfinite(mdd_opt_raw) else 0.0
+            best_params = (normal, fear, extreme, trade_count, calmar, ret, mdd_opt)
 
     # ====================== 결과 출력 ======================
     if best_params:
-        normal, fear, extreme, trades, calmar, ret = best_params
+        normal, fear, extreme, trades, calmar, ret, mdd_opt = best_params
         print("🏆 안전 범위 내 최적 배수 조합")
         print(f"   평시 : {normal:.2f}x | 공포 : {fear:.2f}x | 극단 : {extreme:.2f}x")
-        print(f"   총 매수 횟수 : {trades}회 | Calmar : {calmar:.3f} | 수익률 : {ret:+.2f}%\n")
+        print(f"   총 매수 횟수 : {trades}회 | Calmar : {calmar:.3f} | 수익률 : {ret:+.2f}% | MDD : {mdd_opt:.2f}%\n")
 
         print("="*65)
         print("💡 config.json에 바로 사용하세요:")
