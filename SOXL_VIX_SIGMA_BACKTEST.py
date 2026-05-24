@@ -52,6 +52,7 @@ def verify_long_term_hold_logic():
     print(f"📈 SOXL 최종 종가 : ${final_price:.2f}\n")
 
     # ====================== 안전 범위 정의 및 조건 설정 ======================
+    # config.json 기준값(MULT_EXTREME: 2.40)을 포함하도록 탐색 범위 설정
     SAFETY_BOUNDS = {
         "MULT_NORMAL":  (0.65, 0.85),
         "MULT_FEAR":    (1.95, 2.45),
@@ -73,12 +74,39 @@ def verify_long_term_hold_logic():
         multipliers = np.where(df['VIX'] >= 30, extreme, np.where(df['VIX'] >= 20, fear, normal))
         
         # 갭 보정 적용
-        adj_multipliers = [apply_gap_correction(m, g) for m, g in zip(multipliers, df['Gap_Ratio'])]
+        # [BUG #1 FIX] np.array 변환으로 numpy 연산 속도 최적화
+        adj_multipliers = np.array([apply_gap_correction(m, g) for m, g in zip(multipliers, df['Gap_Ratio'])])
         
         target_prices = df['Open'].values * np.exp(-df['Daily_Sigma'].values * adj_multipliers)
         triggered = df['Low'].values <= target_prices
         
         return triggered, target_prices
+
+    # ====================== 현재 설정값 기준 성과 먼저 출력 ======================
+    # [BUG #3 FIX] 최적화 결과와 비교할 현재 config.json 설정 기준 성과 출력
+    CURRENT_NORMAL, CURRENT_FEAR, CURRENT_EXTREME = 0.85, 1.95, 2.40
+    cur_triggered, cur_target_prices = evaluate_parameters(CURRENT_NORMAL, CURRENT_FEAR, CURRENT_EXTREME)
+    cur_pf = vbt.Portfolio.from_signals(
+        close=df['Close'],
+        entries=pd.Series(cur_triggered, index=df.index),
+        exits=pd.Series(False, index=df.index),
+        price=pd.Series(cur_target_prices, index=df.index),
+        init_cash=10000,
+        fees=0.0015,
+        freq='1D',
+        accumulate=True,
+        allow_partial=True
+    )
+    cur_calmar_raw = cur_pf.calmar_ratio()
+    cur_calmar = 0.0 if (cur_calmar_raw is None or not np.isfinite(cur_calmar_raw)) else float(cur_calmar_raw)
+    cur_ret_raw = cur_pf.total_return()
+    cur_ret = float(cur_ret_raw * 100) if np.isfinite(cur_ret_raw) else 0.0
+    print("[현재 config.json 설정값]")
+    print(f"   평시: {CURRENT_NORMAL:.2f} | 공포: {CURRENT_FEAR:.2f} | 극단: {CURRENT_EXTREME:.2f}")
+    print(f"   총 매수 횟수 : {int(cur_triggered.sum())}회")
+    print(f"   최종 수익률  : {cur_ret:+.2f}%")
+    print(f"   최대 드로다운 : {cur_pf.max_drawdown()*100:.2f}%")
+    print(f"   Calmar Ratio : {cur_calmar:.3f}\n")
 
     # ====================== 안전 범위 내 최적화 탐색 ======================
     print("🔍 안전 범위 내에서 최적 배수 탐색 중...\n")
@@ -110,12 +138,17 @@ def verify_long_term_hold_logic():
             allow_partial=True
         )
 
-        calmar = pf.calmar_ratio() or 0
+        # [BUG #2 FIX] nan or 0 → nan 그대로 반환되는 문제 수정
+        calmar_raw = pf.calmar_ratio()
+        calmar = 0.0 if (calmar_raw is None or not np.isfinite(calmar_raw)) else float(calmar_raw)
         score = calmar * 150 + (trade_count / 2.8)
 
         if score > best_score:
             best_score = score
-            best_params = (normal, fear, extreme, trade_count, calmar, pf.total_return() * 100)
+            # [BUG #5 FIX] total_return() nan 방어
+            total_ret_raw = pf.total_return()
+            ret = float(total_ret_raw * 100) if np.isfinite(total_ret_raw) else 0.0
+            best_params = (normal, fear, extreme, trade_count, calmar, ret)
 
     # ====================== 결과 출력 ======================
     if best_params:
