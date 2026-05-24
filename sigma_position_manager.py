@@ -559,7 +559,7 @@ def create_combined_message(results: dict, is_open: bool,
     return "\n".join(lines)
 
 
-# ====================== Discord 전송 (오류 수정 완료) ======================
+# ====================== Discord 전송 ======================
 def send_discord_message_with_file(content: str, webhook_url: str, user_id: str, file_path: str = None) -> bool:
     if not webhook_url:
         return False
