@@ -10,10 +10,11 @@ import logging
 import time
 import subprocess
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Tuple, TypedDict
 import bisect
+import statistics
 
 # 필수 라이브러리 (BeautifulSoup4 설치 필요: pip install beautifulsoup4)
 import requests
@@ -98,7 +99,7 @@ CACHE_FILE = Path("historical_rates_cache.json")
 
 def save_cache(rates: list[float]):
     try:
-        data = {"rates": rates, "timestamp": datetime.now().isoformat()}
+        data = {"rates": rates, "timestamp": datetime.now(tz=timezone.utc).isoformat()}
         CACHE_FILE.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
     except Exception as e:
         logger.warning(f"캐시 저장 실패: {e}")
@@ -158,7 +159,7 @@ def get_current_rate() -> float | None:
 def get_backup_rate() -> float | None:
     """서울외국환중개 서버가 일시 오류일 때 작동하는 2차 백업 환율망"""
     try:
-        ticker = yf.Ticker("KRW=X")
+        ticker = yf.Ticker("USDKRW=X")
         df = ticker.history(period="1d")
         if not df.empty:
             return float(df['Close'].iloc[-1])
@@ -174,7 +175,7 @@ def get_historical_rates(days: int = 365) -> list[float]:
 
     try:
         logger.info(f"통계 분석을 위해 과거 {days}일간의 뼈대 환율 데이터를 빌드합니다...")
-        ticker = yf.Ticker("KRW=X")
+        ticker = yf.Ticker("USDKRW=X")
         df = ticker.history(period="1y")
         if df.empty:
             raise ValueError("통계 데이터가 비어 있습니다.")
@@ -214,7 +215,7 @@ def calc_percentile(sorted_rates: list[float], current: float) -> float:
 def get_median_applied_rate(sorted_base_rates: list[float]) -> float:
     if not sorted_base_rates:
         return 0.0
-    median_base = sorted_base_rates[len(sorted_base_rates) // 2]
+    median_base = statistics.median(sorted_base_rates)
     return calc_applied_rate(median_base)["applied_rate"]
 
 def get_rating(percentile: float) -> Tuple[str, str]:
