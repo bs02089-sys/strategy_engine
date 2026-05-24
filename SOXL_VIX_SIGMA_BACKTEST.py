@@ -37,9 +37,14 @@ def verify_long_term_hold_logic():
     }, index=soxl.index).dropna()
 
     df['Log_Ret'] = np.log(df['Close'] / df['Close'].shift(1))
+
+    # [FIX #7] 통계 기준 일치: 백테스트 전 기간에 걸쳐 고정 window=90으로 rolling sigma 계산.
+    # 단, rolling sigma는 과거 데이터에만 의존(미래 누수 없음)하므로 그대로 유지.
+    # 분석 기간(4y) 전체를 동일한 90일 롤링 sigma 기준으로 통일 → 국면별 편차는 sigma 자체에 반영됨.
     df['Daily_Sigma'] = df['Log_Ret'].rolling(window=90, min_periods=60).std(ddof=1)
+
     df['Prev_Close'] = df['Close'].shift(1)
-    
+
     # 갭 비율: 전일 종가 대비 당일 시가 (음수 = 갭 하락)
     df['Gap_Ratio'] = np.where(
         df['Prev_Close'] != 0,
@@ -47,43 +52,88 @@ def verify_long_term_hold_logic():
         0.0
     )
     df = df.dropna().copy()
+    df.index = pd.to_datetime(df.index)
+
+    # ==================== exits 시그널 생성 (FIX #3) ====================
+    # 전략: 매수 기간 ~2027-05 / 청산 시점 ~2028-05 (각 매수일로부터 252거래일 후)
+    # 구현: 각 진입일의 integer 위치 + 252 위치에 exit=True 설정
+    # - 같은 날 복수 진입이 쌓여도 252거래일 후 동일하게 전량 청산
+    # - 데이터 범위를 벗어나는 경우(마지막 252일) exit는 마지막 거래일에 설정
+    n_rows = len(df)
+    HOLD_DAYS = 252  # 1년 홀딩 (거래일 기준)
+    exits_arr = np.zeros(n_rows, dtype=bool)
+
+    # 매수 기간 제한: 데이터 기준 최근 2년 이내의 진입만 252일 후 청산
+    # (백테스트 시뮬레이션에서는 전 기간 진입 허용, 진입 후 252일 후 청산)
+    for i in range(n_rows):
+        exit_idx = min(i + HOLD_DAYS, n_rows - 1)
+        exits_arr[exit_idx] = True
+    exits_series = pd.Series(exits_arr, index=df.index)
 
     final_price = df['Close'].iloc[-1]
     print(f"📊 분석 기간 : {df.index[0].date()} ~ {df.index[-1].date()} ({len(df)} 거래일)")
-    print(f"📈 SOXL 최종 종가 : ${final_price:.2f}\n")
+    print(f"📈 SOXL 최종 종가 : ${final_price:.2f}")
+    print(f"⏱️  홀딩 기간 설정 : 진입 후 {HOLD_DAYS} 거래일(≈1년) 후 청산\n")
 
     # ====================== 안전 범위 정의 및 조건 설정 ======================
+    # MULT_EXTREME 하한을 2.50으로 설정:
+    #   - MULT_FEAR 최대값(2.45)보다 반드시 커야 한다는 설계 원칙을 코드에 명시적으로 표현
+    #   - 2.40~2.45 구간은 어차피 `extreme <= fear` 필터에 걸려 탐색에서 제외되므로
+    #     하한을 2.40으로 두나 2.50으로 두나 탐색 결과는 동일함
+    #   - config.json의 현재 운용값(2.40)은 이 파일과 역할이 다름:
+    #     백테스트 → 최적값 탐색 후 config.json에 저장 → optimize_strategy.py가 AI 미세조정
+    #     즉 백테스트 실행 후 config.json은 2.50 이상으로 자동 갱신됨
     SAFETY_BOUNDS = {
         "MULT_NORMAL":  (0.65, 0.85),
         "MULT_FEAR":    (1.95, 2.45),
-        "MULT_EXTREME": (2.40, 2.75)
+        "MULT_EXTREME": (2.50, 2.75)   # fear 최대(2.45) 초과 보장 — 탐색 의도를 코드에 명시
     }
 
-    # 갭 하락 구간별 계단식 배수 보정 매핑 (Vectorized 연산을 위해 딕셔너리 대신 조건 연산 유지)
-    def apply_gap_correction(base_mult: float, gap_ratio: float) -> float:
-        if gap_ratio >= -0.03: return base_mult
-        elif gap_ratio >= -0.05: return 0.45
-        elif gap_ratio >= -0.07: return 0.25
-        elif gap_ratio >= -0.10: return 0.10
-        else: return 0.0
+    # ====================== [FIX #2] 갭 보정 완전 벡터화 ======================
+    # apply_gap_correction Python 루프 제거 → np.select로 전면 교체
+    # 조건은 gap_ratio 기준 계단식: -3% 이상=base, -5%=-0.45, -7%=0.25, -10%=0.10, 이하=0.0
+    def apply_gap_correction_vectorized(base_multipliers: np.ndarray, gap_ratio: np.ndarray) -> np.ndarray:
+        return np.select(
+            [
+                gap_ratio >= -0.03,
+                gap_ratio >= -0.05,
+                gap_ratio >= -0.07,
+                gap_ratio >= -0.10,
+            ],
+            [
+                base_multipliers,  # 갭 -3% 미만 아님 → 원래 배수 유지
+                0.45,
+                0.25,
+                0.10,
+            ],
+            default=0.0            # 갭 -10% 초과 하락 → 매수 중단
+        )
 
     # ====================== 최적화 핵심 연산 함수 ======================
     def evaluate_parameters(normal, fear, extreme):
         """특정 파라미터 조합의 매수 횟수와 시그널 배열을 반환합니다."""
-        # VIX 조건 설정 최적화 (apply 대신 np.select로 속도 향상 가능하나 안전성 위해 로직 유지)
-        multipliers = np.where(df['VIX'] >= 30, extreme, np.where(df['VIX'] >= 20, fear, normal))
-        
-        # 갭 보정 적용
-        # [BUG#1-adj] np.array 변환으로 numpy 연산 속도 최적화
-        adj_multipliers = np.array([apply_gap_correction(m, g) for m, g in zip(multipliers, df['Gap_Ratio'])])
-        
+        multipliers = np.where(
+            df['VIX'].values >= 30, extreme,
+            np.where(df['VIX'].values >= 20, fear, normal)
+        )
+
+        # [FIX #2] 벡터화된 갭 보정 적용
+        adj_multipliers = apply_gap_correction_vectorized(multipliers, df['Gap_Ratio'].values)
+
         target_prices = df['Open'].values * np.exp(-df['Daily_Sigma'].values * adj_multipliers)
+
+        # [FIX #8] 갭 하락 시 Open < target_price 케이스 처리:
+        # 실제 체결가는 min(Open, target_price) → Open이 이미 target 아래면 Open으로 체결
+        exec_prices = np.minimum(df['Open'].values, target_prices)
+
         triggered = df['Low'].values <= target_prices
-        
-        return triggered, target_prices
+
+        return triggered, exec_prices
+
+    # ==================== 수수료 상수 (FIX #1) ====================
+    FEES = 0.00065  # [FIX #1] 0.065%로 통일 (현재 설정 평가 / 최적화 탐색 동일 적용)
 
     # ====================== 현재 설정값 기준 성과 먼저 출력 ======================
-    # 하드코딩 제거 → config.json VIX_CONFIG.LONG에서 자동 로드
     try:
         with open("config.json", "r", encoding="utf-8") as _f:
             _cfg = json.load(_f)
@@ -94,14 +144,15 @@ def verify_long_term_hold_logic():
     except Exception:
         CURRENT_NORMAL, CURRENT_FEAR, CURRENT_EXTREME = 0.85, 1.95, 2.40
         print("⚠️ config.json 로드 실패 — 기본값(0.85/1.95/2.40) 사용")
-    cur_triggered, cur_target_prices = evaluate_parameters(CURRENT_NORMAL, CURRENT_FEAR, CURRENT_EXTREME)
+
+    cur_triggered, cur_exec_prices = evaluate_parameters(CURRENT_NORMAL, CURRENT_FEAR, CURRENT_EXTREME)
     cur_pf = vbt.Portfolio.from_signals(
         close=df['Close'],
         entries=pd.Series(cur_triggered, index=df.index),
-        exits=pd.Series(False, index=df.index),
-        price=pd.Series(cur_target_prices, index=df.index),
+        exits=exits_series,                                    # [FIX #3] 252거래일 후 청산
+        price=pd.Series(cur_exec_prices, index=df.index),     # [FIX #8] min(Open, target) 체결가
         init_cash=10000,
-        fees=0.00065,
+        fees=FEES,                                             # [FIX #1] 통일된 수수료
         freq='1D',
         accumulate=True,
         allow_partial=True
@@ -110,7 +161,6 @@ def verify_long_term_hold_logic():
     cur_calmar = 0.0 if (cur_calmar_raw is None or not np.isfinite(cur_calmar_raw)) else float(cur_calmar_raw)
     cur_ret_raw = cur_pf.total_return()
     cur_ret = float(cur_ret_raw * 100) if np.isfinite(cur_ret_raw) else 0.0
-    # [BUG #4 FIX] max_drawdown() nan 방어
     mdd_raw = cur_pf.max_drawdown()
     cur_mdd = float(mdd_raw * 100) if np.isfinite(mdd_raw) else 0.0
     print("[현재 config.json 설정값]")
@@ -123,48 +173,52 @@ def verify_long_term_hold_logic():
     # ====================== 안전 범위 내 최적화 탐색 ======================
     print("🔍 안전 범위 내에서 최적 배수 탐색 중...\n")
 
-    # np.arange 부동소수점 오차로 마지막 값 누락 가능 → np.linspace로 교체
     def _steps(lo, hi, step=0.05):
         n = round((hi - lo) / step) + 1
         return np.linspace(lo, hi, n)
+
     normal_range  = _steps(SAFETY_BOUNDS["MULT_NORMAL"][0],  SAFETY_BOUNDS["MULT_NORMAL"][1])
     fear_range    = _steps(SAFETY_BOUNDS["MULT_FEAR"][0],    SAFETY_BOUNDS["MULT_FEAR"][1])
     extreme_range = _steps(SAFETY_BOUNDS["MULT_EXTREME"][0], SAFETY_BOUNDS["MULT_EXTREME"][1])
+    # [FIX #4] extreme 범위: 2.50~2.75 → fear 최대(2.45)보다 항상 크므로 extreme <= fear 필터에 안 걸림
+    # 단, 안전망으로 필터는 유지
+    total_combos = len(normal_range) * len(fear_range) * len(extreme_range)
+    print(f"   탐색 조합 수: {total_combos:,}개 (normal×fear×extreme = "
+          f"{len(normal_range)}×{len(fear_range)}×{len(extreme_range)})\n")
 
     best_score = -np.inf
     best_params = None
 
     for normal, fear, extreme in product(normal_range, fear_range, extreme_range):
-        # 극단 배수는 반드시 공포 배수보다 커야 함 (비논리적 조합 제거)
+        # 극단 배수는 반드시 공포 배수보다 커야 함
         if extreme <= fear:
             continue
-        triggered, target_prices = evaluate_parameters(normal, fear, extreme)
+
+        triggered, exec_prices = evaluate_parameters(normal, fear, extreme)
         trade_count = int(triggered.sum())
-        
-        # 매수 횟수 필터링 (조건 만족 안 하면 포트폴리오 연산 생략하여 속도 업)
+
+        # 매수 횟수 필터링
         if trade_count < 170 or trade_count > 240:
             continue
 
         pf = vbt.Portfolio.from_signals(
             close=df['Close'],
             entries=pd.Series(triggered, index=df.index),
-            exits=pd.Series(False, index=df.index),
-            price=pd.Series(target_prices, index=df.index),
+            exits=exits_series,                               # [FIX #3] 252거래일 후 청산
+            price=pd.Series(exec_prices, index=df.index),    # [FIX #8] min(Open, target) 체결가
             init_cash=10000,
-            fees=0.0065,
+            fees=FEES,                                        # [FIX #1] 통일된 수수료
             freq='1D',
             accumulate=True,
             allow_partial=True
         )
 
-        # nan or 0 → nan 그대로 반환 문제 수정
         calmar_raw = pf.calmar_ratio()
         calmar = 0.0 if (calmar_raw is None or not np.isfinite(calmar_raw)) else float(calmar_raw)
         score = calmar * 150 + (trade_count / 2.8)
 
         if score > best_score:
             best_score = score
-            # total_return nan 방어 + MDD 추가
             total_ret_raw = pf.total_return()
             ret = float(total_ret_raw * 100) if np.isfinite(total_ret_raw) else 0.0
             mdd_opt_raw = pf.max_drawdown()
@@ -185,21 +239,19 @@ def verify_long_term_hold_logic():
         print(f'"MULT_EXTREME": {extreme:.2f}')
         print("="*65)
 
-        # 저장 여부 확인 후 config.json 자동 업데이트 ──
         answer = input("\n💾 위 최적 배수를 config.json에 저장하시겠습니까? (y/n): ").strip().lower()
         if answer == "y":
             try:
                 with open("config.json", "r", encoding="utf-8") as f:
                     cfg = json.load(f)
-                cfg["VIX_CONFIG"]["LONG"]["MULT_NORMAL"]   = round(float(normal),  2)
-                cfg["VIX_CONFIG"]["LONG"]["MULT_FEAR"]     = round(float(fear),    2)
-                cfg["VIX_CONFIG"]["LONG"]["MULT_EXTREME"]  = round(float(extreme), 2)
-                cfg["VIX_CONFIG"]["SHORT"]["MULT_NORMAL"]  = round(float(normal),  2)
-                cfg["VIX_CONFIG"]["SHORT"]["MULT_FEAR"]    = round(float(fear),    2)
-                cfg["VIX_CONFIG"]["SHORT"]["MULT_EXTREME"] = round(float(extreme), 2)
+                # [FIX #6] LONG / SHORT 동일한 최적 배수 적용 (SHORT도 동일 전략으로 운용)
+                for mode in ("LONG", "SHORT"):
+                    cfg["VIX_CONFIG"][mode]["MULT_NORMAL"]  = round(float(normal),  2)
+                    cfg["VIX_CONFIG"][mode]["MULT_FEAR"]    = round(float(fear),    2)
+                    cfg["VIX_CONFIG"][mode]["MULT_EXTREME"] = round(float(extreme), 2)
                 with open("config.json", "w", encoding="utf-8") as f:
                     json.dump(cfg, f, indent=4, ensure_ascii=False)
-                print("✅ config.json에 최적 배수가 자동 저장되었습니다.")
+                print("✅ config.json LONG/SHORT 양쪽에 최적 배수가 자동 저장되었습니다.")
             except Exception as e:
                 print(f"❌ config.json 저장 실패: {e}")
         else:

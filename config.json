@@ -1,10 +1,7 @@
 {
     "DISCORD_WEBHOOK": "",
     "DISCORD_USER_ID": "",
-    "TICKERS": [
-        "SOXL",
-        "TSLA"
-    ],
+    "TICKERS": ["SOXL","TSLA"],
     "POSITIONS": {
         "SOXL": {
             "MODE": "LONG",
