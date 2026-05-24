@@ -19,7 +19,7 @@ import statistics
 # 필수 라이브러리 (BeautifulSoup4 설치 필요: pip install beautifulsoup4)
 import requests
 from bs4 import BeautifulSoup
-import yfinance as yf  # 👈 [수정 완료] 과거 1년 통계 빌드용 yfinance 임포트 복원
+import yfinance as yf  # 과거 1년 통계 빌드용 yfinance 임포트 복원
 
 # =============================================
 # 로깅 설정
@@ -37,7 +37,9 @@ class Config:
     PREFER_RATE: float = 95.0  # 우대율 (%)
     PERCENTILE_THRESHOLD: float = 50.0  # 고환율 시국에 맞춘 50% 기준선 고정!
     CHECK_INTERVAL: int = 300
+    ALERT_COOLDOWN_HOURS: int = 4  # 알림 발생 후 재알림까지의 대기 시간
     CACHE_HOURS: int = 6
+
     DISCORD_WEBHOOK: str = ""  
     DISCORD_USER_ID: str = ""  
 
@@ -48,6 +50,7 @@ class Config:
             "PREFER_RATE": 95.0,
             "PERCENTILE_THRESHOLD": 50.0,
             "CHECK_INTERVAL": 300,
+            "ALERT_COOLDOWN_HOURS": 4,
             "CACHE_HOURS": 6,
             "DISCORD_WEBHOOK": "",
             "DISCORD_USER_ID": "",
