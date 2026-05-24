@@ -113,10 +113,15 @@ def optimize_strategy():
         new_config = result.get("updated_config")
         # [BUG #1 FIX] config.json 실제 구조에 맞게 키 검증 (tickers → TICKERS)
         if new_config and isinstance(new_config, dict) and "TICKERS" in new_config:
-            # [BUG #6 FIX] 기존 config를 베이스로 AI 결과를 병합 → 키 누락으로 인한 덮어쓰기 방지
-            merged_config = {**config, **new_config}
-            save_config(merged_config)
-            sync_to_git_via_manager()
+            # 저장 여부 사용자 확인 후 반영
+            answer = input("\n💾 AI 분석 결과를 config.json에 저장하시겠습니까? (y/n): ").strip().lower()
+            if answer == "y":
+                # [BUG #6 FIX] 기존 config를 베이스로 AI 결과를 병합 → 키 누락으로 인한 덮어쓰기 방지
+                merged_config = {**config, **new_config}
+                save_config(merged_config)
+                sync_to_git_via_manager()
+            else:
+                logger.info("⏭️ 저장을 건너뜁니다. config.json은 변경되지 않았습니다.")
         else:
             logger.error("❌ AI가 리턴한 새로운 config 구조가 올바르지 않아 반영을 취소합니다.")
 
