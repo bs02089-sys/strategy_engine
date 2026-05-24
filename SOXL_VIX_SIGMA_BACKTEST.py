@@ -184,6 +184,26 @@ def verify_long_term_hold_logic():
         print(f'"MULT_FEAR": {fear:.2f},')
         print(f'"MULT_EXTREME": {extreme:.2f}')
         print("="*65)
+
+        # ── 방향B: 저장 여부 확인 후 config.json 자동 업데이트 ──
+        answer = input("\n💾 위 최적 배수를 config.json에 저장하시겠습니까? (y/n): ").strip().lower()
+        if answer == "y":
+            try:
+                with open("config.json", "r", encoding="utf-8") as f:
+                    cfg = json.load(f)
+                cfg["VIX_CONFIG"]["LONG"]["MULT_NORMAL"]   = round(float(normal),  2)
+                cfg["VIX_CONFIG"]["LONG"]["MULT_FEAR"]     = round(float(fear),    2)
+                cfg["VIX_CONFIG"]["LONG"]["MULT_EXTREME"]  = round(float(extreme), 2)
+                cfg["VIX_CONFIG"]["SHORT"]["MULT_NORMAL"]  = round(float(normal),  2)
+                cfg["VIX_CONFIG"]["SHORT"]["MULT_FEAR"]    = round(float(fear),    2)
+                cfg["VIX_CONFIG"]["SHORT"]["MULT_EXTREME"] = round(float(extreme), 2)
+                with open("config.json", "w", encoding="utf-8") as f:
+                    json.dump(cfg, f, indent=4, ensure_ascii=False)
+                print("✅ config.json에 최적 배수가 자동 저장되었습니다.")
+            except Exception as e:
+                print(f"❌ config.json 저장 실패: {e}")
+        else:
+            print("⏭️ 저장을 건너뜁니다. config.json은 변경되지 않았습니다.")
     else:
         print("❌ 조건(매수 횟수 170~240회)을 만족하는 최적 배수 조합을 찾지 못했습니다.")
 
