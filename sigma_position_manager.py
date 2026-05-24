@@ -247,10 +247,7 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
         sub_msg_gap = ""
 
     long_buy = (today_open if is_open else prev_close) * float(np.exp(-daily_sigma_val * adjusted_multiplier))
-
-    max_drop_protection = defaults.get("MAX_DROP_PROTECTION", 0.10)
-    long_buy = max(long_buy, prev_close * (1.0 - max_drop_protection))
-
+    
     last_cast_str = pos_cfg.get("LAST_CAST_DATE", defaults.get("LAST_CAST_DATE", "2026-01-01"))
     try:
         last_cast_date = datetime.strptime(last_cast_str, "%Y-%m-%d").date()
