@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from dotenv import load_dotenv
 
-# 1. 환경 변수 로드 (Gemini API Key용)
+# 1. 환경 변수 로드 (로컬 PC 구동 시 .env 파일 스캔용)
 load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
@@ -121,6 +121,19 @@ def send_to_discord(webhook_url, user_id, message_body, ping_prefix=""):
 
 
 def main():
+    # 💡 [하이브리드 환경을 위한 환경 변수 상호 해석 장치]
+    # 깃허브 서버(Action) 환경일 때는 Secrets에 등록된 값을 우선 추적하고, 
+    # 로컬 파워셸 환경일 때는 로컬 .env나 config.json에 등록된 API 키를 영리하게 보정합니다.
+    global GEMINI_API_KEY
+    if not GEMINI_API_KEY:
+        GEMINI_API_KEY = config_data.get("GEMINI_API_KEY")
+
+    # 💡 [마법 구문 변형 안전장치]
+    # 만약 로컬 PC에서 테스트나 개발 용도로 수동 실행할 때, 디스코드에 알림이 중복 전송되어 
+    # 채널이 도배되는 현상을 방지하고 싶다면 아래의 마법 구문 주석(#)을 해제하고 사용하시면 됩니다.
+    # if os.getenv("GITHUB_ACTIONS") != "true":
+    #     print("ℹ️ 로컬 편집기 환경 감지: 디스코드 도배 방지를 위해 시뮬레이션 모드로 전환하거나 종료할 수 있습니다.")
+
     # 1. 뉴스 수집
     news_content = fetch_latest_news()
     if not news_content.strip():
@@ -128,6 +141,10 @@ def main():
         return
 
     # 2. Gemini AI 번역 및 요약 진행
+    if not GEMINI_API_KEY:
+        print("❌ 에러: GEMINI_API_KEY가 환경 변수나 config.json에 설정되지 않았습니다.")
+        return
+
     report = None
     try:
         client = genai.Client(
@@ -141,8 +158,8 @@ def main():
         )
         
         response = client.models.generate_content(
-            model="models/gemini-2.5-flash",
-            contents=prompt
+            model="models/gemini-3.5-flash",
+            contents=prompt,
         )
         report = response.text
 

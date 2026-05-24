@@ -432,9 +432,9 @@ def generate_long_portfolio_chart(df: pd.DataFrame, config: dict, output_filenam
 
 
 # Git 동기화 함수
+# Git 동기화 함수
 def sync_config_to_git(target_date: datetime.date):
     today_str = target_date.strftime("%Y-%m-%d")
-    is_github_action = os.getenv("GITHUB_ACTIONS") == "true"
 
     try:
         status = subprocess.run(
@@ -445,18 +445,23 @@ def sync_config_to_git(target_date: datetime.date):
             logger.info("📝 config.json 변경사항이 없어 Git Commit을 생략합니다.")
             return
 
+        # 💡 [하이브리드 환경 최적화 마법 구문]
+        # 현재 실행 환경이 깃허브 액션즈(서버) 위라면, 중복 푸시 충돌을 막기 위해 여기서 루프를 종료합니다.
+        # 최종 푸시는 워크플로우(.yml)의 맨 마지막 스텝이 안전하게 처리합니다.
+        if os.getenv("GITHUB_ACTIONS") == "true":
+            logger.info("ℹ️ GitHub Actions 환경 감지: 파이썬 내부 푸시를 생략하고 워크플로우에 위임합니다.")
+            return
+
+        # 💻 여기서부터는 오직 '로컬 PC 파워셸'에서 수동 실행했을 때만 실행되는 안전지대입니다.
         subprocess.run(["git", "config", "user.name", "Automated Bot"], check=True, timeout=10)
         subprocess.run(["git", "config", "user.email", "bot@example.com"], check=True, timeout=10)
         subprocess.run(["git", "add", "config.json"], check=True, timeout=10)
         subprocess.run(["git", "commit", "-m", f"🤖 Auto-update config.json [{today_str}]"], check=True, timeout=10)
-
-        if is_github_action:
-            subprocess.run(["git", "push"], check=True, timeout=15)
-        else:
-            subprocess.run(["git", "push", "origin", "main"], check=True, timeout=15)
+        subprocess.run(["git", "push", "origin", "main"], check=True, timeout=15)
+        logger.info("🚀 로컬 파워셸 기준 Git Push 성공.")
     except Exception as e:
         logger.error(f"❌ Git 처리 중 오류: {e}")
-
+        
 
 # ====================== 데이터 수집 ======================
 def get_combined_market_data(tickers: list, config: dict, est_tz, target_date: datetime.date):

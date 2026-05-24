@@ -10,7 +10,7 @@ on:
   schedule:
     # [미국 본장 개장 전 자동 점검]
     # 목표: 서머타임 개장(KST 오후 10시 30분) 훨씬 전에 수집 → KST 오후 9시~10시 사이 최종 수신
-    # 계산: UTC 12시 17분 = KST 오후 9시 17분 (기존 10시 17분은 KST 오전 7시 17분이었던 주석 오류 수정)
+    # 계산: UTC 12시 17분 = KST 오후 9시 17분
     - cron: '17 12 * * 1-5'
   workflow_dispatch:
 
@@ -28,17 +28,18 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          fetch-depth: 0 # 💡 중요: 전체 커밋 히스토리를 가져와야 파이썬 내부의 git push가 충돌 나지 않습니다.
+          # 💡 안전하고 강력한 푸시를 위해 사용자님의 Secrets 토큰을 사용하도록 변경합니다.
+          token: ${{ secrets.vscode_push_token_2026 }}
+          fetch-depth: 0 
 
-      # 💡 파이썬 내부의 subprocess.run(["git", ...])과 봇 계정 정보를 일치시킵니다.
       - name: Configure Git
+        # 💡 파이썬 내부의 봇 계정 정보(Automated Bot) 및 원격 저장소 자격 증명을 정돈합니다.
         run: |
           git config --global user.name "Automated Bot"
           git config --global user.email "bot@example.com"
-          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/bs02089-sys/strategy_engine.git
+          CLEAN_TOKEN=$(echo "${{ secrets.vscode_push_token_2026 }}" | tr -d '\r\n')
+          git remote set-url origin "https://x-access-token:${CLEAN_TOKEN}@github.com/bs02089-sys/strategy_engine.git"
 
-      # 💡 깃허브 액션 서버에 최신 config.json이 유실되는 걸 막기 위해 실행 전 무조건 pull을 먼저 땡깁니다.
       - name: Sync latest data
         run: |
           git pull origin main || echo "Already up to date or no remote changes."
@@ -55,11 +56,28 @@ jobs:
           pip install numpy pandas requests yfinance pytz holidays matplotlib
 
       - name: Discord 알림 및 자동 데이터 동기화 실행
-        # 🔑 [핵심 수정]: 깃허브 금고(Secrets)에 저장한 디스코드 웹훅 주소를 파이썬 시스템 환경변수로 주입합니다.
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
         run: |
           for i in {1..3}; do
-            # 💡 이제 이 파이썬 코드가 실행되면서 파일 수정 + Git Push까지 원스톱으로 처리합니다.
+            # 💡 이제 파이썬은 깃허브 서버 안에서 푸시를 생략하고 자산 평정 데이터(config.json) 수정만 담당합니다.
             python sigma_position_manager.py && break || echo "Retry $i failed..." && sleep 10
           done
+
+      # 🚀 [마법 분기 연동: 최종 커밋 & 푸시 스텝 추가]
+      # 파이썬이 양보하고 남겨둔 변경된 config.json 파일을 워크플로우 매니저가 안전하게 최종 푸시합니다.
+      - name: 실행 결과 config.json 최종 커밋 & 푸시
+        if: always()
+        run: |
+          if [ -f config.json ]; then
+            git add config.json
+          fi
+          
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: 자산 평정 결과 config.json 동기화 ($(date -u +'%Y-%m-%d %H:%M UTC'))"
+            git push --force-with-lease || git push
+            echo "🚀 GitHub Actions 기준 자산 데이터 최종 Push 성공."
+          else
+            echo "✅ 변동 사항이 없어 동기화를 건너뜁니다."
+          fi
