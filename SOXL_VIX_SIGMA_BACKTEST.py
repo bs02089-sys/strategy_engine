@@ -83,7 +83,7 @@ def verify_long_term_hold_logic():
         return triggered, target_prices
 
     # ====================== 현재 설정값 기준 성과 먼저 출력 ======================
-    # [BUG #1 FIX] 하드코딩 제거 → config.json VIX_CONFIG.LONG에서 자동 로드
+    # 하드코딩 제거 → config.json VIX_CONFIG.LONG에서 자동 로드
     try:
         with open("config.json", "r", encoding="utf-8") as _f:
             _cfg = json.load(_f)
@@ -101,7 +101,7 @@ def verify_long_term_hold_logic():
         exits=pd.Series(False, index=df.index),
         price=pd.Series(cur_target_prices, index=df.index),
         init_cash=10000,
-        fees=0.0015,
+        fees=0.00065,
         freq='1D',
         accumulate=True,
         allow_partial=True
@@ -123,7 +123,7 @@ def verify_long_term_hold_logic():
     # ====================== 안전 범위 내 최적화 탐색 ======================
     print("🔍 안전 범위 내에서 최적 배수 탐색 중...\n")
 
-    # [BUG #3 FIX] np.arange 부동소수점 오차로 마지막 값 누락 가능 → np.linspace로 교체
+    # np.arange 부동소수점 오차로 마지막 값 누락 가능 → np.linspace로 교체
     def _steps(lo, hi, step=0.05):
         n = round((hi - lo) / step) + 1
         return np.linspace(lo, hi, n)
@@ -135,7 +135,7 @@ def verify_long_term_hold_logic():
     best_params = None
 
     for normal, fear, extreme in product(normal_range, fear_range, extreme_range):
-        # [BUG #2 FIX] 극단 배수는 반드시 공포 배수보다 커야 함 (비논리적 조합 제거)
+        # 극단 배수는 반드시 공포 배수보다 커야 함 (비논리적 조합 제거)
         if extreme <= fear:
             continue
         triggered, target_prices = evaluate_parameters(normal, fear, extreme)
@@ -151,20 +151,20 @@ def verify_long_term_hold_logic():
             exits=pd.Series(False, index=df.index),
             price=pd.Series(target_prices, index=df.index),
             init_cash=10000,
-            fees=0.0015,
+            fees=0.0065,
             freq='1D',
             accumulate=True,
             allow_partial=True
         )
 
-        # [BUG #2 FIX] nan or 0 → nan 그대로 반환 문제 수정
+        # nan or 0 → nan 그대로 반환 문제 수정
         calmar_raw = pf.calmar_ratio()
         calmar = 0.0 if (calmar_raw is None or not np.isfinite(calmar_raw)) else float(calmar_raw)
         score = calmar * 150 + (trade_count / 2.8)
 
         if score > best_score:
             best_score = score
-            # [BUG #5 FIX] total_return nan 방어 + MDD 추가
+            # total_return nan 방어 + MDD 추가
             total_ret_raw = pf.total_return()
             ret = float(total_ret_raw * 100) if np.isfinite(total_ret_raw) else 0.0
             mdd_opt_raw = pf.max_drawdown()
@@ -185,7 +185,7 @@ def verify_long_term_hold_logic():
         print(f'"MULT_EXTREME": {extreme:.2f}')
         print("="*65)
 
-        # ── 방향B: 저장 여부 확인 후 config.json 자동 업데이트 ──
+        # 저장 여부 확인 후 config.json 자동 업데이트 ──
         answer = input("\n💾 위 최적 배수를 config.json에 저장하시겠습니까? (y/n): ").strip().lower()
         if answer == "y":
             try:
