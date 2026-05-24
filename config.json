@@ -39,8 +39,7 @@
     "DEFAULTS": {
         "SIGMA_DEFAULT": 2.0,
         "LAST_CAST_DATE": "2026-01-01",
-        "ANNUAL_QUOTA": 24,
-        "MAX_DROP_PROTECTION": 0.10
+        "ANNUAL_QUOTA": 24
     },
     "exchange_status": {
         "LAST_CHECK_DATE": "2026-05-18 20:02:56",
