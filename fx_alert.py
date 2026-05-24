@@ -16,7 +16,6 @@ from typing import Tuple, TypedDict
 import bisect
 import statistics
 
-# 필수 라이브러리 (BeautifulSoup4 설치 필요: pip install beautifulsoup4)
 import requests
 from bs4 import BeautifulSoup
 import yfinance as yf  # 과거 1년 통계 빌드용 yfinance 임포트 복원
