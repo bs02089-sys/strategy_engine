@@ -1,5 +1,6 @@
 """
-나무증권 원화 → 달러 환율 적정성 알림 봇 (서울외국환중개 실시간 크롤링 및 고정 스프레드 반영 버전 - yf 에러 수정본)
+나무증권 원화 → 달러 환율 적정성 알림 봇 
+(서울외국환중개 실시간 크롤링 및 고정 스프레드 반영 버전 - GitHub Actions 최적화본)
 """
 
 import os
@@ -18,7 +19,7 @@ import statistics
 
 import requests
 from bs4 import BeautifulSoup
-import yfinance as yf  # 과거 1년 통계 빌드용 yfinance 임포트 복원
+import yfinance as yf
 
 # =============================================
 # 로깅 설정
@@ -32,11 +33,10 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class Config:
-    NAMUH_SPREAD: float = 10.0  # 달러당 기본 스프레드 (10.0원 또는 11.5원)
-    PREFER_RATE: float = 95.0  # 우대율 (%)
-    PERCENTILE_THRESHOLD: float = 50.0  # 고환율 시국에 맞춘 50% 기준선 고정!
+    NAMUH_SPREAD: float = 10.0  
+    PREFER_RATE: float = 95.0  
+    PERCENTILE_THRESHOLD: float = 50.0  
     CHECK_INTERVAL: int = 300
-    ALERT_COOLDOWN_HOURS: int = 4  # 알림 발생 후 재알림까지의 대기 시간
     CACHE_HOURS: int = 6
 
     DISCORD_WEBHOOK: str = ""  
@@ -49,7 +49,6 @@ class Config:
             "PREFER_RATE": 95.0,
             "PERCENTILE_THRESHOLD": 50.0,
             "CHECK_INTERVAL": 300,
-            "ALERT_COOLDOWN_HOURS": 4,
             "CACHE_HOURS": 6,
             "DISCORD_WEBHOOK": "",
             "DISCORD_USER_ID": "",
@@ -81,15 +80,12 @@ class Config:
             DISCORD_USER_ID=str(config_data["DISCORD_USER_ID"]),
         )
 
-# 설정 로드
 config = Config.load()
-
 WEBHOOK_URL = config.DISCORD_WEBHOOK
 DISCORD_USER_ID = config.DISCORD_USER_ID
 
 COLOR_GREEN = 0x1D9E75
 COLOR_AMBER = 0xBA7517
-COLOR_RED   = 0xA32D2D
 
 class RateInfo(TypedDict):
     base_rate: float
@@ -111,7 +107,7 @@ def load_cache() -> list[float] | None:
         return None
     try:
         data = json.loads(CACHE_FILE.read_text(encoding="utf-8"))
-        if datetime.now() - datetime.fromisoformat(data["timestamp"]) < timedelta(hours=config.CACHE_HOURS):
+        if datetime.now(tz=timezone.utc) - datetime.fromisoformat(data["timestamp"]) < timedelta(hours=config.CACHE_HOURS):
             return data["rates"]
     except Exception:
         pass
@@ -121,7 +117,6 @@ def load_cache() -> list[float] | None:
 # 🎯 서울외국환중개 실시간 매매기준율 크롤링 엔진
 # =============================================
 def get_current_rate() -> float | None:
-    """서울외국환중개(SMBS) 웹사이트에서 실시간 미국 달러(USD) 매매기준율을 크롤링합니다."""
     url = "https://www.smbs.biz/ExRate/TodayExRate.jsp"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -129,12 +124,9 @@ def get_current_rate() -> float | None:
     try:
         resp = requests.get(url, headers=headers, timeout=15)
         resp.raise_for_status()
-        
-        # 인코딩 방어코드 (EUC-KR 처리)
         resp.encoding = resp.apparent_encoding or 'euc-kr'
         
         soup = BeautifulSoup(resp.text, "html.parser")
-        
         tables = soup.find_all("table")
         for table in tables:
             text = table.get_text()
@@ -159,18 +151,17 @@ def get_current_rate() -> float | None:
     return get_backup_rate()
 
 def get_backup_rate() -> float | None:
-    """서울외국환중개 서버가 일시 오류일 때 작동하는 2차 백업 환율망"""
+    """[개선] 주말/시장교대기 데이터 공백 방지를 위해 period를 5d로 확장하여 최근 종가 확보"""
     try:
         ticker = yf.Ticker("USDKRW=X")
-        df = ticker.history(period="1d")
+        df = ticker.history(period="5d")
         if not df.empty:
-            return float(df['Close'].iloc[-1])
-    except Exception:
-        pass
+            return float(df['Close'].dropna().iloc[-1])
+    except Exception as e:
+        logger.error(f"❌ 2차 백업 환율망 조회 실패: {e}")
     return None
 
 def get_historical_rates(days: int = 365) -> list[float]:
-    """과거 1년 치 통계용 데이터셋을 안전하게 빌드합니다."""
     cached = load_cache()
     if cached:
         return cached
@@ -193,7 +184,6 @@ def get_historical_rates(days: int = 365) -> list[float]:
 # 계산 및 비즈니스 로직
 # =============================================
 def calc_applied_rate(base_rate: float) -> RateInfo:
-    """나무증권의 실제 우대 환율 계산법을 적용합니다."""
     spread_cost = config.NAMUH_SPREAD * (1 - config.PREFER_RATE / 100)
     spread_cost = round(spread_cost, 2)  
     
@@ -208,10 +198,16 @@ def calc_applied_rate(base_rate: float) -> RateInfo:
     }
 
 def calc_percentile(sorted_rates: list[float], current: float) -> float:
-    n = len(sorted_rates)
-    if n == 0:
+    """[개선] 현재 환율을 통계 데이터셋에 포함하여 정확한 백분위 계산"""
+    if not sorted_rates:
         return 50.0
-    idx = bisect.bisect_right(sorted_rates, current)
+    
+    # 원본 훼손 없는 가상 삽입 백분위 계산
+    combined_rates = sorted_rates + [current]
+    combined_rates.sort()
+    
+    idx = bisect.bisect_right(combined_rates, current)
+    n = len(combined_rates)
     return round((idx / n) * 100, 1)
 
 def get_median_applied_rate(sorted_base_rates: list[float]) -> float:
@@ -271,7 +267,7 @@ def send_discord_alert(rate_info: RateInfo, percentile: float, median_applied: f
                     "inline": False,
                 },
             ],
-            "timestamp": datetime.now(tz=__import__('datetime').timezone.utc).isoformat(),
+            "timestamp": datetime.now(tz=timezone.utc).isoformat(),
             "footer"   : {"text": f"우대율 {config.PREFER_RATE}% • 알림 기준 하위 {config.PERCENTILE_THRESHOLD:.0f}%"},
         }],
     }
@@ -315,17 +311,24 @@ def sync_config_to_git(rate_info: dict, percentile: float):
             logger.info("ℹ️ 환율 변동 사항이 없어 Git 커밋을 생략합니다.")
             return
 
-        is_github_action = os.getenv("GITHUB_ACTIONS") == "true"
-        subprocess.run(["git", "config", "--local", "user.name", "Automated Bot"], check=True)
-        subprocess.run(["git", "config", "--local", "user.email", "bot@example.com"], check=True)
+        # [개선] GitHub Actions 토큰 인증 기반의 안전한 원격 주소 설정 및 푸시 처리
+        github_token = os.getenv("GITHUB_TOKEN")
+        github_repository = os.getenv("GITHUB_REPOSITORY")
+        
+        subprocess.run(["git", "config", "--local", "user.name", "github-actions[bot]"], check=True)
+        subprocess.run(["git", "config", "--local", "user.email", "github-actions[bot]@users.noreply.github.com"], check=True)
         subprocess.run(["git", "add", str(config_path)], check=True)
         subprocess.run(["git", "commit", "-m", f"🤖 Auto-update config.json [Rate: {rate_info['applied_rate']}]"], check=True)
         
-        if is_github_action:
-            subprocess.run(["git", "push"], check=True)
+        if os.getenv("GITHUB_ACTIONS") == "true" and github_token and github_repository:
+            # 토큰을 이용한 권한 인증 주소 재설정
+            remote_url = f"https://x-access-token:{github_token}@github.com/{github_repository}.git"
+            subprocess.run(["git", "remote", "set-url", "origin", remote_url], check=True)
+            subprocess.run(["git", "push", "origin", "HEAD:main"], check=True)
+            logger.info("🚀 깃허브 서버로 자동 푸시 성공 (토큰 인증 적용).")
         else:
             subprocess.run(["git", "push", "origin", "main"], check=True)
-        logger.info("🚀 깃허브 서버로 동기화 완료.")
+            logger.info("🚀 로컬 기준 Git Push 성공.")
     except Exception as git_err:
         logger.error(f"❌ Git 동기화 중 에러 발생: {git_err}")
 
@@ -342,49 +345,21 @@ def analyze() -> Tuple[bool, RateInfo | dict, float, float]:
 
     return is_recommended, rate_info, percentile, median_applied
 
-# =============================================
-# 실행 컨트롤러
-# =============================================
 def run_once():
-    logger.info("=== 나무증권 환율 봇 (서울외국환 실시간 모드) ===")
+    logger.info("=== 나무증권 환율 봇 (GitHub Actions 1일 1회 실행 모드) ===")
     try:
         is_recommended, rate_info, percentile, median_applied = analyze()
         if not rate_info or len(rate_info) == 0:
-            logger.error("환율 조회 실패 - 서울외국환중개 서버 응답 없음")
+            logger.error("환율 조회 실패 - 서포트되는 모든 서버에서 응답이 없습니다.")
             return
 
         logger.info(f"실시간 적용환율: ₩{rate_info['applied_rate']:,.2f} | 백분위: 하위 {percentile:.1f}%")
+        # 1일 1회 정기 실행이므로, 추천 여부와 관계없이 스냅샷 형태의 리포트를 디스코드로 항시 전송
         send_discord_alert(rate_info, percentile, median_applied, is_recommended)
         sync_config_to_git(rate_info, percentile)
     except Exception as e:
         logger.error(f"run_once 오류 발생: {e}")
 
-def run_monitor():
-    logger.info("=== 나무증권 환율 봇 — 서울외국환 모니터링 모드 ===")
-    consecutive_errors = 0
-    while True:
-        try:
-            is_recommended, rate_info, percentile, median_applied = analyze()
-            if not rate_info or len(rate_info) == 0:
-                consecutive_errors += 1
-            else:
-                consecutive_errors = 0
-                logger.info(f"조회 성공 | 적용환율: ₩{rate_info['applied_rate']:,.2f} | 하위 {percentile:.1f}%")
-
-                if is_recommended:
-                    send_discord_alert(rate_info, percentile, median_applied, True)
-                    sync_config_to_git(rate_info, percentile)
-                    break
-            time.sleep(config.CHECK_INTERVAL)
-        except KeyboardInterrupt:
-            logger.info("👋 사용자에 의해 모니터링이 종료되었습니다.")
-            break
-        except Exception as e:
-            # 💡 아래처럼 e를 로그 출력에 사용하면 비활성 상태가 깔끔하게 해결됩니다!
-            logger.error(f"⚠️ 모니터링 중 예기치 못한 오류 발생: {e}")
-            time.sleep(60)
 if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1] == "monitor":
-        run_monitor()
-    else:
-        run_once()
+    # GitHub Actions Cron 스케줄러 환경이므로 무조건 1회 실행(run_once) 유도
+    run_once()
