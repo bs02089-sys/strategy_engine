@@ -14,7 +14,7 @@ strategy_engine/
 ├── sigma_position_manager.py   ← 핵심 매매 엔진 (본 파일)
 ├── config.json                 ← 전략 설정 파일 (수동 관리)
 ├── SOXL_VIX_SIGMA_BACKTEST.py  ← 백테스트 & 최적 배수 탐색
-└── vix_multiplier_optimizer.py ← VIX 구간별 황금 배수 역산
+└── optimize_strategy.py        ← VIX 구간별 최적 배수 역산
 ```
 
 ---
