@@ -156,7 +156,7 @@ python SOXL_VIX_SIGMA_BACKTEST.py
 
 ### VIX 구간별 황금 배수 역산
 ```bash
-python vix_multiplier_optimizer.py
+python optimiz_strategy.py
 ```
 - 3년치 데이터 기반 구간별 최적 배수 역산
 - 5거래일 청산 기준 승률 및 프로핏 팩터 산출
