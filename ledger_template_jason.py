@@ -6,7 +6,7 @@
       "date": "2026-05-25",
       "mode": "LONG",
       "action": "BUY",
-      "buy_price": 42.50,
+      "buy_target": 42.50,
       "qty": 15,
       "current_casts": 1
     },
@@ -25,7 +25,7 @@
       "date": "2026-05-26",
       "mode": "SHORT",
       "action": "BUY",
-      "target_price": 175.00,
+      "buy_target": 175.00,
       "qty": 10
     },
     
