@@ -21,8 +21,9 @@ env:
 jobs:
   fx_alert:
     runs-on: ubuntu-latest
-    # fx_alert.py는 GitHub Actions에서 run_once() 단발 실행이므로 10분이면 충분합니다
-    timeout-minutes: 10
+    # 💡 [신규 최적화] 무한 모니터링 모드로 동작하므로, 깃허브 액션이 불필요하게 6시간 동안 
+    # 서버를 붙잡고 있는 것을 방지하기 위해 최대 실행 시간을 360분(6시간)으로 타임아웃 제한을 걸어둡니다.
+    timeout-minutes: 360
 
     steps:
       - name: Checkout repository
@@ -49,34 +50,38 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.vscode_push_token_2026 }}
         run: python fx_alert.py
 
-      - name: Commit and push updated files
-        # Safety net: even if the job times out or is cancelled,
-        # any updated exchange logs and config are always committed.
+      - name: 실행 결과 및 로그 최종 커밋 & 푸시
+        # 💡 [안전장치] 만약 타임아웃(6시간 경과)으로 취소되거나 수동으로 중단하더라도, 
+        # 그때까지 쌓인 환율 실시간 로그 파일만큼은 유실 없이 무조건 저장소에 푸시하도록 설정합니다.
         if: always()
         env:
           PUSH_TOKEN: ${{ secrets.vscode_push_token_2026 }}
-          # [FIX] Force UTF-8 locale so bash handles multibyte chars safely.
-          # Commits messages are now ASCII-only to prevent
-          # "Malformed input to a URL function" from git push.
-          LANG: C.UTF-8
-          LC_ALL: C.UTF-8
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
+          
           CLEAN_TOKEN=$(echo "$PUSH_TOKEN" | tr -d '\r\n')
           git remote set-url origin "https://x-access-token:${CLEAN_TOKEN}@github.com/bs02089-sys/strategy_engine.git"
-
-          # Stage updated files
-          [ -f config.json ]                  && git add config.json
-          [ -f historical_rates_cache.json ]  && git add historical_rates_cache.json
-          [ -f fx_alert.log ]                 && git add -f fx_alert.log
-
-          # Commit and push only when there are staged changes
+          
+          # 실시간 업데이트된 config.json 장바구니에 담기
+          if [ -f config.json ]; then
+            git add config.json
+          fi
+          
+          # yfinance 통계 캐시 파일 담기
+          if [ -f historical_rates_cache.json ]; then
+            git add historical_rates_cache.json
+          fi
+          
+          # 실시간 추적 로그 파일 강제 담기
+          if [ -f fx_alert.log ]; then
+            git add -f fx_alert.log
+          fi
+          
+          # 변동 내역 최종 push 처리
           if ! git diff --cached --quiet; then
-            TIMESTAMP=$(date -u +'%Y-%m-%d %H:%M UTC')
-            git commit -m "chore: sync exchange_status and runtime log (${TIMESTAMP})"
-            git push --force-with-lease
+            git commit -m "chore: exchange_status 실시간 환율 및 런타임 로그 동기화 ($(date -u +'%Y-%m-%d %H:%M UTC'))"
+            git push --force-with-lease || git push
           else
-            echo "No changes to commit. Skipping push."
+            echo "✅ 새로 변경된 데이터나 로그가 없어 동기화를 건너뜁니다."
           fi

@@ -162,7 +162,7 @@ def get_current_rate() -> float | None:
                 cells = row.find_all(["td", "th"])
                 cell_texts = [c.get_text(strip=True) for c in cells]
 
-                # 위치 기반 파싱: 불필요한 any() 구조 제거 후 단순 조건으로 정리
+                # [FIX #2] 위치 기반 파싱: 불필요한 any() 구조 제거 후 단순 조건으로 정리
                 if len(cell_texts) > 1 and ("미국" in cell_texts[0] or "USD" in cell_texts[0]):
                     # SMBS 테이블에서 매매기준율은 두 번째 열(Index 1)에 위치
                     target_txt = cell_texts[1].replace(",", "")
@@ -178,7 +178,7 @@ def get_current_rate() -> float | None:
     except Exception as e:
         logger.error(f"❌ 서울외국환중개 실시간 환율 크롤링 실패: {e}")
 
-    # SMBS 성공 시에만 yfinance 교차 검증 호출 → 불필요한 선호출 제거
+    # [FIX #6] SMBS 성공 시에만 yfinance 교차 검증 호출 → 불필요한 선호출 제거
     if smbs_rate:
         yf_rate = get_backup_rate()
         if yf_rate:
@@ -256,7 +256,7 @@ def calc_applied_rate(base_rate: float) -> RateInfo:
 
 def calc_percentile(sorted_rates: list[float], current: float) -> float:
     """현재 환율이 과거 1년 데이터 중 하위 몇 %에 해당하는지 반환합니다.
-    현재값을 통계 모집단에 혼입하지 않아 백분위 왜곡을 방지합니다.
+    [FIX #1] 현재값을 통계 모집단에 혼입하지 않아 백분위 왜곡을 방지합니다.
     """
     if not sorted_rates:
         return 50.0
@@ -342,6 +342,7 @@ def send_discord_alert(rate_info: RateInfo, percentile: float, median_applied: f
 
 
 def sync_config_to_git(rate_info: dict, percentile: float):
+    # [FIX #3] 들여쓰기 오류 수정 — 함수 본문을 표준 4칸으로 정렬
     config_path = Path("config.json")
     if config_path.exists():
         try:
@@ -355,7 +356,7 @@ def sync_config_to_git(rate_info: dict, percentile: float):
     if "exchange_status" not in full_config:
         full_config["exchange_status"] = {}
 
-    # timezone.utc 통일 — naive datetime 혼용 방지
+    # [FIX #4] timezone.utc 통일 — naive datetime 혼용 방지
     full_config["exchange_status"]["LAST_CHECK_DATE"] = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     full_config["exchange_status"]["CURRENT_APPLIED_RATE"] = rate_info["applied_rate"]
     full_config["exchange_status"]["CURRENT_PERCENTILE"] = percentile
@@ -408,7 +409,10 @@ def analyze() -> Tuple[bool, RateInfo | dict, float, float]:
 # 실행 컨트롤러
 # =============================================
 def run_once():
-    """GitHub Actions 스케줄 실행용 — 1회 조회 후 종료합니다."""
+    """GitHub Actions 스케줄 실행용 — 1회 조회 후 종료합니다.
+    Git push는 yml 워크플로우가 전담합니다.
+    이 함수는 config.json 로컬 기입(exchange_status 갱신)까지만 수행합니다.
+    """
     logger.info("=== 나무증권 환율 봇 (서울외국환 실시간 모드) — 단발 실행 ===")
     try:
         is_recommended, rate_info, percentile, median_applied = analyze()
@@ -418,7 +422,20 @@ def run_once():
 
         logger.info(f"실시간 적용환율: ₩{rate_info['applied_rate']:,.2f} | 하위 {percentile:.1f}%")
         send_discord_alert(rate_info, percentile, median_applied, is_recommended)
-        sync_config_to_git(rate_info, percentile)
+
+        # config.json 로컬 기입만 수행 (Git push는 yml 워크플로우 마지막 스텝이 담당)
+        config_path = Path("config.json")
+        try:
+            full_config = json.loads(config_path.read_text(encoding="utf-8")) if config_path.exists() else {}
+        except Exception:
+            full_config = {}
+        full_config.setdefault("exchange_status", {})
+        full_config["exchange_status"]["LAST_CHECK_DATE"] = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        full_config["exchange_status"]["CURRENT_APPLIED_RATE"] = rate_info["applied_rate"]
+        full_config["exchange_status"]["CURRENT_PERCENTILE"] = percentile
+        config_path.write_text(json.dumps(full_config, ensure_ascii=False, indent=2), encoding="utf-8")
+        logger.info("📝 config.json exchange_status 로컬 기입 완료. Git push는 yml이 처리합니다.")
+
     except Exception as e:
         logger.error(f"run_once 오류 발생: {e}")
 
@@ -429,7 +446,7 @@ def run_monitor():
     consecutive_errors = 0
     ERROR_THRESHOLD    = 5  # 연속 장애 임계값: 초과 시 Discord SOS 알림 발송
 
-    # timezone.utc aware datetime으로 통일 — 향후 파일 저장/로드 확장 시 충돌 방지
+    # [FIX #4] timezone.utc aware datetime으로 통일 — 향후 파일 저장/로드 확장 시 충돌 방지
     last_alert_time: datetime | None = None
 
     while True:
