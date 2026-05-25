@@ -1,5 +1,5 @@
 """
-글로벌 시장 뉴스 수집 및 AI 번역 에러 핸들링 봇 (올라마-Gemini 하이브리드 교차 검증 버전)
+글로벌 시장 뉴스 수집 및 AI 번역 에러 핸들링 봇 (V2: 기사별 핵심 팩트 요약 기능 탑재)
 """
 
 import os
@@ -13,7 +13,6 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 # 🛡️ [올라마 라이브러리 하이브리드 방어막 설정]
-# 로컬 PC 환경(Ollama 존재)과 깃허브 액션즈 환경(Ollama 부재)을 스스로 판별합니다.
 try:
     import ollama
     HAS_OLLAMA = True
@@ -56,7 +55,7 @@ MAX_NEWS_PER_KEYWORD = NEWS_SETTINGS.get("MAX_NEWS_PER_KEYWORD", 5)
 
 
 def fetch_latest_news():
-    """Google News RSS를 통해 키워드별 최신 뉴스를 수집합니다."""
+    """[🚀 1단계 업그레이드] Google News RSS에서 제목과 본문 요약문(Snippet)을 매핑하여 수집합니다."""
     all_news_text = ""
     headers = {"User-Agent": "Mozilla/5.0"}
     
@@ -69,9 +68,20 @@ def fetch_latest_news():
                 all_news_text += f"\n### 📂 검색 키워드: {kw}\n"
                 items = root.findall(".//item")
                 
-                for item in items[:MAX_NEWS_PER_KEYWORD]:
-                    title = item.find('title').text or ""
-                    all_news_text += f"- {title}\n"
+                for idx, item in enumerate(items[:MAX_NEWS_PER_KEYWORD], 1):
+                    title = item.find('title').text or "No Title"
+                    # 💡 구글이 제공하는 본문 짧은 서두 텍스트(Description)를 긁어옵니다.
+                    description = item.find('description').text or ""
+                    
+                    # HTML 태그 제거 및 기사 묶음 구조화
+                    clean_desc = ET.fromstring(f"<p>{description}</p>").itertext()
+                    desc_text = "".join(clean_desc).strip()
+                    # 너무 긴 찌꺼기 텍스트 방지용 슬라이싱
+                    desc_text = desc_text[:200] if desc_text else "본문 요약 없음"
+
+                    all_news_text += f"기사 {idx}.\n"
+                    all_news_text += f"- 제목: {title}\n"
+                    all_news_text += f"- 내용: {desc_text}\n\n"
         except Exception as e:
             print(f"❌ 뉴스 수집 에러 ({kw}): {e}")
             continue
@@ -122,7 +132,7 @@ def main():
     if not GEMINI_API_KEY:
         GEMINI_API_KEY = config_data.get("GEMINI_API_KEY")
 
-    # 1. 뉴스 수집 단계
+    # 1. 뉴스 및 본문 설명문 수집 단계
     news_content = fetch_latest_news()
     if not news_content.strip():
         print("ℹ️ 수집된 뉴스가 없습니다.")
@@ -131,15 +141,21 @@ def main():
     report = None
     ai_mode_notice = ""
 
-    # 2. ✨ AI 엔진 분기 처리 (Ollama vs Gemini)
+    # 2. ✨ [🚀 2단계 업그레이드] 정교한 팩트 요약 프롬프트 주입 구역
     if HAS_OLLAMA:
-        # 💻 로컬 PC 환경: 오프라인 무료 Ollama 엔진 구동
-        ai_mode_notice = "🤖 **[Ollama AI 뉴스 브리핑]**\n\n"
-        print("ℹ️ 로컬 AI 엔진(Ollama) 감지: Llama3 모델로 뉴스 요약 및 번역을 시작합니다.")
+        ai_mode_notice = "🤖 **[Ollama AI 뉴스 팩트 브리핑]**\n\n"
+        print("ℹ️ 로컬 AI 엔진(Ollama) 감지: 기사 제목과 본문을 대조하여 실질적 팩트 요약을 시작합니다.")
         try:
             prompt = (
-                f"너는 금융 전문 번역가이자 퀀트 애널리스트야. 아래 뉴스 제목들을 한국어로 직관적이고 깔끔하게 번역해줘.\n"
-                f"단, 회사명, 주식 티커(NVDA, SOXL 등), 고유명사는 영문 그대로 유지해줘. 섹터별 분류 구조도 그대로 유지해줘:\n\n{news_content}"
+                f"너는 월스트리트 출신의 전문 금융 애널리스트이자 번역가야. 내가 준 기사 세트(제목과 내용)를 바탕으로 리포트를 작성해줘.\n\n"
+                f"🚨 [작성 규칙]\n"
+                f"1. 단순 의문문이나 낚시성 제목에 낚이지 말고, 제공된 '내용'을 파악해서 실질적인 정보와 '팩트(Fact)' 중심의 결과물로 보정해줘.\n"
+                f"2. 각 기사는 반드시 아래의 형식을 똑같이 유지해서 한 줄 한 줄 깔끔하게 출력해줘.\n"
+                f"3. 회사명, 주식 티커(NVDA, SOXL, TSLA 등), 고유명사는 번역하지 말고 영문 그대로 유지해줘.\n\n"
+                f"📝 [출력 포맷 예시]\n"
+                f"- **[한국어 번역 제목]** (영문 원제)\n"
+                f"  └ 💡 **핵심 팩트:** 기사 본문 내용을 기반으로 한 알맹이 있는 실질적 내용 한 줄 요약\n\n"
+                f"이제 아래의 뉴스 데이터를 가지고 규칙과 포맷에 맞춰 작업해줘:\n\n{news_content}"
             )
             response = ollama.chat(
                 model='llama3',
@@ -149,14 +165,14 @@ def main():
         except Exception as e:
             print(f"❌ 로컬 Ollama 구동 실패: {e}. Gemini 백업 엔진 전환을 시도합니다.")
 
-    # 🐙 깃허브 서버 환경이거나 로컬 Ollama가 실패한 경우 -> Gemini API 백업 작동
+    # 🐙 깃허브 서버용 Gemini API 백업 구동 (동일한 팩트 요약 프롬프트 적용)
     if not report:
         if not GEMINI_API_KEY:
             print("❌ 에러: AI 처리를 위한 자격 증명(Ollama 또는 GEMINI_API_KEY)이 없습니다.")
             return
             
-        ai_mode_notice = "✨ **[Gemini AI 뉴스 브리핑]**\n\n"
-        print("ℹ️ 클라우드 AI 엔진(Gemini) 구동: 뉴스 번역을 시작합니다.")
+        ai_mode_notice = "✨ **[Gemini AI 뉴스 팩트 브리핑]**\n\n"
+        print("ℹ️ 클라우드 AI 엔진(Gemini) 구동: 팩트 요약 번역을 시작합니다.")
         try:
             client = genai.Client(
                 api_key=GEMINI_API_KEY,
@@ -164,8 +180,15 @@ def main():
             )
             
             prompt = (
-                f"너는 금융 전문 번역가야. 아래 뉴스 제목들을 한국어로 번역해줘.\n"
-                f"단, 회사명, 주식 티커, 고유명사는 영문 그대로 유지해. 섹터 구조는 그대로 유지해:\n\n{news_content}"
+                f"너는 월스트리트 출신의 전문 금융 애널리스트이자 번역가야. 내가 준 기사 세트(제목과 내용)를 바탕으로 리포트를 작성해줘.\n\n"
+                f"🚨 [작성 규칙]\n"
+                f"1. 단순 의문문이나 낚시성 제목에 낚이지 말고, 제공된 '내용'을 파악해서 실질적인 정보와 '팩트(Fact)' 중심의 결과물로 보정해줘.\n"
+                f"2. 각 기사는 반드시 아래의 형식을 똑같이 유지해서 한 줄 한 줄 깔끔하게 출력해줘.\n"
+                f"3. 회사명, 주식 티커, 고유명사는 번역하지 말고 영문 그대로 유지해줘.\n\n"
+                f"📝 [출력 포맷 예시]\n"
+                f"- **[한국어 번역 제목]** (영문 원제)\n"
+                f"  └ 💡 **핵심 팩트:** 기사 본문 내용을 기반으로 한 알맹이 있는 실질적 내용 한 줄 요약\n\n"
+                f"이제 아래의 뉴스 데이터를 가지고 규칙과 포맷에 맞춰 작업해줘:\n\n{news_content}"
             )
             
             response = client.models.generate_content(
@@ -182,12 +205,12 @@ def main():
     else:
         final_message = f"⚠️ **AI 번역 전원 실패 (뉴스 원문 출력)**\n\n{news_content}"
 
-    # 4. 매월 1일 하트비트/핑 기능 (계정 만료 방지)
+    # 4. 매월 1일 하트비트/핑 기능
     ping_prefix = ""
     if datetime.now().day == 1:
         ping_prefix = "📡 **[System Ping]** 디스코드 계정 활성화 유지 신호 송신 중 (정상 작동)\n\n"
         
-    # 5. 환경 맞춤형 최종 전송 및 화면 출력 제어
+    # 5. 최종 출력 제어
     if DISCORD_WEBHOOK:
         send_to_discord(DISCORD_WEBHOOK, DISCORD_USER_ID, final_message, ping_prefix)
     else:
