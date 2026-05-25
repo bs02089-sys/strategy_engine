@@ -42,9 +42,9 @@
     "ANNUAL_QUOTA": 24
   },
   "exchange_status": {
-    "LAST_CHECK_DATE": "2026-05-25 03:17:45 UTC",
-    "CURRENT_APPLIED_RATE": 1510.21,
-    "CURRENT_PERCENTILE": 99.2
+    "LAST_CHECK_DATE": "2026-05-25 07:17:39 UTC",
+    "CURRENT_APPLIED_RATE": 1513.25,
+    "CURRENT_PERCENTILE": 99.6
   },
   "news_settings": {
     "KEYWORDS": [
