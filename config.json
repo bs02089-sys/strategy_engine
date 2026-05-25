@@ -38,7 +38,7 @@
   },
   "DEFAULTS": {
     "SIGMA_DEFAULT": 2.0,
-    "LAST_CAST_DATE": "2026-01-01",
+    "LAST_CAST_DATE": "2026-05-07",
     "ANNUAL_QUOTA": 24
   },
   "exchange_status": {

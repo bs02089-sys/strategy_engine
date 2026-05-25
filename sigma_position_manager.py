@@ -55,7 +55,6 @@ def setup_environment() -> dict:
         "SIGMA_DEFAULT": 2.0,
         "LAST_CAST_DATE": "2026-05-07",
         "ANNUAL_QUOTA": 24,   
-        "MAX_DROP_PROTECTION": 0.10
     })
 
     return {
@@ -439,7 +438,6 @@ def generate_long_portfolio_chart(df: pd.DataFrame, config: dict, output_filenam
 
 
 # Git 동기화 함수
-# Git 동기화 함수
 def sync_config_to_git(target_date: datetime.date):
     today_str = target_date.strftime("%Y-%m-%d")
 
@@ -618,7 +616,6 @@ def send_discord_message_with_file(content: str, webhook_url: str, user_id: str,
         return False
     
 
-# ====================== 메인 ======================
 # ====================== 메인 ======================
 def main():
     chart_filename = "portfolio_trend.png"
