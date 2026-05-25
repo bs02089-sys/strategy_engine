@@ -71,7 +71,94 @@ def setup_environment() -> dict:
     }
         
 
-# ====================== 유틸 ======================
+# ====================== ⚙️ 자동 동기화 및 유틸 ======================
+def sync_ledger_to_config():
+    """
+    💡 [핵심 아이디어]
+    ledger.json(장부)을 읽어 config.json의 포지션 정보, 평단가(누적 가중평균), 
+    최종 사용 날짜를 자동으로 계산하여 시스템에 완전히 덮어씁니다.
+    """
+    if not os.path.exists("ledger.json") or not os.path.exists("config.json"):
+        logger.info("ℹ️ ledger.json 또는 config.json 파일이 없어 자동 동기화를 건너뜁니다.")
+        return
+
+    try:
+        with open("ledger.json", "r", encoding="utf-8") as f:
+            ledger = json.load(f)
+        with open("config.json", "r", encoding="utf-8") as f:
+            config = json.load(f)
+    except Exception as e:
+        logger.error(f"❌ 파일 로드 실패 (동기화 중단): {e}")
+        return
+
+    # 안전구역 구조 확보
+    if "POSITIONS" not in config:
+        config["POSITIONS"] = {}
+    if "DEFAULTS" not in config:
+        config["DEFAULTS"] = {}
+
+    # 장부 데이터를 바탕으로 누적 실시간 연산 가동
+    for ticker, info in ledger.items():
+        action = info.get("action")
+        mode = info.get("mode")
+        
+        if action == "BUY":
+            buy_target = info.get("buy_target", 0.0)
+            new_qty = info.get("qty", 0)
+            current_casts = info.get("current_casts", 1)
+            tx_date = info.get("date", "")
+
+            # 🧮 기존 포지션 유무에 따른 누적 평단가(가중평균) 동적 계산
+            if ticker in config["POSITIONS"]:
+                old_pos = config["POSITIONS"][ticker]
+                old_total_shares = old_pos.get("TOTAL_SHARES", 0)
+                old_avg_price = old_pos.get("MY_AVG_PRICE", 0.0)
+                
+                # 수학적 공식 대입
+                total_cost = (old_total_shares * old_avg_price) + (new_qty * buy_target)
+                final_shares = old_total_shares + new_qty
+                
+                if final_shares > 0:
+                    calculated_avg_price = round(total_cost / final_shares, 4)
+                else:
+                    calculated_avg_price = buy_target
+            else:
+                # 포지션이 없던 종목은 최초 진입 처리
+                final_shares = new_qty
+                calculated_avg_price = buy_target
+
+            # 🤖 config.json 맞춤형 데이터 완전 자동 조립
+            config["POSITIONS"][ticker] = {
+                "MODE": mode,
+                "TOTAL_SHARES": final_shares,
+                "MY_AVG_PRICE": calculated_avg_price,
+                "CURRENT_CASTS": current_casts,
+                "ANNUAL_QUOTA": config["DEFAULTS"].get("ANNUAL_QUOTA", 24), # 원칙 유지
+                "LAST_CAST_DATE": tx_date
+            }
+
+            # 📅 시스템 전체 최종 활동일 함께 싱크
+            if tx_date:
+                config["DEFAULTS"]["LAST_CAST_DATE"] = tx_date
+
+        elif action == "SELL":
+            # 전량 매도 완료 건 발생 시 청산 처리
+            if ticker in config["POSITIONS"]:
+                logger.info(f"📉 장부 확인 - {ticker} 전량 매도 완료: 포지션을 청산합니다.")
+                del config["POSITIONS"][ticker]
+                
+            if info.get("date"):
+                config["DEFAULTS"]["LAST_CAST_DATE"] = info.get("date")
+
+    # 연산 결과 설정 파일에 안전하게 덮어쓰기
+    try:
+        with open("config.json", "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=2, ensure_ascii=False)
+        logger.info("✅ 장부(ledger) 기반 config.json 누적 연산 및 자동 동기화 성공!")
+    except Exception as e:
+        logger.error(f"❌ config.json 자동 저장 실패: {e}")
+
+
 def get_vix_report() -> tuple[float, str]:
     try:
         df = yf.download("^VIX", period="2d", progress=False)
@@ -201,7 +288,6 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
             buy_target = base * (1 - std_20d * v_fear / 100)
             buy_name, sub_msg = f"-{v_fear}σ", "🔴 VIX 공포"
         elif is_open and gap_ratio < -0.001:
-            # gap_adjust를 더해야 시가 아래 타점이 잡힘 (- → +)
             gap_adjust = abs(gap_ratio) * 100
             rem = max(0, std_20d + gap_adjust)
             buy_target = today_open * (1 - rem / 100)
@@ -237,16 +323,16 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
         gap_pct = abs(gap_ratio) * 100
         if gap_pct <= 5.0:
             adjusted_multiplier = 0.45
-            gap_zone = f"-3%~-5% 구간"
+            gap_zone = "-3%~-5% 구간"
         elif gap_pct <= 7.0:
             adjusted_multiplier = 0.25
-            gap_zone = f"-5%~-7% 구간"
+            gap_zone = "-5%~-7% 구간"
         elif gap_pct <= 10.0:
             adjusted_multiplier = 0.10
-            gap_zone = f"-7%~-10% 구간"
+            gap_zone = "-7%~-10% 구간"
         else:
             adjusted_multiplier = 0.0
-            gap_zone = f"-10% 초과 구간"
+            gap_zone = "-10% 초과 구간"
         sub_msg_gap = f" (갭 {gap_ratio*100:.1f}% / {gap_zone} → 배수 {multiplier:.2f}→{adjusted_multiplier:.2f})"
     else:
         adjusted_multiplier = multiplier
@@ -265,7 +351,6 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
     min_days_gate = 14 if std_20d > normal_std * 1.3 else 5
     is_time_gate_passed = days_since >= min_days_gate
 
-    # 1. 타임 가드 상태 및 직관적인 가이드 멘트 산출
     if is_open and current_price <= long_buy and not is_time_gate_passed:
         time_guard_status = "🔥 [시간 가드 강제 해제] 초저점 도달로 실탄 집행!"
         action_ment = f"계산된 초저점 타깃가(${long_buy:.2f})를 터치하여 기계적으로 매수를 집행합니다."
@@ -277,11 +362,9 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
         action_ment = f"조급한 실탄 고갈을 막기 위해 관망합니다. 가드 해제 후 유효 매수 예정가는 ${long_buy:.2f}입니다."
 
     annual_quota = pos_cfg.get("ANNUAL_QUOTA", defaults.get("ANNUAL_QUOTA", 24))
-
-    # 2. 결과 딕셔너리
     current_casts = pos_cfg.get("CURRENT_CASTS", 0)
     exhaustion_rate = min(current_casts / max(annual_quota, 1) * 100, 100.0)
-    # 소진율 100% 초과 시 경고 로그
+    
     if current_casts > annual_quota:
         logger.warning(f"⚠️ {ticker} CURRENT_CASTS({current_casts})가 ANNUAL_QUOTA({annual_quota})를 초과했습니다!")
 
@@ -325,8 +408,6 @@ def calculate_split_sell_targets(base_price: float, std_20d: float, shares: int)
 
 # ====================== 📊 시각화 엔진 ======================
 def generate_long_portfolio_chart(df: pd.DataFrame, config: dict, output_filename: str = "portfolio_trend.png"):
-    """LONG 모드 계좌 전용 월별 누적수익률 및 계좌 평가액 추세 차트 생성"""
-    # matplotlib 미설치 시 차트만 스킵, 봇 전체 크래시 방지
     try:
         import matplotlib.pyplot as plt
     except ImportError:
@@ -339,7 +420,6 @@ def generate_long_portfolio_chart(df: pd.DataFrame, config: dict, output_filenam
         logger.info("ℹ️ LONG 모드 종목이 없어 차트 생성을 스킵합니다.")
         return False
 
-    # 데이터 프레임 단일/멀티 인덱스 예외 보정
     try:
         chart_data = pd.DataFrame(index=df.index)
         for tk in long_tickers:
@@ -355,10 +435,8 @@ def generate_long_portfolio_chart(df: pd.DataFrame, config: dict, output_filenam
     if chart_data.empty:
         return False
 
-    # 월별 말일 데이터 추출하여 월별 추세 트래킹
     monthly_df = chart_data.resample('ME').last()
     if len(monthly_df) < 2:
-        # 데이터 일수가 너무 적은 경우 일별 데이터 그대로 사용
         monthly_df = chart_data
         x_labels = monthly_df.index.strftime('%m-%d')
         title_suffix = "(일별 추세)"
@@ -366,40 +444,31 @@ def generate_long_portfolio_chart(df: pd.DataFrame, config: dict, output_filenam
         x_labels = monthly_df.index.strftime('%Y-%m')
         title_suffix = "(월별 추세)"
 
-    # 포트폴리오 메트릭 계산
     total_value_series = pd.Series(0.0, index=monthly_df.index)
     total_cost = 0.0
-    
-    # 각 종목별 수익률 및 누적 금액 합산
     returns_dict = {}
+    
     for tk in long_tickers:
         pos = positions_cfg[tk]
         avg_price = float(pos.get("MY_AVG_PRICE", 0.0))
         shares = int(pos.get("TOTAL_SHARES", 0))
         
         if avg_price > 0 and shares > 0:
-            # 월별 자산 가치 = 현재가 * 보유 주식 수
-            total_value_series += (monthly_df[tk] * shares).fillna(0)  # NaN 전파 방지
+            total_value_series += (monthly_df[tk] * shares).fillna(0)
             total_cost += avg_price * shares
-            # 종목별 수익률
             returns_dict[tk] = ((monthly_df[tk] - avg_price) / avg_price) * 100
         else:
-            # 평단가 정보가 없는 경우 첫 거래일 기준 간이 수익률 계산
             returns_dict[tk] = ((monthly_df[tk] - monthly_df[tk].iloc[0]) / monthly_df[tk].iloc[0]) * 100
 
-    # 종합 누적 수익률 (%)
     if total_cost > 0:
         portfolio_return = ((total_value_series - total_cost) / total_cost) * 100
     else:
-        # 투자 금액 산출 불가 시 자산 단순 합산의 변동률 추종
         portfolio_return = total_value_series.pct_change().cumsum() * 100
         portfolio_return.iloc[0] = 0.0
 
-    # 스타일 및 차트 그리기 (plt)
     plt.style.use('seaborn-v0_8-darkgrid' if 'seaborn-v0_8-darkgrid' in plt.style.available else 'default')
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
     
-    # [차트 1] 월별 누적 수익률 (%)
     for tk, ret_series in returns_dict.items():
         ax1.plot(monthly_df.index, ret_series, marker='o', linestyle='--', alpha=0.6, label=f"{tk} 수익률")  
     
@@ -410,7 +479,6 @@ def generate_long_portfolio_chart(df: pd.DataFrame, config: dict, output_filenam
     ax1.set_ylabel("수익률 (%)", fontsize=11)
     ax1.legend(loc="upper left")
 
-    # [차트 2] 계좌 평가 금액 추세 ($)
     if total_cost > 0:
         ax2.fill_between(monthly_df.index, total_value_series, total_cost, where=(total_value_series >= total_cost), 
                          interpolate=True, color='green', alpha=0.15, label='익절 구간')
@@ -419,7 +487,6 @@ def generate_long_portfolio_chart(df: pd.DataFrame, config: dict, output_filenam
         ax2.axhline(total_cost, color='blue', linestyle=':', alpha=0.7, label=f'총 투자금 (${total_cost:,.2f})')
         ax2.plot(monthly_df.index, total_value_series, marker='o', color='#2ca02c', linewidth=2.5, label=f'계좌 평가액 (${total_value_series.iloc[-1]:,.2f})') 
     else:
-        # 기본 자산 가격 합산 그래프
         ax2.plot(monthly_df.index, total_value_series, marker='o', color='#7f7f7f', label='자산 가격 지수 합산') 
         
     ax2.set_title("💰 LONG 포트폴리오 계좌 자산 평가액 추세", fontsize=13, fontweight='bold')
@@ -430,7 +497,6 @@ def generate_long_portfolio_chart(df: pd.DataFrame, config: dict, output_filenam
     plt.xticks(rotation=30)
     plt.tight_layout()
     
-    # 이미지 파일 저장
     plt.savefig(output_filename, dpi=150)
     plt.close()
     logger.info(f"📊 시각화 차트 생성 완료: {output_filename}")
@@ -450,14 +516,10 @@ def sync_config_to_git(target_date: datetime.date):
             logger.info("📝 config.json 변경사항이 없어 Git Commit을 생략합니다.")
             return
 
-        # 💡 [하이브리드 환경 최적화 마법 구문]
-        # 현재 실행 환경이 깃허브 액션즈(서버) 위라면, 중복 푸시 충돌을 막기 위해 여기서 루프를 종료합니다.
-        # 최종 푸시는 워크플로우(.yml)의 맨 마지막 스텝이 안전하게 처리합니다.
         if os.getenv("GITHUB_ACTIONS") == "true":
             logger.info("ℹ️ GitHub Actions 환경 감지: 파이썬 내부 푸시를 생략하고 워크플로우에 위임합니다.")
             return
 
-        # 💻 여기서부터는 오직 '로컬 PC 파워셸'에서 수동 실행했을 때만 실행되는 안전지대입니다.
         subprocess.run(["git", "config", "user.name", "Automated Bot"], check=True, timeout=10)
         subprocess.run(["git", "config", "user.email", "bot@example.com"], check=True, timeout=10)
         subprocess.run(["git", "add", "config.json"], check=True, timeout=10)
@@ -557,7 +619,7 @@ def create_combined_message(results: dict, is_open: bool,
 
         if v.get("mode") == "LONG":
             lines += [
-                f"-----------------------------------------",
+                "-----------------------------------------",
                 f"📊 일간 평균 변동성 : ±{v.get('daily_sigma', 0.0):.2f}%",
                 f"💡 적용 배수     : {v.get('multiplier', 0.0):.2f}x",
                 f"⚙️ 타임 엔진     : {v.get('time_guard_info', '정보 없음')}",
@@ -589,25 +651,20 @@ def send_discord_message_with_file(content: str, webhook_url: str, user_id: str,
     if not webhook_url:
         return False
         
-    # 멘션 뒤에 한 줄 띄워 가독성 확보
     mention = f"<@{user_id}>\n\n" if user_id else ""
     
     try:
-        # 마크다운 태그(##, **, 이모지)가 온전하게 작동하도록 수정
         payload = {
             "content": f"{mention}{content}"  
         }
         
-        # 파일 첨부 여부에 따라 격리 전송 처리
         if file_path and os.path.exists(file_path):
             with open(file_path, 'rb') as f:
                 files = {
                     "file": (os.path.basename(file_path), f, "image/png")
                 }
-                # multipart/form-data 형태로 payload와 file을 동시에 포스트
                 r = requests.post(webhook_url, data=payload, files=files, timeout=20)
         else:
-            # 파일이 없을 때는 json 형태로 일반 포스트
             r = requests.post(webhook_url, json=payload, timeout=15)
             
         return r.status_code in (200, 204)
@@ -620,8 +677,12 @@ def send_discord_message_with_file(content: str, webhook_url: str, user_id: str,
 def main():
     chart_filename = "portfolio_trend.png"
     try:
+        # 1. 🔥 [리팩토링 핵심] 데이터 로드 전, 사용자 장부(ledger.json) 현황을 config.json에 강제 실시간 싱크 처리!
+        sync_ledger_to_config()
+
+        # 2. 동기화가 반영된 최신 상태의 환경 설정값 로드
         config = setup_environment()
-        logger.info("✅ 설정 로드 완료")
+        logger.info("✅ 최신 설정 로드 및 연동 완료")
 
         kst_now = datetime.now(config["kst"])
         now_est = datetime.now(config["est"])
@@ -654,10 +715,9 @@ def main():
         # ==================== 리포트 생성 & Discord 전송 ====================
         kst_str = kst_now.strftime('%Y-%m-%d %H:%M:%S')
         
-        # 1. 기존 엔진의 정량 분석 메시지 생성 (기존 로직 유지)
         msg = create_combined_message(results, is_open, kst_str, vix_info, is_last)
         
-        # 2. 🔥 [올라마 AI 연동 레이어 삽입] 
+        # 🔥 [올라마 AI 연동 레이어 작동] 
         try:
             logger.info("🤖 올라마(Ollama) 로컬 AI가 정량 타점 데이터 브리핑을 시작합니다...")
             
@@ -668,14 +728,12 @@ def main():
                 f"[매매 엔진 정량 데이터]\n{msg}"
             )
             
-            # 로컬 Llama3 모델 호출 (내 PC GPU 연산)
             ollama_resp = ollama.chat(
                 model="llama3",
                 messages=[{"role": "user", "content": ai_prompt}]
             )
             ai_insight = ollama_resp['message']['content']
             
-            # 기존 리포트 상단에 올라마의 핵심 인사이트를 결합하여 msg 변수 업데이트
             msg = (
                 f"💡 **올라마 로컬 AI 퀀트 가이드**\n"
                 f"{ai_insight}\n"
@@ -683,10 +741,9 @@ def main():
                 f"{msg}"
             )
         except Exception as ollama_err:
-            # 올라마가 안 켜져 있거나 에러 발생 시, 기존 정량 리포트만 안전하게 나가도록 방어 코드 구축
             logger.warning(f"⚠️ 올라마 분석 레이어 건너뜀 (로컬 전용): {ollama_err}")
 
-        # 3. 최종 메시지를 이미지와 함께 디스코드 전송 (기존 로직 유지)
+        # 3. 최종 메시지를 이미지와 함께 디스코드 전송
         send_success = send_discord_message_with_file(
             content=msg, 
             webhook_url=config["webhook"], 
@@ -708,7 +765,7 @@ def main():
             except Exception:
                 pass
 
-                        
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format='%(message)s')
     main()
