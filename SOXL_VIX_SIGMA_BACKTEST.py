@@ -38,7 +38,7 @@ def verify_long_term_hold_logic():
 
     df['Log_Ret'] = np.log(df['Close'] / df['Close'].shift(1))
 
-    # [FIX #7] 통계 기준 일치: 백테스트 전 기간에 걸쳐 고정 window=90으로 rolling sigma 계산.
+    # 통계 기준 일치: 백테스트 전 기간에 걸쳐 고정 window=90으로 rolling sigma 계산.
     # 단, rolling sigma는 과거 데이터에만 의존(미래 누수 없음)하므로 그대로 유지.
     # 분석 기간(4y) 전체를 동일한 90일 롤링 sigma 기준으로 통일 → 국면별 편차는 sigma 자체에 반영됨.
     df['Daily_Sigma'] = df['Log_Ret'].rolling(window=90, min_periods=60).std(ddof=1)
@@ -54,7 +54,7 @@ def verify_long_term_hold_logic():
     df = df.dropna().copy()
     df.index = pd.to_datetime(df.index)
 
-    # ==================== exits 시그널 생성 (FIX #3) ====================
+    # ==================== exits 시그널 생성 ====================
     # 전략: 매수 기간 ~2027-05 / 청산 시점 ~2028-05 (각 매수일로부터 252거래일 후)
     # 구현: 각 진입일의 integer 위치 + 252 위치에 exit=True 설정
     # - 같은 날 복수 진입이 쌓여도 252거래일 후 동일하게 전량 청산
@@ -78,7 +78,7 @@ def verify_long_term_hold_logic():
     # ====================== 안전 범위 정의 및 조건 설정 ======================
     # MULT_EXTREME 하한을 2.50으로 설정:
     #   - MULT_FEAR 최대값(2.45)보다 반드시 커야 한다는 설계 원칙을 코드에 명시적으로 표현
-    #   - 2.40~2.45 구간은 어차피 `extreme <= fear` 필터에 걸려 탐색에서 제외되므로
+    #   - 2.40~2.45 구간은 어차피 `extreme <= fear` 필터에 걸려 탐색에서 제외되므로,
     #     하한을 2.40으로 두나 2.50으로 두나 탐색 결과는 동일함
     #   - config.json의 현재 운용값(2.40)은 이 파일과 역할이 다름:
     #     백테스트 → 최적값 탐색 후 config.json에 저장 → optimize_strategy.py가 AI 미세조정
@@ -89,7 +89,7 @@ def verify_long_term_hold_logic():
         "MULT_EXTREME": (2.50, 2.75)   # fear 최대(2.45) 초과 보장 — 탐색 의도를 코드에 명시
     }
 
-    # ====================== [FIX #2] 갭 보정 완전 벡터화 ======================
+    # ====================== 갭 보정 완전 벡터화 ======================
     # apply_gap_correction Python 루프 제거 → np.select로 전면 교체
     # 조건은 gap_ratio 기준 계단식: -3% 이상=base, -5%=-0.45, -7%=0.25, -10%=0.10, 이하=0.0
     def apply_gap_correction_vectorized(base_multipliers: np.ndarray, gap_ratio: np.ndarray) -> np.ndarray:
@@ -117,12 +117,12 @@ def verify_long_term_hold_logic():
             np.where(df['VIX'].values >= 20, fear, normal)
         )
 
-        # [FIX #2] 벡터화된 갭 보정 적용
+        # 벡터화된 갭 보정 적용
         adj_multipliers = apply_gap_correction_vectorized(multipliers, df['Gap_Ratio'].values)
 
         target_prices = df['Open'].values * np.exp(-df['Daily_Sigma'].values * adj_multipliers)
 
-        # [FIX #8] 갭 하락 시 Open < target_price 케이스 처리:
+        # 갭 하락 시 Open < target_price 케이스 처리:
         # 실제 체결가는 min(Open, target_price) → Open이 이미 target 아래면 Open으로 체결
         exec_prices = np.minimum(df['Open'].values, target_prices)
 
@@ -130,8 +130,8 @@ def verify_long_term_hold_logic():
 
         return triggered, exec_prices
 
-    # ==================== 수수료 상수 (FIX #1) ====================
-    FEES = 0.00065  # [FIX #1] 0.065%로 통일 (현재 설정 평가 / 최적화 탐색 동일 적용)
+    # ==================== 수수료 상수 ====================
+    FEES = 0.00065  # 0.065%로 통일 (현재 설정 평가 / 최적화 탐색 동일 적용)
 
     # ====================== 현재 설정값 기준 성과 먼저 출력 ======================
     try:
@@ -149,11 +149,10 @@ def verify_long_term_hold_logic():
     cur_pf = vbt.Portfolio.from_signals(
         close=df['Close'],
         entries=pd.Series(cur_triggered, index=df.index),
-        exits=exits_series,                                    # [FIX #3] 252거래일 후 청산
-        price=pd.Series(cur_exec_prices, index=df.index),     # [FIX #8] min(Open, target) 체결가
+        exits=exits_series,                                    # 252거래일 후 청산
+        price=pd.Series(cur_exec_prices, index=df.index),     # min(Open, target) 체결가
         init_cash=10000,
-        fees=FEES,                                             # [FIX #1] 통일된 수수료
-        freq='1D',
+        fees=FEES,                                            
         accumulate=True,
         allow_partial=True
     )
@@ -180,7 +179,7 @@ def verify_long_term_hold_logic():
     normal_range  = _steps(SAFETY_BOUNDS["MULT_NORMAL"][0],  SAFETY_BOUNDS["MULT_NORMAL"][1])
     fear_range    = _steps(SAFETY_BOUNDS["MULT_FEAR"][0],    SAFETY_BOUNDS["MULT_FEAR"][1])
     extreme_range = _steps(SAFETY_BOUNDS["MULT_EXTREME"][0], SAFETY_BOUNDS["MULT_EXTREME"][1])
-    # [FIX #4] extreme 범위: 2.50~2.75 → fear 최대(2.45)보다 항상 크므로 extreme <= fear 필터에 안 걸림
+    # extreme 범위: 2.50~2.75 → fear 최대(2.45)보다 항상 크므로 extreme <= fear 필터에 안 걸림
     # 단, 안전망으로 필터는 유지
     total_combos = len(normal_range) * len(fear_range) * len(extreme_range)
     print(f"   탐색 조합 수: {total_combos:,}개 (normal×fear×extreme = "
@@ -204,10 +203,10 @@ def verify_long_term_hold_logic():
         pf = vbt.Portfolio.from_signals(
             close=df['Close'],
             entries=pd.Series(triggered, index=df.index),
-            exits=exits_series,                               # [FIX #3] 252거래일 후 청산
-            price=pd.Series(exec_prices, index=df.index),    # [FIX #8] min(Open, target) 체결가
+            exits=exits_series,                               # 252거래일 후 청산
+            price=pd.Series(exec_prices, index=df.index),    # min(Open, target) 체결가
             init_cash=10000,
-            fees=FEES,                                        # [FIX #1] 통일된 수수료
+            fees=FEES,                                        # 통일된 수수료
             freq='1D',
             accumulate=True,
             allow_partial=True
@@ -244,7 +243,7 @@ def verify_long_term_hold_logic():
             try:
                 with open("config.json", "r", encoding="utf-8") as f:
                     cfg = json.load(f)
-                # [FIX #6] LONG / SHORT 동일한 최적 배수 적용 (SHORT도 동일 전략으로 운용)
+                # LONG / SHORT 동일한 최적 배수 적용 (SHORT도 동일 전략으로 운용)
                 for mode in ("LONG", "SHORT"):
                     cfg["VIX_CONFIG"][mode]["MULT_NORMAL"]  = round(float(normal),  2)
                     cfg["VIX_CONFIG"][mode]["MULT_FEAR"]    = round(float(fear),    2)
