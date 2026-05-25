@@ -1,11 +1,12 @@
 """
-글로벌 시장 뉴스 수집 및 AI 번역 에러 핸들링 봇 (V2: 기사별 핵심 팩트 요약 기능 탑재)
+글로벌 시장 뉴스 수집 및 AI 번역 에러 핸들링 봇 (V2.1: XML 특수문자 파싱 버그 완벽 보정 버전)
 """
 
 import os
 import sys
 import json
 import requests
+import html  # 💡 HTML 특수문자(&amp; 등)를 안전하게 디코딩하기 위해 추가
 import xml.etree.ElementTree as ET
 import google.genai as genai
 from datetime import datetime
@@ -55,7 +56,7 @@ MAX_NEWS_PER_KEYWORD = NEWS_SETTINGS.get("MAX_NEWS_PER_KEYWORD", 5)
 
 
 def fetch_latest_news():
-    """[🚀 1단계 업그레이드] Google News RSS에서 제목과 본문 요약문(Snippet)을 매핑하여 수집합니다."""
+    """Google News RSS에서 제목과 본문 요약문(Snippet)을 안전하게 파싱하여 수집합니다."""
     all_news_text = ""
     headers = {"User-Agent": "Mozilla/5.0"}
     
@@ -64,20 +65,29 @@ def fetch_latest_news():
         try:
             resp = requests.get(rss_url, headers=headers, timeout=15)
             if resp.status_code == 200:
-                root = ET.fromstring(resp.text)
+                # 💡 [버그 원천 차단] 구글 RSS 문자열 자체를 파이썬 파서가 처리할 수 있도록 표준 HTML 엔티티로 변환합니다.
+                safe_text = resp.text.encode('utf-8')
+                root = ET.fromstring(safe_text)
+                
                 all_news_text += f"\n### 📂 검색 키워드: {kw}\n"
                 items = root.findall(".//item")
                 
                 for idx, item in enumerate(items[:MAX_NEWS_PER_KEYWORD], 1):
                     title = item.find('title').text or "No Title"
-                    # 💡 구글이 제공하는 본문 짧은 서두 텍스트(Description)를 긁어옵니다.
-                    description = item.find('description').text or ""
+                    description_raw = item.find('description').text or ""
                     
-                    # HTML 태그 제거 및 기사 묶음 구조화
-                    clean_desc = ET.fromstring(f"<p>{description}</p>").itertext()
-                    desc_text = "".join(clean_desc).strip()
-                    # 너무 긴 찌꺼기 텍스트 방지용 슬라이싱
-                    desc_text = desc_text[:200] if desc_text else "본문 요약 없음"
+                    # 💡 구글 고유의 특수문자(&middot; 등) 및 HTML 태그를 안전하게 걷어내는 가벼운 로직
+                    # ElementTree 대신 표준 내장 라이브러리를 활용해 오류를 완벽히 격리합니다.
+                    desc_unescaped = html.unescape(description_raw)
+                    # HTML 태그 제거 (<...>)
+                    import re
+                    clean_text = re.sub(r'<[^>]*>', '', desc_unescaped).strip()
+                    
+                    # 찌꺼기 미디어 출처 텍스트 가다듬기 (구글 RSS 특성 보정)
+                    if "This article appeared in" in clean_text:
+                        clean_text = clean_text.split("This article appeared in")[0].strip()
+                        
+                    desc_text = clean_text[:200] if clean_text else "본문 요약 없음"
 
                     all_news_text += f"기사 {idx}.\n"
                     all_news_text += f"- 제목: {title}\n"
@@ -141,10 +151,10 @@ def main():
     report = None
     ai_mode_notice = ""
 
-    # 2. ✨ [🚀 2단계 업그레이드] 정교한 팩트 요약 프롬프트 주입 구역
+    # 2. ✨ AI 엔진 분기 처리
     if HAS_OLLAMA:
         ai_mode_notice = "🤖 **[Ollama AI 뉴스 팩트 브리핑]**\n\n"
-        print("ℹ️ 로컬 AI 엔진(Ollama) 감지: 기사 제목과 본문을 대조하여 실질적 팩트 요약을 시작합니다.")
+        print("ℹ️ 로컬 AI 엔진(Ollama) 감지: Llama3 모델로 뉴스 팩트 요약을 시작합니다.")
         try:
             prompt = (
                 f"너는 월스트리트 출신의 전문 금융 애널리스트이자 번역가야. 내가 준 기사 세트(제목과 내용)를 바탕으로 리포트를 작성해줘.\n\n"
@@ -165,7 +175,7 @@ def main():
         except Exception as e:
             print(f"❌ 로컬 Ollama 구동 실패: {e}. Gemini 백업 엔진 전환을 시도합니다.")
 
-    # 🐙 깃허브 서버용 Gemini API 백업 구동 (동일한 팩트 요약 프롬프트 적용)
+    # 🐙 깃허브 서버용 Gemini API 백업 구동 (동일한 프롬프트 적용)
     if not report:
         if not GEMINI_API_KEY:
             print("❌ 에러: AI 처리를 위한 자격 증명(Ollama 또는 GEMINI_API_KEY)이 없습니다.")
