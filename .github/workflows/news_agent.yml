@@ -8,7 +8,7 @@ on:
       - news_agent.py
       
   schedule:
-    - cron: '20 10 * * 1-5'
+    - cron: '0 7 * * 1-5'
   workflow_dispatch:
 
 permissions:
