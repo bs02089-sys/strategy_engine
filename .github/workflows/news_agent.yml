@@ -6,9 +6,11 @@ on:
       - main
     paths:
       - news_agent.py
-      
+      - .github/workflows/news_agent.yml  # 💡 자동화 파일 자체가 수정되어 git up 될 때도 즉시 작동하도록 추가
+
   schedule:
-    - cron: '0 7 * * 1-5'
+    # 월요일부터 금요일까지 매일 UTC 07:00 (한국 시간 16:00)에 정밀 실행됩니다.
+    - cron: '00 7 * * 1-5'
   workflow_dispatch:
 
 permissions:
