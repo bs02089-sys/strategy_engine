@@ -8,12 +8,17 @@ on:
       - news_agent.py
       
   schedule:
-    # 서버 지연을 감안하여 본장 개장 한참 전인 KST 오후 7시 20분(UTC 10:20)에 실행합니다.
     - cron: '20 10 * * 1-5'
   workflow_dispatch:
 
 permissions:
   contents: write
+
+# 💡 [경고 해결] 여기에 환경 변수를 선언해 두면 actions/checkout@v4가 
+# 다가오는 6월 변경안에 맞춰 Node.js 24 위에서 경고 없이 깔끔하게 실행됩니다.
+env:
+  PYTHONIOENCODING: utf-8
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   news_agent:
@@ -23,20 +28,16 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          # 💡 [원인 해결 1] 만료되거나 유실될 걱정 없는 GitHub 기본 내장 토큰을 주입합니다.
           token: ${{ github.token }}
           fetch-depth: 0 
 
       - name: Configure Git (표준 오리진 주소 및 유저 설정)
-        # 💡 [원인 해결 2] URL 구조를 깨트리던 x-access-token 치환 로직을 완벽히 제거합니다.
-        # permissions 권한이 있어 순수 주소만 매핑해 주면 Git이 알아서 안전하게 인증을 통과시킵니다.
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git remote set-url origin "https://github.com/${{ github.repository }}.git"
 
       - name: Sync latest data
-        # 💡 파이썬 실행 전 원격의 최신 상태를 당겨와 동기화 경합을 차단합니다.
         run: |
           git pull origin main || echo "Already up to date or no remote changes."
 
@@ -63,14 +64,12 @@ jobs:
         run: python news_agent.py
 
       - name: 실행 결과 최종 커밋 & 푸시
-        if: always() # 💡 에러가 나거나 수집된 뉴스가 없더라도 상태를 안전하게 보존합니다.
+        if: always()
         run: |
-          # 혹시 실행 과정에서 config.json에 변동 사항이 생겼다면 바구니에 담습니다.
           if [ -f config.json ]; then
             git add config.json
           fi
           
-          # 실제로 데이터 변경이 감지되었을 때만 안전하게 커밋하고 푸시합니다.
           if ! git diff --cached --quiet; then
             git commit -m "chore: news_agent 실행 후 config.json 자동 동기화 ($(date -u +'%Y-%m-%d %H:%M UTC'))"
             git push --force-with-lease || git push
