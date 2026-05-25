@@ -10,6 +10,13 @@ import requests
 import yfinance as yf
 import pytz
 
+# 🔥 깃허브 서버 환경에서 뻗지 않도록 임포트 예외 처리 방어막 구축
+try:
+    import ollama
+    HAS_OLLAMA = True
+except ImportError:
+    HAS_OLLAMA = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -612,6 +619,7 @@ def send_discord_message_with_file(content: str, webhook_url: str, user_id: str,
     
 
 # ====================== 메인 ======================
+# ====================== 메인 ======================
 def main():
     chart_filename = "portfolio_trend.png"
     try:
@@ -648,9 +656,40 @@ def main():
 
         # ==================== 리포트 생성 & Discord 전송 ====================
         kst_str = kst_now.strftime('%Y-%m-%d %H:%M:%S')
+        
+        # 1. 기존 엔진의 정량 분석 메시지 생성 (기존 로직 유지)
         msg = create_combined_message(results, is_open, kst_str, vix_info, is_last)
         
-        # 차트 이미지(존재할 시)를 포함하여 디스코드 전송
+        # 2. 🔥 [올라마 AI 연동 레이어 삽입] 
+        try:
+            logger.info("🤖 올라마(Ollama) 로컬 AI가 정량 타점 데이터 브리핑을 시작합니다...")
+            
+            ai_prompt = (
+                f"너는 미국 주식 반도체 지수(SOXL) 및 빅테크 종목을 전문으로 다루는 헤지펀드 퀀트 애널리스트야.\n"
+                f"파이썬 매매 엔진이 금일 계산한 아래의 분석 데이터를 정독하고, 투자자가 오늘 본장에서\n"
+                f"기계적으로 대응할 수 있도록 '오늘의 매수 전략과 행동 지침'을 한국어 딱 3줄로 간결하고 날카롭게 정리해 줘.\n\n"
+                f"[매매 엔진 정량 데이터]\n{msg}"
+            )
+            
+            # 로컬 Llama3 모델 호출 (내 PC GPU 연산)
+            ollama_resp = ollama.chat(
+                model="llama3",
+                messages=[{"role": "user", "content": ai_prompt}]
+            )
+            ai_insight = ollama_resp['message']['content']
+            
+            # 기존 리포트 상단에 올라마의 핵심 인사이트를 결합하여 msg 변수 업데이트
+            msg = (
+                f"💡 **올라마 로컬 AI 퀀트 가이드**\n"
+                f"{ai_insight}\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"{msg}"
+            )
+        except Exception as ollama_err:
+            # 올라마가 안 켜져 있거나 에러 발생 시, 기존 정량 리포트만 안전하게 나가도록 방어 코드 구축
+            logger.warning(f"⚠️ 올라마 분석 레이어 건너뜀 (로컬 전용): {ollama_err}")
+
+        # 3. 최종 메시지를 이미지와 함께 디스코드 전송 (기존 로직 유지)
         send_success = send_discord_message_with_file(
             content=msg, 
             webhook_url=config["webhook"], 
@@ -666,13 +705,12 @@ def main():
     except Exception as e:
         logger.error(f"💥 메인 실행 중 오류 발생: {e}")
     finally:
-        # 실행 완료 후 생성된 로컬 임시 이미지 파괴 (서버 스토리지 보호)
         if os.path.exists(chart_filename):
             try:
                 os.remove(chart_filename)
             except Exception:
                 pass
-  
+
                         
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format='%(message)s')
