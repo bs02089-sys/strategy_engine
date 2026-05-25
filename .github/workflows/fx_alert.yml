@@ -51,17 +51,15 @@ jobs:
         run: python fx_alert.py
 
       - name: 실행 결과 및 로그 최종 커밋 & 푸시
-        # 💡 [안전장치] 만약 타임아웃(6시간 경과)으로 취소되거나 수동으로 중단하더라도, 
-        # 그때까지 쌓인 환율 실시간 로그 파일만큼은 유실 없이 무조건 저장소에 푸시하도록 설정합니다.
+        # 만약 타임아웃(6시간 경과)으로 취소되거나 수동으로 중단하더라도 무조건 실행
         if: always()
-        env:
-          PUSH_TOKEN: ${{ secrets.vscode_push_token_2026 }}
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
           
-          CLEAN_TOKEN=$(echo "$PUSH_TOKEN" | tr -d '\r\n')
-          git remote set-url origin "https://x-access-token:${CLEAN_TOKEN}@github.com/bs02089-sys/strategy_engine.git"
+          # 💡 외부 토큰 조합 대신 GitHub 기본 인증 헤더/오리진 구조를 그대로 활용합니다.
+          # 특수문자가 섞인 비밀 토큰을 URL에 강제로 집어넣을 때 발생하는 파싱 에러를 완벽하게 차단합니다.
+          git remote set-url origin "https://github.com/${{ github.repository }}.git"
           
           # 실시간 업데이트된 config.json 장바구니에 담기
           if [ -f config.json ]; then
