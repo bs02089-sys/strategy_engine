@@ -133,7 +133,7 @@ def optimize_strategy():
         print("="*50 + "\n")
         
         new_config = result.get("updated_config")
-        # [BUG #1 FIX] config.json 실제 구조에 맞게 키 검증 (tickers → TICKERS)
+        # config.json 실제 구조에 맞게 키 검증 (tickers → TICKERS)
         if new_config and isinstance(new_config, dict) and "TICKERS" in new_config:
             # 저장 여부 사용자 확인 후 반영
             answer = input("\n💾 AI 분석 결과를 config.json에 저장하시겠습니까? (y/n): ").strip().lower()
