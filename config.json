@@ -1,57 +1,60 @@
 {
-    "DISCORD_WEBHOOK": "",
-    "DISCORD_USER_ID": "",
-    "TICKERS": ["SOXL","TSLA"],
-    "POSITIONS": {
-        "SOXL": {
-            "MODE": "LONG",
-            "TOTAL_SHARES": 34,
-            "MY_AVG_PRICE": 165.1124,
-            "CURRENT_CASTS": 4,
-            "ANNUAL_QUOTA": 24,
-            "LAST_CAST_DATE": "2026-05-15"
-        },
-        "TSLA": {
-            "MODE": "SHORT",
-            "TOTAL_SHARES": 10,
-            "MY_AVG_PRICE": 321.2
-        }
+  "DISCORD_WEBHOOK": "",
+  "DISCORD_USER_ID": "",
+  "TICKERS": [
+    "SOXL",
+    "TSLA"
+  ],
+  "POSITIONS": {
+    "SOXL": {
+      "MODE": "LONG",
+      "TOTAL_SHARES": 34,
+      "MY_AVG_PRICE": 165.1124,
+      "CURRENT_CASTS": 4,
+      "ANNUAL_QUOTA": 24,
+      "LAST_CAST_DATE": "2026-05-15"
     },
-    "VIX_CONFIG": {
-        "LONG": {
-            "LEVEL_LOW": 20.0,
-            "LEVEL_HIGH": 30.0,
-            "MULT_NORMAL": 0.85,
-            "MULT_FEAR": 1.95,
-            "MULT_EXTREME": 2.4
-        },
-        "SHORT": {
-            "LEVEL_LOW": 20.0,
-            "LEVEL_HIGH": 30.0,
-            "MULT_NORMAL": 0.85,
-            "MULT_FEAR": 1.95,
-            "MULT_EXTREME": 2.4
-        }
-    },
-    "DEFAULTS": {
-        "SIGMA_DEFAULT": 2.0,
-        "LAST_CAST_DATE": "2026-01-01",
-        "ANNUAL_QUOTA": 24
-    },
-    "exchange_status": {
-        "LAST_CHECK_DATE": "2026-05-18 20:02:56",
-        "CURRENT_APPLIED_RATE": 1501.48,
-        "CURRENT_PERCENTILE": 50
-    },
-    "news_settings": {
-        "KEYWORDS": [
-            "AI Infrastructure",
-            "semiconductor stock",
-            "NVDA",
-            "SOXL ETF",
-            "TSLA stock",
-            "IONQ stock"
-        ],
-        "MAX_NEWS_PER_KEYWORD": 5
+    "TSLA": {
+      "MODE": "SHORT",
+      "TOTAL_SHARES": 10,
+      "MY_AVG_PRICE": 321.2
     }
+  },
+  "VIX_CONFIG": {
+    "LONG": {
+      "LEVEL_LOW": 20.0,
+      "LEVEL_HIGH": 30.0,
+      "MULT_NORMAL": 0.85,
+      "MULT_FEAR": 1.95,
+      "MULT_EXTREME": 2.4
+    },
+    "SHORT": {
+      "LEVEL_LOW": 20.0,
+      "LEVEL_HIGH": 30.0,
+      "MULT_NORMAL": 0.85,
+      "MULT_FEAR": 1.95,
+      "MULT_EXTREME": 2.4
+    }
+  },
+  "DEFAULTS": {
+    "SIGMA_DEFAULT": 2.0,
+    "LAST_CAST_DATE": "2026-01-01",
+    "ANNUAL_QUOTA": 24
+  },
+  "exchange_status": {
+    "LAST_CHECK_DATE": "2026-05-25 03:17:45 UTC",
+    "CURRENT_APPLIED_RATE": 1510.21,
+    "CURRENT_PERCENTILE": 99.2
+  },
+  "news_settings": {
+    "KEYWORDS": [
+      "AI Infrastructure",
+      "semiconductor stock",
+      "NVDA",
+      "SOXL ETF",
+      "TSLA stock",
+      "IONQ stock"
+    ],
+    "MAX_NEWS_PER_KEYWORD": 5
+  }
 }
