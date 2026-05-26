@@ -1,3 +1,4 @@
+import tempfile  
 import logging
 import json
 import os
@@ -8,12 +9,14 @@ import numpy as np
 import pandas as pd
 import requests
 import yfinance as yf
-# yfinance 캐시 디렉토리를 비활성화하여 DB 잠김(database is locked) 에러 방지
-yf.set_tz_cache_location(None)
 import pytz
 import matplotlib.pyplot as plt
 
-# 시스템에 설치된 나눔고딕 폰트 지정 및 마이너스 깨짐 방지
+# 1. yfinance 임시 디렉토리 캐시 설정 (DB 잠김 및 TypeError 완벽 방지)
+temp_cache_dir = tempfile.mkdtemp()
+yf.set_tz_cache_location(temp_cache_dir)
+
+# 2. 시스템에 설치된 나눔고딕 폰트 지정 및 마이너스 깨짐 방지
 plt.rcParams['font.family'] = 'NanumGothic'
 plt.rcParams['axes.unicode_minus'] = False
 
