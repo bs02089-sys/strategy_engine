@@ -8,8 +8,8 @@ import numpy as np
 import pandas as pd
 import requests
 import yfinance as yf
-# yfinance 캐시 비활성화 (Database locked 에러 방지)
-yf.set_tz_cache_false()
+# yfinance 캐시 디렉토리를 비활성화하여 DB 잠김(database is locked) 에러 방지
+yf.set_tz_cache_location(None)
 import pytz
 import matplotlib.pyplot as plt
 
