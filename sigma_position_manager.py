@@ -9,9 +9,13 @@ import pandas as pd
 import requests
 import yfinance as yf
 import pytz
+import matplotlib.pyplot as plt
+
+# 시스템에 설치된 나눔고딕 폰트 지정 및 마이너스 깨짐 방지
+plt.rcParams['font.family'] = 'NanumGothic'
+plt.rcParams['axes.unicode_minus'] = False
 
 logger = logging.getLogger(__name__)
-
 
 # ====================== 설정 ======================
 def load_config() -> dict:

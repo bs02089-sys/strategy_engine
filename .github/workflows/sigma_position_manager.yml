@@ -51,9 +51,17 @@ jobs:
 
       - name: 패키지 설치
         run: |
+          # 1. 우분투 서버 패키지 업데이트 및 나눔 폰트 설치
+          sudo apt-get update
+          sudo apt-get install -y fonts-nanum
+          
+          # 2. 기존 Matplotlib 폰트 캐시 삭제 (새로 설치된 폰트를 인식하기 위함)
+          rm -rf ~/.cache/matplotlib
+          
+          # 3. 기존 파이썬 패키지 설치 로직
           python -m pip install --upgrade pip
           pip install numpy pandas requests yfinance pytz holidays matplotlib
-
+              
       - name: Discord 알림 및 자동 데이터 동기화 실행
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
