@@ -158,7 +158,7 @@ if __name__ == "__main__":
     target_info = {
         "TSLA": 450.0,
         "IONQ": 100.0,
-        "SOXL": 200.0
+        "SOXL": 250.0
     }
 
     tickers_list = list(target_info.keys())
