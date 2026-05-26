@@ -11,48 +11,11 @@ import requests
 import yfinance as yf
 import pytz
 
-# ====================== 한글 폰트 설정 ======================
-# FontProperties로 TTF 파일 경로를 직접 지정 — rcParams 이름 탐색보다 확실함.
-# Windows 로컬 / GitHub Actions ubuntu 환경을 자동 감지하여 경로 탐색.
-import platform
-import matplotlib
-matplotlib.use("Agg")  # GUI 없는 서버·로컬 양쪽 모두 Agg 백엔드 사용
-import matplotlib.pyplot as plt
-import matplotlib.font_manager as fm
-
-def _get_korean_font() -> fm.FontProperties:
-    if platform.system() == "Windows":
-        candidates = [
-            "C:/Windows/Fonts/NanumGothic.ttf",
-            "C:/Windows/Fonts/NanumGothic.otf",
-            os.path.expanduser("~") + "/AppData/Local/Microsoft/Windows/Fonts/NanumGothic.ttf",
-        ]
-    else:
-        # Linux (GitHub Actions ubuntu)
-        candidates = [
-            "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
-            "/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf",
-        ]
-
-    for path in candidates:
-        if os.path.exists(path):
-            return fm.FontProperties(fname=path)
-
-    # 경로 탐색 실패 시 matplotlib 캐시에서 이름으로 검색
-    for f in fm.fontManager.ttflist:
-        if "Nanum" in f.name and "Gothic" in f.name:
-            return fm.FontProperties(fname=f.fname)
-
-    return fm.FontProperties(family="DejaVu Sans")  # 최종 폴백
-
-_KOREAN_FONT = _get_korean_font()
-plt.rcParams["axes.unicode_minus"] = False  # 마이너스 기호 깨짐 방지
+logger = logging.getLogger(__name__)
 
 # yfinance 임시 디렉토리 캐시 설정 (DB 잠김 및 TypeError 완벽 방지)
 temp_cache_dir = tempfile.mkdtemp()
 yf.set_tz_cache_location(temp_cache_dir)
-
-logger = logging.getLogger(__name__)
 
 
 # ====================== 설정 ======================
@@ -125,8 +88,6 @@ def sync_ledger_to_config():
     if "DEFAULTS" not in config:
         config["DEFAULTS"] = {}
 
-    # [BUG FIX #1] ledger 구조가 dict-of-dict인지 list-of-dict인지 방어 처리
-    # 원본은 ledger.items()로 순회하는데, ledger.json이 [] (리스트)이면 AttributeError 발생
     if isinstance(ledger, list):
         logger.info("ℹ️ ledger.json이 빈 리스트 또는 리스트 형식입니다. 동기화를 건너뜁니다.")
         return
@@ -402,104 +363,6 @@ def calculate_split_sell_targets(base_price: float, std_20d: float, shares: int)
     return plan
 
 
-# ====================== 시각화 엔진 ======================
-def generate_long_portfolio_chart(df: pd.DataFrame, config: dict, output_filename: str = "portfolio_trend.png") -> bool:
-    positions_cfg = config.get("positions", {})
-    long_tickers  = [tk for tk, cfg in positions_cfg.items() if cfg.get("MODE") == "LONG"]
-
-    if not long_tickers:
-        logger.info("ℹ️ LONG 모드 종목이 없어 차트 생성을 스킵합니다.")
-        return False
-
-    try:
-        chart_data = pd.DataFrame(index=df.index)
-        for tk in long_tickers:
-            chart_data[tk] = df.xs(tk, level=1, axis=1)["Close"] if isinstance(df.columns, pd.MultiIndex) else df["Close"]
-        chart_data = chart_data.dropna()
-    except Exception as e:
-        logger.error(f"❌ 차트 데이터 파싱 에러: {e}")
-        return False
-
-    if chart_data.empty:
-        return False
-
-    monthly_df = chart_data.resample('ME').last()
-    if len(monthly_df) < 2:
-        monthly_df    = chart_data
-        x_labels      = monthly_df.index.strftime('%m-%d')
-        title_suffix  = "(일별 추세)"
-    else:
-        x_labels      = monthly_df.index.strftime('%Y-%m')
-        title_suffix  = "(월별 추세)"
-
-    total_value_series = pd.Series(0.0, index=monthly_df.index)
-    total_cost         = 0.0
-    returns_dict       = {}
-
-    for tk in long_tickers:
-        pos       = positions_cfg[tk]
-        avg_price = float(pos.get("MY_AVG_PRICE", 0.0))
-        shares    = int(pos.get("TOTAL_SHARES", 0))
-
-        if avg_price > 0 and shares > 0:
-            total_value_series += (monthly_df[tk] * shares).fillna(0)
-            total_cost         += avg_price * shares
-            returns_dict[tk]    = ((monthly_df[tk] - avg_price) / avg_price) * 100
-        else:
-            returns_dict[tk]    = ((monthly_df[tk] - monthly_df[tk].iloc[0]) / monthly_df[tk].iloc[0]) * 100
-
-    portfolio_return = ((total_value_series - total_cost) / total_cost * 100) if total_cost > 0 else (
-        total_value_series.pct_change().cumsum() * 100
-    )
-    if total_cost == 0:
-        portfolio_return.iloc[0] = 0.0
-
-    plt.style.use('seaborn-v0_8-darkgrid' if 'seaborn-v0_8-darkgrid' in plt.style.available else 'default')
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
-
-    # [FIX] 모든 한글 텍스트에 fontproperties=_KOREAN_FONT 전달
-    for tk, ret_series in returns_dict.items():
-        ax1.plot(monthly_df.index, ret_series, marker='o', linestyle='--', alpha=0.6, label=f"{tk} 수익률")
-
-    if total_cost > 0:
-        ax1.plot(monthly_df.index, portfolio_return, marker='s', color='#d62728',
-                 linewidth=2.5, label="종합 포트폴리오")
-
-    ax1.axhline(0, color='black', linestyle='-', linewidth=0.8, alpha=0.5)
-    ax1.set_title(f"LONG 포트폴리오 누적 수익률 추세 {title_suffix}",
-                  fontsize=13, fontweight='bold', fontproperties=_KOREAN_FONT)
-    ax1.set_ylabel("수익률 (%)", fontsize=11, fontproperties=_KOREAN_FONT)
-    ax1.legend(loc="upper left", prop=_KOREAN_FONT)
-
-    if total_cost > 0:
-        ax2.fill_between(monthly_df.index, total_value_series, total_cost,
-                         where=(total_value_series >= total_cost),
-                         interpolate=True, color='green', alpha=0.15, label='익절 구간')
-        ax2.fill_between(monthly_df.index, total_value_series, total_cost,
-                         where=(total_value_series < total_cost),
-                         interpolate=True, color='red', alpha=0.15, label='손절 구간')
-        ax2.axhline(total_cost, color='blue', linestyle=':', alpha=0.7,
-                    label=f'총 투자금 (${total_cost:,.2f})')
-        ax2.plot(monthly_df.index, total_value_series, marker='o', color='#2ca02c',
-                 linewidth=2.5, label=f'계좌 평가액 (${total_value_series.iloc[-1]:,.2f})')
-    else:
-        ax2.plot(monthly_df.index, total_value_series, marker='o',
-                 color='#7f7f7f', label='자산 가격 지수 합산')
-
-    ax2.set_title("LONG 포트폴리오 계좌 자산 평가액 추세",
-                  fontsize=13, fontweight='bold', fontproperties=_KOREAN_FONT)
-    ax2.set_ylabel("자산 가치 ($)", fontsize=11, fontproperties=_KOREAN_FONT)
-    ax2.set_xlabel("기준 월 (Date)", fontsize=11, fontproperties=_KOREAN_FONT)
-    ax2.legend(loc="upper left", prop=_KOREAN_FONT)
-
-    plt.xticks(rotation=30)
-    plt.tight_layout()
-    plt.savefig(output_filename, dpi=150)
-    plt.close()
-    logger.info(f"📊 시각화 차트 생성 완료: {output_filename}")
-    return True
-
-
 # ====================== Git 동기화 ======================
 def sync_config_to_git(target_date: datetime.date):
     today_str = target_date.strftime("%Y-%m-%d")
@@ -531,7 +394,7 @@ def get_combined_market_data(tickers: list, config: dict, est_tz, target_date: d
     df = yf.download(tickers, period="150d", interval="1d", progress=False, auto_adjust=True)
     if df.empty:
         logger.error("❌ yfinance 데이터 다운로드 실패")
-        return {}, False, "N/A", df
+        return {}, False, "N/A"
 
     now_est      = datetime.now(est_tz)
     market_open  = now_est.replace(hour=9,  minute=30, second=0, microsecond=0)
@@ -572,7 +435,7 @@ def get_combined_market_data(tickers: list, config: dict, est_tz, target_date: d
         except Exception as e:
             logger.warning(f"⚠️ {ticker} 분석 실패: {e}")
 
-    return results, is_open, vix_info, df
+    return results, is_open, vix_info
 
 
 # ====================== 리포트 생성 ======================
@@ -631,29 +494,21 @@ def create_combined_message(results: dict, is_open: bool,
 
 
 # ====================== Discord 전송 ======================
-def send_discord_message_with_file(content: str, webhook_url: str, user_id: str, file_path: str = None) -> bool:
+def send_discord_message(content: str, webhook_url: str, user_id: str) -> bool:
     if not webhook_url:
         return False
     mention = f"<@{user_id}>\n\n" if user_id else ""
     try:
         payload = {"content": f"{mention}{content}"}
-        if file_path and os.path.exists(file_path):
-            with open(file_path, 'rb') as f:
-                r = requests.post(webhook_url,
-                                  data=payload,
-                                  files={"file": (os.path.basename(file_path), f, "image/png")},
-                                  timeout=20)
-        else:
-            r = requests.post(webhook_url, json=payload, timeout=15)
+        r = requests.post(webhook_url, json=payload, timeout=15)
         return r.status_code in (200, 204)
     except Exception as e:
-        logger.error(f"❌ 디스코드 파일 웹훅 전송 중 장애 발생: {e}")
+        logger.error(f"❌ 디스코드 웹훅 전송 중 장애 발생: {e}")
         return False
 
 
 # ====================== 메인 ======================
 def main():
-    chart_filename = "portfolio_trend.png"
     try:
         sync_ledger_to_config()
         config = setup_environment()
@@ -672,22 +527,18 @@ def main():
 
         is_last = is_last_business_day_of_month(target_date)
 
-        results, is_open, vix_info, full_df = get_combined_market_data(
+        results, is_open, vix_info = get_combined_market_data(
             config["tickers"], config, config["est"], target_date
         )
         if not results:
             logger.error("❌ 분석 결과가 없습니다.")
             return
 
-        has_chart = generate_long_portfolio_chart(full_df, config, chart_filename)
         sync_config_to_git(target_date)
 
         kst_str = kst_now.strftime('%Y-%m-%d %H:%M:%S')
         msg     = create_combined_message(results, is_open, kst_str, vix_info, is_last)
 
-        # [FIX] or 체인은 빈 문자열("")을 falsy로 처리하므로
-        # config.json 값이 "" 이면 환경변수 → config 순서로 None이 될 수 있음.
-        # strip() 후 None 비교 방식으로 교체하여 빈 문자열도 정확히 처리.
         def _pick(*vals):
             for v in vals:
                 if v and str(v).strip():
@@ -710,26 +561,19 @@ def main():
         if not discord_webhook_url:
             logger.warning("⚠️ DISCORD_WEBHOOK 값이 없습니다. config.json 또는 환경변수를 확인하세요.")
 
-        send_success = send_discord_message_with_file(
+        send_success = send_discord_message(
             content=msg,
             webhook_url=discord_webhook_url,
-            user_id=discord_user_id,
-            file_path=chart_filename if has_chart else None
+            user_id=discord_user_id
         )
 
         if send_success:
-            logger.info("✅ Discord 알림 및 포트폴리오 차트 전송 완료")
+            logger.info("✅ Discord 알림 전송 완료")
         else:
             logger.warning("⚠️ Discord 전송 실패 (웹훅 URL 및 환경 변수를 점검하세요)")
 
     except Exception as e:
         logger.error(f"💥 메인 실행 중 오류 발생: {e}")
-    finally:
-        if os.path.exists(chart_filename):
-            try:
-                os.remove(chart_filename)
-            except Exception:
-                pass
 
 
 if __name__ == "__main__":

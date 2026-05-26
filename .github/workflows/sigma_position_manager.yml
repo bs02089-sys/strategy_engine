@@ -29,8 +29,6 @@ jobs:
           fetch-depth: 0
 
       - name: Configure Git
-        # github.token 사용 시 remote URL에 토큰을 직접 삽입할 필요 없음
-        # permissions: contents: write 선언으로 인증이 자동 처리됨
         run: |
           git config --global user.name "Automated Bot"
           git config --global user.email "bot@example.com"
@@ -46,20 +44,10 @@ jobs:
           python-version: '3.12'
           cache: 'pip'
 
-      - name: Install system dependencies and fonts
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y fonts-nanum
-          # [FIX] 폰트 설치 후 matplotlib 캐시를 삭제하되,
-          # Python 실행 전에 삭제해야 효과가 있음 → 별도 step으로 분리
-          rm -rf ~/.cache/matplotlib
-          # 시스템 폰트 캐시 재빌드
-          fc-cache -fv > /dev/null 2>&1
-
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install numpy pandas requests yfinance pytz holidays matplotlib
+          pip install numpy pandas requests yfinance pytz holidays
 
       - name: Run sigma_position_manager
         env:
