@@ -10,13 +10,6 @@ import requests
 import yfinance as yf
 import pytz
 
-# 🔥 깃허브 서버 환경에서 뻗지 않도록 임포트 예외 처리 방어막 구축
-try:
-    import ollama
-    HAS_OLLAMA = True
-except ImportError:
-    HAS_OLLAMA = False
-
 logger = logging.getLogger(__name__)
 
 
@@ -677,7 +670,7 @@ def send_discord_message_with_file(content: str, webhook_url: str, user_id: str,
 def main():
     chart_filename = "portfolio_trend.png"
     try:
-        # 1. 🔥 [리팩토링 핵심] 데이터 로드 전, 사용자 장부(ledger.json) 현황을 config.json에 강제 실시간 싱크 처리!
+        # 1. 데이터 로드 전, 사용자 장부(ledger.json) 현황을 config.json에 강제 실시간 싱크 처리!
         sync_ledger_to_config()
 
         # 2. 동기화가 반영된 최신 상태의 환경 설정값 로드
@@ -714,46 +707,22 @@ def main():
 
         # ==================== 리포트 생성 & Discord 전송 ====================
         kst_str = kst_now.strftime('%Y-%m-%d %H:%M:%S')
-        
         msg = create_combined_message(results, is_open, kst_str, vix_info, is_last)
         
-        # 🔥 [올라마 AI 연동 레이어 작동] 
-        # 로컬 환경 변수나 깃허브 시크릿에 OLLAMA_ENABLED가 'true'로 되어 있거나, 
-        # 로컬 PC 테스트 시에만 작동하도록 안전장치 가드 보강
-        import os
-        
-        if os.environ.get("OLLAMA_ENABLED", "false").lower() == "true":
-            try:
-                logger.info("🤖 올라마(Ollama) 로컬 AI가 정량 타점 데이터 브리핑을 시작합니다...")
-                
-                ai_prompt = (
-                    f"너는 미국 주식 반도체 지수(SOXL) 및 빅테크 종목을 전문으로 다루는 헤지펀드 퀀트 애널리스트야.\n"
-                    f"파이썬 매매 엔진이 금일 계산한 아래의 분석 데이터를 정독하고, 투자자가 오늘 본장에서\n"
-                    f"기계적으로 대응할 수 있도록 '오늘의 매수 전략과 행동 지침'을 한국어 딱 3줄로 간결하고 날카롭게 정리해 줘.\n\n"
-                    f"[매매 엔진 정량 데이터]\n{msg}"
-                )
-                
-                ollama_resp = ollama.chat(
-                    model="llama3",
-                    messages=[{"role": "user", "content": ai_prompt}]
-                )
-                ai_insight = ollama_resp['message']['content']
-                
-                msg = (
-                    f"💡 **올라마 로컬 AI 퀀트 가이드**\n"
-                    f"{ai_insight}\n"
-                    f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-                    f"{msg}"
-                )
-            except Exception as ollama_err:
-                logger.warning(f"⚠️ 올라마 분석 레이어 건너뜀 (로컬 전용): {ollama_err}")
-        else:
-            logger.info("ℹ️ Ollama AI 브리핑 레이어 비활성화 (정량 데이터 모드로 전환)")
-
         # 3. 최종 메시지를 이미지와 함께 디스코드 전송
-        # 📌 핵심 수정: 깃허브 시크릿(환경 변수)에 등록된 웹훅을 1순위로 읽고, 없을 때만 config.json 값을 씁니다.
-        discord_webhook_url = os.environ.get("DISCORD_WEBHOOK") or config.get("webhook") or config.get("DISCORD_WEBHOOK")
-        discord_user_id = os.environ.get("DISCORD_USER_ID") or config.get("user_id") or config.get("DISCORD_USER_ID")
+        # 📌 어떤 명칭으로 설정되어 있든 깃허브 Secrets 환경변수와 config 파일을 유연하게 매핑하도록 보강
+        discord_webhook_url = (
+            os.environ.get("DISCORD_WEBHOOK") or 
+            config.get("webhook") or 
+            config.get("DISCORD_WEBHOOK") or 
+            config.get("webhook_url")
+        )
+        discord_user_id = (
+            os.environ.get("DISCORD_USER_ID") or 
+            config.get("user_id") or 
+            config.get("DISCORD_USER_ID") or
+            config.get("USER_ID")
+        )
         
         send_success = send_discord_message_with_file(
             content=msg, 
