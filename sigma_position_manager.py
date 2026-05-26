@@ -12,30 +12,41 @@ import yfinance as yf
 import pytz
 
 # ====================== 한글 폰트 설정 ======================
-# [FIX] plt.rcParams['font.family'] = 'NanumGothic' 방식은
-# matplotlib이 폰트를 캐시에서 이름으로 찾으므로, 캐시 삭제 전에
-# 프로세스가 이미 로드되어 있으면 효과가 없음.
-# → FontProperties로 TTF 파일 경로를 직접 지정하는 방식으로 교체.
-# GitHub Actions ubuntu-latest 기준 fonts-nanum 설치 경로:
-#   /usr/share/fonts/truetype/nanum/NanumGothic.ttf
+# FontProperties로 TTF 파일 경로를 직접 지정 — rcParams 이름 탐색보다 확실함.
+# Windows 로컬 / GitHub Actions ubuntu 환경을 자동 감지하여 경로 탐색.
+import platform
 import matplotlib
-matplotlib.use('Agg')  # GUI 없는 서버 환경에서 반드시 백엔드를 Agg로 지정
+matplotlib.use("Agg")  # GUI 없는 서버·로컬 양쪽 모두 Agg 백엔드 사용
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 
-_NANUM_PATH = "/usr/share/fonts/truetype/nanum/NanumGothic.ttf"
-_FALLBACK_FONT = "DejaVu Sans"
-
 def _get_korean_font() -> fm.FontProperties:
-    """NanumGothic TTF를 직접 로드. 없으면 DejaVu Sans로 폴백."""
-    if os.path.exists(_NANUM_PATH):
-        return fm.FontProperties(fname=_NANUM_PATH)
-    return fm.FontProperties(family=_FALLBACK_FONT)
+    if platform.system() == "Windows":
+        candidates = [
+            "C:/Windows/Fonts/NanumGothic.ttf",
+            "C:/Windows/Fonts/NanumGothic.otf",
+            os.path.expanduser("~") + "/AppData/Local/Microsoft/Windows/Fonts/NanumGothic.ttf",
+        ]
+    else:
+        # Linux (GitHub Actions ubuntu)
+        candidates = [
+            "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+            "/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf",
+        ]
 
-# 전역 폰트 설정 — rcParams는 폴백용으로만 사용
-# 실제 한글 텍스트 렌더링은 _KOREAN_FONT를 직접 전달
+    for path in candidates:
+        if os.path.exists(path):
+            return fm.FontProperties(fname=path)
+
+    # 경로 탐색 실패 시 matplotlib 캐시에서 이름으로 검색
+    for f in fm.fontManager.ttflist:
+        if "Nanum" in f.name and "Gothic" in f.name:
+            return fm.FontProperties(fname=f.fname)
+
+    return fm.FontProperties(family="DejaVu Sans")  # 최종 폴백
+
 _KOREAN_FONT = _get_korean_font()
-plt.rcParams['axes.unicode_minus'] = False  # 마이너스 기호 깨짐 방지
+plt.rcParams["axes.unicode_minus"] = False  # 마이너스 기호 깨짐 방지
 
 # yfinance 임시 디렉토리 캐시 설정 (DB 잠김 및 TypeError 완벽 방지)
 temp_cache_dir = tempfile.mkdtemp()
@@ -674,18 +685,30 @@ def main():
         kst_str = kst_now.strftime('%Y-%m-%d %H:%M:%S')
         msg     = create_combined_message(results, is_open, kst_str, vix_info, is_last)
 
-        discord_webhook_url = (
-            os.environ.get("DISCORD_WEBHOOK") or
-            config.get("webhook") or
-            config.get("DISCORD_WEBHOOK") or
-            config.get("webhook_url")
+        # [FIX] or 체인은 빈 문자열("")을 falsy로 처리하므로
+        # config.json 값이 "" 이면 환경변수 → config 순서로 None이 될 수 있음.
+        # strip() 후 None 비교 방식으로 교체하여 빈 문자열도 정확히 처리.
+        def _pick(*vals):
+            for v in vals:
+                if v and str(v).strip():
+                    return str(v).strip()
+            return None
+
+        discord_webhook_url = _pick(
+            os.environ.get("DISCORD_WEBHOOK"),
+            config.get("webhook"),
+            config.get("DISCORD_WEBHOOK"),
+            config.get("webhook_url"),
         )
-        discord_user_id = (
-            os.environ.get("DISCORD_USER_ID") or
-            config.get("user_id") or
-            config.get("DISCORD_USER_ID") or
-            config.get("USER_ID")
+        discord_user_id = _pick(
+            os.environ.get("DISCORD_USER_ID"),
+            config.get("user_id"),
+            config.get("DISCORD_USER_ID"),
+            config.get("USER_ID"),
         )
+
+        if not discord_webhook_url:
+            logger.warning("⚠️ DISCORD_WEBHOOK 값이 없습니다. config.json 또는 환경변수를 확인하세요.")
 
         send_success = send_discord_message_with_file(
             content=msg,
