@@ -16,7 +16,8 @@
 | SOXL_VIX_SIGMA_BACKTEST.py | 4년 통계 기반 배수 최적화 | ✅ 범위 설정 시에만 편집 |
 | optimize_strategy.py | Hermes AI 월간 복기 엔진 | 필요 시에만 편집 |
 | config.json | 시스템 설정 및 포지션 저장소 | ❌ 수동 편집 절대 금지 |
-| ledger.json | 실전 체결 팩트 기록 장부 | ✅ 체결 시 수동 입력 |
+| ledger.json | 실전 체결 팩트 기록 장부 | ✅ 체결 시 수동 입력      |
+| `README.md` | 본 마스터 운용 가이드 및 전략 관제탑 | ❌ 수동 편집 금지(시스템 변경 시에만) |
 
 > ⚠️ [경고] config.json은 직접 편집하지 마십시오!
 > 새로 구축된 자동화 정산 레이어에 의해 ledger.json에 기록된 실전 팩트와 백테스트/AI 엔진 결과가 연산되어 config.json을 자동으로 100% 갱신합니다.
