@@ -4,12 +4,10 @@ on:
   push:
     branches:
       - main
-    paths: 
-      - sigma_position_manager.py 
-        
+    paths:
+      - sigma_position_manager.py
   schedule:
-    # [미국 본장 개장 전 자동 점검]
-    # 계산: UTC 7시 10분 = KST 16시 10분
+    # UTC 07:10 = KST 16:10 (미국 본장 개장 전 자동 점검)
     - cron: '10 7 * * 1-5'
   workflow_dispatch:
 
@@ -22,18 +20,17 @@ env:
 jobs:
   sigma_position_manager:
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          # 💡 [원인 해결 1] 문제가 발생하는 외부 토큰 대신, 기본 제공되는 github.token을 사용합니다.
           token: ${{ github.token }}
-          fetch-depth: 0 
+          fetch-depth: 0
 
       - name: Configure Git
-        # 💡 [원인 해결 2] URL 파싱 에러를 유발하던 외부 토큰 조합(x-access-token) 주입 과정을 완전히 제거합니다.
-        # github.token을 쓰면 remote URL을 지저분하게 바꾸지 않아도 알아서 인증이 통과됩니다.
+        # github.token 사용 시 remote URL에 토큰을 직접 삽입할 필요 없음
+        # permissions: contents: write 선언으로 인증이 자동 처리됨
         run: |
           git config --global user.name "Automated Bot"
           git config --global user.email "bot@example.com"
@@ -43,26 +40,28 @@ jobs:
         run: |
           git pull origin main || echo "Already up to date or no remote changes."
 
-      - name: Python 3.12 설정
+      - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
           cache: 'pip'
 
-      - name: 패키지 설치
+      - name: Install system dependencies and fonts
         run: |
-          # 1. 우분투 서버 패키지 업데이트 및 나눔 폰트 설치
-          sudo apt-get update
+          sudo apt-get update -qq
           sudo apt-get install -y fonts-nanum
-          
-          # 2. 기존 Matplotlib 폰트 캐시 삭제 (새로 설치된 폰트를 인식하기 위함)
+          # [FIX] 폰트 설치 후 matplotlib 캐시를 삭제하되,
+          # Python 실행 전에 삭제해야 효과가 있음 → 별도 step으로 분리
           rm -rf ~/.cache/matplotlib
-          
-          # 3. 기존 파이썬 패키지 설치 로직
+          # 시스템 폰트 캐시 재빌드
+          fc-cache -fv > /dev/null 2>&1
+
+      - name: Install Python dependencies
+        run: |
           python -m pip install --upgrade pip
           pip install numpy pandas requests yfinance pytz holidays matplotlib
-              
-      - name: Discord 알림 및 자동 데이터 동기화 실행
+
+      - name: Run sigma_position_manager
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
@@ -71,18 +70,14 @@ jobs:
             python sigma_position_manager.py && break || echo "Retry $i failed..." && sleep 10
           done
 
-      # 🚀 파이썬 스크립트 실행 후 변경된 config.json 파일을 안전하게 푸시합니다.
-      - name: 실행 결과 config.json 최종 커밋 & 푸시
+      - name: Commit and push config.json
         if: always()
         run: |
-          if [ -f config.json ]; then
-            git add config.json
-          fi
-          
+          [ -f config.json ] && git add config.json
+
           if ! git diff --cached --quiet; then
-            git commit -m "chore: 자산 평정 결과 config.json 동기화 ($(date -u +'%Y-%m-%d %H:%M UTC'))"
-            git push --force-with-lease || git push
-            echo "🚀 GitHub Actions 기준 자산 데이터 최종 Push 성공."
+            git commit -m "chore: sync config.json after sigma_position_manager run ($(date -u +'%Y-%m-%d %H:%M UTC'))"
+            git push
           else
-            echo "✅ 변동 사항이 없어 동기화를 건너뜁니다."
+            echo "No changes to commit. Skipping push."
           fi
