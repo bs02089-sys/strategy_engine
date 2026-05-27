@@ -1,40 +1,26 @@
 {
   "DISCORD_WEBHOOK": "",
   "DISCORD_USER_ID": "",
-  "TICKERS": [
-    "SOXL",
-    "TSLA"
-  ],
+  "TICKERS": ["SOXL"],
   "POSITIONS": {
     "SOXL": {
-      "MODE": "LONG",
-      "TOTAL_SHARES": 34,
-      "MY_AVG_PRICE": 165.1124,
-      "CURRENT_CASTS": 4,
-      "ANNUAL_QUOTA": 24,
-      "LAST_CAST_DATE": "2026-05-15"
-    },
-    "TSLA": {
-      "MODE": "SHORT",
-      "TOTAL_SHARES": 10,
-      "MY_AVG_PRICE": 321.2
+      "TOTAL_SHARES_LONG": 34,
+      "MY_AVG_PRICE_LONG": 165.1124,
+      "CURRENT_CASTS_LONG": 4, 
+      "ANNUAL_QUOTA_LONG": 24,
+      "TOTAL_SHARES_SHORT": 7,
+      "MY_AVG_PRICE_SHORT": 164.3043,
+      "CURRENT_CASTS_SHORT": 7,
+      "ANNUAL_QUOTA_SHORT": 14,
+      "LAST_CAST_DATE": "2026-05-26" 
     }
   },
   "VIX_CONFIG": {
-    "LONG": {
-      "LEVEL_LOW": 20.0,
-      "LEVEL_HIGH": 30.0,
-      "MULT_NORMAL": 0.85,
-      "MULT_FEAR": 1.95,
-      "MULT_EXTREME": 2.4
-    },
-    "SHORT": {
-      "LEVEL_LOW": 20.0,
-      "LEVEL_HIGH": 30.0,
-      "MULT_NORMAL": 0.85,
-      "MULT_FEAR": 1.95,
-      "MULT_EXTREME": 2.4
-    }
+    "LEVEL_LOW": 20.0,
+    "LEVEL_HIGH": 30.0,
+    "MULT_NORMAL": 0.85,
+    "MULT_FEAR": 1.95,
+    "MULT_EXTREME": 2.4
   },
   "DEFAULTS": {
     "SIGMA_DEFAULT": 2.0,

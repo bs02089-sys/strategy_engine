@@ -56,10 +56,9 @@ def setup_environment() -> dict:
     return {
         "webhook": cfg.get("DISCORD_WEBHOOK") or os.getenv("DISCORD_WEBHOOK"),
         "user_id": cfg.get("DISCORD_USER_ID") or os.getenv("DISCORD_USER_ID"),
-        "tickers": cfg.get("TICKERS", ["SOXL", "TSLA"]),
+        "tickers": cfg.get("TICKERS", ["SOXL"]),
         "positions": cfg.get("POSITIONS", {}),
-        "vix_long":  {**default_vix, **cfg.get("VIX_CONFIG", {}).get("LONG",  {})},
-        "vix_short": {**default_vix, **cfg.get("VIX_CONFIG", {}).get("SHORT", {})},
+        "vix_cfg": {**default_vix, **cfg.get("VIX_CONFIG", {})},
         "defaults": default_values,
         "kst": pytz.timezone('Asia/Seoul'),
         "est": pytz.timezone('US/Eastern'),
@@ -104,23 +103,38 @@ def sync_ledger_to_config():
 
             if ticker in config["POSITIONS"]:
                 old_pos          = config["POSITIONS"][ticker]
-                old_total_shares = old_pos.get("TOTAL_SHARES", 0)
-                old_avg_price    = old_pos.get("MY_AVG_PRICE", 0.0)
-                total_cost       = (old_total_shares * old_avg_price) + (new_qty * buy_target)
-                final_shares     = old_total_shares + new_qty
+                
+                if "TOTAL_SHARES_LONG" in old_pos or "TOTAL_SHARES_SHORT" in old_pos:
+                    if mode == "LONG":
+                        old_total = old_pos.get("TOTAL_SHARES_LONG", 0)
+                        old_avg = old_pos.get("MY_AVG_PRICE_LONG", 0.0)
+                    else:
+                        old_total = old_pos.get("TOTAL_SHARES_SHORT", 0)
+                        old_avg = old_pos.get("MY_AVG_PRICE_SHORT", 0.0)
+                else:
+                    old_total = old_pos.get("TOTAL_SHARES", 0)
+                    old_avg = old_pos.get("MY_AVG_PRICE", 0.0)
+                
+                total_cost       = (old_total * old_avg) + (new_qty * buy_target)
+                final_shares     = old_total + new_qty
                 calculated_avg   = round(total_cost / final_shares, 4) if final_shares > 0 else buy_target
             else:
                 final_shares   = new_qty
                 calculated_avg = buy_target
 
-            config["POSITIONS"][ticker] = {
-                "MODE":          mode,
-                "TOTAL_SHARES":  final_shares,
-                "MY_AVG_PRICE":  calculated_avg,
-                "CURRENT_CASTS": current_casts,
-                "ANNUAL_QUOTA":  config["DEFAULTS"].get("ANNUAL_QUOTA", 24),
-                "LAST_CAST_DATE": tx_date
-            }
+            if ticker not in config["POSITIONS"]:
+                config["POSITIONS"][ticker] = {}
+            
+            if mode == "LONG":
+                config["POSITIONS"][ticker]["TOTAL_SHARES_LONG"] = final_shares
+                config["POSITIONS"][ticker]["MY_AVG_PRICE_LONG"] = calculated_avg
+            else:
+                config["POSITIONS"][ticker]["TOTAL_SHARES_SHORT"] = final_shares
+                config["POSITIONS"][ticker]["MY_AVG_PRICE_SHORT"] = calculated_avg
+                config["POSITIONS"][ticker]["CURRENT_CASTS_SHORT"] = current_casts
+                config["POSITIONS"][ticker]["ANNUAL_QUOTA_SHORT"] = config["DEFAULTS"].get("ANNUAL_QUOTA", 14)
+            
+            config["POSITIONS"][ticker]["LAST_CAST_DATE"] = tx_date
             if tx_date:
                 config["DEFAULTS"]["LAST_CAST_DATE"] = tx_date
 
@@ -186,7 +200,7 @@ def is_triple_witching_week(d: datetime.date) -> bool:
 # ====================== 핵심 분석 함수 ======================
 def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
                    vix_val: float, is_open: bool, today_date: datetime.date,
-                   vix_cfg: dict, defaults: dict = None) -> dict:
+                   vix_long_cfg: dict, vix_short_cfg: dict, defaults: dict = None) -> dict:
 
     defaults = defaults or {}
 
@@ -221,66 +235,79 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
     if pd.isna(std_20d) or std_20d <= 0:
         std_20d = float(defaults.get("SIGMA_DEFAULT", 2.0))
 
-    mode      = pos_cfg.get("MODE", "SHORT")
-    shares    = pos_cfg.get("TOTAL_SHARES", 0)
-    vix_cfg   = vix_cfg or {}
-    v_extreme = vix_cfg.get("MULT_EXTREME")
-    v_fear    = vix_cfg.get("MULT_FEAR")
-    v_normal  = vix_cfg.get("MULT_NORMAL")
-    v_high    = vix_cfg.get("LEVEL_HIGH")
-    v_low     = vix_cfg.get("LEVEL_LOW")
     current_price = float(ticker_df["Close"].iloc[-1])
 
+    # 데이터 취합용 딕셔너리 기초 생성
     result = {
-        "mode": mode, "prev_close": prev_close, "today_open": today_open,
-        "std": std_20d, "total_shares": shares, "current_price": current_price,
+        "prev_close": prev_close,
+        "today_open": today_open,
+        "current_price": current_price,
+        "std": std_20d
     }
 
-    if mode != "LONG":
-        if vix_val >= v_high:
-            buy_target = base * (1 - std_20d * v_extreme / 100)
-            buy_name, sub_msg = f"-{v_extreme}σ", "🔴🔴 VIX 극단적 공포"
-        elif is_triple_witching_week(today_date):
-            if is_open and gap_ratio < -0.001:
-                rem = max(0, std_20d * v_fear + gap_ratio * 100)
-                buy_target = today_open * (1 - rem / 100)
-                buy_name   = f"-{rem/std_20d:.1f}σ"
-                sub_msg    = "🧙 세 마녀 주간 갭 하락 보정"
-            else:
-                buy_target = prev_close * (1 - std_20d * v_fear / 100)
-                buy_name, sub_msg = f"-{v_fear}σ", "🧙 세 마녀 주간"
-        elif vix_val >= v_low:
-            buy_target = base * (1 - std_20d * v_fear / 100)
-            buy_name, sub_msg = f"-{v_fear}σ", "🔴 VIX 공포"
-        elif is_open and gap_ratio < -0.001:
-            gap_adjust = abs(gap_ratio) * 100
-            rem        = max(0, std_20d + gap_adjust)
-            buy_target = today_open * (1 - rem / 100)
-            buy_name   = f"-{rem/std_20d:.1f}σ"
-            sub_msg    = "📉 갭 하락 보정"
+    # 🛠️ SHORT 모드 계산 로직 
+    vs_extreme = vix_short_cfg.get("MULT_EXTREME", 2.4)
+    vs_fear    = vix_short_cfg.get("MULT_FEAR", 1.95)
+    vs_normal  = vix_short_cfg.get("MULT_NORMAL", 0.85)
+    vs_high    = vix_short_cfg.get("LEVEL_HIGH", 30.0)
+    vs_low     = vix_short_cfg.get("LEVEL_LOW", 20.0)
+    shares_short = pos_cfg.get("TOTAL_SHARES_SHORT", pos_cfg.get("TOTAL_SHARES", 0)) 
+
+    if vix_val >= vs_high:
+        short_target = base * (1 - std_20d * vs_extreme / 100)
+        short_buy_name, short_sub_msg = f"-{vs_extreme}σ", "🔴🔴 VIX 극단적 공포"
+    elif is_triple_witching_week(today_date):
+        if is_open and gap_ratio < -0.001:
+            rem = max(0, std_20d * vs_fear + gap_ratio * 100)
+            short_target = today_open * (1 - rem / 100)
+            short_buy_name   = f"-{rem/std_20d:.1f}σ"
+            short_sub_msg    = "🧙 세 마녀 주간 갭 하락 보정"
         else:
-            buy_target = prev_close * (1 - std_20d * v_normal / 100)
-            buy_name, sub_msg = f"-{v_normal}σ", "✨ VIX 안정"
+            short_target = prev_close * (1 - std_20d * vs_fear / 100)
+            short_buy_name, short_sub_msg = f"-{vs_fear}σ", "🧙 세 마녀 주간"
+    elif vix_val >= vs_low:
+        short_target = base * (1 - std_20d * vs_fear / 100)
+        short_buy_name, short_sub_msg = f"-{vs_fear}σ", "🔴 VIX 공포"
+    elif is_open and gap_ratio < -0.001:
+        gap_adjust = abs(gap_ratio) * 100
+        rem        = max(0, std_20d + gap_adjust)
+        short_target = today_open * (1 - rem / 100)
+        short_buy_name   = f"-{rem/std_20d:.1f}σ"
+        short_sub_msg    = "📉 갭 하락 보정"
+    else:
+        short_target = prev_close * (1 - std_20d * vs_normal / 100)
+        short_buy_name, short_sub_msg = f"-{vs_normal}σ", "✨ VIX 안정"
 
-        result.update({
-            "buy_target": buy_target, "buy_name": buy_name, "sub_msg": sub_msg,
-            "split_sell_plan": calculate_split_sell_targets(base, std_20d, shares)
-        })
-        return result
+    result.update({
+        "short_shares": shares_short,
+        "short_target": short_target,
+        "short_buy_name": short_buy_name,
+        "short_sub_msg": short_sub_msg,
+        "short_current_casts": pos_cfg.get("CURRENT_CASTS_SHORT", 0),
+        "short_annual_quota": pos_cfg.get("ANNUAL_QUOTA_SHORT", 14),
+        "split_sell_plan": calculate_split_sell_targets(base, std_20d, shares_short)
+    })
 
-    # ── LONG 모드 ──
+    # 🛠️ LONG 모드 계산 로직 
+    vl_extreme = vix_long_cfg.get("MULT_EXTREME", 2.4)
+    vl_fear    = vix_long_cfg.get("MULT_FEAR", 1.95)
+    vl_normal  = vix_long_cfg.get("MULT_NORMAL", 0.85)
+    vl_high    = vix_long_cfg.get("LEVEL_HIGH", 30.0)
+    vl_low     = vix_long_cfg.get("LEVEL_LOW", 20.0)
+    shares_long = pos_cfg.get("TOTAL_SHARES_LONG", pos_cfg.get("TOTAL_SHARES", 34))
+
     log_ret         = np.log(hist_df["Close"] / hist_df["Close"].shift(1)).dropna().tail(90)
     daily_sigma_val = float(log_ret.std(ddof=1)) if len(log_ret) > 0 else 0.04
 
-    if vix_val >= v_high:
-        multiplier    = v_extreme
-        vix_status_msg = "🔴🔴 VIX 극단적 공포"
-    elif vix_val >= v_low:
-        multiplier    = v_fear
-        vix_status_msg = "🔴 VIX 공포"
+    if vix_val >= vl_high:
+        long_multiplier = vl_extreme
+        long_vix_msg = "🔴🔴 VIX 극단적 공포"
+    elif vix_val >= vl_low:
+        long_multiplier = vl_fear
+        long_vix_msg = "🔴 VIX 공포"
     else:
-        multiplier    = v_normal
-        vix_status_msg = "✨ VIX 안정"
+        long_multiplier = vl_normal
+        long_vix_msg = "✨ VIX 안정"
 
     if is_open and gap_ratio < -0.03:
         gap_pct = abs(gap_ratio) * 100
@@ -296,12 +323,12 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
         else:
             adjusted_multiplier = 0.0
             gap_zone = "-10% 초과 구간"
-        sub_msg_gap = f" (갭 {gap_ratio*100:.1f}% / {gap_zone} → 배수 {multiplier:.2f}→{adjusted_multiplier:.2f})"
+        long_sub_msg = f"{long_vix_msg} ➔ {adjusted_multiplier:.2f}배수 하방 (갭 {gap_ratio*100:.1f}% / {gap_zone} → 배수 {long_multiplier:.2f}→{adjusted_multiplier:.2f})"
     else:
-        adjusted_multiplier = multiplier
-        sub_msg_gap = ""
+        adjusted_multiplier = long_multiplier
+        long_sub_msg = f"{long_vix_msg} ➔ {adjusted_multiplier:.2f}배수 하방"
 
-    long_buy      = (today_open if is_open else prev_close) * float(np.exp(-daily_sigma_val * adjusted_multiplier))
+    long_target = (today_open if is_open else prev_close) * float(np.exp(-daily_sigma_val * adjusted_multiplier))
     last_cast_str = pos_cfg.get("LAST_CAST_DATE", defaults.get("LAST_CAST_DATE", "2026-01-01"))
 
     try:
@@ -314,36 +341,35 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
     min_days_gate = 14 if std_20d > normal_std * 1.3 else 5
     is_time_gate_passed = days_since >= min_days_gate
 
-    if is_open and current_price <= long_buy and not is_time_gate_passed:
+    if is_open and current_price <= long_target and not is_time_gate_passed:
         time_guard_status = "🔥 [시간 가드 강제 해제] 초저점 도달로 실탄 집행!"
-        action_ment       = f"계산된 초저점 타깃가(${long_buy:.2f})를 터치하여 기계적으로 매수를 집행합니다."
+        action_ment       = f"계산된 초저점 타깃가(${long_target:.2f})를 터치하여 기계적으로 매수를 집행합니다."
     elif is_time_gate_passed:
         time_guard_status = "🟢 [시간 가드 해제] 자유 매수 가능 주간"
-        action_ment       = f"대기 기간을 충족하여 실탄 장전이 완료되었습니다. 오늘 본장 매수 저격가는 ${long_buy:.2f}입니다."
+        action_ment       = f"대기 기간을 충족하여 실탄 장전이 완료되었습니다. 오늘 본장 매수 저격가는 ${long_target:.2f}입니다."
     else:
         time_guard_status = f"⏳ [시간 가드 작동 중] {min_days_gate - days_since}일 대기 필요"
-        action_ment       = f"조급한 실탄 고갈을 막기 위해 관망합니다. 가드 해제 후 유효 매수 예정가는 ${long_buy:.2f}입니다."
+        action_ment       = f"조급한 실탄 고갈을 막기 위해 관망합니다. 가드 해제 후 유효 매수 예정가는 ${long_target:.2f}입니다."
 
-    annual_quota   = pos_cfg.get("ANNUAL_QUOTA", defaults.get("ANNUAL_QUOTA", 24))
-    current_casts  = pos_cfg.get("CURRENT_CASTS", 0)
-    exhaustion_rate = min(current_casts / max(annual_quota, 1) * 100, 100.0)
-
-    if current_casts > annual_quota:
-        logger.warning(f"⚠️ {ticker} CURRENT_CASTS({current_casts})가 ANNUAL_QUOTA({annual_quota})를 초과했습니다!")
+    annual_quota_long = pos_cfg.get("ANNUAL_QUOTA_LONG", pos_cfg.get("ANNUAL_QUOTA", defaults.get("ANNUAL_QUOTA", 24)))
+    current_casts_long = pos_cfg.get("CURRENT_CASTS_LONG", pos_cfg.get("CURRENT_CASTS", 0))
+    exhaustion_rate = min(current_casts_long / max(annual_quota_long, 1) * 100, 100.0)
 
     result.update({
+        "long_shares":    shares_long,
         "daily_sigma":    daily_sigma_val * 100,
-        "multiplier":     multiplier,
-        "buy_target":     long_buy,
-        "buy_name":       f"LONG 변동성 방어선 ({adjusted_multiplier:.2f}x)",
-        "sub_msg":        f"{vix_status_msg} ➔ {adjusted_multiplier:.2f}배수 하방{sub_msg_gap}",
+        "multiplier":     long_multiplier,
+        "long_target":    long_target,
+        "long_buy_name":  f"LONG 변동성 방어선 ({adjusted_multiplier:.2f}x)",
+        "long_sub_msg":   long_sub_msg,
         "time_guard_info":   time_guard_status,
         "time_guard_action": action_ment,
-        "my_avg_price":   pos_cfg.get("MY_AVG_PRICE", 0.0),
-        "current_casts":  current_casts,
-        "annual_quota":   annual_quota,
+        "my_avg_price":   pos_cfg.get("MY_AVG_PRICE_LONG", pos_cfg.get("MY_AVG_PRICE", 0.0)),
+        "long_current_casts": current_casts_long,
+        "long_annual_quota":  annual_quota_long,
         "exhaustion_rate": exhaustion_rate,
     })
+
     return result
 
 
@@ -408,9 +434,17 @@ def get_combined_market_data(tickers: list, config: dict, est_tz, target_date: d
     )
 
     vix_val, vix_info  = get_vix_report()
+    
+    # 통합 딕셔너리 구성
     positions_cfg      = config.get("positions", {})
-    vix_long_cfg       = config.get("vix_long",  {})
-    vix_short_cfg      = config.get("vix_short", {})
+    
+    # default_vix가 함수 내부에 선언되어 있지 않다면 아래처럼 안전하게 로컬 딕셔너리를 지정하거나,
+    # setup_environment에서 넘겨받은 전체 config 구조를 활용하도록 세팅합니다.
+    default_vix = {
+        "LEVEL_LOW": 20.0, "LEVEL_HIGH": 30.0,
+        "MULT_NORMAL": 0.85, "MULT_FEAR": 1.95, "MULT_EXTREME": 2.40
+    }
+    vix_cfg            = {**default_vix, **config.get("full_cfg", {}).get("VIX_CONFIG", {})}
     defaults           = config.get("defaults",  {})
 
     results = {}
@@ -424,13 +458,12 @@ def get_combined_market_data(tickers: list, config: dict, est_tz, target_date: d
                 continue
 
             pos_cfg = positions_cfg.get(ticker, {})
-            mode    = pos_cfg.get("MODE", "SHORT")
-            vix_cfg = vix_long_cfg if mode == "LONG" else vix_short_cfg
 
+            # 🌟 analyze_ticker를 호출할 때 롱/숏 개별 vix_cfg 대신 통합 vix_cfg를 통째로 넘겨줍니다.
             results[ticker] = analyze_ticker(
                 ticker=ticker, ticker_df=t_df, pos_cfg=pos_cfg,
                 vix_val=vix_val, is_open=is_open, today_date=target_date,
-                vix_cfg=vix_cfg, defaults=defaults
+                vix_long_cfg=vix_cfg, vix_short_cfg=vix_cfg, defaults=defaults
             )
         except Exception as e:
             logger.warning(f"⚠️ {ticker} 분석 실패: {e}")
@@ -438,7 +471,7 @@ def get_combined_market_data(tickers: list, config: dict, est_tz, target_date: d
     return results, is_open, vix_info
 
 
-# ====================== 리포트 생성 ======================
+# ====================== 리포트 생성 (롱/숏 통합 출력) ======================
 def create_combined_message(results: dict, is_open: bool,
                             kst_now: str, vix_info: str, is_last_day: bool) -> str:
     mode_str = "🚀 실시간 모드" if is_open else "⏳ 장전 대기 모드"
@@ -450,38 +483,46 @@ def create_combined_message(results: dict, is_open: bool,
     for ticker, v in results.items():
         if v is None:
             continue
-        opt_mode = "📈 LONG (장기 적립)" if v.get("mode") == "LONG" else "⚡ SHORT (단기 타격)"
+        
+        current_price = v.get('current_price', 0.0)
+        long_target   = v.get('long_target', 0.0)
+        short_target  = v.get('short_target', 0.0)
+
         lines += [
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
-            f"● 종목 : {ticker} [{opt_mode}] (보유량 : {v.get('total_shares', 0)}주)",
-            f"● 현재가 : ${v.get('current_price', 0.0):.2f}",
-            f"● 전일 종가 : ${v.get('prev_close', 0.0):.2f}",
-            f"● VIX 상태 : {v.get('sub_msg', '')}",
+            f"● 종목 : {ticker}",
+            f"● 현재가 : ${current_price:.2f}  (전일 종가 : ${v.get('prev_close', 0.0):.2f})",
+            f"📊 20일 변동성(1σ) : ±{v.get('std', 0.0):.2f}%",
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+            "📈 [본인 계좌 - LONG 모드]",
+            f"  • 보유량 : {v.get('long_shares', 0)}주 (평단가: ${v.get('my_avg_price', 0.0):.2f})" if v.get('my_avg_price', 0) > 0 else f"  • 보유량 : {v.get('long_shares', 0)}주",
+            f"  • VIX 상태 : {v.get('long_sub_msg', '')}",
+            f"  • 일간 평균 변동성 : ±{v.get('daily_sigma', 0.0):.2f}% / 배수 : {v.get('multiplier', 0.0):.2f}x",
+            f"  • ⚙️ 타임 엔진 : {v.get('time_guard_info', '')}",
         ]
-        buy_target    = v.get('buy_target', 0.0)
-        current_price = v.get('current_price', 0.0)
-        if is_open and current_price <= buy_target:
-            lines.append(f"🛒 [매수 예정가] : ${buy_target:.2f} (🚨 [매수 시그널 포착] 실탄 집행!)")
+        
+        if is_open and current_price <= long_target:
+            lines.append(f"  • 🛒 매수 예정가 : ${long_target:.2f} (🚨 [LONG 매수 시그널 포착] 실탄 집행!)")
         else:
-            lines.append(f"🛒 [매수 예정가] : ${buy_target:.2f}")
+            lines.append(f"  • 🛒 매수 예정가 : ${long_target:.2f}")
+            
+        lines += [
+            "-----------------------------------------",
+            "⚡ [처형 계좌 - SHORT 모드]",
+            f"  • 보유량 : {v.get('short_shares', 0)}주 (집행 현황: {v.get('short_current_casts', 0)}/{v.get('short_annual_quota', 14)}회)",
+            f"  • VIX 상태 : {v.get('short_sub_msg', '')} ({v.get('short_buy_name', '')})",
+        ]
+        
+        if is_open and current_price <= short_target:
+            lines.append(f"  • 🛒 매수 예정가 : ${short_target:.2f} (🚨 [SHORT 매수 시그널 포착] 2배 가속!)")
+        else:
+            lines.append(f"  • 🛒 매수 예정가 : ${short_target:.2f}")
 
-        if v.get("mode") == "LONG":
-            lines += [
-                "-----------------------------------------",
-                f"📊 일간 평균 변동성 : ±{v.get('daily_sigma', 0.0):.2f}%",
-                f"💡 적용 배수     : {v.get('multiplier', 0.0):.2f}x",
-                f"⚙️ 타임 엔진     : {v.get('time_guard_info', '정보 없음')}",
-                f"📊 집행 현황     : {v.get('current_casts', 0)}/{v.get('annual_quota', 24)}회",
-            ]
-            if v.get("my_avg_price", 0) > 0:
-                lines.append(f"🍏 평단가         : ${v.get('my_avg_price'):.2f}")
-        else:
-            lines.append(f"📊 20일 변동성(1σ) : ±{v.get('std', 0.0):.2f}%")
-            plan = v.get("split_sell_plan", [])
-            if plan:
-                lines.append("📌 **3단계 분할 매도 계획**")
-                for p in plan:
-                    lines.append(f"   • {p['level']:16} → ${p['price']:.2f}  ({p['qty']}주)")
+        plan = v.get("split_sell_plan", [])
+        if plan:
+            lines.append("  📌 **3단계 분할 매도 계획 (SHORT)**")
+            for p in plan:
+                lines.append(f"     • {p['level']:16} → ${p['price']:.2f}  ({p['qty']}주)")
 
     lines.append("-----------------------------------------")
     if is_last_day:
