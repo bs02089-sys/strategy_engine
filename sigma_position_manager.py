@@ -68,7 +68,7 @@ def setup_environment() -> dict:
 
 # ====================== 자동 동기화 및 유틸 ======================
 def sync_ledger_to_config():
-    """ledger.json → config.json 포지션 정보 자동 동기화."""
+    """ledger.json → config.json 포지션 정보 자동 동기화 (날짜 찌꺼기 생성 방지)."""
     if not os.path.exists("ledger.json") or not os.path.exists("config.json"):
         logger.info("ℹ️ ledger.json 또는 config.json 파일이 없어 자동 동기화를 건너뜁니다.")
         return
@@ -84,8 +84,6 @@ def sync_ledger_to_config():
 
     if "POSITIONS" not in config:
         config["POSITIONS"] = {}
-    if "DEFAULTS" not in config:
-        config["DEFAULTS"] = {}
 
     if isinstance(ledger, list):
         logger.info("ℹ️ ledger.json이 빈 리스트 또는 리스트 형식입니다. 동기화를 건너뜁니다.")
@@ -99,21 +97,16 @@ def sync_ledger_to_config():
             buy_target    = info.get("buy_target", 0.0)
             new_qty       = info.get("qty", 0)
             current_casts = info.get("current_casts", 1)
-            tx_date       = info.get("date", "")
 
             if ticker in config["POSITIONS"]:
-                old_pos          = config["POSITIONS"][ticker]
+                old_pos = config["POSITIONS"][ticker]
                 
-                if "TOTAL_SHARES_LONG" in old_pos or "TOTAL_SHARES_SHORT" in old_pos:
-                    if mode == "LONG":
-                        old_total = old_pos.get("TOTAL_SHARES_LONG", 0)
-                        old_avg = old_pos.get("MY_AVG_PRICE_LONG", 0.0)
-                    else:
-                        old_total = old_pos.get("TOTAL_SHARES_SHORT", 0)
-                        old_avg = old_pos.get("MY_AVG_PRICE_SHORT", 0.0)
+                if mode == "LONG":
+                    old_total = old_pos.get("TOTAL_SHARES_LONG", 0)
+                    old_avg = old_pos.get("MY_AVG_PRICE_LONG", 0.0)
                 else:
-                    old_total = old_pos.get("TOTAL_SHARES", 0)
-                    old_avg = old_pos.get("MY_AVG_PRICE", 0.0)
+                    old_total = old_pos.get("TOTAL_SHARES_SHORT", 0)
+                    old_avg = old_pos.get("MY_AVG_PRICE_SHORT", 0.0)
                 
                 total_cost       = (old_total * old_avg) + (new_qty * buy_target)
                 final_shares     = old_total + new_qty
@@ -128,22 +121,17 @@ def sync_ledger_to_config():
             if mode == "LONG":
                 config["POSITIONS"][ticker]["TOTAL_SHARES_LONG"] = final_shares
                 config["POSITIONS"][ticker]["MY_AVG_PRICE_LONG"] = calculated_avg
+                config["POSITIONS"][ticker]["CURRENT_CASTS_LONG"] = current_casts
             else:
                 config["POSITIONS"][ticker]["TOTAL_SHARES_SHORT"] = final_shares
                 config["POSITIONS"][ticker]["MY_AVG_PRICE_SHORT"] = calculated_avg
                 config["POSITIONS"][ticker]["CURRENT_CASTS_SHORT"] = current_casts
-                config["POSITIONS"][ticker]["ANNUAL_QUOTA_SHORT"] = config["DEFAULTS"].get("ANNUAL_QUOTA", 14)
-            
-            config["POSITIONS"][ticker]["LAST_CAST_DATE"] = tx_date
-            if tx_date:
-                config["DEFAULTS"]["LAST_CAST_DATE"] = tx_date
+                config["POSITIONS"][ticker]["ANNUAL_QUOTA_SHORT"] = 14
 
         elif action == "SELL":
             if ticker in config["POSITIONS"]:
                 logger.info(f"📉 장부 확인 - {ticker} 전량 매도 완료: 포지션을 청산합니다.")
                 del config["POSITIONS"][ticker]
-            if info.get("date"):
-                config["DEFAULTS"]["LAST_CAST_DATE"] = info.get("date")
 
     try:
         with open("config.json", "w", encoding="utf-8") as f:
@@ -151,7 +139,7 @@ def sync_ledger_to_config():
         logger.info("✅ 장부(ledger) 기반 config.json 누적 연산 및 자동 동기화 성공!")
     except Exception as e:
         logger.error(f"❌ config.json 자동 저장 실패: {e}")
-
+        
 
 def get_vix_report() -> tuple[float, str]:
     try:
@@ -237,7 +225,6 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
 
     current_price = float(ticker_df["Close"].iloc[-1])
 
-    # 데이터 취합용 딕셔너리 기초 생성
     result = {
         "prev_close": prev_close,
         "today_open": today_open,
@@ -251,7 +238,7 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
     vs_normal  = vix_short_cfg.get("MULT_NORMAL", 0.85)
     vs_high    = vix_short_cfg.get("LEVEL_HIGH", 30.0)
     vs_low     = vix_short_cfg.get("LEVEL_LOW", 20.0)
-    shares_short = pos_cfg.get("TOTAL_SHARES_SHORT", pos_cfg.get("TOTAL_SHARES", 0)) 
+    shares_short = pos_cfg.get("TOTAL_SHARES_SHORT", 0) 
 
     if vix_val >= vs_high:
         short_target = base * (1 - std_20d * vs_extreme / 100)
@@ -291,10 +278,10 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
     # 🛠️ LONG 모드 계산 로직 
     vl_extreme = vix_long_cfg.get("MULT_EXTREME", 2.4)
     vl_fear    = vix_long_cfg.get("MULT_FEAR", 1.95)
-    vl_normal  = vix_long_cfg.get("MULT_NORMAL", 0.85)
+    vl_normal  = vl_normal_cfg = vix_long_cfg.get("MULT_NORMAL", 0.85)
     vl_high    = vix_long_cfg.get("LEVEL_HIGH", 30.0)
     vl_low     = vix_long_cfg.get("LEVEL_LOW", 20.0)
-    shares_long = pos_cfg.get("TOTAL_SHARES_LONG", pos_cfg.get("TOTAL_SHARES", 34))
+    shares_long = pos_cfg.get("TOTAL_SHARES_LONG", 34)
 
     log_ret         = np.log(hist_df["Close"] / hist_df["Close"].shift(1)).dropna().tail(90)
     daily_sigma_val = float(log_ret.std(ddof=1)) if len(log_ret) > 0 else 0.04
@@ -329,30 +316,15 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
         long_sub_msg = f"{long_vix_msg} ➔ {adjusted_multiplier:.2f}배수 하방"
 
     long_target = (today_open if is_open else prev_close) * float(np.exp(-daily_sigma_val * adjusted_multiplier))
-    last_cast_str = pos_cfg.get("LAST_CAST_DATE", defaults.get("LAST_CAST_DATE", "2026-01-01"))
 
-    try:
-        last_cast_date = datetime.strptime(last_cast_str, "%Y-%m-%d").date()
-    except Exception:
-        last_cast_date = datetime(2026, 1, 1).date()
-
-    days_since    = (today_date - last_cast_date).days
-    normal_std    = 4.0 if "SOXL" in ticker.upper() else 2.5
-    min_days_gate = 14 if std_20d > normal_std * 1.3 else 5
-    is_time_gate_passed = days_since >= min_days_gate
-
-    if is_open and current_price <= long_target and not is_time_gate_passed:
-        time_guard_status = "🔥 [시간 가드 강제 해제] 초저점 도달로 실탄 집행!"
-        action_ment       = f"계산된 초저점 타깃가(${long_target:.2f})를 터치하여 기계적으로 매수를 집행합니다."
-    elif is_time_gate_passed:
-        time_guard_status = "🟢 [시간 가드 해제] 자유 매수 가능 주간"
-        action_ment       = f"대기 기간을 충족하여 실탄 장전이 완료되었습니다. 오늘 본장 매수 저격가는 ${long_target:.2f}입니다."
+    # ❌ [시간 가드 찌꺼기 완벽 박멸] 오직 확률 돌파 메시지만 남깁니다.
+    if is_open and current_price <= long_target:
+        action_ment = f"🚨 [LONG 매수 시그널 포착] 확률적 최적가(${long_target:.2f})에 도달하여 매수를 집행합니다."
     else:
-        time_guard_status = f"⏳ [시간 가드 작동 중] {min_days_gate - days_since}일 대기 필요"
-        action_ment       = f"조급한 실탄 고갈을 막기 위해 관망합니다. 가드 해제 후 유효 매수 예정가는 ${long_target:.2f}입니다."
+        action_ment = f"통계학적 확률 그물망 작동 중. 오늘 본장 매수 저격가는 ${long_target:.2f}입니다."
 
-    annual_quota_long = pos_cfg.get("ANNUAL_QUOTA_LONG", pos_cfg.get("ANNUAL_QUOTA", defaults.get("ANNUAL_QUOTA", 24)))
-    current_casts_long = pos_cfg.get("CURRENT_CASTS_LONG", pos_cfg.get("CURRENT_CASTS", 0))
+    annual_quota_long = pos_cfg.get("ANNUAL_QUOTA_LONG", 24)
+    current_casts_long = pos_cfg.get("CURRENT_CASTS_LONG", 0)
     exhaustion_rate = min(current_casts_long / max(annual_quota_long, 1) * 100, 100.0)
 
     result.update({
@@ -362,9 +334,8 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
         "long_target":    long_target,
         "long_buy_name":  f"LONG 변동성 방어선 ({adjusted_multiplier:.2f}x)",
         "long_sub_msg":   long_sub_msg,
-        "time_guard_info":   time_guard_status,
         "time_guard_action": action_ment,
-        "my_avg_price":   pos_cfg.get("MY_AVG_PRICE_LONG", pos_cfg.get("MY_AVG_PRICE", 0.0)),
+        "my_avg_price":   pos_cfg.get("MY_AVG_PRICE_LONG", 0.0),
         "long_current_casts": current_casts_long,
         "long_annual_quota":  annual_quota_long,
         "exhaustion_rate": exhaustion_rate,
@@ -476,7 +447,6 @@ def create_combined_message(results: dict, is_open: bool,
                             kst_now: str, vix_info: str, is_last_day: bool) -> str:
     mode_str = "🚀 실시간 모드" if is_open else "⏳ 장전 대기 모드"
     
-    # 첫 종목의 결과를 기준으로 공통 알고리즘 상태를 미리 추출합니다.
     first_ticker = list(results.keys())[0] if results else None
     if first_ticker and results[first_ticker] is not None:
         raw_msg = results[first_ticker].get('long_sub_msg', '').split(' ➔ ')[0]
@@ -498,13 +468,10 @@ def create_combined_message(results: dict, is_open: bool,
         long_target   = v.get('long_target', 0.0)
         short_target  = v.get('short_target', 0.0)
 
-        # 평단가 바인딩
         my_avg_long  = v.get('my_avg_price', 0.0)
-        my_avg_short = v.get('my_avg_price_short', 0.0) if 'my_avg_price_short' in v else 164.3043
+        my_avg_short = 164.3043  # 고정 또는 제이슨 바인딩
 
-        # 배수 값 추출
         long_multiplier  = v.get('multiplier', 0.85)
-        short_multiplier = v.get('multiplier', 0.85)
 
         lines += [
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
@@ -515,28 +482,24 @@ def create_combined_message(results: dict, is_open: bool,
             "📈 [본인 계좌 - LONG 모드]",
             f"  • 보유량 : {v.get('long_shares', 0)}주 (평단가: ${my_avg_long:.2f})",
             f"  • 90일 일간평균변동성 : ±{v.get('daily_sigma', 0.0):.2f}% / 적용 배수 : {long_multiplier:.2f}x",
-            f"  • ⏳ 타임 엔진 : {v.get('time_guard_info', '')}",
+            f"  • 🎯 전략 브리핑 : {v.get('time_guard_action', '')}",
         ]
         
-        # 🛒 롱 매수 예정가
         if is_open and current_price <= long_target:
             lines.append(f"  • 🛒 매수 예정가 : ${long_target:.2f} (🚨 [LONG 매수 시그널 포착] 실탄 집행!)")
         else:
             lines.append(f"  • 🛒 매수 예정가 : ${long_target:.2f}")
-        lines.append(f"    💡 [참고] {long_multiplier:.2f}배수 하방 적용 가격")
             
         lines += [
             "-----------------------------------------",
             "⚡ [처형 계좌 - SHORT 모드]",
-            f"  • 보유량 : {v.get('short_shares', 0)}주 (평단가: ${my_avg_short:.2f})", # 🌟 처형분 집행 현황 삭제 완료!
+            f"  • 보유량 : {v.get('short_shares', 0)}주 (평단가: ${my_avg_short:.2f})",
         ]
         
-        # 🛒 숏 매수 예정가
         if is_open and current_price <= short_target:
             lines.append(f"  • 🛒 매수 예정가 : ${short_target:.2f} (🚨 [SHORT 매수 시그널 포착] 2배 가속!)")
         else:
             lines.append(f"  • 🛒 매수 예정가 : ${short_target:.2f}")
-        lines.append(f"    💡 [참고] {short_multiplier:.2f}배수 하방 적용 가격")
 
         plan = v.get("split_sell_plan", [])
         if plan:
