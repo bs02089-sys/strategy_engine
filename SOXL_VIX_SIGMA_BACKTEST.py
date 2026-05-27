@@ -24,8 +24,15 @@ def run_backtest():
         print("❌ 데이터 다운로드 실패")
         return
 
-    # 데이터 정리
+    # ==================== 데이터 정리 (MultiIndex 방어) ====================
+    # MultiIndex 제거
+    if isinstance(soxl.columns, pd.MultiIndex):
+        soxl = soxl.droplevel(1, axis=1)
+    if isinstance(vix.columns, pd.MultiIndex):
+        vix = vix.droplevel(1, axis=1)
+
     vix_close = vix['Close'].reindex(soxl.index).ffill()
+
     df = soxl[['Open', 'High', 'Low', 'Close']].copy()
     df['VIX'] = vix_close
     df['Prev_Close'] = df['Close'].shift(1)
@@ -44,17 +51,17 @@ def run_backtest():
     DAYS_1Y = 252
     DAYS_2Y = DAYS_1Y * 2
 
-    # 고정 세그먼트 방식 (롤링하지 않음)
+    # 고정 세그먼트 방식
     start_indices = [0, DAYS_1Y, DAYS_1Y * 2, DAYS_1Y * 3]
     segments = []
 
     print("📊 고정 2년 세그먼트 생성 중...")
-    for start_idx in start_indices:
+    for i, start_idx in enumerate(start_indices):
         end_idx = start_idx + DAYS_2Y
         if end_idx <= len(df):
             segment = df.iloc[start_idx:end_idx].copy()
             segments.append(segment)
-            print(f"   • 세그먼트 {len(segments)}: {segment.index[0].date()} ~ {segment.index[-1].date()}")
+            print(f"   • 세그먼트 {i+1}: {segment.index[0].date()} ~ {segment.index[-1].date()}")
 
     print(f"\n총 {len(segments)}개 세그먼트로 백테스트 진행\n")
 
@@ -67,7 +74,6 @@ def run_backtest():
         price = seg['Close'].values
         open_price = seg['Open'].values
 
-        # 멀티플라이어 계산
         base_mult = np.where(vix_val >= 30, MULT_EXTREME,
                     np.where(vix_val >= 20, MULT_FEAR, MULT_NORMAL))
         
@@ -79,11 +85,9 @@ def run_backtest():
 
         target = open_price * np.exp(-SIGMA * adj_mult)
 
-        # 첫 1년 동안만 매수
         buy_window = np.arange(len(seg)) < DAYS_1Y
         entries = (price <= target) & buy_window
 
-        # 마지막 날 강제 청산
         exits = pd.Series(False, index=seg.index)
         exits.iloc[-1] = True
 
@@ -111,27 +115,28 @@ def run_backtest():
     trades = [r['trades'] for r in results]
 
     print("======================================================================")
-    print("🎯 백테스트 최종 결과 보고서")
+    print("🎯 백테스트 최종 결과")
     print("----------------------------------------------------------------------")
     for r in results:
-        print(f"세그먼트 {r['segment']} ({r['period']})")
+        print(f"세그먼트 {r['segment']} | {r['period']}")
         print(f"   수익률 : {r['return']:+.2f}%")
         print(f"   MDD    : {r['mdd']:.2f}%")
         print(f"   매수횟수: {r['trades']}회\n")
 
     print("======================================================================")
-    print(f"평균 수익률     : {np.mean(returns):+.2f}%")
-    print(f"최악 MDD        : {np.min(mdds):.2f}%")
-    print(f"평균 매수 횟수  : {np.mean(trades):.1f}회")
+    print(f"평균 수익률    : {np.mean(returns):+.2f}%")
+    print(f"최악 MDD       : {np.min(mdds):.2f}%")
+    print(f"평균 매수 횟수 : {np.mean(trades):.1f}회")
     print("======================================================================\n")
 
-    # config.json 업데이트
-    if input("\n💾 현재 설정을 config.json에 저장하시겠습니까? (y/n): ").strip().lower() == 'y':
+    # config.json 저장
+    if input("\n💾 config.json에 현재 설정 저장하시겠습니까? (y/n): ").strip().lower() == 'y':
+        # 저장 로직 (기존과 동일)
         try:
             try:
                 with open("config.json", "r", encoding="utf-8") as f:
                     cfg = json.load(f)
-            except (FileNotFoundError, json.JSONDecodeError):
+            except:
                 cfg = {}
 
             cfg.setdefault("VIX_CONFIG", {}).setdefault("LONG", {})
@@ -143,21 +148,11 @@ def run_backtest():
                 "TAKE_PROFIT_RATIO": round(float(TAKE_PROFIT), 2)
             })
 
-            cfg.setdefault("STRATEGY", {})
-            cfg["STRATEGY"].update({
-                "CYCLE_YEARS": 2,
-                "BUY_DURATION_DAYS": DAYS_1Y,
-                "HOLD_DURATION_DAYS": DAYS_1Y
-            })
-
             with open("config.json", "w", encoding="utf-8") as f:
                 json.dump(cfg, f, indent=4, ensure_ascii=False)
-
-            print("✅ config.json 업데이트 완료")
+            print("✅ config.json 업데이트 완료!")
         except Exception as e:
-            print(f"❌ config.json 저장 실패: {e}")
-    else:
-        print("⚠️ 저장이 취소되었습니다.")
+            print(f"❌ 저장 실패: {e}")
 
 
 if __name__ == "__main__":
