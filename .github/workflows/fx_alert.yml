@@ -1,16 +1,12 @@
 name: fx_alert
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - fx_alert.py
   schedule:
-    # 💡 UTC 기준 (한국 시간 = UTC + 9시간)
-    # 한국시간 12:00시 (UTC 03:00)에 가동 시작합니다.
-    - cron: "0 3 * * 1-5"     
+    # 🎯 월요일부터 금요일까지 매일 UTC 03:00 (한국 시간 12:00)에 정식 자동 알림 딱 한 번만 발송!
+    - cron: "0 3 * * 1-5"
+  
   workflow_dispatch:
+    # 🎯 원할 때 언제든 Actions 탭에서 버튼 눌러서 수동 실행 가능!
 
 permissions:
   contents: write
