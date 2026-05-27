@@ -472,13 +472,22 @@ def get_combined_market_data(tickers: list, config: dict, est_tz, target_date: d
 
 
 # ====================== 리포트 생성 ======================
-# ====================== 리포트 생성 (용어 직관성 개선 버전) ======================
 def create_combined_message(results: dict, is_open: bool,
                             kst_now: str, vix_info: str, is_last_day: bool) -> str:
     mode_str = "🚀 실시간 모드" if is_open else "⏳ 장전 대기 모드"
+    
+    # 첫 종목의 결과를 기준으로 공통 알고리즘 상태를 미리 추출합니다.
+    first_ticker = list(results.keys())[0] if results else None
+    if first_ticker and results[first_ticker] is not None:
+        raw_msg = results[first_ticker].get('long_sub_msg', '').split(' ➔ ')[0]
+        clean_algorithm_status = raw_msg.replace("VIX ", "") if raw_msg else "✨ 안정"
+    else:
+        clean_algorithm_status = "✨ 안정"
+
     lines    = [
         f"=== 🎯 매매엔진 통합 리포트 ({mode_str}) ===",
         f"🎬 {vix_info}",
+        f"⚙️ 시스템 알고리즘 상태 : {clean_algorithm_status}", 
     ]
 
     for ticker, v in results.items():
@@ -493,14 +502,6 @@ def create_combined_message(results: dict, is_open: bool,
         my_avg_long  = v.get('my_avg_price', 0.0)
         my_avg_short = v.get('my_avg_price_short', 0.0) if 'my_avg_price_short' in v else 164.3043
 
-        # '✨ VIX 안정'에서 'VIX'를 걷어내고 순수 상태('안정', '공포' 등)만 추출
-        raw_long_msg  = v.get('long_sub_msg', '').split(' ➔ ')[0] if v.get('long_sub_msg') else "✨ 안정"
-        raw_short_msg = v.get('short_sub_msg', '').split(' ➔ ')[0] if v.get('short_sub_msg') else "✨ 안정"
-        
-        # 'VIX' 글자가 포함되어 있다면 제거하여 매끄럽게 다듬기
-        clean_long_status  = raw_long_msg.replace("VIX ", "")
-        clean_short_status = raw_short_msg.replace("VIX ", "")
-
         # 배수 값 추출
         long_multiplier  = v.get('multiplier', 0.85)
         short_multiplier = v.get('multiplier', 0.85)
@@ -513,7 +514,6 @@ def create_combined_message(results: dict, is_open: bool,
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
             "📈 [본인 계좌 - LONG 모드]",
             f"  • 보유량 : {v.get('long_shares', 0)}주 (평단가: ${my_avg_long:.2f})",
-            f"  • ⚙️ 알고리즘 : {clean_long_status}", # 예: ✨ 안정, 🔴 공포
             f"  • 90일 일간평균변동성 : ±{v.get('daily_sigma', 0.0):.2f}% / 적용 배수 : {long_multiplier:.2f}x",
             f"  • ⏳ 타임 엔진 : {v.get('time_guard_info', '')}",
         ]
@@ -528,8 +528,7 @@ def create_combined_message(results: dict, is_open: bool,
         lines += [
             "-----------------------------------------",
             "⚡ [처형 계좌 - SHORT 모드]",
-            f"  • 보유량 : {v.get('short_shares', 0)}주 (평단가: ${my_avg_short:.2f}) (집행 현황: {v.get('short_current_casts', 0)}/{v.get('short_annual_quota', 14)}회)",
-            f"  • ⚙️ 알고리즘 : {clean_short_status}", # 예: ✨ 안정, 🔴 공포
+            f"  • 보유량 : {v.get('short_shares', 0)}주 (평단가: ${my_avg_short:.2f})", # 🌟 처형분 집행 현황 삭제 완료!
         ]
         
         # 🛒 숏 매수 예정가
