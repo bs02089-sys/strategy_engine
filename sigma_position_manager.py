@@ -49,8 +49,7 @@ def setup_environment() -> dict:
 
     default_values = cfg.get("DEFAULTS", {
         "SIGMA_DEFAULT": 2.0,
-        "LAST_CAST_DATE": "2026-05-07",
-        "ANNUAL_QUOTA": 24,
+        "ANNUAL_QUOTA": 21
     })
 
     return {
@@ -323,7 +322,7 @@ def analyze_ticker(ticker: str, ticker_df: pd.DataFrame, pos_cfg: dict,
     else:
         action_ment = f"통계학적 확률 그물망 작동 중. 오늘 본장 매수 저격가는 ${long_target:.2f}입니다."
 
-    annual_quota_long = pos_cfg.get("ANNUAL_QUOTA_LONG", 24)
+    annual_quota_long = pos_cfg.get("ANNUAL_QUOTA_LONG", 21)
     current_casts_long = pos_cfg.get("CURRENT_CASTS_LONG", 0)
     exhaustion_rate = min(current_casts_long / max(annual_quota_long, 1) * 100, 100.0)
 
