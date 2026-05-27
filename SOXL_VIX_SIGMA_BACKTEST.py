@@ -1,159 +1,170 @@
+import os
+import sys
 import json
 import numpy as np
-import pandas as pd
-import yfinance as yf
-import vectorbt as vbt
 import warnings
-from datetime import datetime
+import requests
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8')
 
 warnings.filterwarnings('ignore', category=FutureWarning)
 
 
-def run_backtest():
+# ===================================================================
+def load_config():
+    with open("config.json", "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def get_market_mode():
+    now_ny = datetime.now(ZoneInfo("America/New_York"))
+    hour = now_ny.hour + now_ny.minute / 60.0
+    if hour < 9.5:
+        return "장전", now_ny
+    elif hour < 16.0:
+        return "장중", now_ny
+    else:
+        return "장후", now_ny
+
+
+def get_realtime_data(mode):
+    try:
+        soxl = yf.Ticker("SOXL")
+        vix = yf.Ticker("^VIX")
+        hist = soxl.history(period="3d", auto_adjust=False)
+
+        if len(hist) < 2:
+            return None, None, None, None
+
+        now_ny = datetime.now(ZoneInfo("America/New_York"))
+        is_today = (hist.index[-1].date() == now_ny.date())
+
+        prev_close = float(hist['Close'].iloc[-2] if is_today else hist['Close'].iloc[-1])
+
+        if mode == "장전":
+            current_open = prev_close
+        else:
+            current_open = float(soxl.fast_info.open or hist['Open'].iloc[-1] if is_today else prev_close)
+
+        current_price = float(soxl.fast_info.last_price)
+        current_vix = float(vix.fast_info.last_price)
+
+        return float(current_vix), float(prev_close), float(current_open), float(current_price)
+    except:
+        return None, None, None, None
+
+
+def send_discord_message(webhook_url, user_id, title, content):
+    if not webhook_url:
+        print("⚠️ webhook_url 없음")
+        return
+    mention = f"<@{user_id}> " if user_id else ""
+    payload = {
+        "content": mention,
+        "embeds": [{
+            "title": title,
+            "description": content,
+            "color": 15158332 if "🚨" in title else 3447003,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }]
+    }
+    try:
+        res = requests.post(webhook_url, json=payload, timeout=15)
+        print("✅ 디스코드 전송 성공" if res.status_code == 204 else f"❌ 전송 실패 ({res.status_code})")
+    except Exception as e:
+        print(f"❌ 디스코드 오류: {e}")
+
+
+# ===================================================================
+def execute_dual_tactical_trader():
+    mode, now_ny = get_market_mode()
+    MODE_EMOJI = {"장전": "🌙", "장중": "☀️", "장후": "🌆"}
+
     print("======================================================================")
-    print("📡 SOXL 2년 주기 + 30% 익절 백테스트")
-    print("🏆 Final Tactical Backtester  (고정 세그먼트 방식)")
+    print(f"📡 SOXL_VIX_SIGMA.py  {MODE_EMOJI[mode]} {mode} 모드")
+    print(f"🕒 {now_ny.strftime('%Y-%m-%d %H:%M:%S %Z')}")
     print("======================================================================\n")
 
-    # 데이터 다운로드
-    print("📥 5년치 데이터 다운로드 중...")
-    soxl = yf.download("SOXL", period="5y", interval="1d", progress=False, auto_adjust=True)
-    vix = yf.download("^VIX", period="5y", interval="1d", progress=False, auto_adjust=True)
+    cfg = load_config()
+    pos_cfg = cfg["POSITIONS"]["SOXL"]
+    vix_cfg = cfg["VIX_CONFIG"]["LONG"]
 
-    if soxl.empty or vix.empty:
-        print("❌ 데이터 다운로드 실패")
+    webhook_url = os.environ.get("DISCORD_WEBHOOK") or cfg.get("DISCORD_WEBHOOK", "")
+    user_id = os.environ.get("DISCORD_USER_ID") or cfg.get("DISCORD_USER_ID", "")
+
+    TAKE_PROFIT_RATIO = vix_cfg["TAKE_PROFIT_RATIO"]   # 0.30
+
+    current_vix, prev_close, current_open, current_price = get_realtime_data(mode)
+    if current_vix is None:
+        print("❌ 데이터 조회 실패")
         return
 
-    # ==================== 데이터 정리 (MultiIndex 방어) ====================
-    # MultiIndex 제거
-    if isinstance(soxl.columns, pd.MultiIndex):
-        soxl = soxl.droplevel(1, axis=1)
-    if isinstance(vix.columns, pd.MultiIndex):
-        vix = vix.droplevel(1, axis=1)
+    price_label = "현재가 (실시간)" if mode == "장중" else "전일 종가"
 
-    vix_close = vix['Close'].reindex(soxl.index).ffill()
+    print(f"📌 {price_label}: ${current_price:.2f}")
+    print(f"📌 당일시가 : ${current_open:.2f}")
+    print(f"📌 전일종가 : ${prev_close:.2f}")
+    print(f"📌 VIX       : {current_vix:.2f}\n")
 
-    df = soxl[['Open', 'High', 'Low', 'Close']].copy()
-    df['VIX'] = vix_close
-    df['Prev_Close'] = df['Close'].shift(1)
-    df['Gap_Ratio'] = (df['Open'] - df['Prev_Close']) / df['Prev_Close']
-    df = df.dropna()
+    # ====================== LONG ======================
+    print("🟢 [LONG] 매수 계좌")
+    shares_long = pos_cfg.get("TOTAL_SHARES_LONG", 0)
+    avg_long = pos_cfg.get("MY_AVG_PRICE_LONG", 0)
 
-    print(f"✅ 총 {len(df)} 거래일 데이터 로드 완료\n")
+    long_msg = "**🟢 [LONG] 매수 계좌 현황**\n"
+    any_triggered = False
 
-    # ==================== 백테스트 설정 ====================
-    SIGMA = 0.0460
-    MULT_NORMAL = 1.40
-    MULT_FEAR = 2.70
-    MULT_EXTREME = 2.80
-    TAKE_PROFIT = 0.30
-    FEES = 0.00065
-    DAYS_1Y = 252
-    DAYS_2Y = DAYS_1Y * 2
+    if shares_long > 0 and avg_long > 0:
+        ret_long = (current_price - avg_long) / avg_long
+        long_msg += f"• 수량: {shares_long}주 / 평단: ${avg_long:.4f}\n"
+        long_msg += f"• 수익률: {ret_long*100:+.2f}%\n"
 
-    # 고정 세그먼트 방식
-    start_indices = [0, DAYS_1Y, DAYS_1Y * 2, DAYS_1Y * 3]
-    segments = []
+        if ret_long >= TAKE_PROFIT_RATIO:
+            sell_shares = int(shares_long * 0.5)   # 50% 매도
+            long_msg += f"🚨 **[+30% 부분 익절 발동] → {sell_shares}주 매도 권장 (50%)**\n"
+            any_triggered = True
+    else:
+        long_msg += "• 보유 물량 없음\n"
 
-    print("📊 고정 2년 세그먼트 생성 중...")
-    for i, start_idx in enumerate(start_indices):
-        end_idx = start_idx + DAYS_2Y
-        if end_idx <= len(df):
-            segment = df.iloc[start_idx:end_idx].copy()
-            segments.append(segment)
-            print(f"   • 세그먼트 {i+1}: {segment.index[0].date()} ~ {segment.index[-1].date()}")
+    discord_report = [long_msg]
 
-    print(f"\n총 {len(segments)}개 세그먼트로 백테스트 진행\n")
+    # ====================== SHORT ======================
+    print("🔵 [SHORT] 매도 계좌")
+    shares_short = pos_cfg.get("TOTAL_SHARES_SHORT", 0)
+    avg_short = pos_cfg.get("MY_AVG_PRICE_SHORT", 0)
 
-    # ==================== 백테스트 실행 ====================
-    results = []
+    short_msg = "**🔵 [SHORT] 매도 계좌 현황**\n"
+    if shares_short > 0 and avg_short > 0:
+        ret_short = (current_price - avg_short) / avg_short
+        short_msg += f"• 수량: {shares_short}주 / 평단: ${avg_short:.4f}\n"
+        short_msg += f"• 수익률: {ret_short*100:+.2f}%\n"
 
-    for i, seg in enumerate(segments):
-        vix_val = seg['VIX'].values
-        gap = seg['Gap_Ratio'].values
-        price = seg['Close'].values
-        open_price = seg['Open'].values
+        if ret_short >= TAKE_PROFIT_RATIO:
+            sell_shares_s = int(shares_short * 0.5)
+            short_msg += f"🚨 **[+30% 부분 익절 발동] → {sell_shares_s}주 매도 권장 (50%)**\n"
+            any_triggered = True
+    else:
+        short_msg += "• 보유 물량 없음\n"
 
-        base_mult = np.where(vix_val >= 30, MULT_EXTREME,
-                    np.where(vix_val >= 20, MULT_FEAR, MULT_NORMAL))
-        
-        adj_mult = np.select(
-            [gap >= -0.03, gap >= -0.05, gap >= -0.07, gap >= -0.10],
-            [base_mult, 0.45, 0.25, 0.10],
-            default=0.0
-        )
+    discord_report.append(short_msg)
 
-        target = open_price * np.exp(-SIGMA * adj_mult)
+    # 디스코드 전송
+    full_content = "\n----------------------------------------\n".join(discord_report)
+    full_content += f"\n\n• **VIX**: {current_vix:.2f}"
 
-        buy_window = np.arange(len(seg)) < DAYS_1Y
-        entries = (price <= target) & buy_window
+    if any_triggered:
+        title = "🚨 [부분 익절 발동] +30% 도달 - 50% 매도 권장"
+    else:
+        title = f"{MODE_EMOJI[mode]} [{mode} 브리핑]"
 
-        exits = pd.Series(False, index=seg.index)
-        exits.iloc[-1] = True
-
-        pf = vbt.Portfolio.from_signals(
-            close=seg['Close'],
-            entries=entries,
-            exits=exits,
-            init_cash=10000,
-            fees=FEES,
-            freq='1D',
-            tp_stop=TAKE_PROFIT
-        )
-
-        results.append({
-            'segment': i + 1,
-            'period': f"{seg.index[0].date()} ~ {seg.index[-1].date()}",
-            'return': pf.total_return() * 100,
-            'mdd': pf.max_drawdown() * 100,
-            'trades': int(entries.sum())
-        })
-
-    # ==================== 결과 출력 ====================
-    returns = [r['return'] for r in results]
-    mdds = [r['mdd'] for r in results]
-    trades = [r['trades'] for r in results]
-
-    print("======================================================================")
-    print("🎯 백테스트 최종 결과")
-    print("----------------------------------------------------------------------")
-    for r in results:
-        print(f"세그먼트 {r['segment']} | {r['period']}")
-        print(f"   수익률 : {r['return']:+.2f}%")
-        print(f"   MDD    : {r['mdd']:.2f}%")
-        print(f"   매수횟수: {r['trades']}회\n")
-
-    print("======================================================================")
-    print(f"평균 수익률    : {np.mean(returns):+.2f}%")
-    print(f"최악 MDD       : {np.min(mdds):.2f}%")
-    print(f"평균 매수 횟수 : {np.mean(trades):.1f}회")
-    print("======================================================================\n")
-
-    # config.json 저장
-    if input("\n💾 config.json에 현재 설정 저장하시겠습니까? (y/n): ").strip().lower() == 'y':
-        # 저장 로직 (기존과 동일)
-        try:
-            try:
-                with open("config.json", "r", encoding="utf-8") as f:
-                    cfg = json.load(f)
-            except:
-                cfg = {}
-
-            cfg.setdefault("VIX_CONFIG", {}).setdefault("LONG", {})
-            cfg["VIX_CONFIG"]["LONG"].update({
-                "FIXED_SIGMA": round(float(SIGMA), 4),
-                "MULT_NORMAL": round(float(MULT_NORMAL), 2),
-                "MULT_FEAR": round(float(MULT_FEAR), 2),
-                "MULT_EXTREME": round(float(MULT_EXTREME), 2),
-                "TAKE_PROFIT_RATIO": round(float(TAKE_PROFIT), 2)
-            })
-
-            with open("config.json", "w", encoding="utf-8") as f:
-                json.dump(cfg, f, indent=4, ensure_ascii=False)
-            print("✅ config.json 업데이트 완료!")
-        except Exception as e:
-            print(f"❌ 저장 실패: {e}")
+    send_discord_message(webhook_url, user_id, title, full_content)
 
 
 if __name__ == "__main__":
-    run_backtest()
+    import yfinance as yf
+    execute_dual_tactical_trader()
