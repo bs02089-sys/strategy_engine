@@ -471,7 +471,7 @@ def get_combined_market_data(tickers: list, config: dict, est_tz, target_date: d
     return results, is_open, vix_info
 
 
-# ====================== 리포트 생성 (롱/숏 통합 출력) ======================
+# ====================== 리포트 생성 ======================
 def create_combined_message(results: dict, is_open: bool,
                             kst_now: str, vix_info: str, is_last_day: bool) -> str:
     mode_str = "🚀 실시간 모드" if is_open else "⏳ 장전 대기 모드"
@@ -488,6 +488,18 @@ def create_combined_message(results: dict, is_open: bool,
         long_target   = v.get('long_target', 0.0)
         short_target  = v.get('short_target', 0.0)
 
+        # 평단가 바인딩
+        my_avg_long  = v.get('my_avg_price', 0.0)
+        my_avg_short = v.get('my_avg_price_short', 0.0) if 'my_avg_price_short' in v else 164.3043
+
+        # 깔끔하게 분리된 VIX 상태 메시지 추출 (✨ VIX 안정 형태만 남기기)
+        clean_vix_status = v.get('long_sub_msg', '').split(' ➔ ')[0] if v.get('long_sub_msg') else "✨ VIX 안정"
+        short_clean_vix  = v.get('short_sub_msg', '').split(' ➔ ')[0] if v.get('short_sub_msg') else "✨ VIX 안정"
+
+        # 배수 값 추출
+        long_multiplier  = v.get('multiplier', 0.85)
+        short_multiplier = v.get('multiplier', 0.85)
+
         lines += [
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
             f"● 종목 : {ticker}",
@@ -495,28 +507,32 @@ def create_combined_message(results: dict, is_open: bool,
             f"📊 20일 변동성(1σ) : ±{v.get('std', 0.0):.2f}%",
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
             "📈 [본인 계좌 - LONG 모드]",
-            f"  • 보유량 : {v.get('long_shares', 0)}주 (평단가: ${v.get('my_avg_price', 0.0):.2f})" if v.get('my_avg_price', 0) > 0 else f"  • 보유량 : {v.get('long_shares', 0)}주",
-            f"  • VIX 상태 : {v.get('long_sub_msg', '')}",
-            f"  • 일간 평균 변동성 : ±{v.get('daily_sigma', 0.0):.2f}% / 배수 : {v.get('multiplier', 0.0):.2f}x",
+            f"  • 보유량 : {v.get('long_shares', 0)}주 (평단가: ${my_avg_long:.2f})",
+            f"  • VIX 상태 : {clean_vix_status}",
+            f"  • 90일 일간평균변동성 : ±{v.get('daily_sigma', 0.0):.2f}% / 적용 배수 : {long_multiplier:.2f}x",
             f"  • ⚙️ 타임 엔진 : {v.get('time_guard_info', '')}",
         ]
         
+        # 🛒 롱 모드 매수 예정가 및 바로 아랫줄 참고 표시 추가
         if is_open and current_price <= long_target:
             lines.append(f"  • 🛒 매수 예정가 : ${long_target:.2f} (🚨 [LONG 매수 시그널 포착] 실탄 집행!)")
         else:
             lines.append(f"  • 🛒 매수 예정가 : ${long_target:.2f}")
+        lines.append(f"    💡 [참고] {long_multiplier:.2f}배수 하방 적용 가격")
             
         lines += [
             "-----------------------------------------",
             "⚡ [처형 계좌 - SHORT 모드]",
-            f"  • 보유량 : {v.get('short_shares', 0)}주 (집행 현황: {v.get('short_current_casts', 0)}/{v.get('short_annual_quota', 14)}회)",
-            f"  • VIX 상태 : {v.get('short_sub_msg', '')} ({v.get('short_buy_name', '')})",
+            f"  • 보유량 : {v.get('short_shares', 0)}주 (평단가: ${my_avg_short:.2f}) (집행 현황: {v.get('short_current_casts', 0)}/{v.get('short_annual_quota', 14)}회)",
+            f"  • VIX 상태 : {short_clean_vix}",
         ]
         
+        # 🛒 숏 모드 매수 예정가 및 바로 아랫줄 참고 표시 추가
         if is_open and current_price <= short_target:
             lines.append(f"  • 🛒 매수 예정가 : ${short_target:.2f} (🚨 [SHORT 매수 시그널 포착] 2배 가속!)")
         else:
             lines.append(f"  • 🛒 매수 예정가 : ${short_target:.2f}")
+        lines.append(f"    💡 [참고] {short_multiplier:.2f}배수 하방 적용 가격")
 
         plan = v.get("split_sell_plan", [])
         if plan:
