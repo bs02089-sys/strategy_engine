@@ -22,7 +22,7 @@
         "LONG": {
             "FIXED_SIGMA": 0.046,
             "MULT_NORMAL": 1.4,
-            "MULT_FEAR": 2.7,
+            "MULT_FEAR": 2.65,
             "MULT_EXTREME": 2.8,
             "TAKE_PROFIT_RATIO": 0.3
         }
