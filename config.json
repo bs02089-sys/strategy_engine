@@ -1,18 +1,20 @@
 {
   "DISCORD_WEBHOOK": "",
   "DISCORD_USER_ID": "",
-  "TICKERS": ["SOXL"],
+  "TICKERS": [
+    "SOXL"
+  ],
   "POSITIONS": {
     "SOXL": {
       "TOTAL_SHARES_LONG": 34,
       "MY_AVG_PRICE_LONG": 165.1124,
-      "CURRENT_CASTS_LONG": 4, 
+      "CURRENT_CASTS_LONG": 4,
       "ANNUAL_QUOTA_LONG": 24,
       "TOTAL_SHARES_SHORT": 7,
       "MY_AVG_PRICE_SHORT": 164.3043,
       "CURRENT_CASTS_SHORT": 7,
       "ANNUAL_QUOTA_SHORT": 14,
-      "LAST_CAST_DATE": "2026-05-26" 
+      "LAST_CAST_DATE": "2026-05-26"
     }
   },
   "VIX_CONFIG": {
