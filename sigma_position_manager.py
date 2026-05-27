@@ -14,7 +14,9 @@ def load_config():
         return json.load(f)
 
 def send_discord_message(webhook_url, user_id, title, content):
-    if not webhook_url: return
+    if not webhook_url: 
+        print("⚠️ [디스코드 경고] 웹훅 URL을 시스템 환경변수(또는 컨피그)에서 찾을 수 없습니다.")
+        return
     mention = f"<@{user_id}> " if user_id else ""
     payload = {
         "content": mention,
@@ -25,8 +27,14 @@ def send_discord_message(webhook_url, user_id, title, content):
             "timestamp": datetime.utcnow().isoformat()
         }]
     }
-    try: requests.post(webhook_url, json=payload, timeout=10)
-    except: print("❌ 디스코드 전송 실패")
+    try: 
+        res = requests.post(webhook_url, json=payload, timeout=10)
+        if res.status_code == 204:
+            print("🚀 [디스코드] 알림 전송 완료!")
+        else:
+            print(f"❌ 디스코드 응답 에러 (코드: {res.status_code})")
+    except: 
+        print("❌ 디스코드 네트워크 전송 실패")
 
 def get_realtime_data():
     try:
@@ -40,24 +48,24 @@ def get_realtime_data():
 
 def execute_dual_tactical_trader():
     print("======================================================================")
-    print("📡 [SOXL_VIX_2YEAR_DUAL_TRADER.py] (비활성 변수 해결판)")
-    print("🛡️ [매수/매도 완벽 추적] 내 계좌 & 처형 계좌 통합 관제탑")
+    print("📡 [SOXL_VIX_2YEAR_DUAL_TRADER.py] (환경변수 자동인식형)")
+    print("🛡️ [시스템 연동] 파워셸 환경변수 기반 매수/매도 통합 관제탑")
     print("======================================================================\n")
 
     cfg = load_config()
-    webhook_url = cfg.get("DISCORD_WEBHOOK", "")
-    user_id = cfg.get("DISCORD_USER_ID", "")
     pos_cfg = cfg["POSITIONS"]["SOXL"]
     vix_cfg = cfg["VIX_CONFIG"]["LONG"]
 
-    # 1. 황금 스펙 및 세팅값 로드
+    # 💡 [핵심 교정] config.json에 없으면 베프님이 파워셸에 등록한 환경변수(os.environ)를 우선 취득
+    webhook_url = os.environ.get("DISCORD_WEBHOOK") or cfg.get("DISCORD_WEBHOOK", "")
+    user_id = os.environ.get("DISCORD_USER_ID") or cfg.get("DISCORD_USER_ID", "")
+
     SIGMA = vix_cfg["FIXED_SIGMA"]
     MULT_NORMAL = vix_cfg["MULT_NORMAL"]
     MULT_FEAR = vix_cfg["MULT_FEAR"]
     MULT_EXTREME = vix_cfg["MULT_EXTREME"]
     TAKE_PROFIT_RATIO = vix_cfg["TAKE_PROFIT_RATIO"]
 
-    # 2. 실시간 데이터 스캔 및 갭 보정 연산 (여기서 prev_close 소모)
     current_vix, prev_close, current_open = get_realtime_data()
     if current_vix is None: return
 
@@ -70,7 +78,6 @@ def execute_dual_tactical_trader():
     elif gap_ratio >= -0.10:  adj_mult = 0.10
     else:                     adj_mult = 0.0
 
-    # 3. 오늘 밤 기준 매수 타깃가 계산 (여기서 SIGMA 소모하여 불 켜짐)
     target_price_today = current_open * np.exp(-SIGMA * adj_mult)
 
     try: current_price = yf.Ticker("SOXL").history(period="1d")['Close'].iloc[-1]
@@ -104,7 +111,7 @@ def execute_dual_tactical_trader():
     discord_report.append(long_msg)
     print("----------------------------------------------------------------------")
 
-    # 🔵 [PART 2] 처형님 계좌 (SHORT 방 -> 두 번째 매수 계좌)
+    # 🔵 [PART 2] 처형님 계좌 (SHORT 방)
     print("🔵 [SECTION B] 처형님 자산 포지션 (SHORT 방)")
     shares_short = pos_cfg["TOTAL_SHARES_SHORT"]
     avg_short = pos_cfg["MY_AVG_PRICE_SHORT"]
@@ -129,10 +136,9 @@ def execute_dual_tactical_trader():
     discord_report.append(short_msg)
     print("======================================================================\n")
 
-    # 디스코드 전송
+    # 디스코드 전송 집행
     status_title = "🚨 [관제탑 긴급 청산 명령] 목표 수익률 돌파!!" if any_triggered else "📡 [관제탑 듀얼 모드 작전 브리핑]"
-    full_content = f"🗓️ 기준 일시: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-    full_content += f"📈 현재 VIX 지수: {current_vix:.2f}\n\n"
+    full_content = f"📈 현재 VIX 지수: {current_vix:.2f}\n\n"
     full_content += "\n----------------------------------------\n".join(discord_report)
     send_discord_message(webhook_url, user_id, status_title, full_content)
 
