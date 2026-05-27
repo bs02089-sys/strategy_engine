@@ -213,7 +213,7 @@ def execute_dual_tactical_trader():
     discord_report.append(long_msg)
     print("----------------------------------------------------------------------")
 
-    # ─────────────────────────────────────────────────────────────────────
+        # ─────────────────────────────────────────────────────────────────────
     # 🔵 [PART 2] 매도 계좌 (SHORT) — 지정가 청산 전략
     # ─────────────────────────────────────────────────────────────────────
     print("🔵 [SECTION B] 처형 자산 포지션 (SHORT)")
@@ -227,39 +227,24 @@ def execute_dual_tactical_trader():
 
         print(f"   • 수량 : {shares_short} 주 / 평단가: ${avg_short:.4f}")
         print(f"   • 수익률 : {return_short*100:+.2f}%")
-        print(f"   🎯 익절 지정가: ${take_profit_price:.2f}")
         short_msg += f"• 수량: {shares_short}주 / 평단가: ${avg_short:.4f}\n"
         short_msg += f"• 수익률: {return_short*100:+.2f}%\n"
-        short_msg += f"• 익절 지정가: ${take_profit_price:.2f}\n"
 
+        # 🔥 익절 발동 메시지를 수익률과 익절 지정가 사이에 배치
         if return_short >= TAKE_PROFIT_RATIO:
             print("   🚨 [익절 발동] 목표 돌파! 전량 매도 청산하세요!")
             short_msg += "🚨 **[익절 발동] 전량 매도 청산 권장!**\n"
             any_triggered = True
+
+        print(f"   🎯 익절 지정가: ${take_profit_price:.2f}")
+        short_msg += f"• 익절 지정가: ${take_profit_price:.2f}\n"
+
     else:
         print("   • 보유 물량 없음")
         short_msg += "• 보유 물량 없음\n"
 
     discord_report.append(short_msg)
     
-    # VIX를 터미널 출력의 맨 아래에 표시
-    print(f"   📌 VIX     : {current_vix:.2f}")
-    print("======================================================================\n")
-
-    # 디스코드 전송
-    if any_triggered:
-        status_title = "🚨 [관제탑 긴급 청산 명령] 목표 수익률 돌파!!"
-    elif mode == "장중":
-        status_title = "☀️ [관제탑 장중 브리핑]"
-    elif mode == "장전":
-        status_title = "🌙 [관제탑 장전 대기 브리핑]"
-    else:
-        status_title = "🌆 [관제탑 장후 브리핑]"
-
-    full_content = "\n----------------------------------------\n".join(discord_report)
-    # 디스코드 알림에서도 VIX는 맨 마지막 줄에 표시
-    full_content += f"\n\n• **VIX 지수**: {current_vix:.2f}"
-    send_discord_message(webhook_url, user_id, status_title, full_content)
 
 if __name__ == "__main__":
     execute_dual_tactical_trader()
