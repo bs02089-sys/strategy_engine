@@ -472,6 +472,7 @@ def get_combined_market_data(tickers: list, config: dict, est_tz, target_date: d
 
 
 # ====================== 리포트 생성 ======================
+# ====================== 리포트 생성 (용어 직관성 개선 버전) ======================
 def create_combined_message(results: dict, is_open: bool,
                             kst_now: str, vix_info: str, is_last_day: bool) -> str:
     mode_str = "🚀 실시간 모드" if is_open else "⏳ 장전 대기 모드"
@@ -492,9 +493,13 @@ def create_combined_message(results: dict, is_open: bool,
         my_avg_long  = v.get('my_avg_price', 0.0)
         my_avg_short = v.get('my_avg_price_short', 0.0) if 'my_avg_price_short' in v else 164.3043
 
-        # 깔끔하게 분리된 VIX 상태 메시지 추출 (✨ VIX 안정 형태만 남기기)
-        clean_vix_status = v.get('long_sub_msg', '').split(' ➔ ')[0] if v.get('long_sub_msg') else "✨ VIX 안정"
-        short_clean_vix  = v.get('short_sub_msg', '').split(' ➔ ')[0] if v.get('short_sub_msg') else "✨ VIX 안정"
+        # '✨ VIX 안정'에서 'VIX'를 걷어내고 순수 상태('안정', '공포' 등)만 추출
+        raw_long_msg  = v.get('long_sub_msg', '').split(' ➔ ')[0] if v.get('long_sub_msg') else "✨ 안정"
+        raw_short_msg = v.get('short_sub_msg', '').split(' ➔ ')[0] if v.get('short_sub_msg') else "✨ 안정"
+        
+        # 'VIX' 글자가 포함되어 있다면 제거하여 매끄럽게 다듬기
+        clean_long_status  = raw_long_msg.replace("VIX ", "")
+        clean_short_status = raw_short_msg.replace("VIX ", "")
 
         # 배수 값 추출
         long_multiplier  = v.get('multiplier', 0.85)
@@ -508,12 +513,12 @@ def create_combined_message(results: dict, is_open: bool,
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
             "📈 [본인 계좌 - LONG 모드]",
             f"  • 보유량 : {v.get('long_shares', 0)}주 (평단가: ${my_avg_long:.2f})",
-            f"  • VIX 상태 : {clean_vix_status}",
+            f"  • ⚙️ 알고리즘 : {clean_long_status}", # 예: ✨ 안정, 🔴 공포
             f"  • 90일 일간평균변동성 : ±{v.get('daily_sigma', 0.0):.2f}% / 적용 배수 : {long_multiplier:.2f}x",
-            f"  • ⚙️ 타임 엔진 : {v.get('time_guard_info', '')}",
+            f"  • ⏳ 타임 엔진 : {v.get('time_guard_info', '')}",
         ]
         
-        # 🛒 롱 모드 매수 예정가 및 바로 아랫줄 참고 표시 추가
+        # 🛒 롱 매수 예정가
         if is_open and current_price <= long_target:
             lines.append(f"  • 🛒 매수 예정가 : ${long_target:.2f} (🚨 [LONG 매수 시그널 포착] 실탄 집행!)")
         else:
@@ -524,10 +529,10 @@ def create_combined_message(results: dict, is_open: bool,
             "-----------------------------------------",
             "⚡ [처형 계좌 - SHORT 모드]",
             f"  • 보유량 : {v.get('short_shares', 0)}주 (평단가: ${my_avg_short:.2f}) (집행 현황: {v.get('short_current_casts', 0)}/{v.get('short_annual_quota', 14)}회)",
-            f"  • VIX 상태 : {short_clean_vix}",
+            f"  • ⚙️ 알고리즘 : {clean_short_status}", # 예: ✨ 안정, 🔴 공포
         ]
         
-        # 🛒 숏 모드 매수 예정가 및 바로 아랫줄 참고 표시 추가
+        # 🛒 숏 매수 예정가
         if is_open and current_price <= short_target:
             lines.append(f"  • 🛒 매수 예정가 : ${short_target:.2f} (🚨 [SHORT 매수 시그널 포착] 2배 가속!)")
         else:
