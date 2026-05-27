@@ -149,10 +149,10 @@ def execute_dual_tactical_trader():
     discord_report = []
     any_triggered = False
 
-    # 상단 헤더 (현재가 가장 눈에 띄게 배치)
+    # 상단 헤더 - 현재가만 강조 (모드 정보 제거)
     header = (
-        f"**{MODE_EMOJI[mode]} {mode} 모드** | {now_ny.strftime('%Y-%m-%d %H:%M %Z')}\n"
         f"**{price_label}: ${current_price:.2f}**\n"
+        f"{now_ny.strftime('%Y-%m-%d %H:%M %Z')}\n"
     )
     discord_report.append(header)
 
@@ -203,6 +203,7 @@ def execute_dual_tactical_trader():
     full_content = "\n----------------------------------------\n".join(discord_report)
     full_content += f"\n\n• **VIX**: {current_vix:.2f}"
 
+    # Title (상단 제목에는 모드 유지)
     if any_triggered:
         title = f"🚨 [부분 익절 발동] {MODE_EMOJI[mode]} {mode} 모드 - 50% 매도 권장"
     else:
