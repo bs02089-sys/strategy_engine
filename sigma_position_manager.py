@@ -44,7 +44,6 @@ def update_casts_from_ledger(cfg):
     try:
         with open("config.json", "w", encoding="utf-8") as f:
             json.dump(cfg, f, indent=4, ensure_ascii=False)
-        print(f"✅ CAST 업데이트 → LONG: {long_casts}회 | SHORT: {short_casts}회")
     except:
         pass
 
@@ -52,10 +51,15 @@ def update_casts_from_ledger(cfg):
 def get_market_mode():
     now_ny = datetime.now(ZoneInfo("America/New_York"))
     hour = now_ny.hour + now_ny.minute / 60.0
-    if hour < 9.5:
-        return "장전", now_ny
+    is_dst = now_ny.dst() != datetime.timedelta(0)  # 서머타임 적용 여부
+
+    print(f"🕒 뉴욕 현재 시각: {now_ny.strftime('%Y-%m-%d %H:%M:%S')} {'(EDT - 서머타임)' if is_dst else '(EST)'}")
+
+    # 정규장: 09:30 ~ 16:00 (서머타임 적용 여부와 무관하게 동일)
+    if 9.5 <= hour < 16.0:
+        return "장중", now_ny
     else:
-        return "장중", now_ny   # 장후 모드 제거
+        return "장전", now_ny   # 장후 모드 완전 제거 (애프터마켓 포함 모두 장전)
 
 
 def get_realtime_data(mode):
@@ -105,9 +109,10 @@ def send_discord_message(webhook_url, user_id, title, content):
     }
     try:
         res = requests.post(webhook_url, json=payload, timeout=15)
-        print(f"📡 Discord 응답: {res.status_code}")
+        if res.status_code == 204:
+            print("✅ 디스코드 알림 전송 성공")
     except Exception as e:
-        print(f"❌ Discord 전송 실패: {e}")
+        print(f"❌ 디스코드 전송 실패: {e}")
 
 
 # ===================================================================
@@ -117,7 +122,6 @@ def execute_dual_tactical_trader():
 
     print("======================================================================")
     print(f"📡 SOXL_VIX_SIGMA.py  {MODE_EMOJI[mode]} {mode} 모드")
-    print(f"🕒 {now_ny.strftime('%Y-%m-%d %H:%M:%S %Z')}")
     print("======================================================================\n")
 
     cfg = load_config()
