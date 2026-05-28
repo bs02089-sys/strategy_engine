@@ -4,7 +4,7 @@ import json
 import numpy as np
 import warnings
 import requests
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 
 if hasattr(sys.stdout, 'reconfigure'):
@@ -51,15 +51,16 @@ def update_casts_from_ledger(cfg):
 def get_market_mode():
     now_ny = datetime.now(ZoneInfo("America/New_York"))
     hour = now_ny.hour + now_ny.minute / 60.0
-    is_dst = now_ny.dst() != datetime.timedelta(0)  # 서머타임 적용 여부
+
+    # [버그 수정] datetime.timedelta → timedelta (별도 import)
+    is_dst = now_ny.dst() != timedelta(0)
 
     print(f"🕒 뉴욕 현재 시각: {now_ny.strftime('%Y-%m-%d %H:%M:%S')} {'(EDT - 서머타임)' if is_dst else '(EST)'}")
 
-    # 정규장: 09:30 ~ 16:00 (서머타임 적용 여부와 무관하게 동일)
     if 9.5 <= hour < 16.0:
         return "장중", now_ny
     else:
-        return "장전", now_ny   # 장후 모드 완전 제거 (애프터마켓 포함 모두 장전)
+        return "장전", now_ny
 
 
 def get_realtime_data(mode):
@@ -80,11 +81,11 @@ def get_realtime_data(mode):
         if mode == "장전":
             current_open = prev_close
         else:
-            current_open = float(getattr(soxl.fast_info, 'open', None) or 
+            current_open = float(getattr(soxl.fast_info, 'open', None) or
                                (hist['Open'].iloc[-1] if is_today else prev_close))
 
         current_price = float(soxl.fast_info.last_price)
-        current_vix = float(vix.fast_info.last_price)
+        current_vix   = float(vix.fast_info.last_price)
 
         return float(current_vix), float(prev_close), float(current_open), float(current_price)
     except Exception as e:
@@ -111,6 +112,8 @@ def send_discord_message(webhook_url, user_id, title, content):
         res = requests.post(webhook_url, json=payload, timeout=15)
         if res.status_code == 204:
             print("✅ 디스코드 알림 전송 성공")
+        else:
+            print(f"❌ 디스코드 응답 에러 (코드: {res.status_code})")
     except Exception as e:
         print(f"❌ 디스코드 전송 실패: {e}")
 
@@ -131,12 +134,12 @@ def execute_dual_tactical_trader():
     vix_cfg = cfg["VIX_CONFIG"]["LONG"]
 
     webhook_url = os.environ.get("DISCORD_WEBHOOK") or cfg.get("DISCORD_WEBHOOK", "")
-    user_id = os.environ.get("DISCORD_USER_ID") or cfg.get("DISCORD_USER_ID", "")
+    user_id     = os.environ.get("DISCORD_USER_ID")  or cfg.get("DISCORD_USER_ID", "")
 
-    SIGMA = vix_cfg.get("FIXED_SIGMA", 0.046)
-    MULT_NORMAL = vix_cfg.get("MULT_NORMAL", 1.4)
-    MULT_FEAR = vix_cfg.get("MULT_FEAR", 2.7)
-    MULT_EXTREME = vix_cfg.get("MULT_EXTREME", 2.8)
+    SIGMA             = vix_cfg.get("FIXED_SIGMA", 0.046)
+    MULT_NORMAL       = vix_cfg.get("MULT_NORMAL", 1.4)
+    MULT_FEAR         = vix_cfg.get("MULT_FEAR", 2.7)
+    MULT_EXTREME      = vix_cfg.get("MULT_EXTREME", 2.8)
     TAKE_PROFIT_RATIO = vix_cfg.get("TAKE_PROFIT_RATIO", 0.30)
 
     current_vix, prev_close, current_open, current_price = get_realtime_data(mode)
@@ -146,18 +149,13 @@ def execute_dual_tactical_trader():
 
     gap_ratio = (current_open - prev_close) / prev_close if prev_close != 0 else 0
     base_mult = (MULT_EXTREME if current_vix >= vix_cfg.get("LEVEL_HIGH", 30) else
-                 MULT_FEAR if current_vix >= vix_cfg.get("LEVEL_LOW", 20) else MULT_NORMAL)
+                 MULT_FEAR    if current_vix >= vix_cfg.get("LEVEL_LOW", 20)  else MULT_NORMAL)
 
-    if gap_ratio >= -0.03:
-        adj_mult = base_mult
-    elif gap_ratio >= -0.05:
-        adj_mult = 0.45
-    elif gap_ratio >= -0.07:
-        adj_mult = 0.25
-    elif gap_ratio >= -0.10:
-        adj_mult = 0.10
-    else:
-        adj_mult = 0.0
+    if gap_ratio >= -0.03:   adj_mult = base_mult
+    elif gap_ratio >= -0.05: adj_mult = 0.45
+    elif gap_ratio >= -0.07: adj_mult = 0.25
+    elif gap_ratio >= -0.10: adj_mult = 0.10
+    else:                    adj_mult = 0.0
 
     target_price_today = current_open * np.exp(-SIGMA * adj_mult)
     price_label = "현재가" if mode == "장중" else "전일 종가"
@@ -165,17 +163,17 @@ def execute_dual_tactical_trader():
     print(f"📌 {price_label}: ${current_price:.2f}")
     print(f"📌 당일시가 : ${current_open:.2f}")
     print(f"📌 전일종가 : ${prev_close:.2f}")
-    print(f"📌 VIX       : {current_vix:.2f}\n")
+    print(f"📌 VIX      : {current_vix:.2f}\n")
 
     discord_report = []
-    any_triggered = False
+    any_triggered  = False
 
     header = f"**{price_label}: ${current_price:.2f}**\n{now_ny.strftime('%Y-%m-%d %H:%M %Z')}\n"
     discord_report.append(header)
 
-    # LONG
+    # ── 🟢 LONG 계좌
     shares_long = pos_cfg.get("TOTAL_SHARES_LONG", 0)
-    avg_long = pos_cfg.get("MY_AVG_PRICE_LONG", 0)
+    avg_long    = pos_cfg.get("MY_AVG_PRICE_LONG", 0)
 
     long_msg = "**🟢 [LONG] 매수 계좌 현황**\n"
     if shares_long > 0 and avg_long > 0:
@@ -194,22 +192,20 @@ def execute_dual_tactical_trader():
 
     discord_report.append(long_msg)
 
-    # SHORT
+    # ── 🔵 SHORT (매도) 계좌
     shares_short = pos_cfg.get("TOTAL_SHARES_SHORT", 0)
-    avg_short = pos_cfg.get("MY_AVG_PRICE_SHORT", 0)
+    avg_short    = pos_cfg.get("MY_AVG_PRICE_SHORT", 0)
 
     short_msg = "**🔵 [SHORT] 매도 계좌 현황**\n"
     if shares_short > 0 and avg_short > 0:
         ret_short = (current_price - avg_short) / avg_short
-        tp_price = avg_short * (1 + TAKE_PROFIT_RATIO)
+        tp_price  = avg_short * (1 + TAKE_PROFIT_RATIO)
         short_msg += f"• 수량: {shares_short}주 / 평단: ${avg_short:.4f}\n"
         short_msg += f"• 수익률: {ret_short*100:+.2f}%\n"
-
         if ret_short >= TAKE_PROFIT_RATIO:
             sell_shares_s = int(shares_short * 0.5)
             short_msg += f"🚨 **[+30% 부분 익절] → {sell_shares_s}주 매도 권장 (50%)**\n"
             any_triggered = True
-
         if mode == "장중":
             short_msg += f"• 익절 지정가: ${tp_price:.2f}\n"
     else:
@@ -217,7 +213,7 @@ def execute_dual_tactical_trader():
 
     discord_report.append(short_msg)
 
-    full_content = "\n----------------------------------------\n".join(discord_report)
+    full_content  = "\n----------------------------------------\n".join(discord_report)
     full_content += f"\n\n• **VIX**: {current_vix:.2f}"
 
     if any_triggered:
