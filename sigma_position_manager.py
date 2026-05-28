@@ -29,23 +29,47 @@ def load_ledger():
         with open("ledger.json", "r", encoding="utf-8") as f:
             return json.load(f)
     except:
-        return {"SOXL_LONG_BUY": [], "SOXL_SHORT_BUY": []}
+        return {
+            "SOXL_LONG_BUY":   [], "SOXL_LONG_SELL":  [],
+            "SOXL_SHORT_BUY":  [], "SOXL_SHORT_SELL": [],
+        }
 
 
 def update_casts_from_ledger(cfg):
+    """
+    ledger.json 기반으로 config.json 자동 갱신:
+    - CURRENT_CASTS  : 매수 횟수
+    - TOTAL_SHARES   : 보유 수량 (매수 합계 - 매도 합계)
+    - MY_AVG_PRICE   : 평단가 (전체 매수금액 / 전체 매수수량)
+    """
     ledger = load_ledger()
-    long_casts = len(ledger.get("SOXL_LONG_BUY", []))
-    short_casts = len(ledger.get("SOXL_SHORT_BUY", []))
 
-    pos = cfg.setdefault("POSITIONS", {}).setdefault("SOXL", {})
-    pos["CURRENT_CASTS_LONG"] = long_casts
-    pos["CURRENT_CASTS_SHORT"] = short_casts
+    for key, buy_key, sell_key in [
+        ("LONG",  "SOXL_LONG_BUY",  "SOXL_LONG_SELL"),
+        ("SHORT", "SOXL_SHORT_BUY", "SOXL_SHORT_SELL"),
+    ]:
+        buys  = ledger.get(buy_key,  [])
+        sells = ledger.get(sell_key, [])
+
+        total_buy_qty  = sum(b.get("qty", 0) for b in buys)
+        total_sell_qty = sum(s.get("qty", 0) for s in sells)
+        hold_qty       = max(total_buy_qty - total_sell_qty, 0)
+
+        total_buy_amt  = sum(b.get("total_amount", 0) for b in buys)
+        avg_price      = round(total_buy_amt / total_buy_qty, 4) if total_buy_qty > 0 else 0
+
+        pos = cfg.setdefault("POSITIONS", {}).setdefault("SOXL", {})
+        pos[f"CURRENT_CASTS_{key}"] = len(buys)
+        pos[f"TOTAL_SHARES_{key}"]  = hold_qty
+        pos[f"MY_AVG_PRICE_{key}"]  = avg_price
+
+        print(f"   📒 [{key}] 매수 {len(buys)}회 / 보유 {hold_qty}주 / 평단 ${avg_price:.4f}")
 
     try:
         with open("config.json", "w", encoding="utf-8") as f:
             json.dump(cfg, f, indent=4, ensure_ascii=False)
-    except:
-        pass
+    except Exception as e:
+        print(f"⚠️ config.json 저장 실패: {e}")
 
 
 def get_market_mode():
@@ -81,8 +105,8 @@ def get_realtime_data(mode):
         if mode == "장전":
             current_open = prev_close
         else:
-            current_open = float(getattr(soxl.fast_info, 'open', None) or
-                               (hist['Open'].iloc[-1] if is_today else prev_close))
+            # fast_info.open은 엉뚱한 값을 줄 수 있어 history 시가를 우선 사용
+            current_open = float(hist['Open'].iloc[-1] if is_today else prev_close)
 
         current_price = float(soxl.fast_info.last_price)
         current_vix   = float(vix.fast_info.last_price)
