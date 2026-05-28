@@ -8,11 +8,11 @@
         "SOXL": {
             "TOTAL_SHARES_LONG": 34,
             "MY_AVG_PRICE_LONG": 165.1124,
-            "CURRENT_CASTS_LONG": 4,
+            "CURRENT_CASTS_LONG": 0,
             "ANNUAL_QUOTA_LONG": 21,
             "TOTAL_SHARES_SHORT": 7,
             "MY_AVG_PRICE_SHORT": 164.3043,
-            "CURRENT_CASTS_SHORT": 4,
+            "CURRENT_CASTS_SHORT": 0,
             "ANNUAL_QUOTA_SHORT": 14
         }
     },

@@ -7,7 +7,6 @@ import requests
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
-# Windows 인코딩 문제 방지
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')
 if hasattr(sys.stderr, 'reconfigure'):
@@ -16,9 +15,6 @@ if hasattr(sys.stderr, 'reconfigure'):
 warnings.filterwarnings('ignore', category=FutureWarning)
 
 
-# ===================================================================
-# 설정 및 장부 로드
-# ===================================================================
 def load_config():
     try:
         with open("config.json", "r", encoding="utf-8") as f:
@@ -32,14 +28,11 @@ def load_ledger():
     try:
         with open("ledger.json", "r", encoding="utf-8") as f:
             return json.load(f)
-    except FileNotFoundError:
-        return {"SOXL_LONG_BUY": [], "SOXL_SHORT_BUY": []}
-    except Exception:
+    except:
         return {"SOXL_LONG_BUY": [], "SOXL_SHORT_BUY": []}
 
 
 def update_casts_from_ledger(cfg):
-    """ledger.json을 읽어 CURRENT_CASTS 자동 업데이트"""
     ledger = load_ledger()
     long_casts = len(ledger.get("SOXL_LONG_BUY", []))
     short_casts = len(ledger.get("SOXL_SHORT_BUY", []))
@@ -51,14 +44,10 @@ def update_casts_from_ledger(cfg):
     try:
         with open("config.json", "w", encoding="utf-8") as f:
             json.dump(cfg, f, indent=4, ensure_ascii=False)
-        print(f"✅ CAST 자동 업데이트 → LONG: {long_casts}회 | SHORT: {short_casts}회")
-    except Exception as e:
-        print(f"⚠️ config.json 저장 실패: {e}")
+    except:
+        pass
 
 
-# ===================================================================
-# 시장 모드 & 실시간 데이터
-# ===================================================================
 def get_market_mode():
     now_ny = datetime.now(ZoneInfo("America/New_York"))
     hour = now_ny.hour + now_ny.minute / 60.0
@@ -100,14 +89,9 @@ def get_realtime_data(mode):
         return None, None, None, None
 
 
-# ===================================================================
-# 디스코드 전송
-# ===================================================================
 def send_discord_message(webhook_url, user_id, title, content):
     if not webhook_url:
-        print("⚠️ DISCORD_WEBHOOK이 설정되지 않았습니다.")
         return
-
     mention = f"<@{user_id}> " if user_id else ""
     payload = {
         "content": mention,
@@ -119,17 +103,11 @@ def send_discord_message(webhook_url, user_id, title, content):
         }]
     }
     try:
-        res = requests.post(webhook_url, json=payload, timeout=15)
-        if res.status_code == 204:
-            print("✅ 디스코드 알림 전송 성공")
-        else:
-            print(f"❌ 디스코드 전송 실패 ({res.status_code})")
-    except Exception as e:
-        print(f"❌ 디스코드 오류: {e}")
+        requests.post(webhook_url, json=payload, timeout=15)
+    except:
+        pass
 
 
-# ===================================================================
-# 메인 실행
 # ===================================================================
 def execute_dual_tactical_trader():
     mode, now_ny = get_market_mode()
@@ -141,7 +119,7 @@ def execute_dual_tactical_trader():
     print("======================================================================\n")
 
     cfg = load_config()
-    update_casts_from_ledger(cfg)          # ledger → CURRENT_CASTS 자동 동기화
+    update_casts_from_ledger(cfg)
 
     pos_cfg = cfg["POSITIONS"]["SOXL"]
     vix_cfg = cfg["VIX_CONFIG"]["LONG"]
@@ -160,7 +138,7 @@ def execute_dual_tactical_trader():
         print("❌ 데이터를 가져올 수 없습니다.")
         return
 
-    # LOC 매수가 계산
+    # LOC 계산 (항상 계산은 하되, 표시 여부는 모드에 따라 결정)
     gap_ratio = (current_open - prev_close) / prev_close if prev_close != 0 else 0
     base_mult = (MULT_EXTREME if current_vix >= cfg["VIX_CONFIG"].get("LEVEL_HIGH", 30) else
                  MULT_FEAR if current_vix >= cfg["VIX_CONFIG"].get("LEVEL_LOW", 20) else MULT_NORMAL)
@@ -177,6 +155,7 @@ def execute_dual_tactical_trader():
         adj_mult = 0.0
 
     target_price_today = current_open * np.exp(-SIGMA * adj_mult)
+
     price_label = "현재가" if mode == "장중" else "전일 종가"
 
     print(f"📌 {price_label}: ${current_price:.2f}")
@@ -184,11 +163,9 @@ def execute_dual_tactical_trader():
     print(f"📌 전일종가 : ${prev_close:.2f}")
     print(f"📌 VIX       : {current_vix:.2f}\n")
 
-    # ====================== 디스코드 구성 ======================
     discord_report = []
     any_triggered = False
 
-    # 상단 헤더
     header = f"**{price_label}: ${current_price:.2f}**\n{now_ny.strftime('%Y-%m-%d %H:%M %Z')}\n"
     discord_report.append(header)
 
@@ -208,7 +185,10 @@ def execute_dual_tactical_trader():
     else:
         long_msg += "• 보유 물량 없음\n"
 
-    long_msg += f"• LOC 매수 예정가: ${target_price_today:.2f}\n"
+    # 장중 모드에서만 LOC 표시
+    if mode == "장중":
+        long_msg += f"• LOC 매수 예정가: ${target_price_today:.2f}\n"
+
     discord_report.append(long_msg)
 
     # SHORT
@@ -227,14 +207,14 @@ def execute_dual_tactical_trader():
             short_msg += f"🚨 **[+30% 부분 익절] → {sell_shares_s}주 매도 권장 (50%)**\n"
             any_triggered = True
 
-        short_msg += f"• 익절 지정가: ${tp_price:.2f}\n"
+        # 장중 모드에서만 익절 지정가 표시
+        if mode == "장중":
+            short_msg += f"• 익절 지정가: ${tp_price:.2f}\n"
     else:
         short_msg += "• 보유 물량 없음\n"
-        short_msg += f"• 익절 지정가: ${avg_short * (1 + TAKE_PROFIT_RATIO):.2f} (참고용)\n" if avg_short > 0 else "• 익절 지정가: -\n"
 
     discord_report.append(short_msg)
 
-    # 디스코드 전송
     full_content = "\n----------------------------------------\n".join(discord_report)
     full_content += f"\n\n• **VIX**: {current_vix:.2f}"
 
