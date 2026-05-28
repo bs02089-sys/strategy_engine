@@ -7,7 +7,7 @@ import requests
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 
-# 인코딩 설정 (GitHub Actions 호환)
+# 인코딩 설정
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')
 if hasattr(sys.stderr, 'reconfigure'):
@@ -74,13 +74,11 @@ def update_positions_from_ledger(cfg):
         pos[f"TOTAL_SHARES_{key}"] = hold_qty
         pos[f"MY_AVG_PRICE_{key}"] = avg_price
 
-        print(f"   📒 [{key}] {len(buys)}회 매수 | 보유 {hold_qty}주 | 평단 ${avg_price:.4f}")
-
     save_config(cfg)
 
 
 # ===================================================================
-# 시장 모드 판별 (장후 모드 제거)
+# 시장 모드 (장후 모드 제거)
 # ===================================================================
 def get_market_mode():
     now_ny = datetime.now(ZoneInfo("America/New_York"))
@@ -96,7 +94,7 @@ def get_market_mode():
 
 
 # ===================================================================
-# 시세 데이터 조회
+# 시세 데이터
 # ===================================================================
 def get_market_data(mode):
     try:
@@ -129,9 +127,9 @@ def get_market_data(mode):
 
 
 # ===================================================================
-# 자금 소진 속도에 따른 LOC 자동 조정
+# 자금 소진율 체크 → LOC 최소 조정
 # ===================================================================
-def adjust_loc_by_burn_rate(base_loc_price, cfg, mode):
+def check_burn_rate_and_adjust_loc(base_loc_price, cfg, mode):
     if mode != "장중":
         return base_loc_price
 
@@ -144,18 +142,19 @@ def adjust_loc_by_burn_rate(base_loc_price, cfg, mode):
     executed = sum(item.get("total_amount", 0) for item in ledger.get("SOXL_LONG_BUY", []))
 
     burn_rate = executed / total_cap
-    today = datetime.now()
-    month_progress = today.day / 30.5
+    expected_rate = 4 / 21                     # 5월 말 기준
 
-    if burn_rate > month_progress * 1.25:           # 너무 빠름 → 보수적으로
-        adj = 0.985
-        print(f"⚠️ 자금 소진 빠름 → LOC를 {adj:.1%} 낮춤")
-    elif burn_rate < month_progress * 0.70:         # 너무 느림 → 공격적으로
-        adj = 1.015
-        print(f"📈 자금 소진 느림 → LOC를 {adj:.1%} 높임")
+    print(f"💰 LONG 소진율: {burn_rate*100:.1f}% (예상 {expected_rate*100:.1f}%)")
+
+    if burn_rate > expected_rate * 1.35:
+        adj = 0.99
+        print(f"⚠️ 소진 빠름 → LOC를 {adj:.1%} 낮춤")
+    elif burn_rate < expected_rate * 0.65:
+        adj = 1.008
+        print(f"📈 소진 느림 → LOC를 {adj:.1%} 높임")
     else:
         adj = 1.0
-        print("📊 자금 소진 속도 정상")
+        print("📊 소진 속도 정상")
 
     return round(base_loc_price * adj, 2)
 
@@ -196,8 +195,8 @@ def execute_dual_tactical_trader():
     print("======================================================================\n")
 
     cfg = load_config()
-    update_casts_from_ledger(cfg)
-    cfg = load_config()   # 갱신된 config 재로드
+    update_positions_from_ledger(cfg)
+    cfg = load_config()                     # 갱신된 config 재로드
 
     pos_cfg = cfg["POSITIONS"]["SOXL"]
     vix_cfg = cfg["VIX_CONFIG"]["LONG"]
@@ -232,8 +231,8 @@ def execute_dual_tactical_trader():
 
     base_loc = current_open * np.exp(-SIGMA * adj_mult)
 
-    # 자금 소진 속도에 따른 LOC 조정
-    final_loc = adjust_loc_by_burn_rate(base_loc, cfg, mode)
+    # 소진율 체크 및 최소 LOC 조정
+    final_loc = check_burn_rate_and_adjust_loc(base_loc, cfg, mode)
 
     price_label = "현재가" if mode == "장중" else "전일 종가"
 
@@ -246,7 +245,6 @@ def execute_dual_tactical_trader():
     discord_lines = []
     any_triggered = False
 
-    # 헤더
     if mode == "장중":
         header = f"**현재가: ${current_price:.2f}**\n📍 당일 시가: **${current_open:.2f}** | VIX: {current_vix:.2f}\n{now_ny.strftime('%Y-%m-%d %H:%M %Z')}\n"
     else:

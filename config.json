@@ -8,10 +8,12 @@
         "SOXL": {
             "TOTAL_SHARES_LONG": 34,
             "MY_AVG_PRICE_LONG": 165.1124,
+            "TOTAL_CAPITAL_LONG": 46094.35,
             "CURRENT_CASTS_LONG": 1,
             "ANNUAL_QUOTA_LONG": 21,
             "TOTAL_SHARES_SHORT": 7,
             "MY_AVG_PRICE_SHORT": 164.3043,
+            "TOTAL_CAPITAL_SHORT": 3273.05,
             "CURRENT_CASTS_SHORT": 1,
             "ANNUAL_QUOTA_SHORT": 14
         }
