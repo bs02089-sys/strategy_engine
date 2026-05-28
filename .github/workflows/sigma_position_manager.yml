@@ -1,10 +1,14 @@
 name: sigma_position_manager
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - '**.py'          # .py 파일 변경 시에만 실행
+      - 'config.json'    # config.json 변경 시에도 실행
   schedule:
     # 🎯 UTC 07:10 = KST 16:10 (정식 자동 브리핑 딱 한 번만 발송!)
     - cron: '10 7 * * 1-5'
-  
   workflow_dispatch:
     # 🎯 원할 때 언제든 Actions 탭에서 버튼 눌러서 수동 실행 가능!
 
@@ -29,7 +33,7 @@ jobs:
         run: |
           git config --global user.name "Automated Bot"
           git config --global user.email "bot@example.com"
-          git remote set-url origin "https://github.com/${{ github.repository }}.git"
+          git remote set-url origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
 
       - name: Sync latest data
         run: |
@@ -56,7 +60,8 @@ jobs:
           done
 
       - name: Commit and push config.json
-        if: always()
+        # push 트리거일 때 bot 커밋이 재귀 실행되지 않도록 조건 추가
+        if: always() && github.actor != 'Automated Bot'
         run: |
           [ -f config.json ] && git add config.json
 
