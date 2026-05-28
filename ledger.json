@@ -5,19 +5,32 @@
             "qty": 34,
             "price": 165.1124,
             "total_amount": 5613.82,
-            "casts": 4
+            "casts": 1
         }
     ],
-    "SOXL_LONG_SELL": [],
-
+    "SOXL_LONG_SELL": [
+        {
+            "date": "2026-05-28",
+            "qty": 17,
+            "price": 218.00,
+            "total_amount": 3703.51
+        }
+   ],
     "SOXL_SHORT_BUY": [
         {
             "date": "2026-05-28",
             "qty": 7,
             "price": 164.3043,
             "total_amount": 1150.13,
-            "casts": 4
+            "casts": 1
         }
     ],
-    "SOXL_SHORT_SELL": []
+    "SOXL_SHORT_SELL": [
+        {
+            "date": "2026-05-28",
+            "qty": 3,
+            "price": 218.00,
+            "total_amount": 653.55
+        }
+    ]
 }
