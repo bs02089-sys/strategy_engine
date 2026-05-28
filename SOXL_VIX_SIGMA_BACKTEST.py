@@ -1,7 +1,6 @@
 import os
 import sys
 import json
-import numpy as np
 import warnings
 import requests
 from datetime import datetime, timezone
