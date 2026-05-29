@@ -4,29 +4,18 @@
     "TICKERS": [
         "SOXL"
     ],
-    "POSITIONS": {
+"POSITIONS": {
         "SOXL": {
-            "TOTAL_SHARES_LONG": 34,
+            "TOTAL_SHARES_LONG": 17,
             "MY_AVG_PRICE_LONG": 165.1124,
             "TOTAL_CAPITAL_LONG": 46094.35,
-            "CURRENT_CASTS_LONG": 1,
-            "ANNUAL_QUOTA_LONG": 21,
-            "TOTAL_SHARES_SHORT": 7,
+            "CURRENT_CASTS_LONG": 4,
+            "ANNUAL_QUOTA_LONG": 21,  
+            "TOTAL_SHARES_SHORT": 4,
             "MY_AVG_PRICE_SHORT": 164.3043,
             "TOTAL_CAPITAL_SHORT": 3273.05,
-            "CURRENT_CASTS_SHORT": 1,
-            "ANNUAL_QUOTA_SHORT": 14
-        }
-    },
-    "VIX_CONFIG": {
-        "LEVEL_LOW": 20.0,
-        "LEVEL_HIGH": 30.0,
-        "LONG": {
-            "FIXED_SIGMA": 0.046,
-            "MULT_NORMAL": 1.4,
-            "MULT_FEAR": 2.65,
-            "MULT_EXTREME": 2.8,
-            "TAKE_PROFIT_RATIO": 0.3
+            "CURRENT_CASTS_SHORT": 4,
+            "ANNUAL_QUOTA_SHORT": 6
         }
     },
     "STRATEGY": {
@@ -35,12 +24,12 @@
         "HOLD_DURATION_DAYS": 252
     },
     "DEFAULTS": {
-        "SIGMA_DEFAULT": 2.0
+        "SIGMA_DEFAULT": 1.5
     },
     "exchange_status": {
-        "LAST_CHECK_DATE": "2026-05-28 06:56:59 UTC",
-        "CURRENT_APPLIED_RATE": 1504.38,
-        "CURRENT_PERCENTILE": 94.6
+    "LAST_CHECK_DATE": "2026-05-28 06:56:59 UTC",
+    "CURRENT_APPLIED_RATE": 1504.38,
+    "CURRENT_PERCENTILE": 94.6
     },
     "news_settings": {
         "KEYWORDS": [
