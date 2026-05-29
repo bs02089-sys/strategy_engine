@@ -77,6 +77,7 @@ def check_and_update_sigma(cfg):
     last_update_str = pos.get("LAST_SIGMA_UPDATE", "2000-01-01")
     last_update = datetime.strptime(last_update_str, "%Y-%m-%d")
     
+    # 180일 경과 확인
     if (datetime.now() - last_update).days > 180:
         print("🔄 6개월 경과, 시그마 재계산 중...")
         data = yf.Ticker("SOXL").history(period="250d")
@@ -84,9 +85,11 @@ def check_and_update_sigma(cfg):
         
         pos["DAILY_SIGMA"] = round(new_sigma, 4)
         pos["LAST_SIGMA_UPDATE"] = datetime.now().strftime("%Y-%m-%d")
-        print(f"✅ 시그마 갱신 완료: {pos['DAILY_SIGMA']}")
-        return True
-    return False
+        
+        # 갱신 완료를 알리는 메시지를 반환
+        return True, f"🚨 **[시스템 알림]** 시그마 갱신 완료: {pos['DAILY_SIGMA']}"
+    
+    return False, ""
 
 # ───────────────────────────────────────────────
 # 장 시간 판별 / 시세 / 디스코드 / 타점 계산 (원본 로직)
@@ -138,7 +141,7 @@ def calc_loc(prev_close, FIXED_SIGMA, DAILY_SIGMA):
     return prev_close * np.exp(-FIXED_SIGMA * DAILY_SIGMA)
 
 # ───────────────────────────────────────────────
-# 메인 실행 (중복 호출 차단 및 굵게 표시 제거)
+# 메인 실행 
 # ───────────────────────────────────────────────
 
 def execute_dual_tactical_trader():
@@ -159,7 +162,6 @@ def execute_dual_tactical_trader():
 
     loc_price = calc_loc(prev_close, pos_cfg.get("FIXED_SIGMA", 1.5), pos_cfg.get("DAILY_SIGMA", 0.04))
     
-    # 텍스트 출력 구성 (굵게 표시 제거)
     lines = [f"{MODE_EMOJI[mode]} {mode} 모드 | {now_ny.strftime('%Y-%m-%d %H:%M %Z')}\n"]
     
     if mode == "장전":
@@ -179,10 +181,14 @@ def execute_dual_tactical_trader():
         else:
             msg += "\n• 보유 물량 없음"
         lines.append(msg)
+    
+    # 시그마 갱신 알림 메시지 추가 (갱신된 날만 표시)
+    if sigma_changed:
+        lines.append(f"\n🚨 [시스템 알림] 시그마 갱신 완료: {pos_cfg.get('DAILY_SIGMA', 0.04)}")
 
     send_discord(os.environ.get("DISCORD_WEBHOOK") or cfg.get("DISCORD_WEBHOOK", ""), 
                  os.environ.get("DISCORD_USER_ID") or cfg.get("DISCORD_USER_ID", ""), 
                  f"{MODE_EMOJI[mode]} {mode} 브리핑", "\n\n".join(lines))
-
+    
 if __name__ == "__main__":
     execute_dual_tactical_trader()
