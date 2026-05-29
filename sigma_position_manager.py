@@ -23,21 +23,24 @@ MODE_EMOJI = {"장전": "🌙", "장중": "☀️"}
 # ───────────────────────────────────────────────
 
 def load_config():
+    # 이제 default_cfg에서도 모든 변수를 명확히 정의합니다.
     default_cfg = {
-        "POSITIONS": {"SOXL": {"FIXED_SIGMA": 1.5, "DAILY_SIGMA": 0.04, "LAST_SIGMA_UPDATE": "2000-01-01"}},
-        "DISCORD_WEBHOOK": "", "DISCORD_USER_ID": ""
+        "POSITIONS": {
+            "SOXL": {
+                "FIXED_SIGMA": 1.5,
+                "DAILY_SIGMA": 0.0639, # 최근 갱신된 값으로 초기값 업데이트
+                "LAST_SIGMA_UPDATE": "2026-05-29"
+            }
+        },
+        "DISCORD_WEBHOOK": "",
+        "DISCORD_USER_ID": ""
     }
+    
     if not os.path.exists("config.json"):
         with open("config.json", "w", encoding="utf-8") as f:
             json.dump(default_cfg, f, indent=4, ensure_ascii=False)
         return default_cfg
-    try:
-        with open("config.json", "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception as e:
-        print(f"❌ config.json 로드 실패: {e}")
-        sys.exit(1)
-
+    
 def save_config(cfg):
     try:
         with open("config.json", "w", encoding="utf-8") as f:
@@ -74,7 +77,7 @@ def update_positions_from_ledger(cfg):
 
 def check_and_update_sigma(cfg):
     pos = cfg["POSITIONS"]["SOXL"]
-    last_update_str = pos.get("LAST_SIGMA_UPDATE", "2000-01-01")
+    last_update_str = pos.get("LAST_SIGMA_UPDATE", "2026-05-29")
     last_update = datetime.strptime(last_update_str, "%Y-%m-%d")
     
     # 180일 경과 확인
