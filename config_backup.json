@@ -6,34 +6,16 @@
     ],
     "POSITIONS": {
         "SOXL": {
-            "TOTAL_SHARES_LONG": 34,
+            "TOTAL_SHARES_LONG": 17,
             "MY_AVG_PRICE_LONG": 165.1124,
-            "CURRENT_CASTS_LONG": 0,
-            "ANNUAL_QUOTA_LONG": 21,
-            "TOTAL_SHARES_SHORT": 7,
-            "MY_AVG_PRICE_SHORT": 164.3043,
-            "CURRENT_CASTS_SHORT": 0,
-            "ANNUAL_QUOTA_SHORT": 14
-        }
-    },
-    "VIX_CONFIG": {
-        "LEVEL_LOW": 20.0,
-        "LEVEL_HIGH": 30.0,
-        "LONG": {
-            "FIXED_SIGMA": 0.046,
-            "MULT_NORMAL": 1.4,
-            "MULT_FEAR": 2.65,
-            "MULT_EXTREME": 2.8,
-            "TAKE_PROFIT_RATIO": 0.3
+            "TOTAL_SHARES_SHORT": 4,
+            "MY_AVG_PRICE_SHORT": 164.3043
         }
     },
     "STRATEGY": {
         "CYCLE_YEARS": 2,
         "BUY_DURATION_DAYS": 252,
         "HOLD_DURATION_DAYS": 252
-    },
-    "DEFAULTS": {
-        "SIGMA_DEFAULT": 2.0
     },
     "exchange_status": {
         "LAST_CHECK_DATE": "2026-05-27 07:06:14 UTC",
