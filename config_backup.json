@@ -9,7 +9,9 @@
             "TOTAL_SHARES_LONG": 17,
             "MY_AVG_PRICE_LONG": 165.1124,
             "TOTAL_SHARES_SHORT": 4,
-            "MY_AVG_PRICE_SHORT": 164.3043
+            "MY_AVG_PRICE_SHORT": 164.3043,
+            "DAILY_SIGMA": 0.0639,
+            "LAST_SIGMA_UPDATE": "2026-05-29"
         }
     },
     "STRATEGY": {
