@@ -181,12 +181,12 @@ def execute_dual_tactical_trader():
     lines = [f"**{MODE_EMOJI[mode]} {mode} 모드** | {now_ny.strftime('%Y-%m-%d %H:%M %Z')}\n"]
     
     if mode == "장전":
-        lines.append(f"• 전일 종가: **${prev_close:.2f}**")
-        lines.append(f"• LOC 예정가: **${loc_price:.2f}**")
+        lines.append(f"• 전일 종가: ${prev_close:.2f}")
+        lines.append(f"• LOC 예정가: ${loc_price:.2f}")
     else:
         lines.append(f"• 전일 종가: ${prev_close:.2f}")
-        lines.append(f"• 현재가: **${current_price:.2f}**")
-        lines.append(f"• LOC 예정가: **${loc_price:.2f}**")
+        lines.append(f"• 현재가: ${current_price:.2f}")
+        lines.append(f"• LOC 예정가: ${loc_price:.2f}")
 
     for k in ["LONG", "SHORT"]:
         qty = pos_cfg.get(f"TOTAL_SHARES_{k}", 0)
