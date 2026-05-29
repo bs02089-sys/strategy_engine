@@ -22,6 +22,13 @@ MODE_EMOJI = {"장전": "🌙", "장중": "☀️"}
 # 설정 / 장부 로드 
 # ───────────────────────────────────────────────
 
+# 환경 변수와 config 파일에서 값을 불러오는지 확인
+webhook = os.environ.get("DISCORD_WEBHOOK")
+user_id = os.environ.get("DISCORD_USER_ID")
+
+print(f"DEBUG: 환경변수 Webhook: {webhook}")
+print(f"DEBUG: 환경변수 UserID: {user_id}")
+
 def load_config():
     # 이제 default_cfg에서도 모든 변수를 명확히 정의합니다.
     default_cfg = {
