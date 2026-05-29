@@ -8,17 +8,14 @@ from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 import yfinance as yf
 
-# 인코딩 설정
+# 환경 변수 우선 설정
+WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK")
+USER_ID = os.environ.get("DISCORD_USER_ID")
+
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')
-if hasattr(sys.stderr, 'reconfigure'):
-    sys.stderr.reconfigure(encoding='utf-8')
-
 warnings.filterwarnings('ignore', category=FutureWarning)
 
-# ===================================================================
-# 설정 및 장부 로드/저장
-# ===================================================================
 def load_config():
     try:
         with open("config.json", "r", encoding="utf-8") as f:
@@ -57,17 +54,13 @@ def update_positions_from_ledger(cfg):
         pos[f"MY_AVG_PRICE_{key}"] = avg_price
     save_config(cfg)
 
-# ===================================================================
-# 자동화 로직
-# ===================================================================
 def auto_update_annual_quota(cfg):
     now = datetime.now(ZoneInfo("America/New_York"))
     if now.month == 1 and now.day <= 10:
         quota_cfg = cfg["POSITIONS"]["SOXL"]
         if str(now.year) == quota_cfg.get("LAST_QUOTA_UPDATE", "1970"): return
         try:
-            soxl = yf.Ticker("SOXL")
-            df = soxl.history(period="6y", auto_adjust=False)
+            df = yf.Ticker("SOXL").history(period="6y", auto_adjust=False)
             yearly_hits = []
             for year in range(now.year - 5, now.year):
                 df_year = df[df.index.year == year]
@@ -95,9 +88,6 @@ def auto_update_rolling_sigma(cfg):
             save_config(cfg)
         except Exception as e: print(f"❌ 시그마 자동 연산 실패: {e}")
 
-# ===================================================================
-# 나머지 로직
-# ===================================================================
 def get_market_mode():
     now_ny = datetime.now(ZoneInfo("America/New_York"))
     hour = now_ny.hour + now_ny.minute / 60.0
@@ -122,10 +112,13 @@ def check_burn_rate_and_adjust_loc(base_loc_price, cfg, mode):
     adj = 0.99 if burn_rate > (pos.get("CURRENT_CASTS_LONG", 0) / pos.get("ANNUAL_QUOTA_LONG", 21)) * 1.35 else (1.008 if burn_rate < (pos.get("CURRENT_CASTS_LONG", 0) / pos.get("ANNUAL_QUOTA_LONG", 21)) * 0.65 else 1.0)
     return round(base_loc_price * adj, 2)
 
-def send_discord(webhook_url, user_id, title, content):
-    if not webhook_url: return
-    payload = {"content": f"<@{user_id}> " if user_id else "", "embeds": [{"title": title, "description": content, "color": 15158332 if "🚨" in title or "[반기 결산]" in title else 3447003, "timestamp": datetime.now(timezone.utc).isoformat()}]}
-    requests.post(webhook_url, json=payload, timeout=15)
+def send_discord(title, content):
+    url = WEBHOOK_URL or load_config().get("DISCORD_WEBHOOK", "")
+    if not url: return
+    payload = {"content": f"<@{USER_ID or load_config().get('DISCORD_USER_ID', '')}> " if USER_ID or load_config().get('DISCORD_USER_ID') else "", 
+               "embeds": [{"title": title, "description": content, "color": 15158332 if "🚨" in title or "[반기 결산]" in title else 3447003, "timestamp": datetime.now(timezone.utc).isoformat()}]}
+    try: requests.post(url, json=payload, timeout=15)
+    except Exception as e: print(f"❌ 디스코드 전송 실패: {e}")
 
 def execute_dual_tactical_trader():
     mode, now_ny = get_market_mode()
@@ -136,17 +129,18 @@ def execute_dual_tactical_trader():
     cfg = load_config()
     
     pos = cfg["POSITIONS"]["SOXL"]
-    webhook_url = os.environ.get("DISCORD_WEBHOOK") or cfg.get("DISCORD_WEBHOOK", "")
-    user_id = os.environ.get("DISCORD_USER_ID") or cfg.get("DISCORD_USER_ID", "")
     
+    # 반기 리포트
     if now_ny.month in [6, 12] and now_ny.hour == 16:
         if now_ny.date() == yf.Ticker("SOXL").history(period="1mo").index[-1].date():
-            send_discord(webhook_url, user_id, "[반기 결산] 시그마 최적화 보고", "시그마(σ) 최신화 완료.")
+            send_discord("[반기 결산] 시그마 최적화 보고", "시스템 표준편차(σ)의 갱신 시점이 도래했습니다.")
 
     prev_close, _, current_price = get_market_data(mode)
     if prev_close:
         final_loc = check_burn_rate_and_adjust_loc(prev_close * np.exp(-pos.get("FIXED_SIGMA", 0.0832)), cfg, mode)
-        print(f"📌 {mode} 모드 | 현재가: ${current_price:.2f} | LOC 예정가: ${final_loc:.2f}")
+        msg = f"📌 {mode} 모드 | 현재가: ${current_price:.2f} | LOC 예정가: ${final_loc:.2f}"
+        print(msg)
+        send_discord(f"[{mode} 모드 브리핑]", msg)
 
 if __name__ == "__main__":
     execute_dual_tactical_trader()
