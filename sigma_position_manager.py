@@ -8,7 +8,7 @@ import yfinance as yf
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 
-# ── 인코딩 설정 (GitHub Actions 한글 깨짐 방지)
+# ── 인코딩 설정
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')
 if hasattr(sys.stderr, 'reconfigure'):
@@ -19,11 +19,10 @@ warnings.filterwarnings('ignore', category=FutureWarning)
 MODE_EMOJI = {"장전": "🌙", "장중": "☀️"}
 
 # ───────────────────────────────────────────────
-# 설정 / 장부 로드 (기존 이름 유지)
+# 설정 / 장부 로드 (원본 유지)
 # ───────────────────────────────────────────────
 
 def load_config():
-    # 파일이 없으면 기본값으로 생성
     default_cfg = {
         "POSITIONS": {"SOXL": {"FIXED_SIGMA": 1.5, "DAILY_SIGMA": 0.04, "LAST_SIGMA_UPDATE": "2000-01-01"}},
         "DISCORD_WEBHOOK": "", "DISCORD_USER_ID": ""
@@ -32,7 +31,6 @@ def load_config():
         with open("config.json", "w", encoding="utf-8") as f:
             json.dump(default_cfg, f, indent=4, ensure_ascii=False)
         return default_cfg
-    
     try:
         with open("config.json", "r", encoding="utf-8") as f:
             return json.load(f)
@@ -68,10 +66,7 @@ def update_positions_from_ledger(cfg):
 
         pos[f"TOTAL_SHARES_{key}"] = qty
         pos[f"MY_AVG_PRICE_{key}"] = avg_price
-
         print(f"   📒 [{key}] 보유 {qty}주 / 평단 ${avg_price:.4f}")
-
-    save_config(cfg)
 
 # ───────────────────────────────────────────────
 # 시그마 자동 갱신 로직
@@ -89,12 +84,12 @@ def check_and_update_sigma(cfg):
         
         pos["DAILY_SIGMA"] = round(new_sigma, 4)
         pos["LAST_SIGMA_UPDATE"] = datetime.now().strftime("%Y-%m-%d")
-        save_config(cfg)
         print(f"✅ 시그마 갱신 완료: {pos['DAILY_SIGMA']}")
-    return pos.get("DAILY_SIGMA", 0.04)
+        return True
+    return False
 
 # ───────────────────────────────────────────────
-# 장 시간 판별
+# 장 시간 판별 / 시세 / 디스코드 / 타점 계산 (원본 로직)
 # ───────────────────────────────────────────────
 
 def get_market_mode():
@@ -102,37 +97,24 @@ def get_market_mode():
     hour     = now_ny.hour + now_ny.minute / 60.0
     is_dst   = now_ny.dst() != timedelta(0)
     tz_label = "EDT (서머타임)" if is_dst else "EST"
-
     print(f"🕒 뉴욕 현재 시각: {now_ny.strftime('%Y-%m-%d %H:%M:%S')} ({tz_label})")
-
     mode = "장중" if 9.5 <= hour < 16.0 else "장전"
     return mode, now_ny
-
-# ───────────────────────────────────────────────
-# 시세 데이터 조회
-# ───────────────────────────────────────────────
 
 def get_market_data(mode):
     try:
         soxl = yf.Ticker("SOXL")
         hist = soxl.history(period="3d", auto_adjust=False)
         if len(hist) < 2: return None, None, None
-
         now_ny   = datetime.now(ZoneInfo("America/New_York"))
         is_today = (hist.index[-1].date() == now_ny.date())
-
         prev_close = float(hist['Close'].iloc[-2] if is_today else hist['Close'].iloc[-1])
         current_open = float(hist['Open'].iloc[-1] if is_today else prev_close) if mode == "장중" else prev_close
         current_price = float(soxl.fast_info.last_price)
-
         return prev_close, current_open, current_price
     except Exception as e:
         print(f"❌ 시세 조회 실패: {e}")
         return None, None, None
-
-# ───────────────────────────────────────────────
-# 디스코드 알림 전송
-# ───────────────────────────────────────────────
 
 def send_discord(webhook_url, user_id, title, content):
     if not webhook_url: return
@@ -152,33 +134,33 @@ def send_discord(webhook_url, user_id, title, content):
     except Exception as e:
         print(f"❌ 디스코드 전송 실패: {e}")
 
-# ───────────────────────────────────────────────
-# LOC 매수 타점 계산
-# ───────────────────────────────────────────────
-
 def calc_loc(prev_close, FIXED_SIGMA, DAILY_SIGMA):
-    # 전일 종가 기준으로 하락폭 계산
     return prev_close * np.exp(-FIXED_SIGMA * DAILY_SIGMA)
 
 # ───────────────────────────────────────────────
-# 메인 실행
+# 메인 실행 (중복 호출 차단 및 굵게 표시 제거)
 # ───────────────────────────────────────────────
 
 def execute_dual_tactical_trader():
     mode, now_ny = get_market_mode()
     cfg = load_config()
-    DAILY_SIGMA = check_and_update_sigma(cfg)
     
-    print("📒 장부 → config.json 갱신 중...")
+    # 데이터 업데이트 체크
+    sigma_changed = check_and_update_sigma(cfg)
     update_positions_from_ledger(cfg)
-    cfg = load_config()
-    pos_cfg = cfg["POSITIONS"]["SOXL"]
     
+    # 변경사항 있을 시에만 저장 (알림 중복 방지)
+    if sigma_changed:
+        save_config(cfg)
+    
+    pos_cfg = cfg["POSITIONS"]["SOXL"]
     prev_close, current_open, current_price = get_market_data(mode)
     if prev_close is None: return
 
-    loc_price = calc_loc(prev_close, pos_cfg.get("FIXED_SIGMA", 1.5), DAILY_SIGMA)
-    lines = [f"**{MODE_EMOJI[mode]} {mode} 모드** | {now_ny.strftime('%Y-%m-%d %H:%M %Z')}\n"]
+    loc_price = calc_loc(prev_close, pos_cfg.get("FIXED_SIGMA", 1.5), pos_cfg.get("DAILY_SIGMA", 0.04))
+    
+    # 텍스트 출력 구성 (굵게 표시 제거)
+    lines = [f"{MODE_EMOJI[mode]} {mode} 모드 | {now_ny.strftime('%Y-%m-%d %H:%M %Z')}\n"]
     
     if mode == "장전":
         lines.append(f"• 전일 종가: ${prev_close:.2f}")
@@ -191,10 +173,11 @@ def execute_dual_tactical_trader():
     for k in ["LONG", "SHORT"]:
         qty = pos_cfg.get(f"TOTAL_SHARES_{k}", 0)
         avg = pos_cfg.get(f"MY_AVG_PRICE_{k}", 0)
-        msg = f"\n**{ '🟢' if k == 'LONG' else '🔵' } [{k}] {'매수' if k == 'LONG' else '매도'} 계좌**\n"
+        msg = f"\n[{k}] {'매수' if k == 'LONG' else '매도'} 계좌"
         if qty > 0 and avg > 0:
-            msg += f"• {qty}주 / 평단 ${avg:.4f} / 수익률 {(current_price - avg)/avg*100:+.2f}%"
-        else: msg += "• 보유 물량 없음"
+            msg += f"\n• {qty}주 / 평단 ${avg:.4f} / 수익률 {(current_price - avg)/avg*100:+.2f}%"
+        else:
+            msg += "\n• 보유 물량 없음"
         lines.append(msg)
 
     send_discord(os.environ.get("DISCORD_WEBHOOK") or cfg.get("DISCORD_WEBHOOK", ""), 
