@@ -158,43 +158,16 @@ def calc_loc(prev_close, FIXED_SIGMA, DAILY_SIGMA):
     return prev_close * np.exp(-FIXED_SIGMA * DAILY_SIGMA)
 
 # ───────────────────────────────────────────────
-# 메인 실행 
+# 메인 실행부
 # ───────────────────────────────────────────────
 
 def execute_dual_tactical_trader():
     mode, now_ny = get_market_mode()
     cfg = load_config()
 
-def update_sigma_annually(cfg):
-    now = datetime.now()
-    # 마지막 업데이트 기록 확인 (없으면 초기값)
-    last_update_str = cfg["POSITIONS"]["SOXL"].get("LAST_SIGMA_UPDATE", "2000-01-01")
-    last_update = datetime.strptime(last_update_str, "%Y-%m-%d")
-
-    # 올해가 업데이트되지 않았다면 실행 (연초 로직)
-    if last_update.year < now.year:
-        print(f"📅 연초 시그마 자동 갱신 시작: {now.year}년")
-        
-        # 1. yfinance로 252일치 데이터 가져오기
-        ticker = yf.Ticker("SOXL")
-        hist = ticker.history(period="252d")
-        
-        # 2. 시그마 계산 (여기서 대표님의 계산 로직 적용)
-        # 예: 일일 변동성의 표준편차 등을 활용
-        new_daily_sigma = hist['Close'].pct_change().std() * (252**0.5) 
-        
-        # 3. config 갱신
-        cfg["POSITIONS"]["SOXL"]["DAILY_SIGMA"] = round(new_daily_sigma, 4)
-        cfg["POSITIONS"]["SOXL"]["LAST_SIGMA_UPDATE"] = now.strftime("%Y-%m-%d")
-        
-        # 4. 저장
-        save_config(cfg)
-        print(f"✅ 시그마 자동 갱신 완료: {cfg['POSITIONS']['SOXL']['DAILY_SIGMA']}")
-        
-    return cfg
-   
-    # 데이터 업데이트 체크
-    sigma_changed = check_and_update_sigma(cfg)
+    # 1. 연초 시그마 갱신 및 데이터 업데이트 (함수 밖으로 분리된 것 통합)
+    cfg = update_sigma_annually(cfg) 
+    sigma_changed, sigma_msg = check_and_update_sigma(cfg)
     update_positions_from_ledger(cfg)
     
     # 변경사항 있을 시에만 저장
@@ -203,38 +176,36 @@ def update_sigma_annually(cfg):
     
     pos_cfg = cfg["POSITIONS"]["SOXL"]
     prev_close, current_price = get_market_data(mode)
+    
+    # 2. 데이터 없을 시 예외 처리 (함수 종료 없이 메시지 구성 후 진행)
     if prev_close is None:
-        print("⚠️ 시장 데이터를 가져오지 못했습니다. 데이터를 확인하세요.")
-        # return 대신 에러 내용을 담은 메시지를 만들어서 보냅니다.
-        lines = [f"{MODE_EMOJI[mode]} {mode} 브리핑", "⚠️ 데이터 수신 실패로 상세 내역을 가져오지 못했습니다."]
-        send_discord(...) # 여기서 바로 발송해 버립니다.
-        return
-
-    loc_price = calc_loc(prev_close, pos_cfg.get("FIXED_SIGMA", 1.5), pos_cfg.get("DAILY_SIGMA", 0.04))
-    
-    # 메시지 구성
-    lines = [f"{MODE_EMOJI[mode]} {mode} 모드 | {now_ny.strftime('%Y-%m-%d %H:%M %Z')}"]
-    
-    # 시세 정보 
-    if mode == "장전":
-        lines.append(f"• 전일 종가: ${prev_close:.2f}\n• LOC 예정가: ${loc_price:.2f}")
+        print("⚠️ 시장 데이터를 가져오지 못했습니다.")
+        lines = [f"{MODE_EMOJI[mode]} {mode} 브리핑", "⚠️ 데이터 수신 실패로 상세 내역을 가져올 수 없습니다."]
     else:
-        lines.append(f"• 전일 종가: ${prev_close:.2f}\n• 현재가: ${current_price:.2f}\n• LOC 예정가: ${loc_price:.2f}")
-
-    # 계좌 정보
-    for k in ["LONG", "SHORT"]:
-        qty = pos_cfg.get(f"TOTAL_SHARES_{k}", 0)
-        avg = pos_cfg.get(f"MY_AVG_PRICE_{k}", 0)
-        msg = f"[{k}] {'매수' if k == 'LONG' else '매도'} 계좌"
-        if qty > 0 and avg > 0:
-            msg += f"\n• {qty}주 / 평단 ${avg:.4f} / 수익률 {(current_price - avg)/avg*100:+.2f}%"
+        loc_price = calc_loc(prev_close, pos_cfg.get("FIXED_SIGMA", 1.5), pos_cfg.get("DAILY_SIGMA", 0.04))
+        
+        # 메시지 구성
+        lines = [f"{MODE_EMOJI[mode]} {mode} 모드 | {now_ny.strftime('%Y-%m-%d %H:%M %Z')}"]
+        
+        if mode == "장전":
+            lines.append(f"• 전일 종가: ${prev_close:.2f}\n• LOC 예정가: ${loc_price:.2f}")
         else:
-            msg += "\n• 보유 물량 없음"
-        lines.append(msg)
+            lines.append(f"• 전일 종가: ${prev_close:.2f}\n• 현재가: ${current_price:.2f}\n• LOC 예정가: ${loc_price:.2f}")
+
+        # 계좌 정보
+        for k in ["LONG", "SHORT"]:
+            qty = pos_cfg.get(f"TOTAL_SHARES_{k}", 0)
+            avg = pos_cfg.get(f"MY_AVG_PRICE_{k}", 0)
+            msg = f"[{k}] {'매수' if k == 'LONG' else '매도'} 계좌"
+            if qty > 0 and avg > 0:
+                msg += f"\n• {qty}주 / 평단 ${avg:.4f} / 수익률 {(current_price - avg)/avg*100:+.2f}%"
+            else:
+                msg += "\n• 보유 물량 없음"
+            lines.append(msg)
     
-    # 시스템 알림
+    # 3. 시스템 알림 (항상 전송되도록 로직 통합)
     if sigma_changed:
-        lines.append(f"🚨 [시스템 알림] 시그마 갱신 완료: {pos_cfg.get('DAILY_SIGMA', 0.04)}")
+        lines.append(sigma_msg)
 
     send_discord(os.environ.get("DISCORD_WEBHOOK") or cfg.get("DISCORD_WEBHOOK", ""), 
                  os.environ.get("DISCORD_USER_ID") or cfg.get("DISCORD_USER_ID", ""), 
