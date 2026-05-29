@@ -112,9 +112,8 @@ def get_market_data(mode):
         now_ny   = datetime.now(ZoneInfo("America/New_York"))
         is_today = (hist.index[-1].date() == now_ny.date())
         prev_close = float(hist['Close'].iloc[-2] if is_today else hist['Close'].iloc[-1])
-        current_open = float(hist['Open'].iloc[-1] if is_today else prev_close) if mode == "장중" else prev_close
         current_price = float(soxl.fast_info.last_price)
-        return prev_close, current_open, current_price
+        return prev_close, current_price
     except Exception as e:
         print(f"❌ 시세 조회 실패: {e}")
         return None, None, None
@@ -157,7 +156,7 @@ def execute_dual_tactical_trader():
         save_config(cfg)
     
     pos_cfg = cfg["POSITIONS"]["SOXL"]
-    prev_close, current_open, current_price = get_market_data(mode)
+    prev_close, current_price = get_market_data(mode)
     if prev_close is None: return
 
     loc_price = calc_loc(prev_close, pos_cfg.get("FIXED_SIGMA", 1.5), pos_cfg.get("DAILY_SIGMA", 0.04))
