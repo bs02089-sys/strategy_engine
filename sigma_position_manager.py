@@ -35,7 +35,7 @@ INITIAL_SIGMA = 0.0635  # 한셀로 직접 검증한 최초의 숫자(2026-05-29
 def load_config():
     config_path = "config.json"
     
-    # 대표님이 산출하신 검증된 값을 시스템의 기본값으로 명시
+    # 검증된 값을 시스템의 기본값으로 명시
     default_cfg = {
         "POSITIONS": {
             "SOXL": {
