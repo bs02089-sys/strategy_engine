@@ -203,7 +203,12 @@ def update_sigma_annually(cfg):
     
     pos_cfg = cfg["POSITIONS"]["SOXL"]
     prev_close, current_price = get_market_data(mode)
-    if prev_close is None: return
+    if prev_close is None:
+        print("⚠️ 시장 데이터를 가져오지 못했습니다. 데이터를 확인하세요.")
+        # return 대신 에러 내용을 담은 메시지를 만들어서 보냅니다.
+        lines = [f"{MODE_EMOJI[mode]} {mode} 브리핑", "⚠️ 데이터 수신 실패로 상세 내역을 가져오지 못했습니다."]
+        send_discord(...) # 여기서 바로 발송해 버립니다.
+        return
 
     loc_price = calc_loc(prev_close, pos_cfg.get("FIXED_SIGMA", 1.5), pos_cfg.get("DAILY_SIGMA", 0.04))
     
