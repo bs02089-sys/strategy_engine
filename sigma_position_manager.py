@@ -30,24 +30,32 @@ print(f"DEBUG: 환경변수 Webhook: {webhook}")
 print(f"DEBUG: 환경변수 UserID: {user_id}")
 
 def load_config():
-    # 이제 default_cfg에서도 모든 변수를 명확히 정의합니다.
-    default_cfg = {
-        "POSITIONS": {
-            "SOXL": {
-                "FIXED_SIGMA": 1.5,
-                "DAILY_SIGMA": 0.0639, # 최근 갱신된 값으로 초기값 업데이트
-                "LAST_SIGMA_UPDATE": "2026-05-29"
-            }
-        },
-        "DISCORD_WEBHOOK": "",
-        "DISCORD_USER_ID": ""
-    }
-    
-    if not os.path.exists("config.json"):
-        with open("config.json", "w", encoding="utf-8") as f:
+    # 경로 확인 (현재 디렉토리에 파일이 있는지 확인)
+    config_path = "config.json"
+    if not os.path.exists(config_path):
+        print(f"⚠️ {config_path} 파일을 찾을 수 없습니다. 기본 설정을 생성합니다.")
+        default_cfg = {
+            "POSITIONS": {"SOXL": {"FIXED_SIGMA": 1.5, "DAILY_SIGMA": 0.0639, "LAST_SIGMA_UPDATE": "2026-05-29"}},
+            "DISCORD_WEBHOOK": "", "DISCORD_USER_ID": ""
+        }
+        with open(config_path, "w", encoding="utf-8") as f:
             json.dump(default_cfg, f, indent=4, ensure_ascii=False)
         return default_cfg
-    
+
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            if data is None:
+                raise ValueError("config.json 파일이 비어있습니다.")
+            return data
+    except Exception as e:
+        print(f"❌ config.json 로드 실패: {e}")
+        # 파일이 깨졌을 경우를 대비해 시스템을 강제로 멈추지 않고 기본값을 반환하도록 수정
+        return {
+            "POSITIONS": {"SOXL": {"FIXED_SIGMA": 1.5, "DAILY_SIGMA": 0.0639, "LAST_SIGMA_UPDATE": "2026-05-29"}},
+            "DISCORD_WEBHOOK": "", "DISCORD_USER_ID": ""
+        }
+
 def save_config(cfg):
     try:
         with open("config.json", "w", encoding="utf-8") as f:
