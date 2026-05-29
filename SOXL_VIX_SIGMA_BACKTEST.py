@@ -1,169 +1,208 @@
-import os
-import sys
+# =======================================================================
+# SOXL_VIX_SIGMA_BACKTEST.py
+# SOXL 시그마 전략 백테스트
+# - 타점 = 전일 종가 × exp(-FIXED_SIGMA × σ)
+#   σ     : SOXL 일간 수익률 표준편차 (과거 252일 롤링)
+#   FIXED_SIGMA : 시그마 배수 (config.json, 기본 1.5)
+# - 연초 실행 → ANNUAL_QUOTA, FIXED_SIGMA config.json 업데이트
+# =======================================================================
+
 import json
+import numpy as np
+import pandas as pd
+import yfinance as yf
 import warnings
-import requests
-from datetime import datetime, timezone
-from zoneinfo import ZoneInfo
+from datetime import datetime
 
-if hasattr(sys.stdout, 'reconfigure'):
-    sys.stdout.reconfigure(encoding='utf-8')
-if hasattr(sys.stderr, 'reconfigure'):
-    sys.stderr.reconfigure(encoding='utf-8')
+warnings.filterwarnings('ignore')
 
-warnings.filterwarnings('ignore', category=FutureWarning)
+CONFIG_PATH   = "config.json"
+BACKTEST_YEARS = 5
 
 
-# ===================================================================
+# ───────────────────────────────────────────────
+# 설정 로드 / 저장
+# ───────────────────────────────────────────────
+
 def load_config():
-    with open("config.json", "r", encoding="utf-8") as f:
-        return json.load(f)
-
-
-def get_market_mode():
-    now_ny = datetime.now(ZoneInfo("America/New_York"))
-    hour = now_ny.hour + now_ny.minute / 60.0
-    if hour < 9.5:
-        return "장전", now_ny
-    elif hour < 16.0:
-        return "장중", now_ny
-    else:
-        return "장후", now_ny
-
-
-def get_realtime_data(mode):
     try:
-        soxl = yf.Ticker("SOXL")
-        vix = yf.Ticker("^VIX")
-        hist = soxl.history(period="3d", auto_adjust=False)
-
-        if len(hist) < 2:
-            return None, None, None, None
-
-        now_ny = datetime.now(ZoneInfo("America/New_York"))
-        is_today = (hist.index[-1].date() == now_ny.date())
-
-        prev_close = float(hist['Close'].iloc[-2] if is_today else hist['Close'].iloc[-1])
-
-        if mode == "장전":
-            current_open = prev_close
-        else:
-            current_open = float(soxl.fast_info.open or hist['Open'].iloc[-1] if is_today else prev_close)
-
-        current_price = float(soxl.fast_info.last_price)
-        current_vix = float(vix.fast_info.last_price)
-
-        return float(current_vix), float(prev_close), float(current_open), float(current_price)
-    except:
-        return None, None, None, None
-
-
-def send_discord_message(webhook_url, user_id, title, content):
-    if not webhook_url:
-        print("⚠️ webhook_url 없음")
-        return
-    mention = f"<@{user_id}> " if user_id else ""
-    payload = {
-        "content": mention,
-        "embeds": [{
-            "title": title,
-            "description": content,
-            "color": 15158332 if "🚨" in title else 3447003,
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        }]
-    }
-    try:
-        res = requests.post(webhook_url, json=payload, timeout=15)
-        print("✅ 디스코드 전송 성공" if res.status_code == 204 else f"❌ 전송 실패 ({res.status_code})")
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
     except Exception as e:
-        print(f"❌ 디스코드 오류: {e}")
+        print(f"❌ config.json 로드 실패: {e}")
+        return {}
 
 
-# ===================================================================
-def execute_dual_tactical_trader():
-    mode, now_ny = get_market_mode()
-    MODE_EMOJI = {"장전": "🌙", "장중": "☀️", "장후": "🌆"}
+def save_config(cfg):
+    try:
+        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, indent=4, ensure_ascii=False)
+        print("✅ config.json 업데이트 완료")
+    except Exception as e:
+        print(f"❌ config.json 저장 실패: {e}")
 
+
+# ───────────────────────────────────────────────
+# 데이터 다운로드
+# ───────────────────────────────────────────────
+
+def download_data():
+    print(f"📥 SOXL 데이터 다운로드 중 ({BACKTEST_YEARS}년)...")
+    df = yf.download("SOXL", period=f"{BACKTEST_YEARS}y", interval="1d",
+                     progress=False, auto_adjust=True)
+    if df.empty:
+        print("❌ 데이터 다운로드 실패")
+        return None
+
+    df = df[['Open', 'High', 'Low', 'Close']].copy()
+
+    # 일간 수익률 표준편차 (롤링 252일)
+    df['Prev_Close'] = df['Close'].shift(1)
+    df = df.dropna()
+
+    print(f"✅ {len(df)} 거래일 데이터 로드 완료\n")
+    return df
+
+
+# ───────────────────────────────────────────────
+# 백테스트 실행
+# ───────────────────────────────────────────────
+
+def run_backtest(df, fixed_sigma):
+    """
+    타점 = 전일 종가 × exp(-fixed_sigma × σ)
+    당일 저가가 타점 이하로 내려오면 매수 체결로 간주
+    """
+    trades    = []
+    position  = None
+    equity    = [1.0]
+    peak      = 1.0
+    max_dd    = 0.0
+    buy_count = 0
+
+    for i, row in df.iterrows():
+        target = float(row['Prev_Close']) * np.exp(-fixed_sigma)
+
+        # 매수 체결: 보유 없음 + 당일 저가 ≤ 타점
+        if position is None and float(row['Low']) <= target:
+            position  = target
+            buy_count += 1
+            trades.append({"date": str(i.date()), "buy": round(target, 4)})
+
+        # 보유 중 평가
+        if position is not None:
+            curr_val = float(row['Close']) / position
+            equity.append(equity[-1] * curr_val)
+            peak   = max(peak, equity[-1])
+            dd     = (peak - equity[-1]) / peak
+            max_dd = max(max_dd, dd)
+
+    trading_days  = len(df)
+    years         = trading_days / 252
+    total_return  = (equity[-1] - 1.0) * 100
+    annual_return = ((equity[-1]) ** (1 / years) - 1) * 100
+    annual_trades = round(buy_count / years)
+
+    return {
+        "total_return":  round(total_return,  2),
+        "annual_return": round(annual_return, 2),
+        "max_drawdown":  round(max_dd * 100,  2),
+        "buy_count":     buy_count,
+        "annual_trades": annual_trades,
+        "years":         round(years, 1),
+    }
+
+
+# ───────────────────────────────────────────────
+# 시그마 배수 최적화 (연간 매수 횟수 기준)
+# ───────────────────────────────────────────────
+
+def optimize_sigma(df, target_trades_per_year):
+    print(f"🔍 최적 SIGMA 배수 탐색 중 (목표 연간 매수: {target_trades_per_year}회)...\n")
+
+    best_sigma  = None
+    best_diff   = float("inf")
+    best_result = None
+
+    for sigma in np.arange(0.1, 5.0, 0.1):
+        result = run_backtest(df, round(sigma, 1))
+        diff   = abs(result["annual_trades"] - target_trades_per_year)
+        if diff < best_diff:
+            best_diff   = diff
+            best_sigma  = round(sigma, 1)
+            best_result = result
+
+    return best_sigma, best_result
+
+
+# ───────────────────────────────────────────────
+# 메인 실행
+# ───────────────────────────────────────────────
+
+def run():
     print("======================================================================")
-    print(f"📡 SOXL_VIX_SIGMA.py  {MODE_EMOJI[mode]} {mode} 모드")
-    print(f"🕒 {now_ny.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+    print("📊 SOXL_VIX_SIGMA_BACKTEST.py")
+    print(f"🗓️  실행일: {datetime.now().strftime('%Y-%m-%d')}")
     print("======================================================================\n")
 
-    cfg = load_config()
-    pos_cfg = cfg["POSITIONS"]["SOXL"]
-    vix_cfg = cfg["VIX_CONFIG"]["LONG"]
-
-    webhook_url = os.environ.get("DISCORD_WEBHOOK") or cfg.get("DISCORD_WEBHOOK", "")
-    user_id = os.environ.get("DISCORD_USER_ID") or cfg.get("DISCORD_USER_ID", "")
-
-    TAKE_PROFIT_RATIO = vix_cfg["TAKE_PROFIT_RATIO"]   # 0.30
-
-    current_vix, prev_close, current_open, current_price = get_realtime_data(mode)
-    if current_vix is None:
-        print("❌ 데이터 조회 실패")
+    df = download_data()
+    if df is None:
         return
 
-    price_label = "현재가 (실시간)" if mode == "장중" else "전일 종가"
+    cfg     = load_config()
+    pos_cfg = cfg.get("POSITIONS", {}).get("SOXL", {})
 
-    print(f"📌 {price_label}: ${current_price:.2f}")
-    print(f"📌 당일시가 : ${current_open:.2f}")
-    print(f"📌 전일종가 : ${prev_close:.2f}")
-    print(f"📌 VIX       : {current_vix:.2f}\n")
+    current_sigma = pos_cfg.get("FIXED_SIGMA",        1.5)
+    quota_long    = pos_cfg.get("ANNUAL_QUOTA_LONG",   21)
+    quota_short   = pos_cfg.get("ANNUAL_QUOTA_SHORT",  14)
 
-    # ====================== LONG ======================
-    print("🟢 [LONG] 매수 계좌")
-    shares_long = pos_cfg.get("TOTAL_SHARES_LONG", 0)
-    avg_long = pos_cfg.get("MY_AVG_PRICE_LONG", 0)
+    print(f"📋 현재 config 값")
+    print(f"   FIXED_SIGMA        : {current_sigma}  (σ 배수)")
+    print(f"   ANNUAL_QUOTA_LONG  : {quota_long}")
+    print(f"   ANNUAL_QUOTA_SHORT : {quota_short}\n")
 
-    long_msg = "**🟢 [LONG] 매수 계좌 현황**\n"
-    any_triggered = False
+    # ── 현재 시그마 배수로 백테스트
+    print("─" * 60)
+    print(f"📈 현재 SIGMA 배수 ({current_sigma}) 백테스트 결과")
+    print("─" * 60)
+    result = run_backtest(df, current_sigma)
+    print(f"   기간              : {result['years']}년")
+    print(f"   총 수익률         : {result['total_return']:+.2f}%")
+    print(f"   연평균 수익률     : {result['annual_return']:+.2f}%")
+    print(f"   최대 낙폭 (MDD)   : -{result['max_drawdown']:.2f}%")
+    print(f"   총 매수 횟수      : {result['buy_count']}회")
+    print(f"   연간 매수 횟수    : {result['annual_trades']}회\n")
 
-    if shares_long > 0 and avg_long > 0:
-        ret_long = (current_price - avg_long) / avg_long
-        long_msg += f"• 수량: {shares_long}주 / 평단: ${avg_long:.4f}\n"
-        long_msg += f"• 수익률: {ret_long*100:+.2f}%\n"
+    # ── LONG 기준 최적 시그마 배수 탐색
+    print("─" * 60)
+    print(f"🔧 LONG 기준 최적 SIGMA 배수 탐색 (목표: {quota_long}회/년)")
+    print("─" * 60)
+    best_sigma, best_result = optimize_sigma(df, target_trades_per_year=quota_long)
+    print(f"   최적 SIGMA 배수   : {best_sigma}")
+    print(f"   총 수익률         : {best_result['total_return']:+.2f}%")
+    print(f"   연평균 수익률     : {best_result['annual_return']:+.2f}%")
+    print(f"   최대 낙폭 (MDD)   : -{best_result['max_drawdown']:.2f}%")
+    print(f"   총 매수 횟수      : {best_result['buy_count']}회")
+    print(f"   연간 매수 횟수    : {best_result['annual_trades']}회\n")
 
-        if ret_long >= TAKE_PROFIT_RATIO:
-            sell_shares = int(shares_long * 0.5)   # 50% 매도
-            long_msg += f"🚨 **[+30% 부분 익절 발동] → {sell_shares}주 매도 권장 (50%)**\n"
-            any_triggered = True
+    # ── 업데이트 여부 확인
+    print("=" * 60)
+    answer = input("config.json에 위 파라미터를 업데이트하시겠습니까? (y/n): ").strip().lower()
+
+    if answer == 'y':
+        pos_cfg["FIXED_SIGMA"]       = best_sigma
+        pos_cfg["LAST_SIGMA_UPDATE"] = datetime.now().strftime("%Y-%m-%d")
+        cfg["POSITIONS"]["SOXL"]     = pos_cfg
+        save_config(cfg)
+        print(f"\n   FIXED_SIGMA   → {best_sigma}")
+        print(f"   업데이트 일자 → {pos_cfg['LAST_SIGMA_UPDATE']}")
     else:
-        long_msg += "• 보유 물량 없음\n"
+        print("⚠️ 업데이트 취소됨. config.json 변경 없음.")
 
-    discord_report = [long_msg]
-
-    # ====================== SHORT ======================
-    print("🔵 [SHORT] 매도 계좌")
-    shares_short = pos_cfg.get("TOTAL_SHARES_SHORT", 0)
-    avg_short = pos_cfg.get("MY_AVG_PRICE_SHORT", 0)
-
-    short_msg = "**🔵 [SHORT] 매도 계좌 현황**\n"
-    if shares_short > 0 and avg_short > 0:
-        ret_short = (current_price - avg_short) / avg_short
-        short_msg += f"• 수량: {shares_short}주 / 평단: ${avg_short:.4f}\n"
-        short_msg += f"• 수익률: {ret_short*100:+.2f}%\n"
-
-        if ret_short >= TAKE_PROFIT_RATIO:
-            sell_shares_s = int(shares_short * 0.5)
-            short_msg += f"🚨 **[+30% 부분 익절 발동] → {sell_shares_s}주 매도 권장 (50%)**\n"
-            any_triggered = True
-    else:
-        short_msg += "• 보유 물량 없음\n"
-
-    discord_report.append(short_msg)
-
-    # 디스코드 전송
-    full_content = "\n----------------------------------------\n".join(discord_report)
-    full_content += f"\n\n• **VIX**: {current_vix:.2f}"
-
-    if any_triggered:
-        title = "🚨 [부분 익절 발동] +30% 도달 - 50% 매도 권장"
-    else:
-        title = f"{MODE_EMOJI[mode]} [{mode} 브리핑]"
-
-    send_discord_message(webhook_url, user_id, title, full_content)
+    print("\n======================================================================")
+    print("✅ 백테스트 완료")
+    print("======================================================================")
 
 
 if __name__ == "__main__":
-    import yfinance as yf
-    execute_dual_tactical_trader()
+    run()
