@@ -174,77 +174,55 @@ def calc_loc(current_open, prev_close, FIXED_SIGMA, DAILY_SIGMA):
 # 메인 실행
 # ───────────────────────────────────────────────
 
+# ───────────────────────────────────────────────
+# 메인 실행부 (조건부 출력 로직 적용)
+# ───────────────────────────────────────────────
+
 def execute_dual_tactical_trader():
     mode, now_ny = get_market_mode()
-
-    print("======================================================================")
-    print(f"📡 sigma_position_manager.py  {MODE_EMOJI[mode]} {mode} 모드")
-    print("======================================================================\n")
-
-    cfg = load_config()
-    # 시그마 자동 갱신 검증
+    cfg = get_config()
     DAILY_SIGMA = check_and_update_sigma(cfg)
-    
-    print("📒 장부 → config.json 갱신 중...")
     update_positions_from_ledger(cfg)
-    cfg = load_config()
-
+    cfg = get_config()
     pos_cfg = cfg["POSITIONS"]["SOXL"]
+    
+    prev_close, curr_open, curr_price = get_market_data(mode)
+    if prev_close is None: return
+    
+    # LOC 계산
+    loc_price = calc_loc(curr_open, prev_close, pos_cfg.get("FIXED_SIGMA", 1.5), DAILY_SIGMA)
 
-    webhook_url         = os.environ.get("DISCORD_WEBHOOK") or cfg.get("DISCORD_WEBHOOK", "")
-    user_id             = os.environ.get("DISCORD_USER_ID")  or cfg.get("DISCORD_USER_ID", "")
-    FIXED_SIGMA         = pos_cfg.get("FIXED_SIGMA",       1.5)
-
-    prev_close, current_open, current_price = get_market_data(mode)
-    if prev_close is None:
-        print("❌ 시세 데이터를 가져올 수 없습니다. 종료합니다.")
-        return
-
-    loc_price = calc_loc(current_open, prev_close, FIXED_SIGMA, DAILY_SIGMA)
-
-    price_label = "현재가" if mode == "장중" else "전일 종가"
-
-    print(f"\n📌 {price_label}  : ${current_price:.2f}")
-    print(f"📌 LOC 매수가   : ${loc_price:.2f}\n")
-
-    discord_lines = []
-
-    discord_lines.append(
-        f"**{MODE_EMOJI[mode]} {mode} 모드** | {now_ny.strftime('%Y-%m-%d %H:%M %Z')}\n"
-        f"• {price_label}: **${current_price:.2f}**\n"
-        f"• 시가: ${current_open:.2f} | 전일종가: ${prev_close:.2f}"
-    )
-
-    shares_long = pos_cfg.get("TOTAL_SHARES_LONG", 0)
-    avg_long    = pos_cfg.get("MY_AVG_PRICE_LONG",  0)
-
-    long_msg = "**🟢 [LONG] 매수 계좌**\n"
-    if shares_long > 0 and avg_long > 0:
-        ret_long = (current_price - avg_long) / avg_long
-        long_msg += f"• {shares_long}주 / 평단 ${avg_long:.4f} / 수익률 {ret_long*100:+.2f}%\n"
+    # 1. 메시지 구성 (공통 헤더)
+    lines = [f"**{MODE_EMOJI[mode]} {mode} 모드** | {now_ny.strftime('%Y-%m-%d %H:%M %Z')}\n"]
+    
+    # 2. 모드별 정보 출력
+    if mode == "장전":
+        # 장전: 전일 종가, LOC 예정가
+        lines.append(f"• 전일 종가: **${prev_close:.2f}**")
+        lines.append(f"• LOC 예정가: **${loc_price:.2f}**")
     else:
-        long_msg += "• 보유 물량 없음\n"
-
-    if mode == "장중":
-        long_msg += f"• LOC 매수 예정가: **${loc_price:.2f}**"
-
-    discord_lines.append(long_msg)
-
-    shares_short = pos_cfg.get("TOTAL_SHARES_SHORT", 0)
-    avg_short    = pos_cfg.get("MY_AVG_PRICE_SHORT",  0)
-
-    short_msg = "**🔵 [SHORT] 매도 계좌**\n"
-    if shares_short > 0 and avg_short > 0:
-        ret_short = (current_price - avg_short) / avg_short
-        short_msg += f"• {shares_short}주 / 평단 ${avg_short:.4f} / 수익률 {ret_short*100:+.2f}%\n"
-    else:
-        short_msg += "• 보유 물량 없음"
-
-    discord_lines.append(short_msg)
-
-    full_content = "\n\n".join(discord_lines)
-    send_discord(webhook_url, user_id, f"{MODE_EMOJI[mode]} {mode} 브리핑", full_content)
-
+        # 장중: 전일 종가, 현재가, LOC 예정가
+        lines.append(f"• 전일 종가: ${prev_close:.2f}")
+        lines.append(f"• 현재가: **${curr_price:.2f}**")
+        lines.append(f"• LOC 예정가: **${loc_price:.2f}**")
+    
+    # 3. 계좌 정보 (수량, 평단, 수익률 - 공통)
+    for k in ["LONG", "SHORT"]:
+        qty = pos_cfg.get(f"TOTAL_SHARES_{k}", 0)
+        avg = pos_cfg.get(f"MY_AVG_PRICE_{k}", 0)
+        msg = f"\n**{ '🟢' if k == 'LONG' else '🔵' } [{k}] {'매수' if k == 'LONG' else '매도'} 계좌**\n"
+        if qty > 0 and avg > 0:
+            msg += f"• {qty}주 / 평단 ${avg:.4f} / 수익률 {(curr_price - avg)/avg*100:+.2f}%"
+        else: 
+            msg += "• 보유 물량 없음"
+        lines.append(msg)
+    
+    # 4. 디스코드 전송
+    full_content = "\n".join(lines)
+    send_discord(os.environ.get("DISCORD_WEBHOOK") or cfg.get("DISCORD_WEBHOOK"), 
+                 os.environ.get("DISCORD_USER_ID") or cfg.get("DISCORD_USER_ID"), 
+                 f"{MODE_EMOJI[mode]} {mode} 브리핑", full_content)
+    
 
 if __name__ == "__main__":
     execute_dual_tactical_trader()
