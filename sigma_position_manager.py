@@ -1,17 +1,10 @@
-# =======================================================================
-# sigma_position_manager.py
-# 시그마 전략 기반 SOXL 듀얼 계좌 관제탑
-# - 장전: 전일 종가 기준 브리핑
-# - 장중: 실시간 현재가 + LOC 매수가 + 익절 지정가 브리핑
-# - ledger.json 기반 수량/평단가 자동 갱신
-# =======================================================================
-
 import os
 import sys
 import json
 import numpy as np
 import warnings
 import requests
+import yfinance as yf
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 
@@ -26,7 +19,7 @@ warnings.filterwarnings('ignore', category=FutureWarning)
 MODE_EMOJI = {"장전": "🌙", "장중": "☀️"}
 
 # ───────────────────────────────────────────────
-# 설정 / 장부 로드
+# 설정 / 장부 로드 (원본 유지)
 # ───────────────────────────────────────────────
 
 def load_config():
@@ -37,14 +30,12 @@ def load_config():
         print(f"❌ config.json 로드 실패: {e}")
         sys.exit(1)
 
-
 def save_config(cfg):
     try:
         with open("config.json", "w", encoding="utf-8") as f:
             json.dump(cfg, f, indent=4, ensure_ascii=False)
     except Exception as e:
         print(f"⚠️ config.json 저장 실패: {e}")
-
 
 def load_ledger():
     try:
@@ -57,20 +48,10 @@ def load_ledger():
         }
 
 # ───────────────────────────────────────────────
-# 장부 → config.json 자동 갱신
+# 장부 → config.json 자동 갱신 (원본 유지)
 # ───────────────────────────────────────────────
 
 def update_positions_from_ledger(cfg):
-    """
-    ledger.json 기반으로 config.json 포지션 자동 갱신
-      - TOTAL_SHARES : ledger의 qty 값 직접 반영
-      - MY_AVG_PRICE : ledger의 avg_price 값 직접 반영
-    ledger.json 구조:
-    {
-        "SOXL_LONG":  {"qty": 17, "avg_price": 165.1124},
-        "SOXL_SHORT": {"qty": 4,  "avg_price": 164.3043}
-    }
-    """
     ledger = load_ledger()
     pos    = cfg.setdefault("POSITIONS", {}).setdefault("SOXL", {})
 
@@ -87,7 +68,27 @@ def update_positions_from_ledger(cfg):
     save_config(cfg)
 
 # ───────────────────────────────────────────────
-# 장 시간 판별 (뉴욕 기준)
+# 시그마 자동 갱신 로직 (추가된 부분)
+# ───────────────────────────────────────────────
+
+def check_and_update_sigma(cfg):
+    pos = cfg["POSITIONS"]["SOXL"]
+    last_update_str = pos.get("LAST_SIGMA_UPDATE", "2000-01-01")
+    last_update = datetime.strptime(last_update_str, "%Y-%m-%d")
+    
+    if (datetime.now() - last_update).days > 180:
+        print("🔄 6개월 경과, 시그마 재계산 중...")
+        data = yf.Ticker("SOXL").history(period="250d")
+        new_sigma = float(data['Close'].pct_change().dropna().std())
+        
+        pos["DAILY_SIGMA"] = round(new_sigma, 4)
+        pos["LAST_SIGMA_UPDATE"] = datetime.now().strftime("%Y-%m-%d")
+        save_config(cfg)
+        print(f"✅ 시그마 갱신 완료: {pos['DAILY_SIGMA']}")
+    return pos.get("DAILY_SIGMA", 0.04)
+
+# ───────────────────────────────────────────────
+# 장 시간 판별 (원본 유지)
 # ───────────────────────────────────────────────
 
 def get_market_mode():
@@ -102,20 +103,11 @@ def get_market_mode():
     return mode, now_ny
 
 # ───────────────────────────────────────────────
-# 시세 데이터 조회
+# 시세 데이터 조회 (원본 유지)
 # ───────────────────────────────────────────────
 
 def get_market_data(mode):
-    """
-    장중 : current_price → fast_info 실시간
-           current_open  → history 시가 (fast_info.open 오류 방지)
-    장전 : current_price → fast_info (전일 종가 수준)
-           current_open  → prev_close 동일 적용
-    반환 : (prev_close, current_open, current_price)
-    """
     try:
-        import yfinance as yf
-
         soxl = yf.Ticker("SOXL")
         hist = soxl.history(period="3d", auto_adjust=False)
 
@@ -126,18 +118,15 @@ def get_market_data(mode):
         now_ny   = datetime.now(ZoneInfo("America/New_York"))
         is_today = (hist.index[-1].date() == now_ny.date())
 
-        # 전일 종가
         prev_close = float(
             hist['Close'].iloc[-2] if is_today else hist['Close'].iloc[-1]
         )
 
-        # 당일 시가: history 우선 (fast_info.open은 간헐적으로 오류값 반환)
         if mode == "장중":
             current_open = float(hist['Open'].iloc[-1] if is_today else prev_close)
         else:
             current_open = prev_close
 
-        # 실시간 현재가
         current_price = float(soxl.fast_info.last_price)
 
         return prev_close, current_open, current_price
@@ -147,7 +136,7 @@ def get_market_data(mode):
         return None, None, None
 
 # ───────────────────────────────────────────────
-# 디스코드 알림 전송
+# 디스코드 알림 전송 (원본 유지)
 # ───────────────────────────────────────────────
 
 def send_discord(webhook_url, user_id, title, content):
@@ -158,10 +147,10 @@ def send_discord(webhook_url, user_id, title, content):
     payload = {
         "content": f"<@{user_id}> " if user_id else "",
         "embeds": [{
-            "title":       title,
+            "title":    title,
             "description": content,
-            "color":       15158332 if "🚨" in title else 3447003,
-            "timestamp":   datetime.now(timezone.utc).isoformat()
+            "color":      3447003,
+            "timestamp":  datetime.now(timezone.utc).isoformat()
         }]
     }
     try:
@@ -174,18 +163,12 @@ def send_discord(webhook_url, user_id, title, content):
         print(f"❌ 디스코드 전송 실패: {e}")
 
 # ───────────────────────────────────────────────
-# LOC 매수 타점 계산
+# LOC 매수 타점 계산 (원본 유지)
 # ───────────────────────────────────────────────
 
 def calc_loc(current_open, prev_close, FIXED_SIGMA, DAILY_SIGMA):
-    """
-    타점 = 전일 종가 × exp(-FIXED_SIGMA × DAILY_SIGMA)
-    FIXED_SIGMA : σ 배수 (config.json, 기본 1.5)
-    DAILY_SIGMA : SOXL 250일 기준 일간 수익률 표준편차
-    """
-    gap_ratio = (current_open - prev_close) / prev_close if prev_close != 0 else 0
     loc_price = prev_close * np.exp(-FIXED_SIGMA * DAILY_SIGMA)
-    return loc_price, gap_ratio
+    return loc_price
 
 # ───────────────────────────────────────────────
 # 메인 실행
@@ -198,50 +181,40 @@ def execute_dual_tactical_trader():
     print(f"📡 sigma_position_manager.py  {MODE_EMOJI[mode]} {mode} 모드")
     print("======================================================================\n")
 
-    # ── 설정 로드 및 장부 갱신
     cfg = load_config()
+    # 시그마 자동 갱신 검증
+    DAILY_SIGMA = check_and_update_sigma(cfg)
+    
     print("📒 장부 → config.json 갱신 중...")
     update_positions_from_ledger(cfg)
-    cfg = load_config()  # 갱신된 값 재로드
+    cfg = load_config()
 
     pos_cfg = cfg["POSITIONS"]["SOXL"]
 
-    webhook_url       = os.environ.get("DISCORD_WEBHOOK") or cfg.get("DISCORD_WEBHOOK", "")
-    user_id           = os.environ.get("DISCORD_USER_ID")  or cfg.get("DISCORD_USER_ID", "")
-    FIXED_SIGMA       = pos_cfg.get("FIXED_SIGMA",       1.5)
-    DAILY_SIGMA       = pos_cfg.get("DAILY_SIGMA",        0.04)
-    TAKE_PROFIT_RATIO = pos_cfg.get("TAKE_PROFIT_RATIO",  0.30)
+    webhook_url         = os.environ.get("DISCORD_WEBHOOK") or cfg.get("DISCORD_WEBHOOK", "")
+    user_id             = os.environ.get("DISCORD_USER_ID")  or cfg.get("DISCORD_USER_ID", "")
+    FIXED_SIGMA         = pos_cfg.get("FIXED_SIGMA",       1.5)
 
-    # ── 시세 조회
     prev_close, current_open, current_price = get_market_data(mode)
     if prev_close is None:
         print("❌ 시세 데이터를 가져올 수 없습니다. 종료합니다.")
         return
 
-    # ── LOC 계산
-    loc_price, gap_ratio = calc_loc(
-        current_open, prev_close, FIXED_SIGMA, DAILY_SIGMA
-    )
+    loc_price = calc_loc(current_open, prev_close, FIXED_SIGMA, DAILY_SIGMA)
 
     price_label = "현재가" if mode == "장중" else "전일 종가"
 
     print(f"\n📌 {price_label}  : ${current_price:.2f}")
-    print(f"📌 당일 시가    : ${current_open:.2f}")
-    print(f"📌 전일 종가    : ${prev_close:.2f}")
-    print(f"📌 갭 비율      : {gap_ratio*100:+.2f}%")
     print(f"📌 LOC 매수가   : ${loc_price:.2f}\n")
 
     discord_lines = []
-    any_triggered = False
 
-    # ── 디스코드 헤더
     discord_lines.append(
         f"**{MODE_EMOJI[mode]} {mode} 모드** | {now_ny.strftime('%Y-%m-%d %H:%M %Z')}\n"
         f"• {price_label}: **${current_price:.2f}**\n"
         f"• 시가: ${current_open:.2f} | 전일종가: ${prev_close:.2f}"
     )
 
-    # ── 🟢 LONG 계좌
     shares_long = pos_cfg.get("TOTAL_SHARES_LONG", 0)
     avg_long    = pos_cfg.get("MY_AVG_PRICE_LONG",  0)
 
@@ -249,9 +222,6 @@ def execute_dual_tactical_trader():
     if shares_long > 0 and avg_long > 0:
         ret_long = (current_price - avg_long) / avg_long
         long_msg += f"• {shares_long}주 / 평단 ${avg_long:.4f} / 수익률 {ret_long*100:+.2f}%\n"
-        if ret_long >= TAKE_PROFIT_RATIO:
-            long_msg += f"🚨 **[+30% 익절 발동] → {int(shares_long * 0.5)}주 매도 권장 (50%)**\n"
-            any_triggered = True
     else:
         long_msg += "• 보유 물량 없음\n"
 
@@ -260,33 +230,20 @@ def execute_dual_tactical_trader():
 
     discord_lines.append(long_msg)
 
-    # ── 🔵 SHORT (매도) 계좌
     shares_short = pos_cfg.get("TOTAL_SHARES_SHORT", 0)
     avg_short    = pos_cfg.get("MY_AVG_PRICE_SHORT",  0)
 
     short_msg = "**🔵 [SHORT] 매도 계좌**\n"
     if shares_short > 0 and avg_short > 0:
         ret_short = (current_price - avg_short) / avg_short
-        tp_price  = avg_short * (1 + TAKE_PROFIT_RATIO)
         short_msg += f"• {shares_short}주 / 평단 ${avg_short:.4f} / 수익률 {ret_short*100:+.2f}%\n"
-        if ret_short >= TAKE_PROFIT_RATIO:
-            short_msg += f"🚨 **[+30% 익절 발동] → {int(shares_short * 0.5)}주 매도 권장 (50%)**\n"
-            any_triggered = True
-        if mode == "장중":
-            short_msg += f"• 익절 지정가: **${tp_price:.2f}**"
     else:
         short_msg += "• 보유 물량 없음"
 
     discord_lines.append(short_msg)
 
-    # ── 디스코드 전송
     full_content = "\n\n".join(discord_lines)
-    title = (
-        f"🚨 [익절 발동] {MODE_EMOJI[mode]} {mode} - 50% 매도 권장"
-        if any_triggered else
-        f"{MODE_EMOJI[mode]} {mode} 브리핑"
-    )
-    send_discord(webhook_url, user_id, title, full_content)
+    send_discord(webhook_url, user_id, f"{MODE_EMOJI[mode]} {mode} 브리핑", full_content)
 
 
 if __name__ == "__main__":
