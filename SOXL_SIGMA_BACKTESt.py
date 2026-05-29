@@ -1,10 +1,9 @@
 # =======================================================================
-# SOXL_VIX_SIGMA_BACKTEST.py
+# SOXL_SIGMA_BACKTEST.py
 # SOXL 시그마 전략 백테스트
-# - 타점 = 전일 종가 × exp(-FIXED_SIGMA × σ)
-#   σ     : SOXL 일간 수익률 표준편차 (과거 252일 롤링)
-#   FIXED_SIGMA : 시그마 배수 (config.json, 기본 1.5)
-# - 연초 실행 → ANNUAL_QUOTA, FIXED_SIGMA config.json 업데이트
+# - σ     : SOXL 250일 기준 일간 수익률 표준편차
+# - 타점  : 전일 종가 × exp(-FIXED_SIGMA × σ)
+# - 연초 실행 → DAILY_SIGMA, FIXED_SIGMA, ANNUAL_QUOTA → config.json 저장
 # =======================================================================
 
 import json
@@ -16,8 +15,9 @@ from datetime import datetime
 
 warnings.filterwarnings('ignore')
 
-CONFIG_PATH   = "config.json"
+CONFIG_PATH    = "config.json"
 BACKTEST_YEARS = 5
+SIGMA_WINDOW   = 252  # σ 계산 기준 거래일
 
 
 # ───────────────────────────────────────────────
@@ -52,44 +52,45 @@ def download_data():
                      progress=False, auto_adjust=True)
     if df.empty:
         print("❌ 데이터 다운로드 실패")
-        return None
+        return None, None
 
     df = df[['Open', 'High', 'Low', 'Close']].copy()
-
-    # 일간 수익률 표준편차 (롤링 252일)
     df['Prev_Close'] = df['Close'].shift(1)
     df = df.dropna()
 
-    print(f"✅ {len(df)} 거래일 데이터 로드 완료\n")
-    return df
+    # σ: 최근 252 거래일 기준 일간 수익률 표준편차 (고정값)
+    log_returns = np.log(df['Close'] / df['Close'].shift(1)).dropna()
+    daily_sigma = round(float(log_returns.iloc[-SIGMA_WINDOW:].std()), 6)
+
+    print(f"✅ {len(df)} 거래일 데이터 로드 완료")
+    print(f"   최근 {SIGMA_WINDOW}일 기준 일간 σ : {daily_sigma:.6f}\n")
+    return df, daily_sigma
 
 
 # ───────────────────────────────────────────────
 # 백테스트 실행
 # ───────────────────────────────────────────────
 
-def run_backtest(df, fixed_sigma):
+def run_backtest(df, fixed_sigma, daily_sigma):
     """
-    타점 = 전일 종가 × exp(-fixed_sigma × σ)
-    당일 저가가 타점 이하로 내려오면 매수 체결로 간주
+    타점 = 전일 종가 × exp(-fixed_sigma × daily_sigma)
+    당일 저가 ≤ 타점이면 매수 체결로 간주
     """
-    trades    = []
     position  = None
     equity    = [1.0]
     peak      = 1.0
     max_dd    = 0.0
     buy_count = 0
 
-    for i, row in df.iterrows():
-        target = float(row['Prev_Close']) * np.exp(-fixed_sigma)
+    for _, row in df.iterrows():
+        target = float(row['Prev_Close']) * np.exp(-fixed_sigma * daily_sigma)
 
         # 매수 체결: 보유 없음 + 당일 저가 ≤ 타점
         if position is None and float(row['Low']) <= target:
             position  = target
             buy_count += 1
-            trades.append({"date": str(i.date()), "buy": round(target, 4)})
 
-        # 보유 중 평가
+        # 보유 중 손익 평가
         if position is not None:
             curr_val = float(row['Close']) / position
             equity.append(equity[-1] * curr_val)
@@ -97,8 +98,7 @@ def run_backtest(df, fixed_sigma):
             dd     = (peak - equity[-1]) / peak
             max_dd = max(max_dd, dd)
 
-    trading_days  = len(df)
-    years         = trading_days / 252
+    years         = len(df) / 252
     total_return  = (equity[-1] - 1.0) * 100
     annual_return = ((equity[-1]) ** (1 / years) - 1) * 100
     annual_trades = round(buy_count / years)
@@ -114,25 +114,40 @@ def run_backtest(df, fixed_sigma):
 
 
 # ───────────────────────────────────────────────
-# 시그마 배수 최적화 (연간 매수 횟수 기준)
+# FIXED_SIGMA 배수 최적화
 # ───────────────────────────────────────────────
 
-def optimize_sigma(df, target_trades_per_year):
-    print(f"🔍 최적 SIGMA 배수 탐색 중 (목표 연간 매수: {target_trades_per_year}회)...\n")
+def optimize_fixed_sigma(df, daily_sigma, target_trades_per_year):
+    print(f"🔍 최적 FIXED_SIGMA 배수 탐색 중 (목표 연간 매수: {target_trades_per_year}회)...\n")
 
     best_sigma  = None
     best_diff   = float("inf")
     best_result = None
 
     for sigma in np.arange(0.1, 5.0, 0.1):
-        result = run_backtest(df, round(sigma, 1))
+        sigma  = round(sigma, 1)
+        result = run_backtest(df, sigma, daily_sigma)
         diff   = abs(result["annual_trades"] - target_trades_per_year)
         if diff < best_diff:
             best_diff   = diff
-            best_sigma  = round(sigma, 1)
+            best_sigma  = sigma
             best_result = result
 
     return best_sigma, best_result
+
+
+# ───────────────────────────────────────────────
+# 결과 출력
+# ───────────────────────────────────────────────
+
+def print_result(label, sigma, result):
+    print(f"   FIXED_SIGMA 배수  : {sigma}")
+    print(f"   기간              : {result['years']}년")
+    print(f"   총 수익률         : {result['total_return']:+.2f}%")
+    print(f"   연평균 수익률     : {result['annual_return']:+.2f}%")
+    print(f"   최대 낙폭 (MDD)   : -{result['max_drawdown']:.2f}%")
+    print(f"   총 매수 횟수      : {result['buy_count']}회")
+    print(f"   연간 매수 횟수    : {result['annual_trades']}회\n")
 
 
 # ───────────────────────────────────────────────
@@ -141,60 +156,56 @@ def optimize_sigma(df, target_trades_per_year):
 
 def run():
     print("======================================================================")
-    print("📊 SOXL_VIX_SIGMA_BACKTEST.py")
+    print("📊 SOXL_SIGMA_BACKTEST.py")
     print(f"🗓️  실행일: {datetime.now().strftime('%Y-%m-%d')}")
     print("======================================================================\n")
 
-    df = download_data()
+    df, daily_sigma = download_data()
     if df is None:
         return
 
     cfg     = load_config()
     pos_cfg = cfg.get("POSITIONS", {}).get("SOXL", {})
 
-    current_sigma = pos_cfg.get("FIXED_SIGMA",        1.5)
-    quota_long    = pos_cfg.get("ANNUAL_QUOTA_LONG",   21)
-    quota_short   = pos_cfg.get("ANNUAL_QUOTA_SHORT",  14)
+    current_fixed_sigma = pos_cfg.get("FIXED_SIGMA",        1.5)
+    current_daily_sigma = pos_cfg.get("DAILY_SIGMA",  daily_sigma)
+    quota_long          = pos_cfg.get("ANNUAL_QUOTA_LONG",   21)
+    quota_short         = pos_cfg.get("ANNUAL_QUOTA_SHORT",  14)
 
     print(f"📋 현재 config 값")
-    print(f"   FIXED_SIGMA        : {current_sigma}  (σ 배수)")
+    print(f"   FIXED_SIGMA        : {current_fixed_sigma}  (σ 배수)")
+    print(f"   DAILY_SIGMA        : {current_daily_sigma}  (일간 σ)")
     print(f"   ANNUAL_QUOTA_LONG  : {quota_long}")
     print(f"   ANNUAL_QUOTA_SHORT : {quota_short}\n")
 
-    # ── 현재 시그마 배수로 백테스트
+    # ── 현재 파라미터로 백테스트
     print("─" * 60)
-    print(f"📈 현재 SIGMA 배수 ({current_sigma}) 백테스트 결과")
+    print(f"📈 현재 파라미터 백테스트 결과")
     print("─" * 60)
-    result = run_backtest(df, current_sigma)
-    print(f"   기간              : {result['years']}년")
-    print(f"   총 수익률         : {result['total_return']:+.2f}%")
-    print(f"   연평균 수익률     : {result['annual_return']:+.2f}%")
-    print(f"   최대 낙폭 (MDD)   : -{result['max_drawdown']:.2f}%")
-    print(f"   총 매수 횟수      : {result['buy_count']}회")
-    print(f"   연간 매수 횟수    : {result['annual_trades']}회\n")
+    result_current = run_backtest(df, current_fixed_sigma, daily_sigma)
+    print_result("현재", current_fixed_sigma, result_current)
 
-    # ── LONG 기준 최적 시그마 배수 탐색
+    # ── 최적 FIXED_SIGMA 탐색
     print("─" * 60)
-    print(f"🔧 LONG 기준 최적 SIGMA 배수 탐색 (목표: {quota_long}회/년)")
+    print(f"🔧 최적 FIXED_SIGMA 탐색 (목표: {quota_long}회/년)")
     print("─" * 60)
-    best_sigma, best_result = optimize_sigma(df, target_trades_per_year=quota_long)
-    print(f"   최적 SIGMA 배수   : {best_sigma}")
-    print(f"   총 수익률         : {best_result['total_return']:+.2f}%")
-    print(f"   연평균 수익률     : {best_result['annual_return']:+.2f}%")
-    print(f"   최대 낙폭 (MDD)   : -{best_result['max_drawdown']:.2f}%")
-    print(f"   총 매수 횟수      : {best_result['buy_count']}회")
-    print(f"   연간 매수 횟수    : {best_result['annual_trades']}회\n")
+    best_sigma, best_result = optimize_fixed_sigma(df, daily_sigma, quota_long)
+    print_result("최적", best_sigma, best_result)
 
     # ── 업데이트 여부 확인
     print("=" * 60)
-    answer = input("config.json에 위 파라미터를 업데이트하시겠습니까? (y/n): ").strip().lower()
+    print(f"📌 새로운 DAILY_SIGMA : {daily_sigma}")
+    print(f"📌 최적 FIXED_SIGMA   : {best_sigma}")
+    answer = input("\nconfig.json에 위 파라미터를 업데이트하시겠습니까? (y/n): ").strip().lower()
 
     if answer == 'y':
+        pos_cfg["DAILY_SIGMA"]       = daily_sigma
         pos_cfg["FIXED_SIGMA"]       = best_sigma
         pos_cfg["LAST_SIGMA_UPDATE"] = datetime.now().strftime("%Y-%m-%d")
         cfg["POSITIONS"]["SOXL"]     = pos_cfg
         save_config(cfg)
-        print(f"\n   FIXED_SIGMA   → {best_sigma}")
+        print(f"\n   DAILY_SIGMA   → {daily_sigma}")
+        print(f"   FIXED_SIGMA   → {best_sigma}")
         print(f"   업데이트 일자 → {pos_cfg['LAST_SIGMA_UPDATE']}")
     else:
         print("⚠️ 업데이트 취소됨. config.json 변경 없음.")

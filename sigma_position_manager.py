@@ -107,22 +107,21 @@ def get_market_mode():
 
 def get_market_data(mode):
     """
-    장중 : current_price / current_vix → fast_info 실시간
-           current_open               → history 시가 (fast_info.open 오류 방지)
-    장전 : current_price / current_vix → fast_info (전일 종가 수준)
-           current_open               → prev_close 동일 적용
-    반환 : (current_vix, prev_close, current_open, current_price)
+    장중 : current_price → fast_info 실시간
+           current_open  → history 시가 (fast_info.open 오류 방지)
+    장전 : current_price → fast_info (전일 종가 수준)
+           current_open  → prev_close 동일 적용
+    반환 : (prev_close, current_open, current_price)
     """
     try:
         import yfinance as yf
 
         soxl = yf.Ticker("SOXL")
-        vix  = yf.Ticker("^VIX")
         hist = soxl.history(period="3d", auto_adjust=False)
 
         if len(hist) < 2:
             print("⚠️ SOXL 데이터 부족 (3d 기준 2일치 미만)")
-            return None, None, None, None
+            return None, None, None
 
         now_ny   = datetime.now(ZoneInfo("America/New_York"))
         is_today = (hist.index[-1].date() == now_ny.date())
@@ -138,15 +137,14 @@ def get_market_data(mode):
         else:
             current_open = prev_close
 
-        # 실시간 현재가 / VIX
+        # 실시간 현재가
         current_price = float(soxl.fast_info.last_price)
-        current_vix   = float(vix.fast_info.last_price)
 
-        return current_vix, prev_close, current_open, current_price
+        return prev_close, current_open, current_price
 
     except Exception as e:
         print(f"❌ 시세 조회 실패: {e}")
-        return None, None, None, None
+        return None, None, None
 
 # ───────────────────────────────────────────────
 # 디스코드 알림 전송
@@ -179,24 +177,15 @@ def send_discord(webhook_url, user_id, title, content):
 # LOC 매수 타점 계산
 # ───────────────────────────────────────────────
 
-def calc_loc(current_open, prev_close, current_vix, SIGMA):
+def calc_loc(current_open, prev_close, FIXED_SIGMA, DAILY_SIGMA):
     """
-    타점 = 기준가 × exp(-SIGMA × 조정배수)
-    조정배수 = VIX 구간 배수 + 갭 하락 보정
+    타점 = 전일 종가 × exp(-FIXED_SIGMA × DAILY_SIGMA)
+    FIXED_SIGMA : σ 배수 (config.json, 기본 1.5)
+    DAILY_SIGMA : SOXL 250일 기준 일간 수익률 표준편차
     """
     gap_ratio = (current_open - prev_close) / prev_close if prev_close != 0 else 0
-
-    if   current_vix >= 30: base_mult = 2.80  # 극단 공포
-    elif current_vix >= 20: base_mult = 2.65  # 공포
-    else:                   base_mult = 1.40  # 평시
-
-    if   gap_ratio >= -0.03: adj_mult = base_mult
-    elif gap_ratio >= -0.05: adj_mult = 0.45
-    elif gap_ratio >= -0.07: adj_mult = 0.25
-    elif gap_ratio >= -0.10: adj_mult = 0.10
-    else:                    adj_mult = 0.0
-
-    return current_open * np.exp(-SIGMA * adj_mult), gap_ratio, base_mult, adj_mult
+    loc_price = prev_close * np.exp(-FIXED_SIGMA * DAILY_SIGMA)
+    return loc_price, gap_ratio
 
 # ───────────────────────────────────────────────
 # 메인 실행
@@ -219,18 +208,19 @@ def execute_dual_tactical_trader():
 
     webhook_url       = os.environ.get("DISCORD_WEBHOOK") or cfg.get("DISCORD_WEBHOOK", "")
     user_id           = os.environ.get("DISCORD_USER_ID")  or cfg.get("DISCORD_USER_ID", "")
-    SIGMA             = pos_cfg.get("FIXED_SIGMA",        0.0460)
+    FIXED_SIGMA       = pos_cfg.get("FIXED_SIGMA",       1.5)
+    DAILY_SIGMA       = pos_cfg.get("DAILY_SIGMA",        0.04)
     TAKE_PROFIT_RATIO = pos_cfg.get("TAKE_PROFIT_RATIO",  0.30)
 
     # ── 시세 조회
-    current_vix, prev_close, current_open, current_price = get_market_data(mode)
-    if current_vix is None:
+    prev_close, current_open, current_price = get_market_data(mode)
+    if prev_close is None:
         print("❌ 시세 데이터를 가져올 수 없습니다. 종료합니다.")
         return
 
     # ── LOC 계산
-    loc_price, gap_ratio, base_mult, adj_mult = calc_loc(
-        current_open, prev_close, current_vix, SIGMA
+    loc_price, gap_ratio = calc_loc(
+        current_open, prev_close, FIXED_SIGMA, DAILY_SIGMA
     )
 
     price_label = "현재가" if mode == "장중" else "전일 종가"
@@ -238,9 +228,7 @@ def execute_dual_tactical_trader():
     print(f"\n📌 {price_label}  : ${current_price:.2f}")
     print(f"📌 당일 시가    : ${current_open:.2f}")
     print(f"📌 전일 종가    : ${prev_close:.2f}")
-    print(f"📌 VIX          : {current_vix:.2f}")
     print(f"📌 갭 비율      : {gap_ratio*100:+.2f}%")
-    print(f"📌 VIX 배수     : {base_mult:.2f}  →  조정 배수: {adj_mult:.2f}")
     print(f"📌 LOC 매수가   : ${loc_price:.2f}\n")
 
     discord_lines = []
@@ -250,7 +238,7 @@ def execute_dual_tactical_trader():
     discord_lines.append(
         f"**{MODE_EMOJI[mode]} {mode} 모드** | {now_ny.strftime('%Y-%m-%d %H:%M %Z')}\n"
         f"• {price_label}: **${current_price:.2f}**\n"
-        f"• VIX: {current_vix:.2f} | 시가: ${current_open:.2f} | 전일종가: ${prev_close:.2f}"
+        f"• 시가: ${current_open:.2f} | 전일종가: ${prev_close:.2f}"
     )
 
     # ── 🟢 LONG 계좌
