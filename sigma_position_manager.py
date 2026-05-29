@@ -156,7 +156,7 @@ def execute_dual_tactical_trader():
         save_config(cfg)
     
     pos_cfg = cfg["POSITIONS"]["SOXL"]
-    prev_close, current_open, current_price = get_market_data(mode)
+    prev_close, current_price = get_market_data(mode)
     if prev_close is None: return
 
     loc_price = calc_loc(prev_close, pos_cfg.get("FIXED_SIGMA", 1.5), pos_cfg.get("DAILY_SIGMA", 0.04))
