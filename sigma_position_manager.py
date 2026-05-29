@@ -164,7 +164,35 @@ def calc_loc(prev_close, FIXED_SIGMA, DAILY_SIGMA):
 def execute_dual_tactical_trader():
     mode, now_ny = get_market_mode()
     cfg = load_config()
-    
+
+def update_sigma_annually(cfg):
+    now = datetime.now()
+    # 마지막 업데이트 기록 확인 (없으면 초기값)
+    last_update_str = cfg["POSITIONS"]["SOXL"].get("LAST_SIGMA_UPDATE", "2000-01-01")
+    last_update = datetime.strptime(last_update_str, "%Y-%m-%d")
+
+    # 올해가 업데이트되지 않았다면 실행 (연초 로직)
+    if last_update.year < now.year:
+        print(f"📅 연초 시그마 자동 갱신 시작: {now.year}년")
+        
+        # 1. yfinance로 252일치 데이터 가져오기
+        ticker = yf.Ticker("SOXL")
+        hist = ticker.history(period="252d")
+        
+        # 2. 시그마 계산 (여기서 대표님의 계산 로직 적용)
+        # 예: 일일 변동성의 표준편차 등을 활용
+        new_daily_sigma = hist['Close'].pct_change().std() * (252**0.5) 
+        
+        # 3. config 갱신
+        cfg["POSITIONS"]["SOXL"]["DAILY_SIGMA"] = round(new_daily_sigma, 4)
+        cfg["POSITIONS"]["SOXL"]["LAST_SIGMA_UPDATE"] = now.strftime("%Y-%m-%d")
+        
+        # 4. 저장
+        save_config(cfg)
+        print(f"✅ 시그마 자동 갱신 완료: {cfg['POSITIONS']['SOXL']['DAILY_SIGMA']}")
+        
+    return cfg
+   
     # 데이터 업데이트 체크
     sigma_changed = check_and_update_sigma(cfg)
     update_positions_from_ledger(cfg)
