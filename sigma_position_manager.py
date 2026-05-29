@@ -98,7 +98,7 @@ def check_and_update_sigma(cfg):
     # 180일 경과 확인
     if (datetime.now() - last_update).days > 180:
         print("🔄 6개월 경과, 시그마 재계산 중...")
-        data = yf.Ticker("SOXL").history(period="250d")
+        data = yf.Ticker("SOXL").history(period="252d")
         new_sigma = float(data['Close'].pct_change().dropna().std())
         
         pos["DAILY_SIGMA"] = round(new_sigma, 4)
