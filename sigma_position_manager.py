@@ -156,7 +156,8 @@ def send_discord(webhook_url, user_id, title, content):
 # LOC 매수 타점 계산
 # ───────────────────────────────────────────────
 
-def calc_loc(current_open, prev_close, FIXED_SIGMA, DAILY_SIGMA):
+def calc_loc(prev_close, FIXED_SIGMA, DAILY_SIGMA):
+    # 전일 종가 기준으로 하락폭 계산
     return prev_close * np.exp(-FIXED_SIGMA * DAILY_SIGMA)
 
 # ───────────────────────────────────────────────
@@ -165,7 +166,7 @@ def calc_loc(current_open, prev_close, FIXED_SIGMA, DAILY_SIGMA):
 
 def execute_dual_tactical_trader():
     mode, now_ny = get_market_mode()
-    cfg = load_config() # load_config() 함수명으로 통일
+    cfg = load_config()
     DAILY_SIGMA = check_and_update_sigma(cfg)
     
     print("📒 장부 → config.json 갱신 중...")
@@ -176,9 +177,7 @@ def execute_dual_tactical_trader():
     prev_close, current_open, current_price = get_market_data(mode)
     if prev_close is None: return
 
-    loc_price = calc_loc(current_open, prev_close, pos_cfg.get("FIXED_SIGMA", 1.5), DAILY_SIGMA)
-
-    # 출력 구성
+    loc_price = calc_loc(prev_close, pos_cfg.get("FIXED_SIGMA", 1.5), DAILY_SIGMA)
     lines = [f"**{MODE_EMOJI[mode]} {mode} 모드** | {now_ny.strftime('%Y-%m-%d %H:%M %Z')}\n"]
     
     if mode == "장전":
