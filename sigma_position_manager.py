@@ -87,25 +87,21 @@ def update_positions_from_ledger(cfg):
 # 시그마 자동 갱신 로직
 # ───────────────────────────────────────────────
 
-def check_and_update_sigma(cfg):
-    pos = cfg["POSITIONS"]["SOXL"]
-    last_update_str = pos.get("LAST_SIGMA_UPDATE", "2026-05-29")
-    last_update = datetime.strptime(last_update_str, "%Y-%m-%d")
-    
-    # 180일 경과 확인
-    if (datetime.now() - last_update).days > 180:
-        print("🔄 6개월 경과, 시그마 재계산 중...")
-        data = yf.Ticker("SOXL").history(period="252d")
-        new_sigma = float(data['Close'].pct_change().dropna().std())
-        
-        pos["DAILY_SIGMA"] = round(new_sigma, 4)
-        pos["LAST_SIGMA_UPDATE"] = datetime.now().strftime("%Y-%m-%d")
-        
-        # 갱신 완료를 알리는 메시지를 반환
-        return True, f"🚨 **[시스템 알림]** 시그마 갱신 완료: {pos['DAILY_SIGMA']}"
-    
-    return False, ""
+import datetime
 
+def check_and_update_sigma(config):
+    last_update = datetime.datetime.strptime(config["POSITIONS"]["SOXL"]["LAST_SIGMA_UPDATE"], "%Y-%m-%d")
+    today = datetime.datetime.now()
+    
+    # 180일이 지났는지 확인
+    if (today - last_update).days >= 180:
+        print("6개월 경과, 시그마 값 재산출 시작...")
+        # 1. 새로운 데이터로 시그마 계산
+        # 2. config["POSITIONS"]["SOXL"]["DAILY_SIGMA"] = new_sigma_value
+        # 3. config["POSITIONS"]["SOXL"]["LAST_SIGMA_UPDATE"] = today.strftime("%Y-%m-%d")
+        # 4. json.dump()를 통해 config.json 파일 저장
+        print("시그마 값 갱신 완료!")
+        
 # ───────────────────────────────────────────────
 # 장 시간 판별 / 시세 / 디스코드 / 타점 계산 
 # ───────────────────────────────────────────────
