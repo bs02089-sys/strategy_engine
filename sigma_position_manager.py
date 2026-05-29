@@ -7,6 +7,7 @@ import requests
 import yfinance as yf
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
+import datetime
 
 # ── 인코딩 설정
 if hasattr(sys.stdout, 'reconfigure'):
@@ -81,13 +82,11 @@ def update_positions_from_ledger(cfg):
 
         pos[f"TOTAL_SHARES_{key}"] = qty
         pos[f"MY_AVG_PRICE_{key}"] = avg_price
-        print(f"   📒 [{key}] 보유 {qty}주 / 평단 ${avg_price:.4f}")
+        print(f"   📒 [{key}] 보유 {qty}주 / 평균가격 ${avg_price:.4f}")
 
 # ───────────────────────────────────────────────
 # 시그마 자동 갱신 로직
 # ───────────────────────────────────────────────
-
-import datetime
 
 def check_and_update_sigma(config):
     last_update = datetime.datetime.strptime(config["POSITIONS"]["SOXL"]["LAST_SIGMA_UPDATE"], "%Y-%m-%d")
@@ -154,30 +153,11 @@ def calc_loc(prev_close, FIXED_SIGMA, DAILY_SIGMA):
 # 메인 실행부
 # ───────────────────────────────────────────────
 
-def update_sigma_annually(cfg):
-    now = datetime.now()
-    last_update_str = cfg["POSITIONS"]["SOXL"].get("LAST_SIGMA_UPDATE", "2000-01-01")
-    last_update = datetime.strptime(last_update_str, "%Y-%m-%d")
-
-    if last_update.year < now.year:
-        print(f"📅 연초 시그마 자동 갱신 시작: {now.year}년")
-        ticker = yf.Ticker("SOXL")
-        hist = ticker.history(period="252d")
-        new_daily_sigma = hist['Close'].pct_change().std() * (252**0.5) 
-        
-        cfg["POSITIONS"]["SOXL"]["DAILY_SIGMA"] = round(new_daily_sigma, 4)
-        cfg["POSITIONS"]["SOXL"]["LAST_SIGMA_UPDATE"] = now.strftime("%Y-%m-%d")
-        save_config(cfg)
-        print(f"✅ 시그마 자동 갱신 완료: {cfg['POSITIONS']['SOXL']['DAILY_SIGMA']}")
-        
-    return cfg
-
 def execute_dual_tactical_trader():
     mode, now_ny = get_market_mode()
     cfg = load_config()
 
-    # 1. 연초 시그마 갱신 및 데이터 업데이트 (함수 밖으로 분리된 것 통합)
-    cfg = update_sigma_annually(cfg) 
+    # 1. 시그마 갱신 및 데이터 업데이트
     sigma_changed, sigma_msg = check_and_update_sigma(cfg)
     update_positions_from_ledger(cfg)
     
@@ -209,7 +189,7 @@ def execute_dual_tactical_trader():
             avg = pos_cfg.get(f"MY_AVG_PRICE_{k}", 0)
             msg = f"[{k}] {'매수' if k == 'LONG' else '매도'} 계좌"
             if qty > 0 and avg > 0:
-                msg += f"\n• {qty}주 / 평단 ${avg:.4f} / 수익률 {(current_price - avg)/avg*100:+.2f}%"
+                msg += f"\n• {qty}주 / 평균가격 ${avg:.4f} / 수익률 {(current_price - avg)/avg*100:+.2f}%"
             else:
                 msg += "\n• 보유 물량 없음"
             lines.append(msg)
