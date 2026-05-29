@@ -19,7 +19,7 @@ warnings.filterwarnings('ignore', category=FutureWarning)
 MODE_EMOJI = {"장전": "🌙", "장중": "☀️"}
 
 # ───────────────────────────────────────────────
-# 설정 / 장부 로드 (원본 유지)
+# 설정 / 장부 로드 
 # ───────────────────────────────────────────────
 
 def load_config():
@@ -151,43 +151,43 @@ def execute_dual_tactical_trader():
     sigma_changed = check_and_update_sigma(cfg)
     update_positions_from_ledger(cfg)
     
-    # 변경사항 있을 시에만 저장 (알림 중복 방지)
+    # 변경사항 있을 시에만 저장
     if sigma_changed:
         save_config(cfg)
     
     pos_cfg = cfg["POSITIONS"]["SOXL"]
-    prev_close, current_price = get_market_data(mode)
+    prev_close, current_open, current_price = get_market_data(mode)
     if prev_close is None: return
 
     loc_price = calc_loc(prev_close, pos_cfg.get("FIXED_SIGMA", 1.5), pos_cfg.get("DAILY_SIGMA", 0.04))
     
-    lines = [f"{MODE_EMOJI[mode]} {mode} 모드 | {now_ny.strftime('%Y-%m-%d %H:%M %Z')}\n"]
+    # 메시지 구성
+    lines = [f"{MODE_EMOJI[mode]} {mode} 모드 | {now_ny.strftime('%Y-%m-%d %H:%M %Z')}"]
     
+    # 시세 정보 
     if mode == "장전":
-        lines.append(f"• 전일 종가: ${prev_close:.2f}")
-        lines.append(f"• LOC 예정가: ${loc_price:.2f}")
+        lines.append(f"• 전일 종가: ${prev_close:.2f}\n• LOC 예정가: ${loc_price:.2f}")
     else:
-        lines.append(f"• 전일 종가: ${prev_close:.2f}")
-        lines.append(f"• 현재가: ${current_price:.2f}")
-        lines.append(f"• LOC 예정가: ${loc_price:.2f}")
+        lines.append(f"• 전일 종가: ${prev_close:.2f}\n• 현재가: ${current_price:.2f}\n• LOC 예정가: ${loc_price:.2f}")
 
+    # 계좌 정보
     for k in ["LONG", "SHORT"]:
         qty = pos_cfg.get(f"TOTAL_SHARES_{k}", 0)
         avg = pos_cfg.get(f"MY_AVG_PRICE_{k}", 0)
-        msg = f"\n[{k}] {'매수' if k == 'LONG' else '매도'} 계좌"
+        msg = f"[{k}] {'매수' if k == 'LONG' else '매도'} 계좌"
         if qty > 0 and avg > 0:
             msg += f"\n• {qty}주 / 평단 ${avg:.4f} / 수익률 {(current_price - avg)/avg*100:+.2f}%"
         else:
             msg += "\n• 보유 물량 없음"
         lines.append(msg)
     
-    # 시그마 갱신 알림 메시지 추가 (갱신된 날만 표시)
+    # 시스템 알림
     if sigma_changed:
-        lines.append(f"\n🚨 [시스템 알림] 시그마 갱신 완료: {pos_cfg.get('DAILY_SIGMA', 0.04)}")
+        lines.append(f"🚨 [시스템 알림] 시그마 갱신 완료: {pos_cfg.get('DAILY_SIGMA', 0.04)}")
 
     send_discord(os.environ.get("DISCORD_WEBHOOK") or cfg.get("DISCORD_WEBHOOK", ""), 
                  os.environ.get("DISCORD_USER_ID") or cfg.get("DISCORD_USER_ID", ""), 
                  f"{MODE_EMOJI[mode]} {mode} 브리핑", "\n\n".join(lines))
-    
+            
 if __name__ == "__main__":
     execute_dual_tactical_trader()
