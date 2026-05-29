@@ -30,24 +30,29 @@ print(f"DEBUG: 환경변수 Webhook: {webhook}")
 print(f"DEBUG: 환경변수 UserID: {user_id}")
 
 # 시스템의 논리적 근거가 되는 검증된 초기값
-INITIAL_SIGMA = 0.0635  # 한셀로 직접 검증한 최초의 숫자(2026-05-29)
+INITIAL_SIGMA = 0.0830  # 한셀로 직접 검증한 최초의 숫자(2026-05-29)
 
 def load_config():
-    config_path = "config.json"
+    config_path = "config.json" 
     
-    # 검증된 값을 시스템의 기본값으로 명시
-    default_cfg = {
-        "POSITIONS": {
-            "SOXL": {
-                "FIXED_SIGMA": 1.5,
-                "DAILY_SIGMA": INITIAL_SIGMA,  # 검증된 숫자로 명확하게 출발
-                "LAST_SIGMA_UPDATE": "2026-05-29"
+    # 파일이 있으면 읽고, 없으면 default_cfg를 사용하게 로직 추가
+    try:
+        with open(config_path, 'r') as f:
+            config = json.load(f)
+            return config
+    except FileNotFoundError:
+        # 파일이 없을 때 default_cfg를 시스템에 로드
+        default_cfg = {
+            "POSITIONS": {
+                "SOXL": {
+                    "ENTRY_MULTIPLIER": 1.5,
+                    "DAILY_SIGMA": INITIAL_SIGMA,
+                    "LAST_SIGMA_UPDATE": "2026-05-29"
+                }
             }
-        },
-        "DISCORD_WEBHOOK": "", 
-        "DISCORD_USER_ID": ""
-    }
-     
+        }
+        return default_cfg
+         
 def save_config(cfg):
     try:
         with open("config.json", "w", encoding="utf-8") as f:
