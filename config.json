@@ -1,7 +1,15 @@
 {
-  "exchange_status": {
-    "LAST_CHECK_DATE": "2026-05-29 06:57:08 UTC",
-    "CURRENT_APPLIED_RATE": 1506.71,
-    "CURRENT_PERCENTILE": 96.2
-  }
+    "exchange_status": {
+        "LAST_CHECK_DATE": "2026-05-29 06:57:08 UTC",
+        "CURRENT_APPLIED_RATE": 1506.71,
+        "CURRENT_PERCENTILE": 96.2
+    },
+    "POSITIONS": {
+        "SOXL": {
+            "TOTAL_SHARES_LONG": 17,
+            "MY_AVG_PRICE_LONG": 165.1124,
+            "TOTAL_SHARES_SHORT": 4,
+            "MY_AVG_PRICE_SHORT": 164.3043
+        }
+    }
 }
