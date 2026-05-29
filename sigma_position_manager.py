@@ -161,6 +161,24 @@ def calc_loc(prev_close, FIXED_SIGMA, DAILY_SIGMA):
 # 메인 실행부
 # ───────────────────────────────────────────────
 
+def update_sigma_annually(cfg):
+    now = datetime.now()
+    last_update_str = cfg["POSITIONS"]["SOXL"].get("LAST_SIGMA_UPDATE", "2000-01-01")
+    last_update = datetime.strptime(last_update_str, "%Y-%m-%d")
+
+    if last_update.year < now.year:
+        print(f"📅 연초 시그마 자동 갱신 시작: {now.year}년")
+        ticker = yf.Ticker("SOXL")
+        hist = ticker.history(period="252d")
+        new_daily_sigma = hist['Close'].pct_change().std() * (252**0.5) 
+        
+        cfg["POSITIONS"]["SOXL"]["DAILY_SIGMA"] = round(new_daily_sigma, 4)
+        cfg["POSITIONS"]["SOXL"]["LAST_SIGMA_UPDATE"] = now.strftime("%Y-%m-%d")
+        save_config(cfg)
+        print(f"✅ 시그마 자동 갱신 완료: {cfg['POSITIONS']['SOXL']['DAILY_SIGMA']}")
+        
+    return cfg
+
 def execute_dual_tactical_trader():
     mode, now_ny = get_market_mode()
     cfg = load_config()
