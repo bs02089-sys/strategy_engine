@@ -29,33 +29,25 @@ user_id = os.environ.get("DISCORD_USER_ID")
 print(f"DEBUG: 환경변수 Webhook: {webhook}")
 print(f"DEBUG: 환경변수 UserID: {user_id}")
 
+# 시스템의 논리적 근거가 되는 검증된 초기값
+INITIAL_SIGMA = 0.0635  # 한셀로 직접 검증한 최초의 숫자(2026-05-29)
+
 def load_config():
-    # 경로 확인 (현재 디렉토리에 파일이 있는지 확인)
     config_path = "config.json"
-    if not os.path.exists(config_path):
-        print(f"⚠️ {config_path} 파일을 찾을 수 없습니다. 기본 설정을 생성합니다.")
-        default_cfg = {
-            "POSITIONS": {"SOXL": {"FIXED_SIGMA": 1.5, "DAILY_SIGMA": 0.0639, "LAST_SIGMA_UPDATE": "2026-05-29"}},
-            "DISCORD_WEBHOOK": "", "DISCORD_USER_ID": ""
-        }
-        with open(config_path, "w", encoding="utf-8") as f:
-            json.dump(default_cfg, f, indent=4, ensure_ascii=False)
-        return default_cfg
-
-    try:
-        with open(config_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            if data is None:
-                raise ValueError("config.json 파일이 비어있습니다.")
-            return data
-    except Exception as e:
-        print(f"❌ config.json 로드 실패: {e}")
-        # 파일이 깨졌을 경우를 대비해 시스템을 강제로 멈추지 않고 기본값을 반환하도록 수정
-        return {
-            "POSITIONS": {"SOXL": {"FIXED_SIGMA": 1.5, "DAILY_SIGMA": 0.0639, "LAST_SIGMA_UPDATE": "2026-05-29"}},
-            "DISCORD_WEBHOOK": "", "DISCORD_USER_ID": ""
-        }
-
+    
+    # 대표님이 산출하신 검증된 값을 시스템의 기본값으로 명시
+    default_cfg = {
+        "POSITIONS": {
+            "SOXL": {
+                "FIXED_SIGMA": 1.5,
+                "DAILY_SIGMA": INITIAL_SIGMA,  # 검증된 숫자로 명확하게 출발
+                "LAST_SIGMA_UPDATE": "2026-05-29"
+            }
+        },
+        "DISCORD_WEBHOOK": "", 
+        "DISCORD_USER_ID": ""
+    }
+     
 def save_config(cfg):
     try:
         with open("config.json", "w", encoding="utf-8") as f:
