@@ -15,7 +15,9 @@
             "MY_AVG_PRICE_SHORT": 164.3043,
             "TOTAL_CAPITAL_SHORT": 3273.05,
             "CURRENT_CASTS_SHORT": 1,
-            "ANNUAL_QUOTA_SHORT": 6
+            "ANNUAL_QUOTA_SHORT": 6,
+            "FIXED_SIGMA": NaN,
+            "LAST_SIGMA_UPDATE": "2026-05-28"
         }
     },
     "STRATEGY": {
