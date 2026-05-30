@@ -88,17 +88,20 @@ def update_positions_from_ledger(cfg):
 # ───────────────────────────────────────────────
 
 def check_and_update_sigma(config):
-    last_update = datetime.strptime(config["POSITIONS"]["SOXL"]["LAST_SIGMA_UPDATE"], "%Y-%m-%d")    
+    # 1. 시그마 업데이트 날짜 확인 로직
+    last_update_str = config["POSITIONS"]["SOXL"]["LAST_SIGMA_UPDATE"]
+    last_update = datetime.strptime(last_update_str, "%Y-%m-%d")
     today = datetime.now()
     
-    # 180일이 지났는지 확인
+    # 2. 6개월(약 180일) 경과 여부 판단
     if (today - last_update).days >= 180:
-        print("6개월 경과, 시그마 값 재산출 시작...")
-        # 1. 새로운 데이터로 시그마 계산
-        # 2. config["POSITIONS"]["SOXL"]["DAILY_SIGMA"] = new_sigma_value
-        # 3. config["POSITIONS"]["SOXL"]["LAST_SIGMA_UPDATE"] = today.strftime("%Y-%m-%d")
-        # 4. json.dump()를 통해 config.json 파일 저장
-        print("시그마 값 갱신 완료!")
+        # 업데이트가 필요한 경우
+        # (여기서 실제로 백테스트를 수행하거나 값을 갱신합니다)
+        # 예시로 일단 True를 반환하게 작성했습니다.
+        return True, f"시그마 갱신 필요 (지난 갱신일: {last_update_str})"
+    
+    # 3. 중요: 업데이트가 필요 없는 경우에도 반드시 값을 반환해야 합니다!
+    return False, "시그마 갱신 주기 아님"
         
 # ───────────────────────────────────────────────
 # 장 시간 판별 / 시세 / 디스코드 / 타점 계산 
