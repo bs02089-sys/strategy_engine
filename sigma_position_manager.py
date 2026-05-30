@@ -95,10 +95,15 @@ def check_and_update_sigma(config):
     
     # 2. 6개월(약 180일) 경과 여부 판단
     if (today - last_update).days >= 180:
-        # 업데이트가 필요한 경우
-        # (여기서 실제로 백테스트를 수행하거나 값을 갱신합니다)
-        # 예시로 일단 True를 반환하게 작성했습니다.
-        return True, f"시그마 갱신 필요 (지난 갱신일: {last_update_str})"
+        try:
+            import yfinance as yf
+            hist = yf.Ticker("SOXL").history(period="252d", auto_adjust=True)
+            new_sigma = round(float(hist['Close'].pct_change().dropna().std()), 6)
+            config["POSITIONS"]["SOXL"]["DAILY_SIGMA"]       = new_sigma
+            config["POSITIONS"]["SOXL"]["LAST_SIGMA_UPDATE"] = today.strftime("%Y-%m-%d")
+            return True, f"📊 시그마 자동 갱신 완료: {new_sigma} (이전 갱신일: {last_update_str})"
+        except Exception as e:
+            return False, f"⚠️ 시그마 갱신 실패: {e}"
     
     # 3. 중요: 업데이트가 필요 없는 경우에도 반드시 값을 반환해야 합니다!
     return False, "시그마 갱신 주기 아님"
@@ -125,8 +130,10 @@ def get_market_data(mode):
         # 최근 5일 데이터를 확보하여 데이터 누락 위험을 차단합니다.
         hist = soxl.history(period="5d", auto_adjust=False)        
         if len(hist) < 2: 
-            return None, None       
-        prev_close = float(hist['Close'].iloc[-1])
+            return None, None
+        now_ny   = datetime.now(ZoneInfo("America/New_York"))
+        is_today = (hist.index[-1].date() == now_ny.date())
+        prev_close = float(hist['Close'].iloc[-2] if is_today else hist['Close'].iloc[-1])
         current_price = float(soxl.fast_info.last_price)       
         return prev_close, current_price
         
@@ -152,8 +159,8 @@ def send_discord(webhook_url, user_id, title, content):
     except Exception as e:
         print(f"❌ 디스코드 전송 실패: {e}")
 
-def calc_loc(prev_close, FIXED_SIGMA, DAILY_SIGMA):
-    return prev_close * np.exp(-FIXED_SIGMA * DAILY_SIGMA)
+def calc_loc(prev_close, ENTRY_MULTIPLIER, DAILY_SIGMA):
+    return prev_close * np.exp(-ENTRY_MULTIPLIER * DAILY_SIGMA)
 
 # ───────────────────────────────────────────────
 # 메인 실행부
@@ -166,8 +173,9 @@ def execute_dual_tactical_trader():
     # 1. 시그마 갱신 및 데이터 업데이트
     sigma_changed, sigma_msg = check_and_update_sigma(cfg)
     update_positions_from_ledger(cfg)
+    save_config(cfg)  # ledger 갱신 항상 저장
     
-    # 변경사항 있을 시에만 저장
+    # 시그마 변경사항 추가 저장
     if sigma_changed:
         save_config(cfg)
     
@@ -179,7 +187,7 @@ def execute_dual_tactical_trader():
         print("⚠️ 시장 데이터를 가져오지 못했습니다.")
         lines = [f"{MODE_EMOJI[mode]} {mode} 브리핑", "⚠️ 데이터 수신 실패로 상세 내역을 가져올 수 없습니다."]
     else:
-        loc_price = calc_loc(prev_close, pos_cfg.get("FIXED_SIGMA", 1.5), pos_cfg.get("DAILY_SIGMA", 0.04))
+        loc_price = calc_loc(prev_close, pos_cfg.get("ENTRY_MULTIPLIER", 1.5), pos_cfg.get("DAILY_SIGMA", 0.0818))
         
         # 메시지 구성
         lines = [f"{MODE_EMOJI[mode]} {mode} 모드 | {now_ny.strftime('%Y-%m-%d %H:%M %Z')}"]
