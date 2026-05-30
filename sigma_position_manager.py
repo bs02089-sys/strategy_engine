@@ -87,9 +87,9 @@ def check_and_update_sigma(config):
     last_update = datetime.strptime(last_update_str, "%Y-%m-%d")
     today = datetime.now()
     
-    if (today - last_update).days >= 180:
+    if (today - last_update).days >= 365:
         try:
-            hist = yf.Ticker("SOXL").history(period="252d", auto_adjust=True)
+            hist = yf.Ticker("SOXL").history(period="365d", auto_adjust=True)
             new_sigma = round(float(hist['Close'].pct_change().dropna().std()), 6)
             config["POSITIONS"]["SOXL"]["DAILY_SIGMA"]       = new_sigma
             config["POSITIONS"]["SOXL"]["LAST_SIGMA_UPDATE"] = today.strftime("%Y-%m-%d")
