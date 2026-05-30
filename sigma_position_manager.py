@@ -7,7 +7,6 @@ import requests
 import yfinance as yf
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
-import datetime
 
 # ── 인코딩 설정
 if hasattr(sys.stdout, 'reconfigure'):
@@ -106,7 +105,7 @@ def check_and_update_sigma(config):
 # ───────────────────────────────────────────────
 
 def get_market_mode():
-    now_ny   = datetime.now(ZoneInfo("America/New_York"))
+    now_ny = datetime.now(ZoneInfo("America/New_York"))
     hour     = now_ny.hour + now_ny.minute / 60.0
     is_dst   = now_ny.dst() != timedelta(0)
     tz_label = "EDT (서머타임)" if is_dst else "EST"
