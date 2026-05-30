@@ -88,7 +88,7 @@ def update_positions_from_ledger(cfg):
 # ───────────────────────────────────────────────
 
 def check_and_update_sigma(config):
-    last_update = datetime.datetime.strptime(config["POSITIONS"]["SOXL"]["LAST_SIGMA_UPDATE"], "%Y-%m-%d")
+    last_update = datetime.strptime(config["POSITIONS"]["SOXL"]["LAST_SIGMA_UPDATE"], "%Y-%m-%d")    
     today = datetime.datetime.now()
     
     # 180일이 지났는지 확인
