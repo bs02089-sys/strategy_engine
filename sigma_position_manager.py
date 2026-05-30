@@ -30,7 +30,7 @@ print(f"DEBUG: 환경변수 Webhook: {webhook}")
 print(f"DEBUG: 환경변수 UserID: {user_id}")
 
 # 시스템의 논리적 근거가 되는 검증된 초기값
-INITIAL_SIGMA = 0.0818  # 한셀로 직접 검증한 최초의 숫자(2026-05-29)
+INITIAL_SIGMA = 0.0818  # 252일 기준, 직접 검증한 최초의 숫자(2026-05-29)
 
 def load_config():
     config_path = "config.json" 
@@ -45,7 +45,7 @@ def load_config():
         default_cfg = {
             "POSITIONS": {
                 "SOXL": {
-                    "ENTRY_MULTIPLIER": 1.5,
+                    "ENTRY_MULTIPLIER": 1.5, # 연간 20회 검증
                     "DAILY_SIGMA": INITIAL_SIGMA,
                     "LAST_SIGMA_UPDATE": "2026-05-29"
                 }
