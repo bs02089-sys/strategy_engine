@@ -22,37 +22,32 @@ MODE_EMOJI = {"장전": "🌙", "장중": "☀️"}
 # 설정 / 장부 로드 
 # ───────────────────────────────────────────────
 
-# 환경 변수와 config 파일에서 값을 불러오는지 확인
 webhook = os.environ.get("DISCORD_WEBHOOK")
 user_id = os.environ.get("DISCORD_USER_ID")
 
 print(f"DEBUG: 환경변수 Webhook: {webhook}")
 print(f"DEBUG: 환경변수 UserID: {user_id}")
 
-# 시스템의 논리적 근거가 되는 검증된 초기값
-INITIAL_SIGMA = 0.0818  # 252일 기준, 직접 검증한 최초의 숫자(2026-05-29)
+INITIAL_SIGMA = 0.0818
 
 def load_config():
     config_path = "config.json" 
-    
-    # 파일이 있으면 읽고, 없으면 default_cfg를 사용하게 로직 추가
     try:
         with open(config_path, 'r') as f:
-            config = json.load(f)
-            return config
+            return json.load(f)
     except FileNotFoundError:
-        # 파일이 없을 때 default_cfg를 시스템에 로드
         default_cfg = {
             "POSITIONS": {
                 "SOXL": {
-                    "ENTRY_MULTIPLIER": 1.5, # 연간 20회 검증
+                    "ENTRY_MULTIPLIER": 1.5,
                     "DAILY_SIGMA": INITIAL_SIGMA,
                     "LAST_SIGMA_UPDATE": "2026-05-29"
                 }
-            }
+            },
+            "LAST_MONTHLY_PING": ""
         }
         return default_cfg
-         
+          
 def save_config(cfg):
     try:
         with open("config.json", "w", encoding="utf-8") as f:
@@ -72,11 +67,11 @@ def load_ledger():
 
 def update_positions_from_ledger(cfg):
     ledger = load_ledger()
-    pos    = cfg.setdefault("POSITIONS", {}).setdefault("SOXL", {})
+    pos = cfg.setdefault("POSITIONS", {}).setdefault("SOXL", {})
 
     for key, ledger_key in [("LONG", "SOXL_LONG"), ("SHORT", "SOXL_SHORT")]:
         entry     = ledger.get(ledger_key, {})
-        qty       = entry.get("qty",       0)
+        qty       = entry.get("qty", 0)
         avg_price = entry.get("avg_price", 0.0)
 
         pos[f"TOTAL_SHARES_{key}"] = qty
@@ -84,19 +79,16 @@ def update_positions_from_ledger(cfg):
         print(f"   📒 [{key}] 보유 {qty}주 / 평균가격 ${avg_price:.4f}")
 
 # ───────────────────────────────────────────────
-# 시그마 자동 갱신 로직
+# 시그마 및 월말 핑 로직
 # ───────────────────────────────────────────────
 
 def check_and_update_sigma(config):
-    # 1. 시그마 업데이트 날짜 확인 로직
     last_update_str = config["POSITIONS"]["SOXL"]["LAST_SIGMA_UPDATE"]
     last_update = datetime.strptime(last_update_str, "%Y-%m-%d")
     today = datetime.now()
     
-    # 2. 6개월(약 180일) 경과 여부 판단
     if (today - last_update).days >= 180:
         try:
-            import yfinance as yf
             hist = yf.Ticker("SOXL").history(period="252d", auto_adjust=True)
             new_sigma = round(float(hist['Close'].pct_change().dropna().std()), 6)
             config["POSITIONS"]["SOXL"]["DAILY_SIGMA"]       = new_sigma
@@ -104,37 +96,43 @@ def check_and_update_sigma(config):
             return True, f"📊 시그마 자동 갱신 완료: {new_sigma} (이전 갱신일: {last_update_str})"
         except Exception as e:
             return False, f"⚠️ 시그마 갱신 실패: {e}"
-    
-    # 3. 중요: 업데이트가 필요 없는 경우에도 반드시 값을 반환해야 합니다!
     return False, "시그마 갱신 주기 아님"
-        
+
+def check_monthly_ping(cfg):
+    now = datetime.now()
+    if now.day == 1:
+        last_ping = cfg.get("LAST_MONTHLY_PING", "")
+        today_str = now.strftime("%Y-%m")
+        if last_ping != today_str:
+            msg = f"🔔 **월말 핑**: {now.strftime('%Y년 %m월')} 운용 시스템이 정상 가동 중입니다."
+            send_discord(os.environ.get("DISCORD_WEBHOOK") or cfg.get("DISCORD_WEBHOOK", ""), 
+                         os.environ.get("DISCORD_USER_ID") or cfg.get("DISCORD_USER_ID", ""), 
+                         "🗓️ 월간 리포트 핑", msg)
+            cfg["LAST_MONTHLY_PING"] = today_str
+            return True
+    return False
+
 # ───────────────────────────────────────────────
-# 장 시간 판별 / 시세 / 디스코드 / 타점 계산 
+# 시세 및 알림 로직
 # ───────────────────────────────────────────────
 
 def get_market_mode():
     now_ny = datetime.now(ZoneInfo("America/New_York"))
-    hour     = now_ny.hour + now_ny.minute / 60.0
-    is_dst   = now_ny.dst() != timedelta(0)
+    hour    = now_ny.hour + now_ny.minute / 60.0
+    is_dst  = now_ny.dst() != timedelta(0)
     tz_label = "EDT (서머타임)" if is_dst else "EST"
     print(f"🕒 뉴욕 현재 시각: {now_ny.strftime('%Y-%m-%d %H:%M:%S')} ({tz_label})")
     mode = "장중" if 9.5 <= hour < 16.0 else "장전"
     return mode, now_ny
 
 def get_market_data(mode):
-    """
-    mode에 관계없이 가장 최근 마감된 데이터를 전일 종가로 확정합니다.
-    """
     try:
         soxl = yf.Ticker("SOXL")
-        # 최근 5일 데이터를 확보하여 데이터 누락 위험을 차단합니다.
-        hist = soxl.history(period="5d", auto_adjust=False)        
-        if len(hist) < 2: 
-            return None, None
+        hist = soxl.history(period="5d", auto_adjust=False)       
+        if len(hist) < 2: return None, None
         prev_close = float(hist['Close'].iloc[-1])
-        current_price = float(soxl.fast_info.last_price)       
+        current_price = float(soxl.fast_info.last_price)      
         return prev_close, current_price
-        
     except Exception as e:
         print(f"❌ 시세 조회 실패: {e}")
         return None, None
@@ -144,7 +142,7 @@ def send_discord(webhook_url, user_id, title, content):
     payload = {
         "content": f"<@{user_id}> " if user_id else "",
         "embeds": [{
-            "title":    title,
+            "title":   title,
             "description": content,
             "color":      3447003,
             "timestamp":  datetime.now(timezone.utc).isoformat()
@@ -171,23 +169,20 @@ def execute_dual_tactical_trader():
     # 1. 시그마 갱신 및 데이터 업데이트
     sigma_changed, sigma_msg = check_and_update_sigma(cfg)
     update_positions_from_ledger(cfg)
-    save_config(cfg)  # ledger 갱신 항상 저장
+    check_monthly_ping(cfg) # 월말 핑 추가
+    save_config(cfg)
     
-    # 시그마 변경사항 추가 저장
     if sigma_changed:
         save_config(cfg)
     
     pos_cfg = cfg["POSITIONS"]["SOXL"]
     prev_close, current_price = get_market_data(mode)
     
-    # 2. 데이터 없을 시 예외 처리 (함수 종료 없이 메시지 구성 후 진행)
     if prev_close is None:
         print("⚠️ 시장 데이터를 가져오지 못했습니다.")
         lines = [f"{MODE_EMOJI[mode]} {mode} 브리핑", "⚠️ 데이터 수신 실패로 상세 내역을 가져올 수 없습니다."]
     else:
         loc_price = calc_loc(prev_close, pos_cfg.get("ENTRY_MULTIPLIER", 1.5), pos_cfg.get("DAILY_SIGMA", 0.0818))
-        
-        # 메시지 구성
         lines = [f"{MODE_EMOJI[mode]} {mode} 모드 | {now_ny.strftime('%Y-%m-%d %H:%M %Z')}"]
         
         if mode == "장전":
@@ -195,7 +190,6 @@ def execute_dual_tactical_trader():
         else:
             lines.append(f"• 전일 종가: ${prev_close:.2f}\n• 현재가: ${current_price:.2f}\n• LOC 예정가: ${loc_price:.2f}")
 
-        # 계좌 정보
         for k in ["LONG", "SHORT"]:
             qty = pos_cfg.get(f"TOTAL_SHARES_{k}", 0)
             avg = pos_cfg.get(f"MY_AVG_PRICE_{k}", 0)
@@ -206,7 +200,6 @@ def execute_dual_tactical_trader():
                 msg += "\n• 보유 물량 없음"
             lines.append(msg)
     
-    # 3. 시스템 알림 (항상 전송되도록 로직 통합)
     if sigma_changed:
         lines.append(sigma_msg)
 
