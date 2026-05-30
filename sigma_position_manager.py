@@ -117,19 +117,23 @@ def get_market_mode():
     return mode, now_ny
 
 def get_market_data(mode):
+    """
+    mode에 관계없이 가장 최근 마감된 데이터를 전일 종가로 확정합니다.
+    """
     try:
         soxl = yf.Ticker("SOXL")
-        hist = soxl.history(period="3d", auto_adjust=False)
-        if len(hist) < 2: return None, None, None
-        now_ny   = datetime.now(ZoneInfo("America/New_York"))
-        is_today = (hist.index[-1].date() == now_ny.date())
-        prev_close = float(hist['Close'].iloc[-2] if is_today else hist['Close'].iloc[-1])
-        current_price = float(soxl.fast_info.last_price)
+        # 최근 5일 데이터를 확보하여 데이터 누락 위험을 차단합니다.
+        hist = soxl.history(period="5d", auto_adjust=False)        
+        if len(hist) < 2: 
+            return None, None       
+        prev_close = float(hist['Close'].iloc[-1])
+        current_price = float(soxl.fast_info.last_price)       
         return prev_close, current_price
+        
     except Exception as e:
         print(f"❌ 시세 조회 실패: {e}")
-        return None, None, None
-
+        return None, None
+    
 def send_discord(webhook_url, user_id, title, content):
     if not webhook_url: return
     payload = {
