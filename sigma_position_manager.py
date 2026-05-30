@@ -131,9 +131,7 @@ def get_market_data(mode):
         hist = soxl.history(period="5d", auto_adjust=False)        
         if len(hist) < 2: 
             return None, None
-        now_ny   = datetime.now(ZoneInfo("America/New_York"))
-        is_today = (hist.index[-1].date() == now_ny.date())
-        prev_close = float(hist['Close'].iloc[-2] if is_today else hist['Close'].iloc[-1])
+        prev_close = float(hist['Close'].iloc[-1])
         current_price = float(soxl.fast_info.last_price)       
         return prev_close, current_price
         
