@@ -128,14 +128,17 @@ def get_market_mode():
 def get_market_data(mode):
     try:
         soxl = yf.Ticker("SOXL")
-        hist = soxl.history(period="5d", auto_adjust=False)       
-        if len(hist) < 2: return None, None
+        hist = soxl.history(period="5d", auto_adjust=False)
+        vix = yf.Ticker("^VIX").history(period="1d")
+        vix_price = float(vix['Close'].iloc[-1]) if not vix.empty else 0.0
+        
+        if len(hist) < 2: return None, None, None
         prev_close = float(hist['Close'].iloc[-1])
-        current_price = float(soxl.fast_info.last_price)      
-        return prev_close, current_price
+        current_price = float(soxl.fast_info.last_price)
+        return prev_close, current_price, vix_price
     except Exception as e:
         print(f"❌ 시세 조회 실패: {e}")
-        return None, None
+        return None, None, None
     
 def send_discord(webhook_url, user_id, title, content):
     if not webhook_url: return
@@ -176,14 +179,14 @@ def execute_dual_tactical_trader():
         save_config(cfg)
     
     pos_cfg = cfg["POSITIONS"]["SOXL"]
-    prev_close, current_price = get_market_data(mode)
+    prev_close, current_price, vix_price = get_market_data(mode)
     
     if prev_close is None:
         print("⚠️ 시장 데이터를 가져오지 못했습니다.")
         lines = [f"{MODE_EMOJI[mode]} {mode} 브리핑", "⚠️ 데이터 수신 실패로 상세 내역을 가져올 수 없습니다."]
     else:
         loc_price = calc_loc(prev_close, pos_cfg.get("ENTRY_MULTIPLIER", 1.5), pos_cfg.get("DAILY_SIGMA", 0.0818))
-        lines = [f"{MODE_EMOJI[mode]} {mode} 모드 | {now_ny.strftime('%Y-%m-%d %H:%M %Z')}"]
+        lines = [f"{MODE_EMOJI[mode]} {mode} 모드 | {now_ny.strftime('%Y-%m-%d %H:%M %Z')}", f"• VIX: {vix_price:.2f}"]
         
         if mode == "장전":
             lines.append(f"• 전일 종가: ${prev_close:.2f}\n• LOC 예정가: ${loc_price:.2f}")
