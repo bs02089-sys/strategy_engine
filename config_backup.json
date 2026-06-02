@@ -2,7 +2,8 @@
     "DISCORD_WEBHOOK": "",
     "DISCORD_USER_ID": "",
     "TICKERS": [
-        "SOXL"
+        "SOXL",
+        "JPM"
     ],
     "POSITIONS": {
         "SOXL": {
@@ -13,6 +14,13 @@
             "ENTRY_MULTIPLIER": 1.5,
             "DAILY_SIGMA": 0.0818,
             "LAST_SIGMA_UPDATE": "2026-05-29"
+        },
+        "JPM": {
+            "TOTAL_SHARES_LONG": 0,
+            "MY_AVG_PRICE_LONG": 0.0,
+            "ENTRY_MULTIPLIER": 1.5,
+            "DAILY_SIGMA": 0.01995,
+            "LAST_SIGMA_UPDATE": "2026-06-02"
         }
     },
     "STRATEGY": {
@@ -21,9 +29,9 @@
         "HOLD_DURATION_DAYS": 252
     },
     "exchange_status": {
-        "LAST_CHECK_DATE": "2026-05-27 07:06:14 UTC",
-        "CURRENT_APPLIED_RATE": 1501.56,
-        "CURRENT_PERCENTILE": 94.2
+        "LAST_CHECK_DATE": "2026-06-01 08:37:39 UTC",
+        "CURRENT_APPLIED_RATE": 1506.28,
+        "CURRENT_PERCENTILE": 95.8
     },
     "news_settings": {
         "KEYWORDS": [
@@ -32,8 +40,10 @@
             "NVDA",
             "SOXL ETF",
             "TSLA stock",
-            "IONQ stock"
+            "IONQ stock",
+            "JPM stock"
         ],
         "MAX_NEWS_PER_KEYWORD": 5
-    }
+    },
+    "LAST_MONTHLY_PING": "2026-06"
 }
