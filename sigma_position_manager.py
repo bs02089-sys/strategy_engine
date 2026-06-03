@@ -105,17 +105,24 @@ def get_market_mode():
     mode = "장중" if 9.5 <= hour < 16.0 else "장전"
     return mode, now_ny
 
-def get_ticker_data(ticker):
+def get_ticker_data(ticker, mode):
     try:
         t = yf.Ticker(ticker)
+        # 데이터를 넉넉히 가져옵니다
         hist = t.history(period="5d", auto_adjust=False)
         if len(hist) < 2: return None, None
-        prev_close = float(hist['Close'].iloc[-1])
+        
+        # [수정된 로직]
+        # 장중(☀️): 당일 데이터가 포함된 iloc[-1]은 미완성일 수 있으므로 확실한 종가인 iloc[-2] 사용
+        # 장전(🌙): 전날 장이 이미 끝났으므로 가장 최근 데이터인 iloc[-1] 사용
+        prev_close = float(hist['Close'].iloc[-2]) if mode == "장중" else float(hist['Close'].iloc[-1])
+        
         current_price = float(t.fast_info.last_price)
         return prev_close, current_price
-    except:
+    except Exception as e:
+        print(f"⚠️ {ticker} 데이터 조회 오류: {e}")
         return None, None
-    
+        
 def send_discord(webhook_url, user_id, title, content):
     if not webhook_url: return
     payload = {
