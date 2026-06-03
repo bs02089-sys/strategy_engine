@@ -1,48 +1,48 @@
 {
-    "DISCORD_WEBHOOK": "",
-    "DISCORD_USER_ID": "",
-    "TICKERS": [
-        "SOXL",
-        "JPM"
-    ],
-    "POSITIONS": {
-        "SOXL": {
-            "TOTAL_SHARES_LONG": 17,
-            "MY_AVG_PRICE_LONG": 165.1124,
-            "TOTAL_SHARES_SHORT": 4,
-            "MY_AVG_PRICE_SHORT": 164.3043,
-            "ENTRY_MULTIPLIER": 1.1,
-            "DAILY_SIGMA": 0.0705,
-            "LAST_SIGMA_UPDATE": "2026-06-03"
-        },
-        "JPM": {
-            "TOTAL_SHARES_LONG": 0,
-            "MY_AVG_PRICE_LONG": 0.0,
-            "ENTRY_MULTIPLIER": 1.5,
-            "DAILY_SIGMA": 0.0162,
-            "LAST_SIGMA_UPDATE": "2026-06-02"
-        }
+  "DISCORD_WEBHOOK": "",
+  "DISCORD_USER_ID": "",
+  "TICKERS": [
+    "SOXL",
+    "JPM"
+  ],
+  "POSITIONS": {
+    "SOXL": {
+      "TOTAL_SHARES_LONG": 17,
+      "MY_AVG_PRICE_LONG": 165.1124,
+      "TOTAL_SHARES_SHORT": 4,
+      "MY_AVG_PRICE_SHORT": 164.3043,
+      "ENTRY_MULTIPLIER": 1.1,
+      "DAILY_SIGMA": 0.0705,
+      "LAST_SIGMA_UPDATE": "2026-06-03"
     },
-    "STRATEGY": {
-        "CYCLE_YEARS": 2,
-        "BUY_DURATION_DAYS": 252,
-        "HOLD_DURATION_DAYS": 252
-    },
-    "exchange_status": {
-        "LAST_CHECK_DATE": "2026-06-02 07:26:43 UTC",
-        "CURRENT_APPLIED_RATE": 1519.27,
-        "CURRENT_PERCENTILE": 100.0
-    },
-    "news_settings": {
-        "KEYWORDS": [
-            "AI Infrastructure",
-            "semiconductor stock",
-            "NVDA",
-            "SOXL ETF",
-            "TSLA stock",
-            "IONQ stock",
-            "JPM stock"
-        ],
-        "MAX_NEWS_PER_KEYWORD": 5
+    "JPM": {
+      "TOTAL_SHARES_LONG": 0,
+      "MY_AVG_PRICE_LONG": 0.0,
+      "ENTRY_MULTIPLIER": 1.5,
+      "DAILY_SIGMA": 0.0162,
+      "LAST_SIGMA_UPDATE": "2026-06-02"
     }
+  },
+  "STRATEGY": {
+    "CYCLE_YEARS": 2,
+    "BUY_DURATION_DAYS": 252,
+    "HOLD_DURATION_DAYS": 252
+  },
+  "exchange_status": {
+    "LAST_CHECK_DATE": "2026-06-03 08:21:12 UTC",
+    "CURRENT_APPLIED_RATE": 1526.57,
+    "CURRENT_PERCENTILE": 100.0
+  },
+  "news_settings": {
+    "KEYWORDS": [
+      "AI Infrastructure",
+      "semiconductor stock",
+      "NVDA",
+      "SOXL ETF",
+      "TSLA stock",
+      "IONQ stock",
+      "JPM stock"
+    ],
+    "MAX_NEWS_PER_KEYWORD": 5
+  }
 }
