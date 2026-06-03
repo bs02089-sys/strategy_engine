@@ -28,8 +28,8 @@ user_id = os.environ.get("DISCORD_USER_ID")
 print(f"DEBUG: 환경변수 Webhook: {webhook}")
 print(f"DEBUG: 환경변수 UserID: {user_id}")
 
-INITIAL_SIGMA_SOXL = 0.0818
-INITIAL_SIGMA_JPM = 0.01995
+INITIAL_SIGMA_SOXL = 0.0705
+INITIAL_SIGMA_JPM = 0.0162
 
 def load_config():
     config_path = "config.json" 
@@ -40,9 +40,9 @@ def load_config():
         default_cfg = {
             "POSITIONS": {
                 "SOXL": {
-                    "ENTRY_MULTIPLIER": 1.5,
+                    "ENTRY_MULTIPLIER": 1.1,
                     "DAILY_SIGMA": INITIAL_SIGMA_SOXL,
-                    "LAST_SIGMA_UPDATE": "2026-05-29"
+                    "LAST_SIGMA_UPDATE": "2026-06-03"
                 },
                 "JPM": {
                     "ENTRY_MULTIPLIER": 1.5,
