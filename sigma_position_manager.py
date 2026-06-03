@@ -17,19 +17,11 @@ if hasattr(sys.stderr, 'reconfigure'):
 warnings.filterwarnings('ignore', category=FutureWarning)
 
 MODE_EMOJI = {"장전": "🌙", "장중": "☀️"}
+TARGET_TICKERS = ["QQQM", "SOXX", "SOXL"]
 
 # ───────────────────────────────────────────────
 # 설정 / 장부 로드 
 # ───────────────────────────────────────────────
-
-webhook = os.environ.get("DISCORD_WEBHOOK")
-user_id = os.environ.get("DISCORD_USER_ID")
-
-print(f"DEBUG: 환경변수 Webhook: {webhook}")
-print(f"DEBUG: 환경변수 UserID: {user_id}")
-
-INITIAL_SIGMA_SOXL = 0.0705
-INITIAL_SIGMA_JPM = 0.0162
 
 def load_config():
     config_path = "config.json" 
@@ -37,22 +29,7 @@ def load_config():
         with open(config_path, 'r') as f:
             return json.load(f)
     except FileNotFoundError:
-        default_cfg = {
-            "POSITIONS": {
-                "SOXL": {
-                    "ENTRY_MULTIPLIER": 1.1,
-                    "DAILY_SIGMA": INITIAL_SIGMA_SOXL,
-                    "LAST_SIGMA_UPDATE": datetime.now().strftime("%Y-%m-%d")
-                },
-                "JPM": {
-                    "ENTRY_MULTIPLIER": 1.5,
-                    "DAILY_SIGMA": INITIAL_SIGMA_JPM,
-                    "LAST_SIGMA_UPDATE": datetime.now().strftime("%Y-%m-%d")
-                }
-            },
-            "LAST_MONTHLY_PING": ""
-        }
-        return default_cfg
+        return {"POSITIONS": {}, "LAST_MONTHLY_PING": ""}
               
 def save_config(cfg):
     try:
@@ -67,40 +44,35 @@ def load_ledger():
             return json.load(f)
     except Exception:
         return {
-            "SOXL_LONG":  {"qty": 0, "avg_price": 0.0},
+            "SOXL_LONG": {"qty": 0, "avg_price": 0.0},
             "SOXL_SHORT": {"qty": 0, "avg_price": 0.0},
-            "JPM_LONG":   {"qty": 0, "avg_price": 0.0},
+            "QQQM_LONG": {"qty": 0, "avg_price": 0.0},
+            "SOXX_LONG": {"qty": 0, "avg_price": 0.0},
         }
 
 def update_positions_from_ledger(cfg):
     ledger = load_ledger()
-    for ticker in ["SOXL", "JPM"]:
+    for ticker in TARGET_TICKERS:
         pos = cfg.setdefault("POSITIONS", {}).setdefault(ticker, {})
         targets = ["LONG", "SHORT"] if ticker == "SOXL" else ["LONG"]
-        
         for key in targets:
             ledger_key = f"{ticker}_{key}"
-            entry     = ledger.get(ledger_key, {})
-            qty       = entry.get("qty", 0)
-            avg_price = entry.get("avg_price", 0.0)
-
-            pos[f"TOTAL_SHARES_{key}"] = qty
-            pos[f"MY_AVG_PRICE_{key}"] = avg_price
-            print(f"   📒 [{ticker} {key}] 보유 {qty}주 / 평균가격 ${avg_price:.4f}")
+            entry = ledger.get(ledger_key, {})
+            pos[f"TOTAL_SHARES_{key}"] = entry.get("qty", 0)
+            pos[f"MY_AVG_PRICE_{key}"] = entry.get("avg_price", 0.0)
 
 # ───────────────────────────────────────────────
-# 시그마 및 월말 핑 로직
+# 로직 함수들
 # ───────────────────────────────────────────────
 
 def check_and_update_sigma(config):
     updated = False
     messages = []
-    for ticker in ["SOXL", "JPM"]:
+    for ticker in TARGET_TICKERS:
         pos = config["POSITIONS"].get(ticker, {})
         last_update_str = pos.get("LAST_SIGMA_UPDATE", "2000-01-01")
         last_update = datetime.strptime(last_update_str, "%Y-%m-%d")
         today = datetime.now()
-        
         if (today - last_update).days >= 365:
             try:
                 hist = yf.Ticker(ticker).history(period="365d", auto_adjust=True)
@@ -127,16 +99,9 @@ def check_monthly_ping(cfg):
             return True
     return False
 
-# ───────────────────────────────────────────────
-# 시세 및 알림 로직
-# ───────────────────────────────────────────────
-
 def get_market_mode():
     now_ny = datetime.now(ZoneInfo("America/New_York"))
-    hour    = now_ny.hour + now_ny.minute / 60.0
-    is_dst  = now_ny.dst() != timedelta(0)
-    tz_label = "EDT (서머타임)" if is_dst else "EST"
-    print(f"🕒 뉴욕 현재 시각: {now_ny.strftime('%Y-%m-%d %H:%M:%S')} ({tz_label})")
+    hour = now_ny.hour + now_ny.minute / 60.0
     mode = "장중" if 9.5 <= hour < 16.0 else "장전"
     return mode, now_ny
 
@@ -155,17 +120,10 @@ def send_discord(webhook_url, user_id, title, content):
     if not webhook_url: return
     payload = {
         "content": f"<@{user_id}> " if user_id else "",
-        "embeds": [{
-            "title":   title,
-            "description": content,
-            "color":      3447003,
-            "timestamp":  datetime.now(timezone.utc).isoformat()
-        }]
+        "embeds": [{"title": title, "description": content, "color": 3447003, "timestamp": datetime.now(timezone.utc).isoformat()}]
     }
     try:
-        res = requests.post(webhook_url, json=payload, timeout=15)
-        if res.status_code == 204: print("✅ 디스코드 알림 전송 성공")
-        else: print(f"❌ 디스코드 응답 에러 (코드: {res.status_code})")
+        requests.post(webhook_url, json=payload, timeout=15)
     except Exception as e:
         print(f"❌ 디스코드 전송 실패: {e}")
 
@@ -181,11 +139,10 @@ def execute_dual_tactical_trader():
     cfg = load_config()
 
     sigma_changed, sigma_msg = check_and_update_sigma(cfg)
+    check_monthly_ping(cfg) # 월말 핑 체크 로직 추가
     update_positions_from_ledger(cfg)
-    check_monthly_ping(cfg)
     save_config(cfg)
     
-    # VIX 데이터 조회
     try:
         vix = yf.Ticker("^VIX").history(period="1d")
         vix_price = float(vix['Close'].iloc[-1]) if not vix.empty else 0.0
@@ -194,36 +151,30 @@ def execute_dual_tactical_trader():
     
     lines = [f"{MODE_EMOJI[mode]} {mode} 모드 | {now_ny.strftime('%Y-%m-%d %H:%M %Z')}", f"• VIX 지수: {vix_price:.2f}"]
     
-    for ticker in ["SOXL", "JPM"]:
-        pos_cfg = cfg["POSITIONS"][ticker]
+    for ticker in TARGET_TICKERS:
+        pos_cfg = cfg["POSITIONS"].get(ticker, {})
         prev_close, current_price = get_ticker_data(ticker)
-        
-        if prev_close is None:
-            lines.append(f"\n⚠️ {ticker} 데이터 수신 실패")
-            continue
+        if prev_close is None: continue
             
-        loc_price = calc_loc(prev_close, pos_cfg.get("ENTRY_MULTIPLIER", 1.5), pos_cfg.get("DAILY_SIGMA", 0.0818))
+        loc_price = calc_loc(prev_close, pos_cfg.get("ENTRY_MULTIPLIER", 1.5), pos_cfg.get("DAILY_SIGMA", 0.05))
         
         ticker_info = [f"\n🔹 **{ticker}**", f"• 전일 종가: ${prev_close:.2f} / LOC 예정가: ${loc_price:.2f}"]
-        if mode == "장중":
-            ticker_info.append(f"• 현재가: ${current_price:.2f}")
+        if mode == "장중": ticker_info.append(f"• 현재가: ${current_price:.2f}")
+
+        # VIX 35 이상 폭락장 알림
+        if vix_price >= 35.0 and ticker == "SOXL":
+            ticker_info.append("• 🚀 **[폭락장] 매수잔액으로 분할 매수 실행 구간**")
 
         targets = ["LONG", "SHORT"] if ticker == "SOXL" else ["LONG"]
         for k in targets:
             qty = pos_cfg.get(f"TOTAL_SHARES_{k}", 0)
             avg = pos_cfg.get(f"MY_AVG_PRICE_{k}", 0)
-            msg = f"• [{k}] 보유: {qty}주"
-            if qty > 0 and avg > 0:
-                msg += f" / 평균: ${avg:.4f} / 수익: {(current_price - avg)/avg*100:+.2f}%"
-            ticker_info.append(msg)
+            if qty > 0:
+                ticker_info.append(f"• [{k}] 보유: {qty}주 / 수익: {(current_price - avg)/avg*100:+.2f}%")
         lines.extend(ticker_info)
     
-    if sigma_changed:
-        lines.append(f"\n{sigma_msg}")
+    if sigma_changed: lines.append(f"\n{sigma_msg}")
+    send_discord(os.environ.get("DISCORD_WEBHOOK"), os.environ.get("DISCORD_USER_ID"), f"{MODE_EMOJI[mode]} 브리핑", "\n".join(lines))
 
-    send_discord(os.environ.get("DISCORD_WEBHOOK") or cfg.get("DISCORD_WEBHOOK", ""), 
-                 os.environ.get("DISCORD_USER_ID") or cfg.get("DISCORD_USER_ID", ""), 
-                 f"{MODE_EMOJI[mode]} {mode} 브리핑", "\n".join(lines))
-            
 if __name__ == "__main__":
     execute_dual_tactical_trader()
