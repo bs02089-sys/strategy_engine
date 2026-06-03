@@ -42,7 +42,7 @@ def load_config():
                 "SOXL": {
                     "ENTRY_MULTIPLIER": 1.1,
                     "DAILY_SIGMA": INITIAL_SIGMA_SOXL,
-                    "LAST_SIGMA_UPDATE": "2026-06-03"
+                    "LAST_SIGMA_UPDATE": datetime.now().strftime("%Y-%m-%d")
                 },
                 "JPM": {
                     "ENTRY_MULTIPLIER": 1.5,
