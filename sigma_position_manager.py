@@ -108,20 +108,16 @@ def get_market_mode():
 def get_ticker_data(ticker, mode):
     try:
         t = yf.Ticker(ticker)
-        # 데이터를 넉넉히 가져옵니다
         hist = t.history(period="5d", auto_adjust=False)
         if len(hist) < 2: return None, None
         
-        # 장중(☀️): 당일 데이터가 포함된 iloc[-1]은 미완성일 수 있으므로 확실한 종가인 iloc[-2] 사용
-        # 장전(🌙): 전날 장이 이미 끝났으므로 가장 최근 데이터인 iloc[-1] 사용
+        # 장중(☀️): 확실한 종가인 iloc[-2] 사용 / 장전(🌙): 최신 종가인 iloc[-1] 사용
         prev_close = float(hist['Close'].iloc[-2]) if mode == "장중" else float(hist['Close'].iloc[-1])
-        
         current_price = float(t.fast_info.last_price)
         return prev_close, current_price
-    except Exception as e:
-        print(f"⚠️ {ticker} 데이터 조회 오류: {e}")
+    except:
         return None, None
-        
+            
 def send_discord(webhook_url, user_id, title, content):
     if not webhook_url: return
     payload = {
@@ -157,28 +153,36 @@ def execute_dual_tactical_trader():
     
     lines = [f"{MODE_EMOJI[mode]} {mode} 모드 | {now_ny.strftime('%Y-%m-%d %H:%M %Z')}", f"• VIX 지수: {vix_price:.2f}"]
     
-    for ticker in ["SOXL", "JPM"]:
-        pos_cfg = cfg["POSITIONS"][ticker]
+    # 3종목 체제 루프
+    for ticker in ["QQQM", "SOXX", "SOXL"]:
+        pos_cfg = cfg["POSITIONS"].get(ticker, {})
+        
+        # mode를 인자로 전달하여 정확한 전일 종가 산출
         prev_close, current_price = get_ticker_data(ticker, mode)
         
         if prev_close is None:
             lines.append(f"\n⚠️ {ticker} 데이터 수신 실패")
             continue
             
-        loc_price = calc_loc(prev_close, pos_cfg.get("ENTRY_MULTIPLIER", 1.5), pos_cfg.get("DAILY_SIGMA", 0.0818))
+        loc_price = calc_loc(prev_close, pos_cfg.get("ENTRY_MULTIPLIER", 1.5), pos_cfg.get("DAILY_SIGMA", 0.05))
         
         ticker_info = [f"\n🔹 **{ticker}**", f"• 전일 종가: ${prev_close:.2f} / LOC 예정가: ${loc_price:.2f}"]
         if mode == "장중":
             ticker_info.append(f"• 현재가: ${current_price:.2f}")
 
+        # SOXL 폭락장 알림
+        if vix_price >= 35.0 and ticker == "SOXL":
+            ticker_info.append("• 🚀 **[폭락장] 분할 매수 실행 구간**")
+
         targets = ["LONG", "SHORT"] if ticker == "SOXL" else ["LONG"]
         for k in targets:
             qty = pos_cfg.get(f"TOTAL_SHARES_{k}", 0)
             avg = pos_cfg.get(f"MY_AVG_PRICE_{k}", 0)
-            msg = f"• [{k}] 보유: {qty}주"
-            if qty > 0 and avg > 0:
-                msg += f" / 평균: ${avg:.4f} / 수익: {(current_price - avg)/avg*100:+.2f}%"
-            ticker_info.append(msg)
+            if qty > 0:
+                msg = f"• [{k}] 보유: {qty}주"
+                if avg > 0:
+                    msg += f" / 수익: {(current_price - avg)/avg*100:+.2f}%"
+                ticker_info.append(msg)
         lines.extend(ticker_info)
     
     if sigma_changed:
