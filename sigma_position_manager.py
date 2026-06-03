@@ -97,7 +97,7 @@ def check_and_update_sigma(config):
     messages = []
     for ticker in ["SOXL", "JPM"]:
         pos = config["POSITIONS"].get(ticker, {})
-        last_update_str = pos.get("LAST_SIGMA_UPDATE", "2026-05-29")
+        last_update_str = pos.get("LAST_SIGMA_UPDATE", "2000-01-01")
         last_update = datetime.strptime(last_update_str, "%Y-%m-%d")
         today = datetime.now()
         
