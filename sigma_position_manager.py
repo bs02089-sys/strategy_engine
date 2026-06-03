@@ -22,7 +22,6 @@ TARGET_TICKERS = ["QQQM", "SOXX", "SOXL"]
 # ───────────────────────────────────────────────
 # 설정 / 장부 로드 
 # ───────────────────────────────────────────────
-
 def load_config():
     config_path = "config.json" 
     try:
@@ -140,11 +139,13 @@ def execute_dual_tactical_trader():
     mode, now_ny = get_market_mode()
     cfg = load_config()
 
+    # 시스템 기초 로직 실행
     sigma_changed, sigma_msg = check_and_update_sigma(cfg)
     update_positions_from_ledger(cfg)
     check_monthly_ping(cfg)
     save_config(cfg)
     
+    # 시장 상황 확인
     try:
         vix = yf.Ticker("^VIX").history(period="1d")
         vix_price = float(vix['Close'].iloc[-1]) if not vix.empty else 0.0
@@ -153,44 +154,38 @@ def execute_dual_tactical_trader():
     
     lines = [f"{MODE_EMOJI[mode]} {mode} 모드 | {now_ny.strftime('%Y-%m-%d %H:%M %Z')}", f"• VIX 지수: {vix_price:.2f}"]
     
-    # 3종목 체제 루프
+    # 종목별 LOC 매수 전략 실행 (QQQM, SOXX, SOXL 동일)
     for ticker in ["QQQM", "SOXX", "SOXL"]:
         pos_cfg = cfg["POSITIONS"].get(ticker, {})
         
-        # mode를 인자로 전달하여 정확한 전일 종가 산출
+        # LOC 예정가 산출
         prev_close, current_price = get_ticker_data(ticker, mode)
+        if prev_close is None: continue
         
-        if prev_close is None:
-            lines.append(f"\n⚠️ {ticker} 데이터 수신 실패")
-            continue
-            
         loc_price = calc_loc(prev_close, pos_cfg.get("ENTRY_MULTIPLIER", 1.5), pos_cfg.get("DAILY_SIGMA", 0.05))
         
         ticker_info = [f"\n🔹 **{ticker}**", f"• 전일 종가: ${prev_close:.2f} / LOC 예정가: ${loc_price:.2f}"]
-        if mode == "장중":
+        if mode == "장중": 
             ticker_info.append(f"• 현재가: ${current_price:.2f}")
 
-        # SOXL 폭락장 알림
-        if vix_price >= 35.0 and ticker == "SOXL":
-            ticker_info.append("• 🚀 **[폭락장] 분할 매수 실행 구간**")
-
+        # 보유 잔고 및 수익률 현황
         targets = ["LONG", "SHORT"] if ticker == "SOXL" else ["LONG"]
         for k in targets:
             qty = pos_cfg.get(f"TOTAL_SHARES_{k}", 0)
             avg = pos_cfg.get(f"MY_AVG_PRICE_{k}", 0)
             if qty > 0:
                 msg = f"• [{k}] 보유: {qty}주"
-                if avg > 0:
-                    msg += f" / 수익: {(current_price - avg)/avg*100:+.2f}%"
+                if avg > 0: msg += f" / 수익: {(current_price - avg)/avg*100:+.2f}%"
                 ticker_info.append(msg)
         lines.extend(ticker_info)
     
-    if sigma_changed:
-        lines.append(f"\n{sigma_msg}")
+    # 시그마 갱신 알림
+    if sigma_changed: lines.append(f"\n{sigma_msg}")
 
+    # 최종 디스코드 전송
     send_discord(os.environ.get("DISCORD_WEBHOOK") or cfg.get("DISCORD_WEBHOOK", ""), 
                  os.environ.get("DISCORD_USER_ID") or cfg.get("DISCORD_USER_ID", ""), 
                  f"{MODE_EMOJI[mode]} {mode} 브리핑", "\n".join(lines))
-            
+                
 if __name__ == "__main__":
     execute_dual_tactical_trader()

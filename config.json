@@ -10,16 +10,16 @@
         "QQQM": {
             "TOTAL_SHARES_LONG": 0,
             "MY_AVG_PRICE_LONG": 0.0,
-            "ENTRY_MULTIPLIER": 1.1,
-            "DAILY_SIGMA": 0.015,
-            "LAST_SIGMA_UPDATE": "2026-06-03"
+            "ENTRY_MULTIPLIER": 1.5,
+            "DAILY_SIGMA": 0.01498,
+            "LAST_SIGMA_UPDATE": "2026-06-04"
         },
         "SOXX": {
             "TOTAL_SHARES_LONG": 0,
             "MY_AVG_PRICE_LONG": 0.0,
-            "ENTRY_MULTIPLIER": 1.2,
-            "DAILY_SIGMA": 0.025,
-            "LAST_SIGMA_UPDATE": "2026-06-03"
+            "ENTRY_MULTIPLIER": 1.3,
+            "DAILY_SIGMA": 0.0279,
+            "LAST_SIGMA_UPDATE": "2026-06-04"
         },
         "SOXL": {
             "TOTAL_SHARES_LONG": 17,
