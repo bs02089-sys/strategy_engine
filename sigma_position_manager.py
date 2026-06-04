@@ -17,7 +17,7 @@ if hasattr(sys.stderr, 'reconfigure'):
 warnings.filterwarnings('ignore', category=FutureWarning)
 
 MODE_EMOJI = {"장전": "🌙", "장중": "☀️"}
-TARGET_TICKERS = ["QQQM", "SOXX", "SOXL"]
+TARGET_TICKERS = ["BOTZ", "SOXX", "SOXL"]
 
 # ───────────────────────────────────────────────
 # 설정 / 장부 로드 
@@ -45,7 +45,7 @@ def load_ledger():
         return {
             "SOXL_LONG": {"qty": 0, "avg_price": 0.0},
             "SOXL_SHORT": {"qty": 0, "avg_price": 0.0},
-            "QQQM_LONG": {"qty": 0, "avg_price": 0.0},
+            "BOTZ_LONG": {"qty": 0, "avg_price": 0.0},
             "SOXX_LONG": {"qty": 0, "avg_price": 0.0},
         }
 
@@ -154,8 +154,8 @@ def execute_dual_tactical_trader():
     
     lines = [f"{MODE_EMOJI[mode]} {mode} 모드 | {now_ny.strftime('%Y-%m-%d %H:%M %Z')}", f"• VIX 지수: {vix_price:.2f}"]
     
-    # 종목별 LOC 매수 전략 실행 (QQQM, SOXX, SOXL 동일)
-    for ticker in ["QQQM", "SOXX", "SOXL"]:
+    # 종목별 LOC 매수 전략 실행 (BOTZ, SOXX, SOXL 동일)
+    for ticker in ["BOTZ", "SOXX", "SOXL"]:
         pos_cfg = cfg["POSITIONS"].get(ticker, {})
         
         # LOC 예정가 산출
