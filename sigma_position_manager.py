@@ -74,7 +74,7 @@ def check_and_update_sigma(config):
         today = datetime.now()
         if (today - last_update).days >= 365:
             try:
-                hist = yf.Ticker(ticker).history(period="365d", auto_adjust=True)
+                hist = yf.Ticker(ticker).history(period="1y", auto_adjust=True)
                 new_sigma = round(float(hist['Close'].pct_change().dropna().std()), 6)
                 pos["DAILY_SIGMA"] = new_sigma
                 pos["LAST_SIGMA_UPDATE"] = today.strftime("%Y-%m-%d")
