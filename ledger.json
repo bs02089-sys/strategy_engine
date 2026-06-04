@@ -1,4 +1,6 @@
 {
-    "SOXL_LONG":  {"qty": 17, "avg_price": 165.1124},
-    "SOXL_SHORT": {"qty": 4,  "avg_price": 164.3043}
+    "SOXL_LONG":  {"qty": 18, "avg_price": 169.3839},
+    "SOXL_SHORT": {"qty": 5,  "avg_price": 179.8434},
+    "SOXX_LONG":  {"qty": 1,  "avg_price": 586.50},
+    "QQQM_LONG":  {"qty": 0,  "avg_price": 0.0}
 }
