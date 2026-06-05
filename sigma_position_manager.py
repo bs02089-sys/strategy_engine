@@ -153,36 +153,36 @@ def refresh_sigma_if_stale(cfg: dict) -> list[str]:
 # ═══════════════════════════════════════════════════════════
 
 def get_prev_close(ticker: str) -> float | None:
-    """가장 최근 완료된 거래일(어제)의 종가를 반환"""
     try:
         t = yf.Ticker(ticker)
         
+        # 최대한 많은 데이터를 가져와서 가장 최근 종가 강제 추출
         hist = t.history(
-            period="20d",
+            period="30d",          # 기간 대폭 증가
             interval="1d",
             auto_adjust=False,
             prepost=False
         )
         
-        if hist.empty or len(hist) < 2:
-            print(f"⚠️ {ticker}: history 데이터 부족")
+        if hist.empty:
+            print(f"⚠️ {ticker}: history 데이터 없음")
             return None
 
         closes = hist["Close"].dropna()
-        if len(closes) < 2:
-            print(f"⚠️ {ticker}: 유효한 종가 데이터 부족")
+        if len(closes) == 0:
+            print(f"⚠️ {ticker}: Close 데이터 없음")
             return None
 
         prev_close = float(closes.iloc[-1])
         
-        print(f"📌 {ticker} 전일 종가: ${prev_close:.2f}")
+        print(f"📌 {ticker} → 전일 종가: ${prev_close:.2f}  (데이터 {len(closes)}개)")
         
         return prev_close
 
     except Exception as e:
         print(f"❌ {ticker} 가격 조회 실패: {e}")
         return None
-            
+                
     
 def get_vix() -> float | None:
     try:
