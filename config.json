@@ -8,8 +8,8 @@
     ],
     "POSITIONS": {
         "AIQ": {
-            "ENTRY_MULTIPLIER": 0.7,
-            "DAILY_SIGMA": 0.012808,
+            "ENTRY_MULTIPLIER": 1.45,
+            "DAILY_SIGMA": 0.02653,
             "LAST_SIGMA_UPDATE": "2026-06-05",
             "LOOKBACK_DAYS": 90
         },
