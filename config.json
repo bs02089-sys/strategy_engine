@@ -17,7 +17,7 @@
         },
         "SOXX": {
             "TOTAL_SHARES_LONG": 1,
-            "MY_AVG_PRICE_LONG": 586.00,
+            "MY_AVG_PRICE_LONG": 586.0,
             "ENTRY_MULTIPLIER": 1.3,
             "DAILY_SIGMA": 0.02507,
             "LAST_SIGMA_UPDATE": "2026-06-05",
