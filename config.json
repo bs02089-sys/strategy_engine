@@ -35,11 +35,11 @@
         }
     },
     "STRATEGY": {
-    "CYCLE_YEARS": 2,
-    "BUY_DURATION_DAYS": 252,
-    "HOLD_DURATION_DAYS": 252,
-    "DEFAULT_LOOKBACK_DAYS": 365,
-    "VIX_THRESHOLD": 25.0
+        "CYCLE_YEARS": 2,
+        "BUY_DURATION_DAYS": 252,
+        "HOLD_DURATION_DAYS": 252,
+        "DEFAULT_LOOKBACK_DAYS": 365,
+        "VIX_THRESHOLD": 25.0
     },
     "exchange_status": {
         "LAST_CHECK_DATE": "2026-06-04 07:26:34 UTC",
