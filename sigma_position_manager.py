@@ -18,6 +18,8 @@ import json
 import shutil
 import tempfile
 import numpy as np
+import pandas as pd
+from pandas.tseries.offsets import BDay
 import warnings
 import requests
 import yfinance as yf
@@ -134,16 +136,15 @@ def get_prev_close(ticker: str) -> float | None:
     """
     전일 확정 종가를 반환한다.
 
-    history(period="5d", auto_adjust=True) 기준:
-    - auto_adjust=True : 배당락 조정 반영 → 증권앱 표시 가격과 일치
-    - 정규장 시작(09:30 EDT) 이전: iloc[-1] 사용
-      → 당일 미완성 봉이 있더라도 가장 최근 확정 종가가 iloc[-1]
-    - 정규장 중(09:30~16:00 EDT): 오늘 미완성 봉 여부를 날짜로 확인
-      → 오늘 봉 포함 시 iloc[-2] 사용
+    - period="1mo": 유동성 낮은 종목(BOTZ 등)의 데이터 누락 방지
+    - auto_adjust=True: 배당락 조정 반영 → 증권앱 표시 가격과 일치
+    - 직전 거래일(BDay-1) 검증: 가장 최근 봉이 직전 거래일인지 확인
+    - 프리마켓/장후: iloc[-1] 사용 (당일 미완성 봉 제외)
+    - 정규장 중: 오늘 봉 포함 시 iloc[-2] 사용
     """
     try:
         t    = yf.Ticker(ticker)
-        hist = t.history(period="5d", auto_adjust=True)
+        hist = t.history(period="1mo", auto_adjust=True)
 
         if hist.empty or len(hist) < 1:
             print(f"⚠️ {ticker}: 가격 데이터 없음")
@@ -154,13 +155,11 @@ def get_prev_close(ticker: str) -> float | None:
             print(f"⚠️ {ticker}: 유효 Close 없음")
             return None
 
-        # 뉴욕 현재 시각
-        now_ny   = datetime.now(ZoneInfo("America/New_York"))
-        hour_ny  = now_ny.hour + now_ny.minute / 60.0
-        is_open  = 9.5 <= hour_ny < 16.0  # 정규장 시간 여부
+        now_ny  = datetime.now(ZoneInfo("America/New_York"))
+        hour_ny = now_ny.hour + now_ny.minute / 60.0
+        is_open = 9.5 <= hour_ny < 16.0
 
         if is_open:
-            # 정규장 중: 오늘 미완성 봉 포함 여부 확인
             last_date = hist.index[-1].date()
             today_ny  = now_ny.date()
             if last_date == today_ny and len(close_valid) >= 2:
@@ -168,12 +167,18 @@ def get_prev_close(ticker: str) -> float | None:
             else:
                 prev_close = _safe_float(close_valid.iloc[-1])
         else:
-            # 프리마켓 / 장후: 가장 최근 확정 봉 = iloc[-1]
+            # 프리마켓/장후: 가장 최근 확정 봉
             prev_close = _safe_float(close_valid.iloc[-1])
 
         if prev_close is None:
             print(f"⚠️ {ticker}: prev_close NaN")
             return None
+
+        # 직전 거래일 검증 — 데이터 누락 경고
+        last_data_date = close_valid.index[-1].date()
+        expected_date  = (pd.Timestamp(now_ny.date()) - BDay(1)).date()
+        if last_data_date < expected_date:
+            print(f"⚠️ {ticker}: 데이터 지연 — 기대 {expected_date}, 실제 {last_data_date}")
 
         return prev_close
 
