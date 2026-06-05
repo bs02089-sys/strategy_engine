@@ -205,28 +205,31 @@ def get_ticker_data(ticker: str, mode: str) -> tuple[float | None, float | None]
     """
     try:
         t = yf.Ticker(ticker)
-        # 더 안정적으로 최근 데이터를 가져오기 위해 5d 사용
-        hist = t.history(period="5d", auto_adjust=False)
+        
+        # period="5d" + prepost=False로 더 안정적인 전일 종가 확보
+        hist = t.history(
+            period="5d", 
+            auto_adjust=False,
+            prepost=False          # ← 추가: 장전/장후 데이터 제외
+        )
 
-        if hist.empty or len(hist) < 2:
-            print(f"⚠️ {ticker}: 가격 데이터 부족 ({len(hist)}봉)")
+        if hist.empty or len(hist) < 1:
+            print(f"⚠️ {ticker}: 가격 데이터 부족")
             return None, None
 
         close_valid = hist["Close"].dropna()
-        if len(close_valid) < 2:
-            print(f"⚠️ {ticker}: 유효 Close 부족")
+        if len(close_valid) < 1:
+            print(f"⚠️ {ticker}: 유효 Close 데이터 없음")
             return None, None
 
-        # === 핵심 수정 부분 ===
-        # 가장 최근 완성된 봉(전일 종가)을 항상 hist.iloc[-1]로 취함
-        # yfinance는 장중에도 전일까지의 완성된 daily 봉을 hist[-1]에 넣어줌
+        # 가장 최근 **완료된 거래일**의 종가를 전일 종가로 사용
         prev_close = float(close_valid.iloc[-1])
 
         if np.isnan(prev_close):
             print(f"⚠️ {ticker}: prev_close NaN")
             return None, None
 
-        # 현재가
+        # 현재가 (fast_info가 불안정할 경우 대비)
         raw = t.fast_info.last_price
         current_price = (
             float(raw) if (raw is not None and not np.isnan(float(raw)))
@@ -238,7 +241,7 @@ def get_ticker_data(ticker: str, mode: str) -> tuple[float | None, float | None]
     except Exception as e:
         print(f"❌ {ticker} 데이터 에러: {e}")
         return None, None
-
+    
 def get_vix() -> float | None:
     """VIX 지수를 반환한다. 실패 시 None."""
     try:
