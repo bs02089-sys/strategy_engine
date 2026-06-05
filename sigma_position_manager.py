@@ -153,39 +153,44 @@ def refresh_sigma_if_stale(cfg: dict) -> list[str]:
 # ═══════════════════════════════════════════════════════════
 
 def get_prev_close(ticker: str) -> float | None:
-    """Twelve Data API를 사용한 전일 종가 조회"""
+    """Twelve Data 디버깅 강화 버전"""
     try:
-        # 환경변수에서만 API Key 가져오기 (PowerShell 등록 우선)
         api_key = os.environ.get("TWELVEDATA_API_KEY")
-        
+        print(f"🔑 {ticker} API Key 존재 여부: {'Yes' if api_key else 'No'}")  # ← 중요
+
         if not api_key:
-            print(f"⚠️ {ticker}: TWELVEDATA_API_KEY 환경변수가 설정되지 않았습니다.")
+            print(f"❌ {ticker}: TWELVEDATA_API_KEY 환경변수가 없습니다.")
             return None
 
         from twelvedata import TDClient
         td = TDClient(apikey=api_key)
         
+        print(f"📡 {ticker} Twelve Data 요청 시작...")
+        
         ts = td.time_series(
             symbol=ticker,
             interval="1day",
-            outputsize=10
+            outputsize=5
         ).as_json()
         
-        if ts and "values" in ts and len(ts["values"]) > 0:
+        print(f"📊 {ticker} 응답 수신: {type(ts)}")  # 디버깅
+        
+        if ts and isinstance(ts, dict) and "values" in ts and len(ts["values"]) > 0:
             prev_close = float(ts["values"][0]["close"])
-            print(f"📌 {ticker} → Twelve Data 전일 종가: ${prev_close:.2f}")
+            print(f"✅ {ticker} 성공 → ${prev_close:.2f}")
             return prev_close
         else:
-            print(f"⚠️ {ticker}: Twelve Data 응답 데이터 없음")
+            print(f"⚠️ {ticker} 응답에 데이터 없음: {ts}")
             return None
-            
+
     except ImportError:
-        print("⚠️ twelvedata 라이브러리가 설치되지 않았습니다. → pip install twelvedata")
+        print("❌ twelvedata 라이브러리가 설치되지 않았습니다.")
+        print("   명령어: pip install twelvedata")
         return None
     except Exception as e:
-        print(f"❌ {ticker} Twelve Data 조회 실패: {e}")
+        print(f"❌ {ticker} Twelve Data 오류: {type(e).__name__} - {e}")
         return None
-                                
+                                    
     
 def get_vix() -> float | None:
     try:
