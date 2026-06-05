@@ -201,47 +201,41 @@ def get_market_mode() -> tuple[str, datetime]:
 
 def get_ticker_data(ticker: str, mode: str) -> tuple[float | None, float | None]:
     """
-    전일 확정 종가와 현재가를 반환한다.
+    전일 확정 종가와 현재가를 반환한다. (BOTZ $40.08 문제 해결 버전)
     """
     try:
         t = yf.Ticker(ticker)
         
-        # period="5d" + prepost=False로 더 안정적인 전일 종가 확보
-        hist = t.history(
-            period="5d", 
-            auto_adjust=False,
-            prepost=False          # ← 추가: 장전/장후 데이터 제외
-        )
+        # 1. fast_info에서 Previous Close 우선 사용 (가장 신뢰할 수 있는 방법)
+        prev_close = t.fast_info.get('previousClose')
+        
+        # 2. fast_info가 실패하면 history로 폴백
+        if prev_close is None or np.isnan(float(prev_close)):
+            hist = t.history(period="5d", auto_adjust=False, prepost=False)
+            if not hist.empty:
+                prev_close = float(hist["Close"].dropna().iloc[-1])
+            else:
+                prev_close = None
 
-        if hist.empty or len(hist) < 1:
-            print(f"⚠️ {ticker}: 가격 데이터 부족")
+        if prev_close is None or np.isnan(float(prev_close)):
+            print(f"⚠️ {ticker}: prev_close 조회 실패")
             return None, None
 
-        close_valid = hist["Close"].dropna()
-        if len(close_valid) < 1:
-            print(f"⚠️ {ticker}: 유효 Close 데이터 없음")
-            return None, None
+        prev_close = float(prev_close)
 
-        # 가장 최근 **완료된 거래일**의 종가를 전일 종가로 사용
-        prev_close = float(close_valid.iloc[-1])
+        # 현재가
+        current_price = t.fast_info.last_price
+        if current_price is None or np.isnan(float(current_price)):
+            current_price = prev_close
 
-        if np.isnan(prev_close):
-            print(f"⚠️ {ticker}: prev_close NaN")
-            return None, None
-
-        # 현재가 (fast_info가 불안정할 경우 대비)
-        raw = t.fast_info.last_price
-        current_price = (
-            float(raw) if (raw is not None and not np.isnan(float(raw)))
-            else prev_close
-        )
+        current_price = float(current_price)
 
         return prev_close, current_price
 
     except Exception as e:
         print(f"❌ {ticker} 데이터 에러: {e}")
         return None, None
-    
+        
 def get_vix() -> float | None:
     """VIX 지수를 반환한다. 실패 시 None."""
     try:
