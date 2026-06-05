@@ -1,62 +1,62 @@
 {
-    "DISCORD_WEBHOOK": "",
-    "DISCORD_USER_ID": "",
-    "TICKERS": [
-        "BOTZ",
-        "SOXX",
-        "SOXL"
-    ],
-    "POSITIONS": {
-        "BOTZ": {
-            "TOTAL_SHARES_LONG": 0,
-            "MY_AVG_PRICE_LONG": 0.0,
-            "ENTRY_MULTIPLIER": 0.8,
-            "DAILY_SIGMA": 0.014101,
-            "LAST_SIGMA_UPDATE": "2026-06-05",
-            "LOOKBACK_DAYS": 90
-        },
-        "SOXX": {
-            "TOTAL_SHARES_LONG": 1,
-            "MY_AVG_PRICE_LONG": 586.5,
-            "ENTRY_MULTIPLIER": 1.3,
-            "DAILY_SIGMA": 0.02507,
-            "LAST_SIGMA_UPDATE": "2026-06-05",
-            "LOOKBACK_DAYS": 365
-        },
-        "SOXL": {
-            "TOTAL_SHARES_LONG": 18,
-            "MY_AVG_PRICE_LONG": 169.3839,
-            "TOTAL_SHARES_SHORT": 5,
-            "MY_AVG_PRICE_SHORT": 179.8434,
-            "ENTRY_MULTIPLIER": 1.5,
-            "DAILY_SIGMA": 0.074649,
-            "LAST_SIGMA_UPDATE": "2026-06-05",
-            "LOOKBACK_DAYS": 365
-        }
+  "DISCORD_WEBHOOK": "",
+  "DISCORD_USER_ID": "",
+  "TICKERS": [
+    "BOTZ",
+    "SOXX",
+    "SOXL"
+  ],
+  "POSITIONS": {
+    "BOTZ": {
+      "TOTAL_SHARES_LONG": 0,
+      "MY_AVG_PRICE_LONG": 0.0,
+      "ENTRY_MULTIPLIER": 0.8,
+      "DAILY_SIGMA": 0.014101,
+      "LAST_SIGMA_UPDATE": "2026-06-05",
+      "LOOKBACK_DAYS": 90
     },
-    "STRATEGY": {
-        "CYCLE_YEARS": 2,
-        "BUY_DURATION_DAYS": 252,
-        "HOLD_DURATION_DAYS": 252,
-        "DEFAULT_LOOKBACK_DAYS": 365,
-        "VIX_THRESHOLD": 25.0
+    "SOXX": {
+      "TOTAL_SHARES_LONG": 1,
+      "MY_AVG_PRICE_LONG": 586.5,
+      "ENTRY_MULTIPLIER": 1.3,
+      "DAILY_SIGMA": 0.02507,
+      "LAST_SIGMA_UPDATE": "2026-06-05",
+      "LOOKBACK_DAYS": 365
     },
-    "exchange_status": {
-        "LAST_CHECK_DATE": "2026-06-04 07:26:34 UTC",
-        "CURRENT_APPLIED_RATE": 1535.76,
-        "CURRENT_PERCENTILE": 100.0
-    },
-    "news_settings": {
-        "KEYWORDS": [
-            "AI Infrastructure",
-            "semiconductor stock",
-            "NVDA",
-            "SOXL ETF",
-            "TSLA stock",
-            "IONQ stock",
-            "BOTZ",
-            "SOXX"
-        ],
-        "MAX_NEWS_PER_KEYWORD": 5
+    "SOXL": {
+      "TOTAL_SHARES_LONG": 18,
+      "MY_AVG_PRICE_LONG": 169.3839,
+      "TOTAL_SHARES_SHORT": 5,
+      "MY_AVG_PRICE_SHORT": 179.8434,
+      "ENTRY_MULTIPLIER": 1.5,
+      "DAILY_SIGMA": 0.074649,
+      "LAST_SIGMA_UPDATE": "2026-06-05",
+      "LOOKBACK_DAYS": 365
     }
+  },
+  "STRATEGY": {
+    "CYCLE_YEARS": 2,
+    "BUY_DURATION_DAYS": 252,
+    "HOLD_DURATION_DAYS": 252,
+    "DEFAULT_LOOKBACK_DAYS": 365,
+    "VIX_THRESHOLD": 25.0
+  },
+  "exchange_status": {
+    "LAST_CHECK_DATE": "2026-06-05 07:11:11 UTC",
+    "CURRENT_APPLIED_RATE": 1542.1,
+    "CURRENT_PERCENTILE": 100.0
+  },
+  "news_settings": {
+    "KEYWORDS": [
+      "AI Infrastructure",
+      "semiconductor stock",
+      "NVDA",
+      "SOXL ETF",
+      "TSLA stock",
+      "IONQ stock",
+      "BOTZ",
+      "SOXX"
+    ],
+    "MAX_NEWS_PER_KEYWORD": 5
+  }
 }
