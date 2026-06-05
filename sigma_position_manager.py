@@ -33,7 +33,7 @@ if hasattr(sys.stderr, "reconfigure"):
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 
-TARGET_TICKERS         = ["BOTZ", "SOXX", "SOXL"]
+TARGET_TICKERS         = ["AIQ", "SOXX", "SOXL"]
 CONFIG_PATH            = "config.json"
 _PERIOD_MAP            = {90: "3mo", 180: "6mo", 365: "1y"}
 _DISCORD_TITLE_LIMIT   = 256
@@ -136,7 +136,7 @@ def get_prev_close(ticker: str) -> float | None:
     """
     전일 확정 종가를 반환한다.
 
-    - period="1mo": 유동성 낮은 종목(BOTZ 등)의 데이터 누락 방지
+    - period="1mo": 유동성 낮은 종목(AIQ 등)의 데이터 누락 방지
     - auto_adjust=True: 배당락 조정 반영 → 증권앱 표시 가격과 일치
     - 직전 거래일(BDay-1) 검증: 가장 최근 봉이 직전 거래일인지 확인
     - 프리마켓/장후: iloc[-1] 사용 (당일 미완성 봉 제외)
