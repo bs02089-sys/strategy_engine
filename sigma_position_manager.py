@@ -153,42 +153,39 @@ def refresh_sigma_if_stale(cfg: dict) -> list[str]:
 # ═══════════════════════════════════════════════════════════
 
 def get_prev_close(ticker: str) -> float | None:
-    """yfinance 불안정 대응 + BOTZ $40.08 강제 매칭"""
+    """Twelve Data API를 사용한 전일 종가 조회"""
     try:
-        # yf.download 사용 (progress=False 추가)
-        data = yf.download(
-            ticker,
-            period="30d",
-            interval="1d",
-            progress=False,
-            auto_adjust=False,
-            prepost=False,
-            threads=False
-        )
+        # 환경변수에서만 API Key 가져오기 (PowerShell 등록 우선)
+        api_key = os.environ.get("TWELVEDATA_API_KEY")
         
-        if not data.empty:
-            closes = data["Close"].dropna()
-            if len(closes) >= 1:
-                price = float(closes.iloc[-1])
-                print(f"📌 {ticker} 전일 종가: ${price:.2f}")
-                return price
+        if not api_key:
+            print(f"⚠️ {ticker}: TWELVEDATA_API_KEY 환경변수가 설정되지 않았습니다.")
+            return None
 
+        from twelvedata import TDClient
+        td = TDClient(apikey=api_key)
+        
+        ts = td.time_series(
+            symbol=ticker,
+            interval="1day",
+            outputsize=10
+        ).as_json()
+        
+        if ts and "values" in ts and len(ts["values"]) > 0:
+            prev_close = float(ts["values"][0]["close"])
+            print(f"📌 {ticker} → Twelve Data 전일 종가: ${prev_close:.2f}")
+            return prev_close
+        else:
+            print(f"⚠️ {ticker}: Twelve Data 응답 데이터 없음")
+            return None
+            
+    except ImportError:
+        print("⚠️ twelvedata 라이브러리가 설치되지 않았습니다. → pip install twelvedata")
+        return None
     except Exception as e:
-        print(f"⚠️ {ticker} download 실패: {e}")
-
-    # fallback
-    try:
-        hist = yf.Ticker(ticker).history(period="30d", auto_adjust=False, prepost=False)
-        if not hist.empty:
-            price = float(hist["Close"].dropna().iloc[-1])
-            print(f"📌 {ticker} history fallback: ${price:.2f}")
-            return price
-    except:
-        pass
-
-    print(f"❌ {ticker} 가격 조회 최종 실패")
-    return None
-                        
+        print(f"❌ {ticker} Twelve Data 조회 실패: {e}")
+        return None
+                                
     
 def get_vix() -> float | None:
     try:
