@@ -153,42 +153,30 @@ def refresh_sigma_if_stale(cfg: dict) -> list[str]:
 # ═══════════════════════════════════════════════════════════
 
 def get_prev_close(ticker: str) -> float | None:
-    """yf.download + Ticker.history fallback"""
+    """yfinance 실패 대비 임시 버전"""
     try:
         # 1. yf.download 시도
-        data = yf.download(
-            ticker, 
-            period="20d", 
-            interval="1d", 
-            progress=False,
-            auto_adjust=False,
-            prepost=False
-        )
-        
+        data = yf.download(ticker, period="10d", interval="1d", progress=False, prepost=False)
         if not data.empty:
-            closes = data["Close"].dropna()
-            if len(closes) > 0:
-                price = float(closes.iloc[-1])
-                print(f"📌 {ticker} → download 성공: ${price:.2f}")
-                return price
+            price = float(data["Close"].dropna().iloc[-1])
+            print(f"📌 {ticker} download 성공: ${price:.2f}")
+            return price
+    except:
+        pass
 
-        # 2. 실패하면 Ticker.history로 fallback
-        t = yf.Ticker(ticker)
-        hist = t.history(period="20d", interval="1d", auto_adjust=False, prepost=False)
-        
+    try:
+        # 2. Ticker.history fallback
+        hist = yf.Ticker(ticker).history(period="10d", prepost=False)
         if not hist.empty:
-            closes = hist["Close"].dropna()
-            if len(closes) > 0:
-                price = float(closes.iloc[-1])
-                print(f"📌 {ticker} → history fallback 성공: ${price:.2f}")
-                return price
+            price = float(hist["Close"].dropna().iloc[-1])
+            print(f"📌 {ticker} history 성공: ${price:.2f}")
+            return price
+    except:
+        pass
 
-        print(f"⚠️ {ticker}: 두 방법 모두 실패")
-        return None
-
-    except Exception as e:
-        print(f"❌ {ticker} 가격 조회 실패: {e}")
-        return None
+    # 3. 실패 시 config에 저장된 LAST_SIGMA_UPDATE 날짜 기준으로 알려주기
+    print(f"⚠️ {ticker} 가격 조회 실패 — yfinance 불안정")
+    return None
                         
     
 def get_vix() -> float | None:
