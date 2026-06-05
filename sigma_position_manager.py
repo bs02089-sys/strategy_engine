@@ -66,27 +66,43 @@ def update_positions_from_ledger(cfg):
 def check_and_update_sigma(config):
     updated = False
     messages = []
-    default_lookback = config.get("STRATEGY", {}).get("DEFAULT_LOOKBACK_DAYS", 365)
+    today = datetime.now()
     
     for ticker in TARGET_TICKERS:
         pos = config["POSITIONS"].get(ticker, {})
-        lookback_days = pos.get("LOOKBACK_DAYS", default_lookback)
         last_update_str = pos.get("LAST_SIGMA_UPDATE", "2000-01-01")
         last_update = datetime.strptime(last_update_str, "%Y-%m-%d")
-        today = datetime.now()
         
-        if (today - last_update).days >= 1:
+        # [수정] 시그마 갱신은 365일(1년) 주기로 고정
+        if (today - last_update).days >= 365:
             try:
-                hist = yf.Ticker(ticker).history(period=f"{lookback_days}d", auto_adjust=True)
+                # 데이터 수집은 1년치로 고정
+                hist = yf.Ticker(ticker).history(period="1y", auto_adjust=True)
+                if hist.empty: continue
+                
                 new_sigma = round(float(hist['Close'].pct_change().dropna().std()), 6)
                 pos["DAILY_SIGMA"] = new_sigma
                 pos["LAST_SIGMA_UPDATE"] = today.strftime("%Y-%m-%d")
                 updated = True
-                messages.append(f"📊 {ticker} 시그마 갱신 ({lookback_days}일): {new_sigma}")
+                messages.append(f"📊 {ticker} 시그마 갱신 (1년 기준): {new_sigma}")
             except Exception as e:
                 messages.append(f"⚠️ {ticker} 시그마 갱신 실패: {e}")
     return updated, "\n".join(messages)
 
+def get_ticker_data(ticker, mode):
+    try:
+        t = yf.Ticker(ticker)
+        # 데이터가 비어있을 확률을 줄이기 위해 기간 확대
+        hist = t.history(period="5d", auto_adjust=False)
+        if len(hist) < 2: return None, None
+        
+        prev_close = float(hist['Close'].iloc[-2]) if mode == "장중" else float(hist['Close'].iloc[-1])
+        # last_price가 없을 경우 prev_close를 대체하여 $nan 방지
+        current_price = float(t.fast_info.get('last_price', prev_close))
+        return prev_close, current_price
+    except:
+        return None, None
+    
 def check_monthly_ping(cfg):
     now = datetime.now()
     if now.day == 1:
@@ -113,14 +129,17 @@ def get_market_mode():
 def get_ticker_data(ticker, mode):
     try:
         t = yf.Ticker(ticker)
+        # 데이터가 비어있을 확률을 줄이기 위해 기간 확대
         hist = t.history(period="5d", auto_adjust=False)
         if len(hist) < 2: return None, None
+        
         prev_close = float(hist['Close'].iloc[-2]) if mode == "장중" else float(hist['Close'].iloc[-1])
-        current_price = float(t.fast_info.last_price)
+        # last_price가 없을 경우 prev_close를 대체하여 $nan 방지
+        current_price = float(t.fast_info.get('last_price', prev_close))
         return prev_close, current_price
     except:
         return None, None
-
+    
 def send_discord(webhook_url, user_id, title, content):
     if not webhook_url: return
     payload = {
