@@ -153,36 +153,37 @@ def refresh_sigma_if_stale(cfg: dict) -> list[str]:
 # ═══════════════════════════════════════════════════════════
 
 def get_prev_close(ticker: str) -> float | None:
+    """yf.download를 사용한 더 안정적인 전일 종가 조회"""
     try:
-        t = yf.Ticker(ticker)
-        
-        # 최대한 많은 데이터를 가져와서 가장 최근 종가 강제 추출
-        hist = t.history(
-            period="30d",          # 기간 대폭 증가
+        # yf.download 사용 (많은 경우 history보다 안정적)
+        data = yf.download(
+            ticker,
+            period="30d",
             interval="1d",
             auto_adjust=False,
-            prepost=False
+            prepost=False,
+            progress=False
         )
         
-        if hist.empty:
-            print(f"⚠️ {ticker}: history 데이터 없음")
+        if data.empty or len(data) < 2:
+            print(f"⚠️ {ticker}: 데이터 부족")
             return None
 
-        closes = hist["Close"].dropna()
+        closes = data["Close"].dropna()
         if len(closes) == 0:
             print(f"⚠️ {ticker}: Close 데이터 없음")
             return None
 
         prev_close = float(closes.iloc[-1])
         
-        print(f"📌 {ticker} → 전일 종가: ${prev_close:.2f}  (데이터 {len(closes)}개)")
+        print(f"📌 {ticker} → 전일 종가: ${prev_close:.2f}")
         
         return prev_close
 
     except Exception as e:
         print(f"❌ {ticker} 가격 조회 실패: {e}")
         return None
-                
+                    
     
 def get_vix() -> float | None:
     try:
