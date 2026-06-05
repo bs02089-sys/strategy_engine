@@ -1,7 +1,7 @@
 """
 sigma_position_manager.py
 ─────────────────────────────────────────────────────────────
-SOXL VIX Sigma DCA 자동화 — LOC 예정가 디스코드 브리핑
+Sigma DCA 자동화 — LOC 예정가 디스코드 브리핑
 ─────────────────────────────────────────────────────────────
 실행 흐름:
   1. config.json 로드
@@ -136,8 +136,10 @@ def get_prev_close(ticker: str) -> float | None:
 
     history(period="5d", auto_adjust=True) 기준:
     - auto_adjust=True : 배당락 조정 반영 → 증권앱 표시 가격과 일치
-    - 뉴욕 현재 날짜와 마지막 봉 날짜를 비교해
-      오늘 미완성 봉이 포함된 경우 iloc[-2], 아니면 iloc[-1] 사용
+    - 정규장 시작(09:30 EDT) 이전: iloc[-1] 사용
+      → 당일 미완성 봉이 있더라도 가장 최근 확정 종가가 iloc[-1]
+    - 정규장 중(09:30~16:00 EDT): 오늘 미완성 봉 여부를 날짜로 확인
+      → 오늘 봉 포함 시 iloc[-2] 사용
     """
     try:
         t    = yf.Ticker(ticker)
@@ -152,14 +154,21 @@ def get_prev_close(ticker: str) -> float | None:
             print(f"⚠️ {ticker}: 유효 Close 없음")
             return None
 
-        # 오늘 봉(미완성) 포함 여부 확인
-        last_date = hist.index[-1].date()
-        today_ny  = datetime.now(ZoneInfo("America/New_York")).date()
+        # 뉴욕 현재 시각
+        now_ny   = datetime.now(ZoneInfo("America/New_York"))
+        hour_ny  = now_ny.hour + now_ny.minute / 60.0
+        is_open  = 9.5 <= hour_ny < 16.0  # 정규장 시간 여부
 
-        if last_date == today_ny and len(close_valid) >= 2:
-            # 오늘 봉은 미완성 → 전일 확정 봉 사용
-            prev_close = _safe_float(close_valid.iloc[-2])
+        if is_open:
+            # 정규장 중: 오늘 미완성 봉 포함 여부 확인
+            last_date = hist.index[-1].date()
+            today_ny  = now_ny.date()
+            if last_date == today_ny and len(close_valid) >= 2:
+                prev_close = _safe_float(close_valid.iloc[-2])
+            else:
+                prev_close = _safe_float(close_valid.iloc[-1])
         else:
+            # 프리마켓 / 장후: 가장 최근 확정 봉 = iloc[-1]
             prev_close = _safe_float(close_valid.iloc[-1])
 
         if prev_close is None:
