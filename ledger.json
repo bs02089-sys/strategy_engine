@@ -1,6 +1,18 @@
 {
-    "SOXL_LONG":  {"qty": 18, "avg_price": 169.3839},
-    "SOXL_SHORT": {"qty": 5,  "avg_price": 179.8434},
-    "SOXX_LONG":  {"qty": 1,  "avg_price": 586.50},
-    "BOTZ_LONG":  {"qty": 0,  "avg_price": 0.0}
+    "SOXL_LONG": {
+        "qty": 22,
+        "avg_price": 182.8777
+    },
+    "SOXL_SHORT": {
+        "qty": 6,
+        "avg_price": 190.4695
+    },
+    "SOXX_LONG": {
+        "qty": 1,
+        "avg_price": 586.00
+    },
+    "BOTZ_LONG": {
+        "qty": 0,
+        "avg_price": 0.0
+    }
 }
