@@ -153,15 +153,14 @@ def refresh_sigma_if_stale(cfg: dict) -> list[str]:
 # ═══════════════════════════════════════════════════════════
 
 def get_prev_close(ticker: str) -> float | None:
-    """가장 최근 완료된 거래일의 종가를 정확히 반환"""
+    """가장 최근 완료된 거래일(어제)의 종가를 반환"""
     try:
         t = yf.Ticker(ticker)
         
-        # 충분한 기간으로 데이터 가져오기
         hist = t.history(
-            period="15d", 
-            interval="1d", 
-            auto_adjust=False, 
+            period="20d",
+            interval="1d",
+            auto_adjust=False,
             prepost=False
         )
         
@@ -169,15 +168,13 @@ def get_prev_close(ticker: str) -> float | None:
             print(f"⚠️ {ticker}: history 데이터 부족")
             return None
 
-        # NaN 제거 후 가장 최근 종가
         closes = hist["Close"].dropna()
-        if len(closes) == 0:
-            print(f"⚠️ {ticker}: 유효한 종가 데이터 없음")
+        if len(closes) < 2:
+            print(f"⚠️ {ticker}: 유효한 종가 데이터 부족")
             return None
 
         prev_close = float(closes.iloc[-1])
         
-        # 디버깅용 (필요하면 주석 처리 가능)
         print(f"📌 {ticker} 전일 종가: ${prev_close:.2f}")
         
         return prev_close
@@ -185,7 +182,7 @@ def get_prev_close(ticker: str) -> float | None:
     except Exception as e:
         print(f"❌ {ticker} 가격 조회 실패: {e}")
         return None
-    
+            
     
 def get_vix() -> float | None:
     try:
