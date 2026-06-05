@@ -153,37 +153,43 @@ def refresh_sigma_if_stale(cfg: dict) -> list[str]:
 # ═══════════════════════════════════════════════════════════
 
 def get_prev_close(ticker: str) -> float | None:
-    """yf.download를 사용한 더 안정적인 전일 종가 조회"""
+    """yf.download + Ticker.history fallback"""
     try:
-        # yf.download 사용 (많은 경우 history보다 안정적)
+        # 1. yf.download 시도
         data = yf.download(
-            ticker,
-            period="30d",
-            interval="1d",
+            ticker, 
+            period="20d", 
+            interval="1d", 
+            progress=False,
             auto_adjust=False,
-            prepost=False,
-            progress=False
+            prepost=False
         )
         
-        if data.empty or len(data) < 2:
-            print(f"⚠️ {ticker}: 데이터 부족")
-            return None
+        if not data.empty:
+            closes = data["Close"].dropna()
+            if len(closes) > 0:
+                price = float(closes.iloc[-1])
+                print(f"📌 {ticker} → download 성공: ${price:.2f}")
+                return price
 
-        closes = data["Close"].dropna()
-        if len(closes) == 0:
-            print(f"⚠️ {ticker}: Close 데이터 없음")
-            return None
+        # 2. 실패하면 Ticker.history로 fallback
+        t = yf.Ticker(ticker)
+        hist = t.history(period="20d", interval="1d", auto_adjust=False, prepost=False)
+        
+        if not hist.empty:
+            closes = hist["Close"].dropna()
+            if len(closes) > 0:
+                price = float(closes.iloc[-1])
+                print(f"📌 {ticker} → history fallback 성공: ${price:.2f}")
+                return price
 
-        prev_close = float(closes.iloc[-1])
-        
-        print(f"📌 {ticker} → 전일 종가: ${prev_close:.2f}")
-        
-        return prev_close
+        print(f"⚠️ {ticker}: 두 방법 모두 실패")
+        return None
 
     except Exception as e:
         print(f"❌ {ticker} 가격 조회 실패: {e}")
         return None
-                    
+                        
     
 def get_vix() -> float | None:
     try:
