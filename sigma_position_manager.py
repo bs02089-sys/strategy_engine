@@ -142,7 +142,8 @@ def get_ticker_data(ticker, mode):
     전일 확정 종가와 현재가를 반환한다.
     - 장전: hist[-1]이 전일 확정 종가
     - 장중: hist[-1]은 미완성 봉이므로 날짜 확인 후 [-2] 사용
-    - fast_info.last_price가 None이면 prev_close로 대체 (float(None) 오류 차단)
+    - float 변환 후 NaN 명시 검증 (yfinance가 빈 응답 시 NaN 반환 가능)
+    - fast_info.last_price가 None이면 prev_close로 대체
     """
     try:
         t    = yf.Ticker(ticker)
@@ -151,16 +152,27 @@ def get_ticker_data(ticker, mode):
             print(f"⚠️ {ticker}: 가격 데이터 부족 ({len(hist)}봉)")
             return None, None
 
+        # Close 컬럼 NaN 제거 후 유효 데이터 확인
+        close_valid = hist['Close'].dropna()
+        if len(close_valid) < 2:
+            print(f"⚠️ {ticker}: 유효 Close 데이터 부족 (NaN 제외 {len(close_valid)}봉)")
+            return None, None
+
         if mode == "장중":
             last_date = hist.index[-1].date()
             today_ny  = datetime.now(ZoneInfo("America/New_York")).date()
-            prev_close = float(hist['Close'].iloc[-2]) if last_date == today_ny else float(hist['Close'].iloc[-1])
+            prev_close = float(close_valid.iloc[-2]) if last_date == today_ny else float(close_valid.iloc[-1])
         else:
-            prev_close = float(hist['Close'].iloc[-1])
+            prev_close = float(close_valid.iloc[-1])
+
+        # NaN 최종 검증
+        if np.isnan(prev_close):
+            print(f"⚠️ {ticker}: prev_close NaN — 데이터 무효")
+            return None, None
 
         # fast_info.last_price가 None이면 prev_close 사용
-        raw_price    = t.fast_info.last_price
-        current_price = float(raw_price) if raw_price is not None else prev_close
+        raw_price     = t.fast_info.last_price
+        current_price = float(raw_price) if (raw_price is not None and not np.isnan(float(raw_price))) else prev_close
 
         return prev_close, current_price
 
