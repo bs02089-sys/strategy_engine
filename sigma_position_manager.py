@@ -129,17 +129,21 @@ def get_market_mode():
 def get_ticker_data(ticker, mode):
     try:
         t = yf.Ticker(ticker)
-        # 데이터가 비어있을 확률을 줄이기 위해 기간 확대
-        hist = t.history(period="5d", auto_adjust=False)
-        if len(hist) < 2: return None, None
+        # 데이터를 10일치로 넉넉하게 받아옵니다.
+        hist = t.history(period="10d", auto_adjust=False)
+        if hist.empty or len(hist) < 2: return None, None
         
+        # 전일 종가: 장중(iloc[-2]), 장전(iloc[-1])
         prev_close = float(hist['Close'].iloc[-2]) if mode == "장중" else float(hist['Close'].iloc[-1])
-        # last_price가 없을 경우 prev_close를 대체하여 $nan 방지
-        current_price = float(t.fast_info.get('last_price', prev_close))
+        
+        # 현재가: last_price가 없으면 prev_close를 사용하여 계산 오류 차단
+        current_price = float(t.fast_info.get('last_price')) if t.fast_info.get('last_price') else prev_close
+        
         return prev_close, current_price
-    except:
+    except Exception as e:
+        print(f"❌ {ticker} 데이터 에러: {e}")
         return None, None
-    
+        
 def send_discord(webhook_url, user_id, title, content):
     if not webhook_url: return
     payload = {
