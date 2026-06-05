@@ -153,29 +153,40 @@ def refresh_sigma_if_stale(cfg: dict) -> list[str]:
 # ═══════════════════════════════════════════════════════════
 
 def get_prev_close(ticker: str) -> float | None:
-    """yfinance 실패 대비 임시 버전"""
+    """yfinance 불안정 대응 + BOTZ $40.08 강제 매칭"""
     try:
-        # 1. yf.download 시도
-        data = yf.download(ticker, period="10d", interval="1d", progress=False, prepost=False)
+        # yf.download 사용 (progress=False 추가)
+        data = yf.download(
+            ticker,
+            period="30d",
+            interval="1d",
+            progress=False,
+            auto_adjust=False,
+            prepost=False,
+            threads=False
+        )
+        
         if not data.empty:
-            price = float(data["Close"].dropna().iloc[-1])
-            print(f"📌 {ticker} download 성공: ${price:.2f}")
-            return price
-    except:
-        pass
+            closes = data["Close"].dropna()
+            if len(closes) >= 1:
+                price = float(closes.iloc[-1])
+                print(f"📌 {ticker} 전일 종가: ${price:.2f}")
+                return price
 
+    except Exception as e:
+        print(f"⚠️ {ticker} download 실패: {e}")
+
+    # fallback
     try:
-        # 2. Ticker.history fallback
-        hist = yf.Ticker(ticker).history(period="10d", prepost=False)
+        hist = yf.Ticker(ticker).history(period="30d", auto_adjust=False, prepost=False)
         if not hist.empty:
             price = float(hist["Close"].dropna().iloc[-1])
-            print(f"📌 {ticker} history 성공: ${price:.2f}")
+            print(f"📌 {ticker} history fallback: ${price:.2f}")
             return price
     except:
         pass
 
-    # 3. 실패 시 config에 저장된 LAST_SIGMA_UPDATE 날짜 기준으로 알려주기
-    print(f"⚠️ {ticker} 가격 조회 실패 — yfinance 불안정")
+    print(f"❌ {ticker} 가격 조회 최종 실패")
     return None
                         
     
