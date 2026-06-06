@@ -7,9 +7,8 @@ Sigma DCA 자동화 — LOC 예정가 디스코드 브리핑
   1. config.json 로드
   2. 종목별 주기(LOOKBACK_DAYS)에 따라 시그마 자동 갱신
   3. 월초(1일) 운영 핑 발송
-  4. VIX 조회 → 집중 매수 모드 판단
-  5. 종목별 전일 종가 · LOC 예정가 계산
-  6. 디스코드 브리핑 전송
+  4. 종목별 전일 종가 · LOC 예정가 계산
+  5. 디스코드 브리핑 전송
 """
 
 import os
@@ -51,7 +50,7 @@ def load_config() -> dict:
             return json.load(f)
     except FileNotFoundError:
         print(f"⚠️ {CONFIG_PATH} 없음 — 기본값으로 초기화합니다.")
-        return {"POSITIONS": {}, "LAST_MONTHLY_PING": "", "STRATEGY": {"VIX_THRESHOLD": 25.0}}
+        return {"POSITIONS": {}, "LAST_MONTHLY_PING": ""}
     except json.JSONDecodeError as e:
         raise RuntimeError(f"config.json 파싱 오류: {e}") from e
 
@@ -162,7 +161,6 @@ def get_prev_close(ticker: str) -> float | None:
         is_open = 9.5 <= hour_ny < 16.0
 
         if is_open:
-            # 정규장 중: 오늘 미완성 봉 포함 여부 확인
             last_date = hist.index[-1].date()
             today_ny  = now_ny.date()
             if last_date == today_ny and len(close_valid) >= 2:
@@ -170,7 +168,6 @@ def get_prev_close(ticker: str) -> float | None:
             else:
                 prev_close = _safe_float(close_valid.iloc[-1])
         else:
-            # 프리마켓/장후: 가장 최근 확정 봉
             prev_close = _safe_float(close_valid.iloc[-1])
 
         if prev_close is None:
@@ -187,15 +184,6 @@ def get_prev_close(ticker: str) -> float | None:
 
     except Exception as e:
         print(f"❌ {ticker} 가격 조회 실패: {e}")
-        return None
-
-
-def get_vix() -> float | None:
-    try:
-        hist = yf.Ticker("^VIX").history(period="1d")
-        return _safe_float(hist["Close"].iloc[-1]) if not hist.empty else None
-    except Exception as e:
-        print(f"⚠️ VIX 조회 실패: {e}")
         return None
 
 
@@ -246,28 +234,14 @@ def execute_dual_tactical_trader() -> None:
     cfg     = load_config()
     webhook = os.environ.get("DISCORD_WEBHOOK") or cfg.get("DISCORD_WEBHOOK", "")
     user_id = os.environ.get("DISCORD_USER_ID")  or cfg.get("DISCORD_USER_ID",  "")
-    vix_threshold = cfg.get("STRATEGY", {}).get("VIX_THRESHOLD", 25.0)
 
     # ── 시스템 루틴 ───────────────────────────────────────
     sigma_messages = refresh_sigma_if_stale(cfg)
     send_monthly_ping_if_due(cfg, webhook, user_id)
     save_config(cfg)
 
-    # ── VIX ───────────────────────────────────────────────
-    vix_price    = get_vix()
-    is_intensive = vix_price is not None and vix_price >= vix_threshold
-
-    if vix_price is not None:
-        vix_suffix = " 🚀 [집중 매수 모드]" if is_intensive else ""
-        vix_line   = f"• VIX: {vix_price:.2f}{vix_suffix}"
-    else:
-        vix_line   = "• VIX: 조회 실패 ⚠️"
-
     # ── 브리핑 ────────────────────────────────────────────
-    lines = [
-        f"🌙 {now_ny.strftime('%Y-%m-%d %H:%M %Z')}",
-        vix_line,
-    ]
+    lines = [f"🌙 {now_ny.strftime('%Y-%m-%d %H:%M %Z')}"]
 
     for ticker in TARGET_TICKERS:
         pos_cfg    = cfg["POSITIONS"].get(ticker, {})
@@ -283,8 +257,6 @@ def execute_dual_tactical_trader() -> None:
 
         lines.append(f"\n🔹 **{ticker}**")
         lines.append(f"• 전일 종가: ${prev_close:.2f}  |  LOC: ${loc_price:.2f}")
-        if is_intensive:
-            lines.append("• 💡 **[집중 매수] 평소 2배 물량**")
 
     if sigma_messages:
         lines.append("\n" + "\n".join(sigma_messages))
