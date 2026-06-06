@@ -14,7 +14,6 @@ Sigma DCA 자동화 — LOC 예정가 디스코드 브리핑
 import os
 import sys
 import json
-import time
 import shutil
 import tempfile
 import numpy as np
