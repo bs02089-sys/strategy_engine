@@ -1,6 +1,6 @@
 """
-backtest_balanced_final.py — 최종 확정 버전
-균형 추천 비중: AIQ 60% | | SOXL 40%
+backtest_final.py — 최종 정리 버전 (2026-06 기준)
+균형 추천 비중: AIQ 35% | SOXX 35% | SOXL 30%
 """
 
 import json
@@ -8,9 +8,8 @@ import numpy as np
 import yfinance as yf
 import matplotlib.pyplot as plt
 
-# ====================== 한글 폰트 설정 (깨짐 해결) ======================
-plt.rcParams['font.family'] = 'Malgun Gothic'      # Windows
-# plt.rcParams['font.family'] = 'AppleGothic'      # Mac 사용 시 주석 해제
+# ====================== 한글 폰트 설정 ======================
+plt.rcParams['font.family'] = 'Malgun Gothic'
 plt.rcParams['axes.unicode_minus'] = False
 
 # ====================== config 로드 ======================
@@ -20,38 +19,42 @@ with open("config.json", "r", encoding="utf-8") as f:
 POSITIONS = cfg["POSITIONS"]
 STRATEGY = cfg.get("STRATEGY", {})
 
-TARGET_TICKERS = ["AIQ", "SOXL"]
+TARGET_TICKERS = ["AIQ", "SOXX", "SOXL"]
 BUY_DAYS = STRATEGY.get("BUY_DURATION_DAYS", 252)
 HOLD_DAYS = STRATEGY.get("HOLD_DURATION_DAYS", 252)
 CYCLE_DAYS = BUY_DAYS + HOLD_DAYS
 
 # ==================== 균형 추천 비중 ====================
 WEIGHTS = {
-    "AIQ": 0.60,
-    "SOXL": 0.40
+    "AIQ": 0.35,
+    "SOXX": 0.35,
+    "SOXL": 0.30
 }
 
-QUARTERLY_COUNT = {
-    "AIQ": 28,
-    "SOXL": 25
+# 종목별 분할 횟수 (사용자 지정)
+YEARLY_COUNT = {
+    "AIQ": 20,
+    "SOXX": 20,
+    "SOXL": 20
 }
 
-print(f"🚀 최종 균형 추천 전략 백테스트 (AIQ 60% | SOXL 40%)")
+print(f"🚀 최종 백테스트 (균형 추천 비중)")
+print(f"   AIQ 35% | SOXX 35% | SOXL 30%")
 print(f"   Buy Phase: {BUY_DAYS}일 | Hold Phase: {HOLD_DAYS}일\n")
 
-data = yf.download(TARGET_TICKERS, start="2022-01-01", end="2026-06-06", 
+data = yf.download(TARGET_TICKERS, start="2022-01-01", end="2026-06-05", 
                    auto_adjust=True, group_by='ticker')
 
 results = {}
 equity_curves = {}
 
 for ticker in TARGET_TICKERS:
-    print(f"\n🔹 {ticker} ({WEIGHTS[ticker]*100:.0f}%, {QUARTERLY_COUNT[ticker]}회 분할)")
+    print(f"\n🔹 {ticker} ({WEIGHTS[ticker]*100:.0f}%, {YEARLY_COUNT[ticker]}회 분할)")
     df = data[ticker].copy().dropna()
     
     pos = POSITIONS[ticker]
-    multiplier = pos["ENTRY_MULTIPLIER"]
-    lookback = pos["LOOKBACK_DAYS"]
+    multiplier = pos.get("ENTRY_MULTIPLIER", 1.48)
+    lookback = pos.get("LOOKBACK_DAYS", 365)
     
     df['Return'] = df['Close'].pct_change()
     df['Sigma'] = df['Close'].pct_change().rolling(lookback).std()
@@ -63,7 +66,7 @@ for ticker in TARGET_TICKERS:
     avg_entry = 0.0
     cycle_start = 0
     buys_in_cycle = 0
-    max_buys = QUARTERLY_COUNT[ticker]
+    max_buys = YEARLY_COUNT[ticker]
     
     df['Equity'] = 1.0
     df['Daily_Return'] = 0.0
@@ -73,6 +76,7 @@ for ticker in TARGET_TICKERS:
         signal = df['Signal'].iloc[i]
         days_in_cycle = i - cycle_start
         
+        # 사이클 종료 & 재시작
         if days_in_cycle >= CYCLE_DAYS or cycle_start == 0:
             if position > 0:
                 final_ret = (price - avg_entry) / avg_entry if avg_entry != 0 else 0
@@ -82,6 +86,7 @@ for ticker in TARGET_TICKERS:
             avg_entry = 0.0
             buys_in_cycle = 0
         
+        # Buy Phase
         if days_in_cycle < BUY_DAYS and position < 1.0 and buys_in_cycle < max_buys:
             if signal:
                 add_size = 1.0 / max_buys
@@ -92,6 +97,7 @@ for ticker in TARGET_TICKERS:
                 position += add_size
                 buys_in_cycle += 1
         
+        # 일일 수익률
         if position > 0:
             daily_ret = (price / df['Close'].iloc[i-1] - 1) * position
             df.loc[df.index[i], 'Daily_Return'] = daily_ret
@@ -113,7 +119,7 @@ for ticker in TARGET_TICKERS:
 portfolio = sum(equity_curves[t] * WEIGHTS[t] for t in TARGET_TICKERS)
 
 print("\n" + "="*90)
-print("🏆 최종 균형 추천 전략 결과 (AIQ 60% | SOXL 40%)")
+print("🏆 최종 균형 전략 결과 (AIQ 35% | SOXX 35% | SOXL 30%)")
 print("="*90)
 for t, r in results.items():
     print(f"{t:6} | {WEIGHTS[t]*100:2.0f}% | TR: {r['TR']:8.1%} | CAGR: {r['CAGR']:6.2%} | MDD: {r['MDD']:7.1%}")
@@ -122,15 +128,15 @@ print(f"\n💼 Total Portfolio → 총수익률 {portfolio.iloc[-1]-1:7.1%} | "
       f"CAGR {(portfolio.iloc[-1] ** (1/years) -1):6.2%} | "
       f"MDD {((portfolio/portfolio.cummax())-1).min():6.1%}")
 
-# ====================== 차트 ======================
+# 차트
 plt.figure(figsize=(15, 9))
 for t in TARGET_TICKERS:
     plt.plot(equity_curves[t], label=f"{t} ({WEIGHTS[t]*100:.0f}%)")
-plt.plot(portfolio, label="Balanced Portfolio (60/40)", linewidth=3, color='red', linestyle='--')
-plt.title('반도체 슈퍼사이클 전략 - 균형 추천 비중 (AIQ 60% | SOXL 40%)')
+plt.plot(portfolio, label="Balanced Portfolio (35/35/30)", linewidth=3, color='red', linestyle='--')
+plt.title('반도체 슈퍼사이클 전략 - 균형 추천 비중 (AIQ 35% | SOXX 35% | SOXL 30%)')
 plt.legend()
 plt.grid(True)
-plt.savefig('backtest_balanced_60_40_final.png', dpi=200, bbox_inches='tight')
+plt.savefig('backtest_balanced_final.png', dpi=200, bbox_inches='tight')
 plt.show()
 
-print("\n✅ 백테스트 완료! 파일 저장: backtest_balanced_60_40_final.png")
+print("\n✅ 백테스트 완료! (backtest_balanced_final.png)")
