@@ -21,7 +21,7 @@
         },
         "SOXL": {
             "ENTRY_MULTIPLIER": 1.25,
-            "DAILY_SIGMA": 0.0840,
+            "DAILY_SIGMA": 0.084,
             "LAST_SIGMA_UPDATE": "2026-06-07",
             "LOOKBACK_DAYS": 365
         }
