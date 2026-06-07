@@ -32,7 +32,7 @@ if hasattr(sys.stderr, "reconfigure"):
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 
-TARGET_TICKERS         = ["AIQ", "SOXX", "SOXL"]
+TARGET_TICKERS         = ["AIQ", "SOXL"]
 CONFIG_PATH            = "config.json"
 _PERIOD_MAP            = {90: "3mo", 180: "6mo", 365: "1y"}
 _DISCORD_TITLE_LIMIT   = 256

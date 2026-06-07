@@ -1,11 +1,10 @@
 """
 backtest_balanced_final.py — 최종 확정 버전
-균형 추천 비중: AIQ 35% | SOXX 35% | SOXL 30%
+균형 추천 비중: AIQ 60% | | SOXL 40%
 """
 
 import json
 import numpy as np
-import pandas as pd
 import yfinance as yf
 import matplotlib.pyplot as plt
 
@@ -21,25 +20,23 @@ with open("config.json", "r", encoding="utf-8") as f:
 POSITIONS = cfg["POSITIONS"]
 STRATEGY = cfg.get("STRATEGY", {})
 
-TARGET_TICKERS = ["AIQ", "SOXX", "SOXL"]
+TARGET_TICKERS = ["AIQ", "SOXL"]
 BUY_DAYS = STRATEGY.get("BUY_DURATION_DAYS", 252)
 HOLD_DAYS = STRATEGY.get("HOLD_DURATION_DAYS", 252)
 CYCLE_DAYS = BUY_DAYS + HOLD_DAYS
 
 # ==================== 균형 추천 비중 ====================
 WEIGHTS = {
-    "AIQ": 0.35,
-    "SOXX": 0.35,
-    "SOXL": 0.30
+    "AIQ": 0.60,
+    "SOXL": 0.40
 }
 
 QUARTERLY_COUNT = {
     "AIQ": 28,
-    "SOXX": 20,
     "SOXL": 25
 }
 
-print(f"🚀 최종 균형 추천 전략 백테스트 (AIQ 35% | SOXX 35% | SOXL 30%)")
+print(f"🚀 최종 균형 추천 전략 백테스트 (AIQ 60% | SOXL 40%)")
 print(f"   Buy Phase: {BUY_DAYS}일 | Hold Phase: {HOLD_DAYS}일\n")
 
 data = yf.download(TARGET_TICKERS, start="2022-01-01", end="2026-06-06", 
@@ -116,7 +113,7 @@ for ticker in TARGET_TICKERS:
 portfolio = sum(equity_curves[t] * WEIGHTS[t] for t in TARGET_TICKERS)
 
 print("\n" + "="*90)
-print("🏆 최종 균형 추천 전략 결과 (AIQ 35% | SOXX 35% | SOXL 30%)")
+print("🏆 최종 균형 추천 전략 결과 (AIQ 60% | SOXL 40%)")
 print("="*90)
 for t, r in results.items():
     print(f"{t:6} | {WEIGHTS[t]*100:2.0f}% | TR: {r['TR']:8.1%} | CAGR: {r['CAGR']:6.2%} | MDD: {r['MDD']:7.1%}")
@@ -129,11 +126,11 @@ print(f"\n💼 Total Portfolio → 총수익률 {portfolio.iloc[-1]-1:7.1%} | "
 plt.figure(figsize=(15, 9))
 for t in TARGET_TICKERS:
     plt.plot(equity_curves[t], label=f"{t} ({WEIGHTS[t]*100:.0f}%)")
-plt.plot(portfolio, label="Balanced Portfolio (35/35/30)", linewidth=3, color='red', linestyle='--')
-plt.title('반도체 슈퍼사이클 전략 - 균형 추천 비중 (AIQ 35% | SOXX 35% | SOXL 30%)')
+plt.plot(portfolio, label="Balanced Portfolio (60/40)", linewidth=3, color='red', linestyle='--')
+plt.title('반도체 슈퍼사이클 전략 - 균형 추천 비중 (AIQ 60% | SOXL 40%)')
 plt.legend()
 plt.grid(True)
-plt.savefig('backtest_balanced_35_35_30_final.png', dpi=200, bbox_inches='tight')
+plt.savefig('backtest_balanced_60_40_final.png', dpi=200, bbox_inches='tight')
 plt.show()
 
-print("\n✅ 백테스트 완료! 파일 저장: backtest_balanced_35_35_30_final.png")
+print("\n✅ 백테스트 완료! 파일 저장: backtest_balanced_60_40_final.png")
