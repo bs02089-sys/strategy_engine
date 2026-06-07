@@ -8,21 +8,21 @@
     ],
     "POSITIONS": {
         "AIQ": {
-            "ENTRY_MULTIPLIER": 1.45,
-            "DAILY_SIGMA": 0.02653,
-            "LAST_SIGMA_UPDATE": "2026-06-05",
+            "ENTRY_MULTIPLIER": 1.4,
+            "DAILY_SIGMA": 0.0284,
+            "LAST_SIGMA_UPDATE": "2026-06-07",
             "LOOKBACK_DAYS": 90
         },
         "SOXX": {
-            "ENTRY_MULTIPLIER": 1.1,
-            "DAILY_SIGMA": 0.02479,
+            "ENTRY_MULTIPLIER": 1.2,
+            "DAILY_SIGMA": 0.0271,
             "LAST_SIGMA_UPDATE": "2026-06-07",
             "LOOKBACK_DAYS": 365
         },
         "SOXL": {
-            "ENTRY_MULTIPLIER": 1.5,
-            "DAILY_SIGMA": 0.074649,
-            "LAST_SIGMA_UPDATE": "2026-06-05",
+            "ENTRY_MULTIPLIER": 1.25,
+            "DAILY_SIGMA": 0.0840,
+            "LAST_SIGMA_UPDATE": "2026-06-07",
             "LOOKBACK_DAYS": 365
         }
     },
