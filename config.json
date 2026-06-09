@@ -15,8 +15,8 @@
                 "LOOKBACK_DAYS": 90
             },
             "SOXX": {
-                "ENTRY_MULTIPLIER": 1.26,
-                "DAILY_SIGMA": 0.0287,
+                "ENTRY_MULTIPLIER": 1.25,
+                "DAILY_SIGMA": 0.0285,
                 "LAST_SIGMA_UPDATE": "2026-06-09",
                 "LOOKBACK_DAYS": 252
             },
