@@ -121,12 +121,12 @@ def _safe_float(val) -> float | None:
 
 def get_prev_close(ticker: str) -> float | None:
     """
-    반드시 가장 최근 완료된 거래일(전일)의 정규장 종가를 반환
+    가장 최근 완료된 거래일(전일) 정규장 종가를 강제로 가져오는 강력 버전
     """
     try:
         t = yf.Ticker(ticker)
-        # 충분한 데이터 + prepost=False
-        hist = t.history(period="10d", auto_adjust=True, prepost=False)
+        # 더 많은 데이터 + interval=1d 명시
+        hist = t.history(period="15d", interval="1d", auto_adjust=True, prepost=False)
 
         if hist.empty or len(hist) < 2:
             print(f"⚠️ {ticker}: 데이터 부족")
@@ -139,24 +139,24 @@ def get_prev_close(ticker: str) -> float | None:
         now_ny = datetime.now(ZoneInfo("America/New_York"))
         today = now_ny.date()
 
-        # 1순위: 오늘 이전 날짜 중 가장 최근 종가
-        previous_days = close_valid[close_valid.index.date < today]
-        
-        if not previous_days.empty:
-            prev_close = _safe_float(previous_days.iloc[-1])
-            close_date = previous_days.index[-1].date()
-        else:
-            # 오늘 데이터밖에 없는 극단 상황 → iloc[-2] 사용
-            prev_close = _safe_float(close_valid.iloc[-2] if len(close_valid) >= 2 else close_valid.iloc[-1])
-            close_date = close_valid.index[-1].date() if len(close_valid) >= 2 else close_valid.index[-1].date()
+        # 오늘 날짜를 완전히 제외하고 가장 최근 종가 선택
+        previous_closes = close_valid[close_valid.index.date < today]
 
-        print(f"✅ {ticker} prev_close: ${prev_close:.2f} ({close_date})")
+        if not previous_closes.empty:
+            prev_close = _safe_float(previous_closes.iloc[-1])
+            close_date = previous_closes.index[-1].date()
+        else:
+            # 오늘 데이터만 있는 경우 (극단적 상황)
+            prev_close = _safe_float(close_valid.iloc[-2] if len(close_valid) >= 2 else close_valid.iloc[-1])
+            close_date = close_valid.index[-1].date()
+
+        print(f"✅ {ticker} prev_close: ${prev_close:.2f} ({close_date}) [총 {len(close_valid)}개 데이터]")
         return prev_close
 
     except Exception as e:
         print(f"❌ {ticker} 가격 조회 실패: {e}")
         return None
-    
+        
     
 # ═══════════════════════════════════════════════════════════
 # 월초 운영 핑
