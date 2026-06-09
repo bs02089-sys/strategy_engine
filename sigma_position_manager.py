@@ -3,12 +3,6 @@ sigma_position_manager.py
 ─────────────────────────────────────────────────────────────
 Sigma DCA 자동화 — LOC 예정가 디스코드 브리핑
 ─────────────────────────────────────────────────────────────
-실행 흐름:
-  1. config.json 로드
-  2. 종목별 주기(LOOKBACK_DAYS)에 따라 시그마 자동 갱신
-  3. 월초(1일) 운영 핑 발송
-  4. 종목별 전일 종가 · LOC 예정가 계산
-  5. 디스코드 브리핑 전송
 """
 
 import os
@@ -64,39 +58,35 @@ def save_config(cfg: dict) -> None:
 
 
 # ═══════════════════════════════════════════════════════════
-# 시그마 자동 갱신 — 종목별 LOOKBACK_DAYS 주기
+# 시그마 자동 갱신
 # ═══════════════════════════════════════════════════════════
 
 def refresh_sigma_if_stale(cfg: dict) -> list[str]:
     messages = []
-    today = datetime.now()
+    today = datetime.now(ZoneInfo("America/New_York")).date()
 
-    # POSITIONS 내부의 POSITIONS에 접근하도록 경로 수정
-    positions_data = cfg.get("POSITIONS", {}).get("POSITIONS", {})
+    # POSITIONS 직접 접근 (리팩토링 후)
+    positions_data = cfg.setdefault("POSITIONS", {})
 
     for ticker in TARGET_TICKERS:
-        pos = positions_data.get(ticker, {})
-        # 기본값을 252로 설정
+        pos = positions_data.setdefault(ticker, {})
         lookback_days = int(pos.get("LOOKBACK_DAYS", 252))
 
         last_str = pos.get("LAST_SIGMA_UPDATE", "2000-01-01")
         try:
-            last_dt = datetime.strptime(last_str, "%Y-%m-%d")
+            last_dt = datetime.strptime(last_str, "%Y-%m-%d").date()
         except ValueError:
-            last_dt = datetime(2000, 1, 1)
+            last_dt = datetime(2000, 1, 1).date()
 
-        # 갱신 주기 도달 여부 확인
         if (today - last_dt).days < lookback_days:
             continue
 
         try:
-            # 날짜 범위 직접 계산
-            start_date = today - timedelta(days=lookback_days)
+            start_date = today - timedelta(days=lookback_days + 5)  # 여유 기간 추가
             
-            # period 대신 start와 end 사용
             hist = yf.Ticker(ticker).history(
-                start=start_date.strftime("%Y-%m-%d"), 
-                end=today.strftime("%Y-%m-%d"), 
+                start=start_date.strftime("%Y-%m-%d"),
+                end=today.strftime("%Y-%m-%d"),
                 auto_adjust=True
             )
             
@@ -106,11 +96,10 @@ def refresh_sigma_if_stale(cfg: dict) -> list[str]:
                 
             new_sigma = round(float(hist["Close"].pct_change().dropna().std()), 6)
             
-            # 데이터 갱신
+            # config에 직접 반영
             pos["DAILY_SIGMA"] = new_sigma
             pos["LAST_SIGMA_UPDATE"] = today.strftime("%Y-%m-%d")
             
-            # 명확한 기간 표시
             messages.append(f"📊 {ticker} 시그마 갱신 ({lookback_days}일 기준): {new_sigma:.6f}")
             
         except Exception as e:
@@ -130,6 +119,7 @@ def send_monthly_ping_if_due(cfg: dict, webhook: str, user_id: str) -> None:
     today_ym = now.strftime("%Y-%m")
     if cfg.get("LAST_MONTHLY_PING") == today_ym:
         return
+
     msg = f"🔔 **월초 핑** | {now.strftime('%Y년 %m월')}\n운용 시스템이 정상 가동 중입니다."
     _send_discord(webhook, user_id, "🗓️ 월간 운영 핑", msg)
     cfg["LAST_MONTHLY_PING"] = today_ym
@@ -150,17 +140,8 @@ def _safe_float(val) -> float | None:
 
 
 def get_prev_close(ticker: str) -> float | None:
-    """
-    전일 확정 종가를 반환한다.
-
-    - period="1mo": 유동성 낮은 종목의 데이터 누락 방지
-    - auto_adjust=True: 배당락 조정 반영 → 증권앱 표시 가격과 일치
-    - 정규장 중(09:30~16:00 EDT): 오늘 미완성 봉 포함 시 iloc[-2] 사용
-    - 프리마켓/장후: iloc[-1] 사용
-    - 직전 거래일 검증: 데이터 지연 시 경고 출력
-    """
     try:
-        t    = yf.Ticker(ticker)
+        t = yf.Ticker(ticker)
         hist = t.history(period="1mo", auto_adjust=True)
 
         if hist.empty or len(hist) < 1:
@@ -172,30 +153,18 @@ def get_prev_close(ticker: str) -> float | None:
             print(f"⚠️ {ticker}: 유효 Close 없음")
             return None
 
-        # 정규장 시간 여부 (서머타임 자동 반영)
-        now_ny  = datetime.now(ZoneInfo("America/New_York"))
+        now_ny = datetime.now(ZoneInfo("America/New_York"))
         hour_ny = now_ny.hour + now_ny.minute / 60.0
         is_open = 9.5 <= hour_ny < 16.0
 
-        if is_open:
-            last_date = hist.index[-1].date()
-            today_ny  = now_ny.date()
-            if last_date == today_ny and len(close_valid) >= 2:
-                prev_close = _safe_float(close_valid.iloc[-2])
-            else:
-                prev_close = _safe_float(close_valid.iloc[-1])
+        if is_open and len(close_valid) >= 2:
+            prev_close = _safe_float(close_valid.iloc[-2])
         else:
             prev_close = _safe_float(close_valid.iloc[-1])
 
         if prev_close is None:
             print(f"⚠️ {ticker}: prev_close NaN")
             return None
-
-        # 직전 거래일 검증 — 데이터 지연 경고
-        last_data_date = close_valid.index[-1].date()
-        expected_date  = (pd.Timestamp(now_ny.date()) - BDay(1)).date()
-        if last_data_date < expected_date:
-            print(f"⚠️ {ticker}: 데이터 지연 — 기대 {expected_date}, 실제 {last_data_date}")
 
         return prev_close
 
@@ -205,7 +174,7 @@ def get_prev_close(ticker: str) -> float | None:
 
 
 # ═══════════════════════════════════════════════════════════
-# 디스코드
+# 디스코드 전송
 # ═══════════════════════════════════════════════════════════
 
 def _send_discord(webhook_url: str, user_id: str, title: str, content: str) -> None:
@@ -216,52 +185,54 @@ def _send_discord(webhook_url: str, user_id: str, title: str, content: str) -> N
         print(f"⚠️ DISCORD_WEBHOOK 형식 오류: {webhook_url[:40]}...")
         return
 
-    if len(title)   > _DISCORD_TITLE_LIMIT:
-        title   = title[:_DISCORD_TITLE_LIMIT - 3]   + "..."
+    if len(title) > _DISCORD_TITLE_LIMIT:
+        title = title[:_DISCORD_TITLE_LIMIT - 3] + "..."
     if len(content) > _DISCORD_CONTENT_LIMIT:
         content = content[:_DISCORD_CONTENT_LIMIT - 3] + "..."
         print(f"⚠️ Discord content {_DISCORD_CONTENT_LIMIT}자 초과 — 잘림 처리")
 
     payload = {
         "content": f"<@{user_id}>" if user_id else "",
-        "embeds": [{"title": title, "description": content, "color": 3447003,
-                    "timestamp": datetime.now(timezone.utc).isoformat()}],
+        "embeds": [{
+            "title": title,
+            "description": content,
+            "color": 3447003,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }],
     }
     try:
         resp = requests.post(webhook_url, json=payload, timeout=15)
-        if not resp.ok:
-            print(f"❌ 디스코드 전송 실패 — HTTP {resp.status_code}: {resp.text}")
+        if resp.ok:
+            print(f"✅ 디스코드 전송 성공")
         else:
-            print(f"✅ 디스코드 전송 성공 — HTTP {resp.status_code}")
-        resp.raise_for_status()
-    except requests.exceptions.Timeout:
-        print("❌ 디스코드 전송 실패 — 타임아웃 (15s)")
-    except requests.exceptions.ConnectionError as e:
-        print(f"❌ 디스코드 전송 실패 — 연결 오류: {e}")
+            print(f"❌ 디스코드 전송 실패 — HTTP {resp.status_code}")
     except Exception as e:
         print(f"❌ 디스코드 전송 실패: {e}")
 
 
 # ═══════════════════════════════════════════════════════════
-# 메인
+# 메인 실행
 # ═══════════════════════════════════════════════════════════
 
 def execute_dual_tactical_trader() -> None:
-    now_ny  = datetime.now(ZoneInfo("America/New_York"))
-    cfg     = load_config()
+    now_ny = datetime.now(ZoneInfo("America/New_York"))
+    cfg = load_config()
+    
     webhook = os.environ.get("DISCORD_WEBHOOK") or cfg.get("DISCORD_WEBHOOK", "")
-    user_id = os.environ.get("DISCORD_USER_ID")  or cfg.get("DISCORD_USER_ID",  "")
+    user_id = os.environ.get("DISCORD_USER_ID") or cfg.get("DISCORD_USER_ID", "")
 
-    # ── 시스템 루틴 ───────────────────────────────────────
+    # 시스템 루틴
     sigma_messages = refresh_sigma_if_stale(cfg)
     send_monthly_ping_if_due(cfg, webhook, user_id)
     save_config(cfg)
 
-    # ── 브리핑 ────────────────────────────────────────────
+    # 브리핑 생성
     lines = [f"🌙 {now_ny.strftime('%Y-%m-%d %H:%M %Z')}"]
 
+    positions = cfg.get("POSITIONS", {})
+
     for ticker in TARGET_TICKERS:
-        pos_cfg    = cfg["POSITIONS"].get(ticker, {})
+        pos_cfg = positions.get(ticker, {})
         prev_close = get_prev_close(ticker)
 
         if prev_close is None:
@@ -269,8 +240,8 @@ def execute_dual_tactical_trader() -> None:
             continue
 
         multiplier = pos_cfg.get("ENTRY_MULTIPLIER", 1.5)
-        sigma      = pos_cfg.get("DAILY_SIGMA", 0.05)
-        loc_price  = prev_close * np.exp(-multiplier * sigma)
+        sigma = pos_cfg.get("DAILY_SIGMA", 0.05)
+        loc_price = prev_close * np.exp(-multiplier * sigma)
 
         lines.append(f"\n🔹 **{ticker}**")
         lines.append(f"• 전일 종가: ${prev_close:.2f}  |  LOC: ${loc_price:.2f}")
