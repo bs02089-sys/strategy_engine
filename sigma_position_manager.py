@@ -68,7 +68,7 @@ def refresh_sigma_if_stale(cfg: dict) -> list[str]:
 
     for ticker in TARGET_TICKERS:
         pos = positions_data.setdefault(ticker, {})
-        lookback_days = int(pos.get("LOOKBACK_DAYS", 252))
+        lookback_days = int(pos.get("LOOKBACK_DAYS", 90))
 
         last_str = pos.get("LAST_SIGMA_UPDATE", "2000-01-01")
         try:
