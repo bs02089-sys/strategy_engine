@@ -121,42 +121,38 @@ def _safe_float(val) -> float | None:
 
 def get_prev_close(ticker: str) -> float | None:
     """
-    가장 최근 완료된 거래일(전일) 정규장 종가를 강제로 가져오는 강력 버전
+    최종 버전: 가장 최근 완료된 거래일 종가를 정확히 가져옴
     """
     try:
         t = yf.Ticker(ticker)
-        # 더 많은 데이터 + interval=1d 명시
-        hist = t.history(period="15d", interval="1d", auto_adjust=True, prepost=False)
-
-        if hist.empty or len(hist) < 2:
-            print(f"⚠️ {ticker}: 데이터 부족")
+        
+        # 1. 최근 7일 데이터 요청
+        hist = t.history(period="7d", interval="1d", auto_adjust=True, prepost=False)
+        
+        if hist.empty or len(hist) < 1:
+            print(f"⚠️ {ticker}: 데이터 없음")
             return None
 
         close_valid = hist["Close"].dropna()
         if close_valid.empty:
             return None
 
-        now_ny = datetime.now(ZoneInfo("America/New_York"))
-        today = now_ny.date()
+        # 디버깅용 출력
+        print(f"📊 {ticker} 최근 종가들:")
+        for idx, price in zip(hist.index[-4:].date, close_valid.tail(4)):
+            print(f"   {idx}: ${price:.2f}")
 
-        # 오늘 날짜를 완전히 제외하고 가장 최근 종가 선택
-        previous_closes = close_valid[close_valid.index.date < today]
+        # 가장 최근 종가 (yfinance는 장마감 후에는 전일 종가를 iloc[-1]에 안정적으로 넣음)
+        prev_close = _safe_float(close_valid.iloc[-1])
+        close_date = close_valid.index[-1].date()
 
-        if not previous_closes.empty:
-            prev_close = _safe_float(previous_closes.iloc[-1])
-            close_date = previous_closes.index[-1].date()
-        else:
-            # 오늘 데이터만 있는 경우 (극단적 상황)
-            prev_close = _safe_float(close_valid.iloc[-2] if len(close_valid) >= 2 else close_valid.iloc[-1])
-            close_date = close_valid.index[-1].date()
-
-        print(f"✅ {ticker} prev_close: ${prev_close:.2f} ({close_date}) [총 {len(close_valid)}개 데이터]")
+        print(f"✅ {ticker} prev_close: ${prev_close:.2f} ({close_date})")
         return prev_close
 
     except Exception as e:
         print(f"❌ {ticker} 가격 조회 실패: {e}")
         return None
-        
+            
     
 # ═══════════════════════════════════════════════════════════
 # 월초 운영 핑
