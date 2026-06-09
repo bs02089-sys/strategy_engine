@@ -121,28 +121,35 @@ def _safe_float(val) -> float | None:
 
 def get_prev_close(ticker: str) -> float | None:
     """
-    항상 가장 최근 **정규장 종가**를 반환하도록 개선
+    반드시 가장 최근 **완료된 거래일(전일) 정규장 종가**를 반환
     """
     try:
         t = yf.Ticker(ticker)
-        # prepost=False로 after-hours 가격 완전 배제
-        hist = t.history(period="5d", auto_adjust=True, prepost=False)
+        # 10거래일 데이터 확보 + prepost=False
+        hist = t.history(period="10d", auto_adjust=True, prepost=False)
 
-        if hist.empty or len(hist) < 1:
-            print(f"⚠️ {ticker}: 가격 데이터 없음")
+        if hist.empty or len(hist) < 2:
+            print(f"⚠️ {ticker}: 데이터 부족")
             return None
 
         close_valid = hist["Close"].dropna()
         if close_valid.empty:
-            print(f"⚠️ {ticker}: 유효 Close 없음")
             return None
 
-        prev_close = _safe_float(close_valid.iloc[-1])
-        last_date = close_valid.index[-1].date()
+        # === 핵심 수정: 오늘 날짜 제외하고 가장 최근 종가 선택 ===
+        now_ny = datetime.now(ZoneInfo("America/New_York"))
+        today_ny = now_ny.date()
 
-        if prev_close is None:
-            print(f"⚠️ {ticker}: prev_close NaN")
-            return None
+        # 인덱스에서 오늘 날짜를 제외한 마지막 종가 찾기
+        prev_close_series = close_valid[close_valid.index.date < today_ny]
+        
+        if prev_close_series.empty:
+            # 오늘 데이터밖에 없으면 어쩔 수 없이 iloc[-2] 사용 (최후의 수단)
+            prev_close = _safe_float(close_valid.iloc[-2] if len(close_valid) >= 2 else close_valid.iloc[-1])
+        else:
+            prev_close = _safe_float(prev_close_series.iloc[-1])
+
+        last_date = prev_close_series.index[-1].date() if not prev_close_series.empty else close_valid.index[-1].date()
 
         print(f"✅ {ticker} prev_close: ${prev_close:.2f} ({last_date})")
         return prev_close
@@ -150,7 +157,6 @@ def get_prev_close(ticker: str) -> float | None:
     except Exception as e:
         print(f"❌ {ticker} 가격 조회 실패: {e}")
         return None
-
 
 # ═══════════════════════════════════════════════════════════
 # 월초 운영 핑
