@@ -22,7 +22,7 @@ from pandas.tseries.offsets import BDay
 import warnings
 import requests
 import yfinance as yf
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 
 if hasattr(sys.stdout, "reconfigure"):
