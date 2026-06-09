@@ -34,7 +34,7 @@ WEIGHTS = {
 # 종목별 분할 횟수 (사용자 지정)
 YEARLY_COUNT = {
     "AIQ": 20,
-    "SOXX": 20,
+    "SOXX": 21,
     "SOXL": 20
 }
 
