@@ -34,7 +34,6 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 
 TARGET_TICKERS         = ["AIQ", "SOXX", "SOXL"]
 CONFIG_PATH            = "config.json"
-_PERIOD_MAP            = {90: "3mo", 180: "6mo", 365: "1y"}
 _DISCORD_TITLE_LIMIT   = 256
 _DISCORD_CONTENT_LIMIT = 4096
 
@@ -70,12 +69,15 @@ def save_config(cfg: dict) -> None:
 
 def refresh_sigma_if_stale(cfg: dict) -> list[str]:
     messages = []
-    today    = datetime.now()
+    today = datetime.now()
+
+    # POSITIONS 내부의 POSITIONS에 접근하도록 경로 수정
+    positions_data = cfg.get("POSITIONS", {}).get("POSITIONS", {})
 
     for ticker in TARGET_TICKERS:
-        pos           = cfg["POSITIONS"].get(ticker, {})
-        lookback_days = int(pos.get("LOOKBACK_DAYS", 365))
-        period        = _PERIOD_MAP.get(lookback_days, "1y")
+        pos = positions_data.get(ticker, {})
+        # 기본값을 252로 설정
+        lookback_days = int(pos.get("LOOKBACK_DAYS", 252))
 
         last_str = pos.get("LAST_SIGMA_UPDATE", "2000-01-01")
         try:
@@ -83,18 +85,34 @@ def refresh_sigma_if_stale(cfg: dict) -> list[str]:
         except ValueError:
             last_dt = datetime(2000, 1, 1)
 
+        # 갱신 주기 도달 여부 확인
         if (today - last_dt).days < lookback_days:
             continue
 
         try:
-            hist = yf.Ticker(ticker).history(period=period, auto_adjust=True)
+            # 날짜 범위 직접 계산
+            start_date = today - timedelta(days=lookback_days)
+            
+            # period 대신 start와 end 사용
+            hist = yf.Ticker(ticker).history(
+                start=start_date.strftime("%Y-%m-%d"), 
+                end=today.strftime("%Y-%m-%d"), 
+                auto_adjust=True
+            )
+            
             if hist.empty or len(hist) < 10:
                 messages.append(f"⚠️ {ticker} 시그마 갱신 실패: 데이터 부족")
                 continue
+                
             new_sigma = round(float(hist["Close"].pct_change().dropna().std()), 6)
-            pos["DAILY_SIGMA"]       = new_sigma
+            
+            # 데이터 갱신
+            pos["DAILY_SIGMA"] = new_sigma
             pos["LAST_SIGMA_UPDATE"] = today.strftime("%Y-%m-%d")
-            messages.append(f"📊 {ticker} 시그마 갱신 ({period} 기준): {new_sigma:.6f}")
+            
+            # 명확한 기간 표시
+            messages.append(f"📊 {ticker} 시그마 갱신 ({lookback_days}일 기준): {new_sigma:.6f}")
+            
         except Exception as e:
             messages.append(f"⚠️ {ticker} 시그마 갱신 실패: {e}")
 
