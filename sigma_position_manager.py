@@ -12,7 +12,6 @@ import shutil
 import tempfile
 import numpy as np
 import pandas as pd
-from pandas.tseries.offsets import BDay
 import warnings
 import requests
 import yfinance as yf
@@ -65,7 +64,6 @@ def refresh_sigma_if_stale(cfg: dict) -> list[str]:
     messages = []
     today = datetime.now(ZoneInfo("America/New_York")).date()
 
-    # POSITIONS 직접 접근 (리팩토링 후)
     positions_data = cfg.setdefault("POSITIONS", {})
 
     for ticker in TARGET_TICKERS:
@@ -82,7 +80,7 @@ def refresh_sigma_if_stale(cfg: dict) -> list[str]:
             continue
 
         try:
-            start_date = today - timedelta(days=lookback_days + 5)  # 여유 기간 추가
+            start_date = today - timedelta(days=lookback_days + 10)  # 여유 기간
             
             hist = yf.Ticker(ticker).history(
                 start=start_date.strftime("%Y-%m-%d"),
@@ -96,7 +94,6 @@ def refresh_sigma_if_stale(cfg: dict) -> list[str]:
                 
             new_sigma = round(float(hist["Close"].pct_change().dropna().std()), 6)
             
-            # config에 직접 반영
             pos["DAILY_SIGMA"] = new_sigma
             pos["LAST_SIGMA_UPDATE"] = today.strftime("%Y-%m-%d")
             
@@ -106,6 +103,53 @@ def refresh_sigma_if_stale(cfg: dict) -> list[str]:
             messages.append(f"⚠️ {ticker} 시그마 갱신 실패: {e}")
 
     return messages
+
+
+# ═══════════════════════════════════════════════════════════
+# 가격 조회 — 개선됨
+# ═══════════════════════════════════════════════════════════
+
+def _safe_float(val) -> float | None:
+    try:
+        if val is None:
+            return None
+        f = float(val)
+        return None if np.isnan(f) else f
+    except (TypeError, ValueError):
+        return None
+
+
+def get_prev_close(ticker: str) -> float | None:
+    """
+    항상 가장 최근 **정규장 종가**를 반환하도록 개선
+    """
+    try:
+        t = yf.Ticker(ticker)
+        # prepost=False로 after-hours 가격 완전 배제
+        hist = t.history(period="5d", auto_adjust=True, prepost=False)
+
+        if hist.empty or len(hist) < 1:
+            print(f"⚠️ {ticker}: 가격 데이터 없음")
+            return None
+
+        close_valid = hist["Close"].dropna()
+        if close_valid.empty:
+            print(f"⚠️ {ticker}: 유효 Close 없음")
+            return None
+
+        prev_close = _safe_float(close_valid.iloc[-1])
+        last_date = close_valid.index[-1].date()
+
+        if prev_close is None:
+            print(f"⚠️ {ticker}: prev_close NaN")
+            return None
+
+        print(f"✅ {ticker} prev_close: ${prev_close:.2f} ({last_date})")
+        return prev_close
+
+    except Exception as e:
+        print(f"❌ {ticker} 가격 조회 실패: {e}")
+        return None
 
 
 # ═══════════════════════════════════════════════════════════
@@ -123,54 +167,6 @@ def send_monthly_ping_if_due(cfg: dict, webhook: str, user_id: str) -> None:
     msg = f"🔔 **월초 핑** | {now.strftime('%Y년 %m월')}\n운용 시스템이 정상 가동 중입니다."
     _send_discord(webhook, user_id, "🗓️ 월간 운영 핑", msg)
     cfg["LAST_MONTHLY_PING"] = today_ym
-
-
-# ═══════════════════════════════════════════════════════════
-# 가격 조회
-# ═══════════════════════════════════════════════════════════
-
-def _safe_float(val) -> float | None:
-    try:
-        if val is None:
-            return None
-        f = float(val)
-        return None if np.isnan(f) else f
-    except (TypeError, ValueError):
-        return None
-
-
-def get_prev_close(ticker: str) -> float | None:
-    try:
-        t = yf.Ticker(ticker)
-        hist = t.history(period="1mo", auto_adjust=True)
-
-        if hist.empty or len(hist) < 1:
-            print(f"⚠️ {ticker}: 가격 데이터 없음")
-            return None
-
-        close_valid = hist["Close"].dropna()
-        if close_valid.empty:
-            print(f"⚠️ {ticker}: 유효 Close 없음")
-            return None
-
-        now_ny = datetime.now(ZoneInfo("America/New_York"))
-        hour_ny = now_ny.hour + now_ny.minute / 60.0
-        is_open = 9.5 <= hour_ny < 16.0
-
-        if is_open and len(close_valid) >= 2:
-            prev_close = _safe_float(close_valid.iloc[-2])
-        else:
-            prev_close = _safe_float(close_valid.iloc[-1])
-
-        if prev_close is None:
-            print(f"⚠️ {ticker}: prev_close NaN")
-            return None
-
-        return prev_close
-
-    except Exception as e:
-        print(f"❌ {ticker} 가격 조회 실패: {e}")
-        return None
 
 
 # ═══════════════════════════════════════════════════════════
