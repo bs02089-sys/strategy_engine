@@ -11,7 +11,6 @@ import json
 import shutil
 import tempfile
 import numpy as np
-import pandas as pd
 import warnings
 import requests
 import yfinance as yf
