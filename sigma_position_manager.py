@@ -21,6 +21,7 @@ import math
 import warnings
 import requests
 import pandas as pd
+from pandas.tseries.offsets import BDay
 import yfinance as yf
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
