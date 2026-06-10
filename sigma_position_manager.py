@@ -17,7 +17,7 @@ import json
 import shutil
 import tempfile
 import numpy as np
-import math
+import time
 import warnings
 import requests
 import pandas as pd
@@ -137,58 +137,24 @@ def _safe_float(val) -> float | None:
         return None
     
 
-def get_prev_close(ticker: str) -> float | None:
-    """
-    전일 확정 종가를 반환한다.
-
-    prepost=False로 정규장 데이터만 수집한다.
-
-    봉 선택 기준:
-      - 장후(16:00 EDT ~): iloc[-1] = 오늘 확정 종가
-      - 프리마켓 / 정규장 중: 오늘 미완성 봉 포함 여부를 날짜로 확인
-          오늘 봉 포함 → iloc[-2] (전일 확정 종가)
-          오늘 봉 없음 → iloc[-1] (가장 최근 확정 종가)
-    """
-    try:
-        t    = yf.Ticker(ticker)
-        hist = t.history(period="10d", interval="1d", auto_adjust=True, prepost=False)
-
-        if hist.empty or len(hist) < 1:
-            print(f"⚠️ {ticker}: 가격 데이터 없음")
-            return None
-
-        close_valid = hist["Close"].dropna()
-        if close_valid.empty:
-            print(f"⚠️ {ticker}: 유효 Close 없음")
-            return None
-
-        now_ny  = datetime.now(ZoneInfo("America/New_York"))
-        hour_ny = now_ny.hour + now_ny.minute / 60.0
-
-        # 장후(16:00~): 오늘 확정 종가가 iloc[-1]에 있음
-        if hour_ny >= 16.0:
-            prev_close = _safe_float(close_valid.iloc[-1])
-
-        # 프리마켓 / 정규장 중(~16:00): 오늘 미완성 봉 제외
-        else:
-            last_date = close_valid.index[-1].date()
-            today_ny  = now_ny.date()
-            if last_date == today_ny and len(close_valid) >= 2:
-                # 오늘 미완성 봉 포함 → 전일 확정 봉 사용
-                prev_close = _safe_float(close_valid.iloc[-2])
-            else:
-                # 오늘 봉 없음 → 가장 최근 확정 봉
-                prev_close = _safe_float(close_valid.iloc[-1])
-
-        if prev_close is None:
-            print(f"⚠️ {ticker}: prev_close NaN")
-            return None
-
-        return prev_close
-
-    except Exception as e:
-        print(f"❌ {ticker} 가격 조회 실패: {e}")
-        return None
+def get_prev_close_with_retry(ticker: str, retries=3):
+    for i in range(retries):
+        try:
+            t = yf.Ticker(ticker)
+            hist = t.history(period="5d", interval="1d", auto_adjust=False)
+            
+            # 데이터가 정상적으로 들어왔는지 확인
+            if not hist.empty and not pd.isna(hist["Close"].iloc[-1]):
+                return float(hist["Close"].iloc[-1])
+            
+            print(f"🔄 {ticker} 데이터 미확보... {i+1}회 재시도 중")
+            time.sleep(2) # 2초 대기 후 다시 시도
+            
+        except Exception as e:
+            time.sleep(2)
+            
+    print(f"❌ {ticker} 최종 실패: 서버 응답 없음")
+    return None
                                                                                
 
 # ═══════════════════════════════════════════════════════════
@@ -255,7 +221,7 @@ def execute_dual_tactical_trader() -> None:
 
     for ticker in TARGET_TICKERS:
         pos_cfg    = positions.get(ticker, {})
-        prev_close = get_prev_close(ticker)
+        prev_close = get_prev_close_with_retry(ticker)
 
         if prev_close is None:
             lines.append(f"\n🔹 **{ticker}** — 가격 조회 실패 ⚠️")
