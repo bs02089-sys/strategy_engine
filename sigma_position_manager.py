@@ -127,46 +127,67 @@ def send_monthly_ping_if_due(cfg: dict, webhook: str, user_id: str) -> None:
 
 def _safe_float(val) -> float | None:
     try:
-        if val is None or pd.isna(val):
+        if val is None:
             return None
-        return float(val)
+        f = float(val)
+        return None if np.isnan(f) else f
     except (TypeError, ValueError):
         return None
-
+ 
+ 
 def get_prev_close(ticker: str) -> float | None:
+    """
+    전일 확정 종가를 반환한다.
+ 
+    prepost=False로 정규장 데이터만 수집한다.
+ 
+    봉 선택 기준:
+      - 장후(16:00 EDT ~): iloc[-1] = 오늘 확정 종가
+      - 프리마켓 / 정규장 중: 오늘 미완성 봉 포함 여부를 날짜로 확인
+          오늘 봉 포함 → iloc[-2] (전일 확정 종가)
+          오늘 봉 없음 → iloc[-1] (가장 최근 확정 종가)
+    """
     try:
-        t = yf.Ticker(ticker)
-        # 10일치 데이터 확보
-        hist = t.history(period="10d", interval="1d", auto_adjust=False)
-        
-        if hist.empty:
+        t    = yf.Ticker(ticker)
+        hist = t.history(period="10d", interval="1d", auto_adjust=True, prepost=False)
+ 
+        if hist.empty or len(hist) < 1:
+            print(f"⚠️ {ticker}: 가격 데이터 없음")
             return None
-
-        # 미국 동부 시간 기준 오늘 날짜 계산
-        today_ny = datetime.now(ZoneInfo("America/New_York")).date()
-        
-        # 오늘보다 이전 날짜 데이터만 필터링 (가장 확실한 '전일 종가' 추출)
-        past_data = hist[hist.index.date < today_ny]
-        
-        if past_data.empty:
+ 
+        close_valid = hist["Close"].dropna()
+        if close_valid.empty:
+            print(f"⚠️ {ticker}: 유효 Close 없음")
             return None
-            
-        # 가장 최근 날짜의 종가 추출
-        raw_close = past_data["Close"].iloc[-1]
-        last_date = past_data.index[-1].date()
-        
-        # _safe_float를 통해 안전하게 변환
-        final_close = _safe_float(raw_close)
-        
-        if final_close:
-            print(f"✅ {ticker} 종가 확정: ${final_close:.2f} (기준일: {last_date})")
-        
-        return final_close
-        
+ 
+        now_ny  = datetime.now(ZoneInfo("America/New_York"))
+        hour_ny = now_ny.hour + now_ny.minute / 60.0
+ 
+        # 장후(16:00~): 오늘 확정 종가가 iloc[-1]에 있음
+        if hour_ny >= 16.0:
+            prev_close = _safe_float(close_valid.iloc[-1])
+ 
+        # 프리마켓 / 정규장 중(~16:00): 오늘 미완성 봉 제외
+        else:
+            last_date = close_valid.index[-1].date()
+            today_ny  = now_ny.date()
+            if last_date == today_ny and len(close_valid) >= 2:
+                # 오늘 미완성 봉 포함 → 전일 확정 봉 사용
+                prev_close = _safe_float(close_valid.iloc[-2])
+            else:
+                # 오늘 봉 없음 → 가장 최근 확정 봉
+                prev_close = _safe_float(close_valid.iloc[-1])
+ 
+        if prev_close is None:
+            print(f"⚠️ {ticker}: prev_close NaN")
+            return None
+ 
+        return prev_close
+ 
     except Exception as e:
-        print(f"❌ 데이터 자동 조회 오류: {e}")
+        print(f"❌ {ticker} 가격 조회 실패: {e}")
         return None
-        
+            
 
 # ═══════════════════════════════════════════════════════════
 # 디스코드
