@@ -136,67 +136,44 @@ def _safe_float(val) -> float | None:
 
 def get_prev_close(ticker: str) -> float | None:
     """
-    최종 강화 버전: 어떤 상황에서도 '가장 최근 완료된 거래일 종가'를 반환
+    미국 주식 시장의 시간대와 상관없이, 데이터상 가장 최근 완료된 '거래일'의 종가를 반환.
     """
     try:
         t = yf.Ticker(ticker)
-        hist = t.history(
-            period="20d",           # 데이터 더 넉넉하게
-            interval="1d", 
-            auto_adjust=True, 
-            prepost=False
-        )
+        # period="5d" 정도로 충분합니다.
+        hist = t.history(period="5d", interval="1d", auto_adjust=True)
 
         if hist.empty or len(hist) < 2:
-            print(f"⚠️ {ticker}: 가격 데이터 부족")
             return None
 
-        close_valid = hist["Close"].dropna()
-        if close_valid.empty:
-            return None
-
+        # 1. 시간 순서대로 정렬 (가장 최근이 끝에 오도록)
+        # 2. 데이터프레임의 마지막 행이 '오늘' 혹은 '현재까지의 최신' 데이터입니다.
+        # 3. 만약 오늘 장이 열려있다면(진행 중이라면), 마지막 행은 오늘 종가가 아니라 실시간 가격입니다.
+        
+        # 안전하게 마지막 2개만 봅니다.
+        # 가장 최근 행(iloc[-1])이 오늘 날짜와 같다면, 그 이전 행(iloc[-2])이 전일 종가입니다.
+        
         now_ny = datetime.now(ZoneInfo("America/New_York"))
-        today = now_ny.date()
-
-        # 디버깅용 상세 로그
-        print(f"\n📊 {ticker} 최근 데이터 ({len(close_valid)}개):")
-        for i in range(min(6, len(close_valid))):
-            dt = close_valid.index[-1 - i]
-            date_only = dt.date() if hasattr(dt, 'date') else dt
-            price = close_valid.iloc[-1 - i]
-            print(f"   {date_only} | ${price:.2f}")
-
-        # === 핵심 로직: timezone 제거하고 날짜 비교 ===
-        previous_closes = []
-        for i in range(len(close_valid)):
-            idx = -1 - i
-            dt = close_valid.index[idx]
-            # timezone 제거하고 date만 비교
-            candle_date = dt.tz_localize(None).date() if hasattr(dt, 'tz_localize') else dt.date()
-            
-            if candle_date < today:
-                prev_close = _safe_float(close_valid.iloc[idx])
-                close_date = candle_date
-                previous_closes.append((close_date, prev_close))
-                break  # 가장 최근 것만 찾고 종료
-
-        if previous_closes:
-            close_date, prev_close = previous_closes[0]
+        today_date = now_ny.date()
+        
+        last_date = hist.index[-1].date()
+        
+        # 마지막 데이터가 오늘 날짜라면, 전일 종가는 그 이전 데이터
+        if last_date == today_date:
+            prev_close = float(hist["Close"].iloc[-2])
+            prev_date = hist.index[-2].date()
         else:
-            # 최후의 안전장치
-            prev_close = _safe_float(close_valid.iloc[-2] if len(close_valid) >= 2 else close_valid.iloc[-1])
-            close_date = close_valid.index[-2].date() if len(close_valid) >= 2 else close_valid.index[-1].date()
+            # 마지막 데이터가 오늘이 아니면(장 마감 후), 마지막 데이터가 전일 종가
+            prev_close = float(hist["Close"].iloc[-1])
+            prev_date = hist.index[-1].date()
 
-        print(f"✅ {ticker} prev_close: ${prev_close:.2f} ({close_date}) ← 선택됨")
-
+        print(f"✅ {ticker} 전일 종가 확정: ${prev_close:.2f} ({prev_date})")
         return prev_close
 
     except Exception as e:
-        print(f"❌ {ticker} 가격 조회 실패: {e}")
-        import traceback
-        traceback.print_exc()
+        print(f"❌ {ticker} 조회 실패: {e}")
         return None
-            
+                
 
 # ═══════════════════════════════════════════════════════════
 # 디스코드
