@@ -4,19 +4,19 @@
     "POSITIONS": {
         "AIQ": {
             "ENTRY_MULTIPLIER": 1.41,
-            "DAILY_SIGMA": 0.0287,
+            "DAILY_SIGMA": 0.0206,
             "LAST_SIGMA_UPDATE": "2026-06-10",
             "LOOKBACK_DAYS": 90
         },
         "SOXQ": {
             "ENTRY_MULTIPLIER": 1.41,
-            "DAILY_SIGMA": 0.0292,
+            "DAILY_SIGMA": 0.0285,
             "LAST_SIGMA_UPDATE": "2026-06-10",
             "LOOKBACK_DAYS": 90
         },
         "SOXL": {
             "ENTRY_MULTIPLIER": 1.41,
-            "DAILY_SIGMA": 0.1284,
+            "DAILY_SIGMA": 0.0870,
             "LAST_SIGMA_UPDATE": "2026-06-10",
             "LOOKBACK_DAYS": 90
         }
