@@ -136,18 +136,15 @@ def _safe_float(val) -> float | None:
 
 def get_prev_close(ticker: str) -> float | None:
     """
-    어떤 시간대(프리마켓, 장중, 애프터마켓)에서 실행하더라도 
-    항상 '가장 최근 완료된 거래일(전일)'의 정규장 종가를 반환
+    어떤 시간대에서 실행하든 항상 '가장 최근 완료된 거래일(전일)' 종가를 반환
     """
     try:
         t = yf.Ticker(ticker)
-        
-        # 충분한 데이터 확보 (최근 15거래일)
         hist = t.history(
             period="15d", 
             interval="1d", 
             auto_adjust=True, 
-            prepost=False   # after-hours 데이터 완전 배제
+            prepost=False
         )
 
         if hist.empty or len(hist) < 2:
@@ -156,32 +153,43 @@ def get_prev_close(ticker: str) -> float | None:
 
         close_valid = hist["Close"].dropna()
         if close_valid.empty:
-            print(f"⚠️ {ticker}: 유효 Close 없음")
             return None
 
         now_ny = datetime.now(ZoneInfo("America/New_York"))
         today = now_ny.date()
 
-        # === 핵심: 오늘 날짜를 완전히 제외 ===
-        previous_closes = close_valid[close_valid.index.date < today]
+        # 디버깅 로그 강화
+        print(f"📊 {ticker} 최근 날짜 및 가격:")
+        for i in range(min(5, len(close_valid))):
+            idx = -1 - i
+            d = close_valid.index[idx].date()
+            price = close_valid.iloc[idx]
+            print(f"   {d}: ${price:.2f}")
 
-        if not previous_closes.empty:
-            # 가장 최근 완료된 거래일 종가
-            prev_close = _safe_float(previous_closes.iloc[-1])
-            close_date = previous_closes.index[-1].date()
+        # 핵심: 오늘 날짜를 제외한 가장 최근 종가 찾기
+        previous = []
+        for i in range(len(close_valid)):
+            d = close_valid.index[-1 - i].date()
+            if d < today:
+                previous.append((d, close_valid.iloc[-1 - i]))
+                break  # 가장 최근 것만 찾으면 종료
+
+        if previous:
+            close_date, prev_close = previous[0]
         else:
-            # 극단적 상황 (오늘 데이터밖에 없을 때)
-            prev_close = _safe_float(close_valid.iloc[-2] if len(close_valid) >= 2 else close_valid.iloc[-1])
-            close_date = close_valid.index[-1].date()
+            # 안전장치: 오늘 데이터밖에 없으면 iloc[-2]
+            prev_close = _safe_float(close_valid.iloc[-2])
+            close_date = close_valid.index[-2].date()
 
-        print(f"✅ {ticker} prev_close: ${prev_close:.2f} ({close_date})")
+        prev_close = _safe_float(prev_close)
+        print(f"✅ {ticker} prev_close: ${prev_close:.2f} ({close_date}) ← 최종 선택")
 
         return prev_close
 
     except Exception as e:
         print(f"❌ {ticker} 가격 조회 실패: {e}")
         return None
-    
+        
 
 # ═══════════════════════════════════════════════════════════
 # 디스코드
