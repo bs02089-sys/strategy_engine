@@ -147,24 +147,36 @@ def _safe_float(val) -> float | None:
 def get_prev_close(ticker: str) -> float | None:
     try:
         t = yf.Ticker(ticker)
-        # 1. 정규장 데이터만, 배당/분할 보정 없이(auto_adjust=False) 가져옴
-        # 2. 5일치 데이터를 확보하여 가장 최근의 마감 데이터를 찾음
+        # 5일치 데이터를 가져옵니다.
         hist = t.history(period="5d", interval="1d", auto_adjust=False)
         
         if hist.empty:
             return None
         
-        # 가장 최근에 기록된 Close(종가) 값을 가져옴
-        # (이미 6월 9일 정규장이 마감되었으므로, 마지막 행이 6월 9일 종가임)
-        prev_close = float(hist["Close"].iloc[-1])
+        # 오늘 날짜(미국 기준)를 계산합니다.
+        import datetime
+        from zoneinfo import ZoneInfo
+        today_ny = datetime.datetime.now(ZoneInfo("America/New_York")).date()
         
-        print(f"✅ {ticker} 확정 종가: ${prev_close:.2f}")
-        return prev_close
+        # 데이터를 뒤에서부터(최신순) 검사하여, 오늘이 아닌 가장 최근 날짜의 종가를 찾습니다.
+        for i in range(len(hist) - 1, -1, -1):
+            date_idx = hist.index[i].date()
+            
+            # 오늘 날짜보다 과거인 데이터가 진짜 '전일 종가'입니다.
+            if date_idx < today_ny:
+                val = hist["Close"].iloc[i]
+                
+                # val이 숫자인지 명확히 검증 후 리턴
+                if val is not None and not pd.isna(val):
+                    print(f"✅ {ticker} 전일 종가({date_idx}): ${float(val):.2f}")
+                    return float(val)
+        
+        return None
         
     except Exception as e:
-        print(f"❌ 데이터 조회 오류: {e}")
+        print(f"❌ {ticker} 에러 발생: {e}")
         return None
-                                        
+                                            
 
 # ═══════════════════════════════════════════════════════════
 # 디스코드
