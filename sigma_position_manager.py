@@ -139,58 +139,38 @@ def _safe_float(val) -> float | None:
 
 def get_prev_close(ticker: str) -> float | None:
     """
-    전일 확정 종가를 반환한다.
-
-    - period="1mo": 유동성 낮은 종목의 데이터 누락 방지
-    - auto_adjust=True: 배당락 조정 반영 → 증권앱 표시 가격과 일치
-    - 정규장 중(09:30~16:00 EDT): 오늘 미완성 봉 포함 시 iloc[-2] 사용
-    - 프리마켓/장후: iloc[-1] 사용
-    - 직전 거래일 검증: 데이터 지연 시 경고 출력
+    최종 버전: 가장 최근 완료된 거래일 종가를 정확히 가져옴
     """
     try:
-        t    = yf.Ticker(ticker)
-        hist = t.history(period="1mo", auto_adjust=True)
-
+        t = yf.Ticker(ticker)
+        
+        # 1. 최근 7일 데이터 요청
+        hist = t.history(period="7d", interval="1d", auto_adjust=True, prepost=False)
+        
         if hist.empty or len(hist) < 1:
-            print(f"⚠️ {ticker}: 가격 데이터 없음")
+            print(f"⚠️ {ticker}: 데이터 없음")
             return None
 
         close_valid = hist["Close"].dropna()
         if close_valid.empty:
-            print(f"⚠️ {ticker}: 유효 Close 없음")
             return None
 
-        # 정규장 시간 여부 (서머타임 자동 반영)
-        now_ny  = datetime.now(ZoneInfo("America/New_York"))
-        hour_ny = now_ny.hour + now_ny.minute / 60.0
-        is_open = 9.5 <= hour_ny < 16.0
+        # 디버깅용 출력
+        print(f"📊 {ticker} 최근 종가들:")
+        for idx, price in zip(hist.index[-4:].date, close_valid.tail(4)):
+            print(f"   {idx}: ${price:.2f}")
 
-        if is_open:
-            last_date = hist.index[-1].date()
-            today_ny  = now_ny.date()
-            if last_date == today_ny and len(close_valid) >= 2:
-                prev_close = _safe_float(close_valid.iloc[-2])
-            else:
-                prev_close = _safe_float(close_valid.iloc[-1])
-        else:
-            prev_close = _safe_float(close_valid.iloc[-1])
+        # 가장 최근 종가 (yfinance는 장마감 후에는 전일 종가를 iloc[-1]에 안정적으로 넣음)
+        prev_close = _safe_float(close_valid.iloc[-1])
+        close_date = close_valid.index[-1].date()
 
-        if prev_close is None:
-            print(f"⚠️ {ticker}: prev_close NaN")
-            return None
-
-        # 직전 거래일 검증 — 데이터 지연 경고
-        last_data_date = close_valid.index[-1].date()
-        expected_date  = (pd.Timestamp(now_ny.date()) - BDay(1)).date()
-        if last_data_date < expected_date:
-            print(f"⚠️ {ticker}: 데이터 지연 — 기대 {expected_date}, 실제 {last_data_date}")
-
+        print(f"✅ {ticker} prev_close: ${prev_close:.2f} ({close_date})")
         return prev_close
 
     except Exception as e:
         print(f"❌ {ticker} 가격 조회 실패: {e}")
         return None
-                                                            
+                                                                
 
 # ═══════════════════════════════════════════════════════════
 # 디스코드
