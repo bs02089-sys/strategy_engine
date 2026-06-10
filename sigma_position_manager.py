@@ -192,15 +192,6 @@ def get_prev_close(ticker: str) -> float | None:
     except Exception as e:
         print(f"❌ {ticker} 가격 조회 실패: {e}")
         return None
-
-
-def get_vix() -> float | None:
-    try:
-        hist = yf.Ticker("^VIX").history(period="1d")
-        return _safe_float(hist["Close"].iloc[-1]) if not hist.empty else None
-    except Exception as e:
-        print(f"⚠️ VIX 조회 실패: {e}")
-        return None
                                                                            
 
 # ═══════════════════════════════════════════════════════════
