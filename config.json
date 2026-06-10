@@ -3,20 +3,25 @@
     "DISCORD_USER_ID": "",
     "POSITIONS": {
         "AIQ": {
-            "ENTRY_MULTIPLIER": 1.29,
-            "DAILY_SIGMA": 0.0266,
+            "ENTRY_MULTIPLIER": 1.41,
+            "DAILY_SIGMA": 0.0287,
             "LAST_SIGMA_UPDATE": "2026-06-10",
             "LOOKBACK_DAYS": 90
         },
         "SOXQ": {
+<<<<<<< Updated upstream
             "ENTRY_MULTIPLIER": 1.3,
             "DAILY_SIGMA": 0.037,
+=======
+            "ENTRY_MULTIPLIER": 1.41,
+            "DAILY_SIGMA": 0.0292,
+>>>>>>> Stashed changes
             "LAST_SIGMA_UPDATE": "2026-06-10",
             "LOOKBACK_DAYS": 90
         },
         "SOXL": {
-            "ENTRY_MULTIPLIER": 1.3,
-            "DAILY_SIGMA": 0.1131,
+            "ENTRY_MULTIPLIER": 1.41,
+            "DAILY_SIGMA": 0.1284,
             "LAST_SIGMA_UPDATE": "2026-06-10",
             "LOOKBACK_DAYS": 90
         }
