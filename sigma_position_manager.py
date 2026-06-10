@@ -17,6 +17,7 @@ import json
 import shutil
 import tempfile
 import numpy as np
+import pandas as pd
 import warnings
 import requests
 import yfinance as yf
@@ -126,45 +127,46 @@ def send_monthly_ping_if_due(cfg: dict, webhook: str, user_id: str) -> None:
 
 def _safe_float(val) -> float | None:
     try:
-        if val is None:
+        if val is None or pd.isna(val):
             return None
-        f = float(val)
-        return None if np.isnan(f) else f
+        return float(val)
     except (TypeError, ValueError):
         return None
-
 
 def get_prev_close(ticker: str) -> float | None:
     try:
         t = yf.Ticker(ticker)
-        # 데이터를 충분히 확보 (10일치)
+        # 10일치 데이터 확보
         hist = t.history(period="10d", interval="1d", auto_adjust=False)
         
         if hist.empty:
             return None
 
-        # 1. 오늘 날짜를 기준으로, 데이터 중 오늘보다 이전인 데이터만 필터링
-        # (장이 열리지 않았거나 장전 시간이라도 데이터가 꼬이지 않게 함)
+        # 미국 동부 시간 기준 오늘 날짜 계산
         today_ny = datetime.now(ZoneInfo("America/New_York")).date()
+        
+        # 오늘보다 이전 날짜 데이터만 필터링 (가장 확실한 '전일 종가' 추출)
         past_data = hist[hist.index.date < today_ny]
         
         if past_data.empty:
             return None
             
-        # 2. 필터링된 데이터 중 가장 마지막 날짜(iloc[-1])의 종가를 무조건 가져옴
-        # 이것이 항상 가장 최근에 마감된 정규장 종가입니다.
-        last_close = float(past_data["Close"].iloc[-1])
-        
-        # 3. 브리핑을 위해 어떤 날짜의 데이터를 썼는지 확인 가능하도록 출력
+        # 가장 최근 날짜의 종가 추출
+        raw_close = past_data["Close"].iloc[-1]
         last_date = past_data.index[-1].date()
-        print(f"✅ {ticker} 종가 확정: ${last_close:.2f} (기준일: {last_date})")
         
-        return last_close
+        # _safe_float를 통해 안전하게 변환
+        final_close = _safe_float(raw_close)
+        
+        if final_close:
+            print(f"✅ {ticker} 종가 확정: ${final_close:.2f} (기준일: {last_date})")
+        
+        return final_close
         
     except Exception as e:
         print(f"❌ 데이터 자동 조회 오류: {e}")
         return None
-    
+        
 
 # ═══════════════════════════════════════════════════════════
 # 디스코드
