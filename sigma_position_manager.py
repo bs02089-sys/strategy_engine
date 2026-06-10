@@ -189,7 +189,7 @@ def get_prev_close(ticker: str) -> float | None:
     except Exception as e:
         print(f"❌ {ticker} 가격 조회 실패: {e}")
         return None
-                                                                            
+    git                                                                        
 
 # ═══════════════════════════════════════════════════════════
 # 디스코드
