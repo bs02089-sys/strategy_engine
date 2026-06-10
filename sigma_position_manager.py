@@ -145,56 +145,21 @@ def _safe_float(val) -> float | None:
 
 
 def get_prev_close(ticker: str) -> float | None:
-    """
-    전일 확정 종가를 반환한다.
- 
-    prepost=False로 정규장 데이터만 수집한다.
- 
-    봉 선택 기준:
-      - 장후(16:00 EDT ~): iloc[-1] = 오늘 확정 종가
-      - 프리마켓 / 정규장 중: 오늘 미완성 봉 포함 여부를 날짜로 확인
-          오늘 봉 포함 → iloc[-2] (전일 확정 종가)
-          오늘 봉 없음 → iloc[-1] (가장 최근 확정 종가)
-    """
     try:
-        t    = yf.Ticker(ticker)
-        hist = t.history(period="10d", interval="1d", auto_adjust=True, prepost=False)
- 
-        if hist.empty or len(hist) < 1:
-            print(f"⚠️ {ticker}: 가격 데이터 없음")
+        t = yf.Ticker(ticker)
+        # auto_adjust=False로 설정하여 수정되지 않은 실제 종가(Close)를 가져옵니다.
+        hist = t.history(period="5d", interval="1d", auto_adjust=False)
+        
+        if hist.empty:
             return None
- 
-        close_valid = hist["Close"].dropna()
-        if close_valid.empty:
-            print(f"⚠️ {ticker}: 유효 Close 없음")
-            return None
- 
-        now_ny  = datetime.now(ZoneInfo("America/New_York"))
-        hour_ny = now_ny.hour + now_ny.minute / 60.0
- 
-        # 장후(16:00~): 오늘 확정 종가가 iloc[-1]에 있음
-        if hour_ny >= 16.0:
-            prev_close = _safe_float(close_valid.iloc[-1])
- 
-        # 프리마켓 / 정규장 중(~16:00): 오늘 미완성 봉 제외
-        else:
-            last_date = close_valid.index[-1].date()
-            today_ny  = now_ny.date()
-            if last_date == today_ny and len(close_valid) >= 2:
-                # 오늘 미완성 봉 포함 → 전일 확정 봉 사용
-                prev_close = _safe_float(close_valid.iloc[-2])
-            else:
-                # 오늘 봉 없음 → 가장 최근 확정 봉
-                prev_close = _safe_float(close_valid.iloc[-1])
- 
-        if prev_close is None:
-            print(f"⚠️ {ticker}: prev_close NaN")
-            return None
- 
-        return prev_close
- 
+
+        # 가장 최근 완료된 거래일의 실제 종가
+        last_close = float(hist["Close"].iloc[-1])
+        
+        print(f"✅ {ticker} 실제 종가 반영: ${last_close:.2f}")
+        return last_close
     except Exception as e:
-        print(f"❌ {ticker} 가격 조회 실패: {e}")
+        print(f"❌ 조회 실패: {e}")
         return None
                                     
 
