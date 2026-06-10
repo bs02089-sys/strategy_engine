@@ -147,37 +147,30 @@ def _safe_float(val) -> float | None:
 def get_prev_close(ticker: str) -> float | None:
     try:
         t = yf.Ticker(ticker)
-        # 10일치 데이터를 가져와서 범위 내에서 확실한 6월 9일 값을 찾음
+        # 넉넉하게 10일치 데이터를 가져옵니다.
         hist = t.history(period="10d", interval="1d", auto_adjust=False)
         
         if hist.empty:
             return None
-
-        # 1. 미국 동부 시간 기준 어제 날짜를 생성 (6월 9일)
-        ny_tz = ZoneInfo("America/New_York")
-        yesterday_ny = (datetime.now(ny_tz) - timedelta(days=1)).date()
         
-        # 2. 데이터프레임의 인덱스에서 yesterday_ny와 일치하는 행을 강제 선택
-        # 인덱스를 날짜로 변환하여 비교
-        hist.index = hist.index.date
+        # 1. 미국 동부 시간 기준 오늘 날짜를 구함
+        today_ny = datetime.now(ZoneInfo("America/New_York")).date()
         
-        if yesterday_ny in hist.index:
-            val = hist.loc[yesterday_ny, "Close"]
-            # Series일 경우 마지막 값, 단일 값이면 그대로 사용
-            if isinstance(val, pd.Series):
-                val = val.iloc[-1]
-                
-            clean_val = float(val)
-            print(f"✅ {ticker} 확정 종가({yesterday_ny}): ${clean_val:.2f}")
-            return clean_val
+        # 2. 오늘 날짜보다 작은(즉, 어제 혹은 그 이전) 데이터만 필터링
+        past_data = hist[hist.index.date < today_ny]
+        
+        if not past_data.empty:
+            # 3. 그 중에서 가장 최근 날짜의 종가를 선택
+            val = float(past_data["Close"].iloc[-1])
+            print(f"✅ {ticker} 자동 확정 종가: ${val:.2f} ({past_data.index[-1].date()})")
+            return val
         else:
-            print(f"⚠️ {ticker}: {yesterday_ny} 데이터가 아직 로드되지 않음")
             return None
 
     except Exception as e:
-        print(f"❌ 데이터 조회 에러: {e}")
+        print(f"❌ 자동 조회 에러: {e}")
         return None
-                                                
+                                                    
 
 # ═══════════════════════════════════════════════════════════
 # 디스코드
