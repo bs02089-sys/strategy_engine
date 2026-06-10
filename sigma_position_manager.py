@@ -147,30 +147,29 @@ def _safe_float(val) -> float | None:
 def get_prev_close(ticker: str) -> float | None:
     try:
         t = yf.Ticker(ticker)
-        # 넉넉하게 10일치 데이터를 가져옵니다.
-        hist = t.history(period="10d", interval="1d", auto_adjust=False)
+        hist = t.history(period="5d", interval="1d", auto_adjust=False)
         
+        # 1. 아예 raw 데이터 자체를 확인
         if hist.empty:
             return None
+            
+        # 2. 가장 최근의 Close 값을 Series가 아닌 값으로 직접 추출
+        last_val = hist["Close"].iloc[-1]
         
-        # 1. 미국 동부 시간 기준 오늘 날짜를 구함
-        today_ny = datetime.now(ZoneInfo("America/New_York")).date()
+        # 3. 만약 이게 NaN이면 바로 전날 값을 강제 추출
+        if pd.isna(last_val):
+            last_val = hist["Close"].iloc[-2]
+            
+        # 4. 숫자 변환
+        final_val = float(last_val)
         
-        # 2. 오늘 날짜보다 작은(즉, 어제 혹은 그 이전) 데이터만 필터링
-        past_data = hist[hist.index.date < today_ny]
+        print(f"DEBUG: {ticker} 강제 추출값: {final_val}")
+        return final_val
         
-        if not past_data.empty:
-            # 3. 그 중에서 가장 최근 날짜의 종가를 선택
-            val = float(past_data["Close"].iloc[-1])
-            print(f"✅ {ticker} 자동 확정 종가: ${val:.2f} ({past_data.index[-1].date()})")
-            return val
-        else:
-            return None
-
     except Exception as e:
-        print(f"❌ 자동 조회 에러: {e}")
+        print(f"ERROR: {e}")
         return None
-                                                    
+                                                        
 
 # ═══════════════════════════════════════════════════════════
 # 디스코드
