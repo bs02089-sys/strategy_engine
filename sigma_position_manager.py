@@ -147,36 +147,37 @@ def _safe_float(val) -> float | None:
 def get_prev_close(ticker: str) -> float | None:
     try:
         t = yf.Ticker(ticker)
-        # 5일치 데이터를 가져옵니다.
-        hist = t.history(period="5d", interval="1d", auto_adjust=False)
+        # 10일치 데이터를 가져와서 범위 내에서 확실한 6월 9일 값을 찾음
+        hist = t.history(period="10d", interval="1d", auto_adjust=False)
         
         if hist.empty:
             return None
+
+        # 1. 미국 동부 시간 기준 어제 날짜를 생성 (6월 9일)
+        ny_tz = ZoneInfo("America/New_York")
+        yesterday_ny = (datetime.now(ny_tz) - timedelta(days=1)).date()
         
-        # 오늘 날짜(미국 기준)를 계산합니다.
-        import datetime
-        from zoneinfo import ZoneInfo
-        today_ny = datetime.datetime.now(ZoneInfo("America/New_York")).date()
+        # 2. 데이터프레임의 인덱스에서 yesterday_ny와 일치하는 행을 강제 선택
+        # 인덱스를 날짜로 변환하여 비교
+        hist.index = hist.index.date
         
-        # 데이터를 뒤에서부터(최신순) 검사하여, 오늘이 아닌 가장 최근 날짜의 종가를 찾습니다.
-        for i in range(len(hist) - 1, -1, -1):
-            date_idx = hist.index[i].date()
-            
-            # 오늘 날짜보다 과거인 데이터가 진짜 '전일 종가'입니다.
-            if date_idx < today_ny:
-                val = hist["Close"].iloc[i]
+        if yesterday_ny in hist.index:
+            val = hist.loc[yesterday_ny, "Close"]
+            # Series일 경우 마지막 값, 단일 값이면 그대로 사용
+            if isinstance(val, pd.Series):
+                val = val.iloc[-1]
                 
-                # val이 숫자인지 명확히 검증 후 리턴
-                if val is not None and not pd.isna(val):
-                    print(f"✅ {ticker} 전일 종가({date_idx}): ${float(val):.2f}")
-                    return float(val)
-        
-        return None
-        
+            clean_val = float(val)
+            print(f"✅ {ticker} 확정 종가({yesterday_ny}): ${clean_val:.2f}")
+            return clean_val
+        else:
+            print(f"⚠️ {ticker}: {yesterday_ny} 데이터가 아직 로드되지 않음")
+            return None
+
     except Exception as e:
-        print(f"❌ {ticker} 에러 발생: {e}")
+        print(f"❌ 데이터 조회 에러: {e}")
         return None
-                                            
+                                                
 
 # ═══════════════════════════════════════════════════════════
 # 디스코드
