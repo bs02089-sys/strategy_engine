@@ -19,6 +19,7 @@ import tempfile
 import numpy as np
 import warnings
 import requests
+import pandas as pd
 import yfinance as yf
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
@@ -137,30 +138,30 @@ def _safe_float(val) -> float | None:
 def get_prev_close(ticker: str) -> float | None:
     try:
         t = yf.Ticker(ticker)
-        # 5일치 데이터를 가져와서 가장 최근의 완료된 종가를 찾습니다.
+        # 5일치 데이터를 충분히 가져옵니다
         hist = t.history(period="5d", interval="1d", auto_adjust=True)
 
         if hist.empty:
-            print(f"⚠️ {ticker}: 데이터 없음")
             return None
 
-        # 가장 최근 데이터부터 거꾸로 보면서, 값이 NaN이 아닌 첫 번째 종가를 찾습니다.
+        # 데이터를 역순(가장 최근 데이터가 맨 위로)으로 정렬
+        # 정규장 종가인 'Close' 열을 확인
+        # 오늘 장이 진행 중이라면 마지막 데이터(iloc[-1])가 오늘 가격이므로 제외하고,
+        # 장이 마감되었다면 마지막 데이터가 전일 종가임
+        
+        # 최신 2개 행을 확인하여 가장 마지막 '유효한' 종가를 찾습니다.
         for i in range(len(hist) - 1, -1, -1):
             val = hist["Close"].iloc[i]
-            # pandas의 NaN 체크
-            if not (val is None or (isinstance(val, float) and pd.isna(val))):
-                price = float(val)
-                # 0보다 큰 정상적인 가격인지 확인
-                if price > 0:
-                    print(f"✅ {ticker} 종가 확정: ${price:.2f} ({hist.index[i].date()})")
-                    return price
+            # NaN이 아니고 0보다 큰지 확인
+            if pd.notna(val) and val > 0:
+                print(f"✅ {ticker} 전일 종가 데이터 찾음: ${val:.2f}")
+                return float(val)
         
         return None
-
     except Exception as e:
         print(f"❌ {ticker} 조회 에러: {e}")
         return None
-                    
+                        
 
 # ═══════════════════════════════════════════════════════════
 # 디스코드
