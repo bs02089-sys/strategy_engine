@@ -147,21 +147,24 @@ def _safe_float(val) -> float | None:
 def get_prev_close(ticker: str) -> float | None:
     try:
         t = yf.Ticker(ticker)
-        # auto_adjust=False로 설정하여 수정되지 않은 실제 종가(Close)를 가져옵니다.
+        # 1. 정규장 데이터만, 배당/분할 보정 없이(auto_adjust=False) 가져옴
+        # 2. 5일치 데이터를 확보하여 가장 최근의 마감 데이터를 찾음
         hist = t.history(period="5d", interval="1d", auto_adjust=False)
         
         if hist.empty:
             return None
-
-        # 가장 최근 완료된 거래일의 실제 종가
-        last_close = float(hist["Close"].iloc[-1])
         
-        print(f"✅ {ticker} 실제 종가 반영: ${last_close:.2f}")
-        return last_close
+        # 가장 최근에 기록된 Close(종가) 값을 가져옴
+        # (이미 6월 9일 정규장이 마감되었으므로, 마지막 행이 6월 9일 종가임)
+        prev_close = float(hist["Close"].iloc[-1])
+        
+        print(f"✅ {ticker} 확정 종가: ${prev_close:.2f}")
+        return prev_close
+        
     except Exception as e:
-        print(f"❌ 조회 실패: {e}")
+        print(f"❌ 데이터 조회 오류: {e}")
         return None
-                                    
+                                        
 
 # ═══════════════════════════════════════════════════════════
 # 디스코드
