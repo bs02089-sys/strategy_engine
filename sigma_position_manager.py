@@ -135,45 +135,32 @@ def _safe_float(val) -> float | None:
 
 
 def get_prev_close(ticker: str) -> float | None:
-    """
-    미국 주식 시장의 시간대와 상관없이, 데이터상 가장 최근 완료된 '거래일'의 종가를 반환.
-    """
     try:
         t = yf.Ticker(ticker)
-        # period="5d" 정도로 충분합니다.
+        # 5일치 데이터를 가져와서 가장 최근의 완료된 종가를 찾습니다.
         hist = t.history(period="5d", interval="1d", auto_adjust=True)
 
-        if hist.empty or len(hist) < 2:
+        if hist.empty:
+            print(f"⚠️ {ticker}: 데이터 없음")
             return None
 
-        # 1. 시간 순서대로 정렬 (가장 최근이 끝에 오도록)
-        # 2. 데이터프레임의 마지막 행이 '오늘' 혹은 '현재까지의 최신' 데이터입니다.
-        # 3. 만약 오늘 장이 열려있다면(진행 중이라면), 마지막 행은 오늘 종가가 아니라 실시간 가격입니다.
+        # 가장 최근 데이터부터 거꾸로 보면서, 값이 NaN이 아닌 첫 번째 종가를 찾습니다.
+        for i in range(len(hist) - 1, -1, -1):
+            val = hist["Close"].iloc[i]
+            # pandas의 NaN 체크
+            if not (val is None or (isinstance(val, float) and pd.isna(val))):
+                price = float(val)
+                # 0보다 큰 정상적인 가격인지 확인
+                if price > 0:
+                    print(f"✅ {ticker} 종가 확정: ${price:.2f} ({hist.index[i].date()})")
+                    return price
         
-        # 안전하게 마지막 2개만 봅니다.
-        # 가장 최근 행(iloc[-1])이 오늘 날짜와 같다면, 그 이전 행(iloc[-2])이 전일 종가입니다.
-        
-        now_ny = datetime.now(ZoneInfo("America/New_York"))
-        today_date = now_ny.date()
-        
-        last_date = hist.index[-1].date()
-        
-        # 마지막 데이터가 오늘 날짜라면, 전일 종가는 그 이전 데이터
-        if last_date == today_date:
-            prev_close = float(hist["Close"].iloc[-2])
-            prev_date = hist.index[-2].date()
-        else:
-            # 마지막 데이터가 오늘이 아니면(장 마감 후), 마지막 데이터가 전일 종가
-            prev_close = float(hist["Close"].iloc[-1])
-            prev_date = hist.index[-1].date()
-
-        print(f"✅ {ticker} 전일 종가 확정: ${prev_close:.2f} ({prev_date})")
-        return prev_close
+        return None
 
     except Exception as e:
-        print(f"❌ {ticker} 조회 실패: {e}")
+        print(f"❌ {ticker} 조회 에러: {e}")
         return None
-                
+                    
 
 # ═══════════════════════════════════════════════════════════
 # 디스코드
