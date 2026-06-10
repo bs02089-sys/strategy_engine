@@ -10,7 +10,7 @@
         },
         "SOXQ": {
             "ENTRY_MULTIPLIER": 1.3,
-            "DAILY_SIGMA": 0.0370,
+            "DAILY_SIGMA": 0.037,
             "LAST_SIGMA_UPDATE": "2026-06-10",
             "LOOKBACK_DAYS": 90
         },
