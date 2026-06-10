@@ -147,28 +147,34 @@ def _safe_float(val) -> float | None:
 def get_prev_close(ticker: str) -> float | None:
     try:
         t = yf.Ticker(ticker)
-        # 5일치 데이터를 충분히 확보
-        hist = t.history(period="5d", interval="1d", auto_adjust=True)
+        # 10일치 데이터를 가져와서 기간을 넉넉히 확보
+        hist = t.history(period="10d", interval="1d", auto_adjust=True)
 
         if hist.empty:
+            print(f"⚠️ {ticker}: 데이터가 아예 없음")
             return None
 
-        # 가장 최근 데이터부터 거꾸로 내려가며 유효한 숫자 찾기
+        # 최근 10일치 데이터를 뒤에서부터(최신순 -> 과거순) 검사
         for i in range(len(hist) - 1, -1, -1):
             val = hist["Close"].iloc[i]
             
-            # _safe_float를 사용해 검증
-            clean_val = _safe_float(val)
-            
-            # 데이터가 유효하고 0보다 크면 반환
-            if clean_val is not None and clean_val > 0:
-                return clean_val
+            # 1. NaN 체크 (pd.isna 대신 math.isfinite 사용 권장)
+            # 2. 숫자가 0보다 큰지 확인
+            try:
+                f_val = float(val)
+                if math.isfinite(f_val) and f_val > 0:
+                    # 오늘 날짜와 같더라도, 장 마감/진행 상황에 따라 
+                    # 가장 마지막에 기록된 종가(혹은 마지막 데이터)를 반환
+                    print(f"✅ {ticker} 종가 확정: ${f_val:.2f} ({hist.index[i].date()})")
+                    return f_val
+            except (TypeError, ValueError):
+                continue
         
         return None
     except Exception as e:
-        print(f"❌ {ticker} 에러: {e}")
+        print(f"❌ {ticker} 조회 에러: {e}")
         return None
-                            
+                                
 
 # ═══════════════════════════════════════════════════════════
 # 디스코드
