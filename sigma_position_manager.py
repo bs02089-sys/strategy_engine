@@ -135,58 +135,36 @@ def _safe_float(val) -> float | None:
 
 
 def get_prev_close(ticker: str) -> float | None:
-    """
-    전일 확정 종가를 반환한다.
-
-    prepost=False로 정규장 데이터만 수집한다.
-
-    봉 선택 기준:
-      - 장후(16:00 EDT ~): iloc[-1] = 오늘 확정 종가
-      - 프리마켓 / 정규장 중: 오늘 미완성 봉 포함 여부를 날짜로 확인
-          오늘 봉 포함 → iloc[-2] (전일 확정 종가)
-          오늘 봉 없음 → iloc[-1] (가장 최근 확정 종가)
-    """
     try:
-        t    = yf.Ticker(ticker)
-        hist = t.history(period="10d", interval="1d", auto_adjust=True, prepost=False)
-
-        if hist.empty or len(hist) < 1:
-            print(f"⚠️ {ticker}: 가격 데이터 없음")
+        t = yf.Ticker(ticker)
+        # 데이터를 충분히 확보 (10일치)
+        hist = t.history(period="10d", interval="1d", auto_adjust=False)
+        
+        if hist.empty:
             return None
 
-        close_valid = hist["Close"].dropna()
-        if close_valid.empty:
-            print(f"⚠️ {ticker}: 유효 Close 없음")
+        # 1. 오늘 날짜를 기준으로, 데이터 중 오늘보다 이전인 데이터만 필터링
+        # (장이 열리지 않았거나 장전 시간이라도 데이터가 꼬이지 않게 함)
+        today_ny = datetime.now(ZoneInfo("America/New_York")).date()
+        past_data = hist[hist.index.date < today_ny]
+        
+        if past_data.empty:
             return None
-
-        now_ny  = datetime.now(ZoneInfo("America/New_York"))
-        hour_ny = now_ny.hour + now_ny.minute / 60.0
-
-        # 장후(16:00~): 오늘 확정 종가가 iloc[-1]에 있음
-        if hour_ny >= 16.0:
-            prev_close = _safe_float(close_valid.iloc[-1])
-
-        # 프리마켓 / 정규장 중(~16:00): 오늘 미완성 봉 제외
-        else:
-            last_date = close_valid.index[-1].date()
-            today_ny  = now_ny.date()
-            if last_date == today_ny and len(close_valid) >= 2:
-                # 오늘 미완성 봉 포함 → 전일 확정 봉 사용
-                prev_close = _safe_float(close_valid.iloc[-2])
-            else:
-                # 오늘 봉 없음 → 가장 최근 확정 봉
-                prev_close = _safe_float(close_valid.iloc[-1])
-
-        if prev_close is None:
-            print(f"⚠️ {ticker}: prev_close NaN")
-            return None
-
-        return prev_close
-
+            
+        # 2. 필터링된 데이터 중 가장 마지막 날짜(iloc[-1])의 종가를 무조건 가져옴
+        # 이것이 항상 가장 최근에 마감된 정규장 종가입니다.
+        last_close = float(past_data["Close"].iloc[-1])
+        
+        # 3. 브리핑을 위해 어떤 날짜의 데이터를 썼는지 확인 가능하도록 출력
+        last_date = past_data.index[-1].date()
+        print(f"✅ {ticker} 종가 확정: ${last_close:.2f} (기준일: {last_date})")
+        
+        return last_close
+        
     except Exception as e:
-        print(f"❌ {ticker} 가격 조회 실패: {e}")
+        print(f"❌ 데이터 자동 조회 오류: {e}")
         return None
-
+    
 
 # ═══════════════════════════════════════════════════════════
 # 디스코드
