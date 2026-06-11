@@ -3,25 +3,25 @@
   "DISCORD_USER_ID": "",
   "POSITIONS": {
     "AIQ": {
-      "ENTRY_MULTIPLIER": 1.41,
-      "DAILY_SIGMA": 0.0206,
-      "LAST_SIGMA_UPDATE": "2026-06-10",
-      "LOOKBACK_DAYS": 90
-    },
+        "ENTRY_MULTIPLIER": 1.40,
+        "DAILY_SIGMA": 0.0207,
+        "LAST_SIGMA_UPDATE": "2026-06-11",
+        "LOOKBACK_DAYS": 90
+        },
     "SOXQ": {
-      "ENTRY_MULTIPLIER": 1.41,
-      "DAILY_SIGMA": 0.0285,
-      "LAST_SIGMA_UPDATE": "2026-06-10",
-      "LOOKBACK_DAYS": 90
-    },
+        "ENTRY_MULTIPLIER": 1.42,
+        "DAILY_SIGMA": 0.0285,
+        "LAST_SIGMA_UPDATE": "2026-06-11",
+        "LOOKBACK_DAYS": 90
+        },
     "SOXL": {
-      "ENTRY_MULTIPLIER": 1.41,
-      "DAILY_SIGMA": 0.087,
-      "LAST_SIGMA_UPDATE": "2026-06-10",
-      "LOOKBACK_DAYS": 90
+        "ENTRY_MULTIPLIER": 1.46,
+        "DAILY_SIGMA": 0.0866,
+        "LAST_SIGMA_UPDATE": "2026-06-11",
+        "LOOKBACK_DAYS": 90
+        }
     }
-  },
-  "STRATEGY": {
+  ,"STRATEGY": {
     "CYCLE_YEARS": 2,
     "BUY_DURATION_DAYS": 252,
     "HOLD_DURATION_DAYS": 252,
@@ -41,7 +41,7 @@
       "TSLA stock",
       "IONQ stock",
       "AIQ",
-      "SOXX"
+      "SOXQ"
     ],
     "MAX_NEWS_PER_KEYWORD": 5
   }
