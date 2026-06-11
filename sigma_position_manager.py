@@ -136,56 +136,34 @@ def _safe_float(val) -> float | None:
  
  
 def get_prev_close(ticker: str) -> float | None:
-    """
-    전일 확정 종가를 반환한다.
- 
-    prepost=False로 정규장 데이터만 수집한다.
- 
-    봉 선택 기준:
-      - 장후(16:00 EDT ~): iloc[-1] = 오늘 확정 종가
-      - 프리마켓 / 정규장 중: 오늘 미완성 봉 포함 여부를 날짜로 확인
-          오늘 봉 포함 → iloc[-2] (전일 확정 종가)
-          오늘 봉 없음 → iloc[-1] (가장 최근 확정 종가)
-    """
     try:
-        t    = yf.Ticker(ticker)
+        t = yf.Ticker(ticker)
+        # 10일치 데이터를 가져오되 시간대 설정을 명확히 함
         hist = t.history(period="10d", interval="1d", auto_adjust=True, prepost=False)
- 
-        if hist.empty or len(hist) < 1:
-            print(f"⚠️ {ticker}: 가격 데이터 없음")
+
+        if hist.empty:
             return None
- 
-        close_valid = hist["Close"].dropna()
-        if close_valid.empty:
-            print(f"⚠️ {ticker}: 유효 Close 없음")
-            return None
- 
-        now_ny  = datetime.now(ZoneInfo("America/New_York"))
-        hour_ny = now_ny.hour + now_ny.minute / 60.0
- 
-        # 장후(16:00~): 오늘 확정 종가가 iloc[-1]에 있음
-        if hour_ny >= 16.0:
-            prev_close = _safe_float(close_valid.iloc[-1])
- 
-        # 프리마켓 / 정규장 중(~16:00): 오늘 미완성 봉 제외
+
+        # 뉴욕 시간 기준으로 마지막 데이터 확인
+        now_ny = datetime.now(ZoneInfo("America/New_York"))
+        today_ny = now_ny.date()
+        
+        # 1. 오늘 정규장이 끝났거나 장후라면: 마지막 데이터(iloc[-1])가 전일 종가
+        # 2. 오늘 정규장 중이라면: 마지막 데이터는 '오늘'이므로 그 이전(iloc[-2])이 전일 종가
+        
+        last_date = hist.index[-1].date()
+        
+        if last_date >= today_ny:
+            # 마지막 데이터가 오늘 혹은 미래라면 바로 앞의 봉을 전일 종가로 채택
+            prev_close = hist["Close"].iloc[-2]
         else:
-            last_date = close_valid.index[-1].date()
-            today_ny  = now_ny.date()
-            if last_date == today_ny and len(close_valid) >= 2:
-                # 오늘 미완성 봉 포함 → 전일 확정 봉 사용
-                prev_close = _safe_float(close_valid.iloc[-2])
-            else:
-                # 오늘 봉 없음 → 가장 최근 확정 봉
-                prev_close = _safe_float(close_valid.iloc[-1])
- 
-        if prev_close is None:
-            print(f"⚠️ {ticker}: prev_close NaN")
-            return None
- 
-        return prev_close
- 
+            # 마지막 데이터가 어제라면 해당 봉을 전일 종가로 채택
+            prev_close = hist["Close"].iloc[-1]
+
+        return float(prev_close)
+
     except Exception as e:
-        print(f"❌ {ticker} 가격 조회 실패: {e}")
+        print(f"❌ {ticker} 데이터 조회 오류: {e}")
         return None
             
 
