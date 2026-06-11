@@ -138,28 +138,21 @@ def _safe_float(val) -> float | None:
 def get_prev_close(ticker: str) -> float | None:
     try:
         t = yf.Ticker(ticker)
-        # 넉넉하게 5일치만 가져와서 마지막 2개를 확인
-        hist = t.history(period="5d", interval="1d")
-
-        if hist.empty or len(hist) < 2:
-            print(f"⚠️ {ticker}: 데이터 부족 (데이터 길이: {len(hist)})")
-            return None
-
-        # .iloc[-1]이 오늘인지 어제인지 판단할 필요 없이, 
-        # 단순히 '가장 최근에 완료된 봉'을 가져오도록 수정
-        # 'Close' 컬럼에 값이 있는지 확인
-        last_close = hist["Close"].iloc[-1]
+        # 시간대/오늘 날짜 비교 로직을 전부 제거하고 가장 최근 데이터 1개만 가져옴
+        hist = t.history(period="2d", interval="1d") 
         
-        # 값이 NaN이면 그 전날꺼를 가져옴
-        if pd.isna(last_close):
-            last_close = hist["Close"].iloc[-2]
-
-        return float(last_close)
-
-    except Exception as e:
-        print(f"❌ {ticker} 에러: {e}")
+        # 데이터가 1개라도 있으면 무조건 그게 현재 가장 최신 종가임
+        if not hist.empty:
+            # 1. 오늘 종가(장후)인지, 어제 종가인지 고민하지 말고 
+            # 데이터프레임의 마지막 행을 무조건 전일 종가로 채택
+            last_close = float(hist["Close"].iloc[-1])
+            return last_close
+        
         return None
-                
+    except Exception as e:
+        print(f"❌ 데이터 오류: {e}")
+        return None
+                    
 
 # ═══════════════════════════════════════════════════════════
 # 디스코드
