@@ -138,34 +138,28 @@ def _safe_float(val) -> float | None:
 def get_prev_close(ticker: str) -> float | None:
     try:
         t = yf.Ticker(ticker)
-        # 10일치 데이터를 가져오되 시간대 설정을 명확히 함
-        hist = t.history(period="10d", interval="1d", auto_adjust=True, prepost=False)
+        # 넉넉하게 5일치만 가져와서 마지막 2개를 확인
+        hist = t.history(period="5d", interval="1d")
 
-        if hist.empty:
+        if hist.empty or len(hist) < 2:
+            print(f"⚠️ {ticker}: 데이터 부족 (데이터 길이: {len(hist)})")
             return None
 
-        # 뉴욕 시간 기준으로 마지막 데이터 확인
-        now_ny = datetime.now(ZoneInfo("America/New_York"))
-        today_ny = now_ny.date()
+        # .iloc[-1]이 오늘인지 어제인지 판단할 필요 없이, 
+        # 단순히 '가장 최근에 완료된 봉'을 가져오도록 수정
+        # 'Close' 컬럼에 값이 있는지 확인
+        last_close = hist["Close"].iloc[-1]
         
-        # 1. 오늘 정규장이 끝났거나 장후라면: 마지막 데이터(iloc[-1])가 전일 종가
-        # 2. 오늘 정규장 중이라면: 마지막 데이터는 '오늘'이므로 그 이전(iloc[-2])이 전일 종가
-        
-        last_date = hist.index[-1].date()
-        
-        if last_date >= today_ny:
-            # 마지막 데이터가 오늘 혹은 미래라면 바로 앞의 봉을 전일 종가로 채택
-            prev_close = hist["Close"].iloc[-2]
-        else:
-            # 마지막 데이터가 어제라면 해당 봉을 전일 종가로 채택
-            prev_close = hist["Close"].iloc[-1]
+        # 값이 NaN이면 그 전날꺼를 가져옴
+        if pd.isna(last_close):
+            last_close = hist["Close"].iloc[-2]
 
-        return float(prev_close)
+        return float(last_close)
 
     except Exception as e:
-        print(f"❌ {ticker} 데이터 조회 오류: {e}")
+        print(f"❌ {ticker} 에러: {e}")
         return None
-            
+                
 
 # ═══════════════════════════════════════════════════════════
 # 디스코드
