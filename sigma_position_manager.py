@@ -138,24 +138,26 @@ def _safe_float(val) -> float | None:
 def get_prev_close(ticker: str) -> float | None:
     try:
         t = yf.Ticker(ticker)
-        # 10일치 데이터를 가져와서 여유를 둠
-        hist = t.history(period="10d", interval="1d")
+        # 데이터를 넉넉히 5일치 가져옵니다.
+        hist = t.history(period="5d", interval="1d")
         
-        # 'Close' 컬럼에서 NaN이 아닌 값들만 추려냄
-        valid_closes = hist["Close"].dropna()
+        # 마지막 행의 종가를 먼저 확인
+        last_close = hist["Close"].iloc[-1]
         
-        if valid_closes.empty:
-            print(f"⚠️ {ticker}: 유효한 가격 데이터가 전혀 없음")
-            return None
-        
-        # 가장 최근의 유효한 종가를 선택
-        last_close = float(valid_closes.iloc[-1])
-        return last_close
+        # 만약 마지막 종가가 NaN이라면, 그 이전날(어제) 종가를 사용
+        if pd.isna(last_close):
+            last_close = hist["Close"].iloc[-2]
+            
+        # 그래도 NaN이라면 3일 전 데이터라도 강제로 가져옴 (최후의 보루)
+        if pd.isna(last_close):
+            last_close = hist["Close"].iloc[-3]
+            
+        return float(last_close)
 
     except Exception as e:
         print(f"❌ 데이터 조회 오류: {e}")
         return None
-                            
+                                
 
 # ═══════════════════════════════════════════════════════════
 # 디스코드
