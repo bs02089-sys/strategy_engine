@@ -10,7 +10,7 @@ Sigma DCA 자동화 — LOC 예정가 디스코드 브리핑
   4. 종목별 전일 종가 · LOC 예정가 계산
   5. 디스코드 브리핑 전송
 """
-import csv
+
 import os
 import sys
 import json
@@ -52,6 +52,7 @@ def load_config() -> dict:
     except json.JSONDecodeError as e:
         raise RuntimeError(f"config.json 파싱 오류: {e}") from e
 
+
 def save_config(cfg: dict) -> None:
     try:
         with tempfile.NamedTemporaryFile("w", delete=False, suffix=".json", encoding="utf-8") as tmp:
@@ -66,56 +67,39 @@ def save_config(cfg: dict) -> None:
 # 시그마 자동 갱신 — 종목별 LOOKBACK_DAYS 주기
 # ═══════════════════════════════════════════════════════════
 
-# CSV 로그 기록 함수
-def log_sigma_update(ticker: str, sigma: float):
-    file_path = "sigma_history.csv"
-    file_exists = os.path.isfile(file_path)
-    
-    with open(file_path, 'a', newline='') as f:
-        writer = csv.writer(f)
-        if not file_exists:
-            writer.writerow(['Date', 'Ticker', 'Sigma'])
-        writer.writerow([datetime.now().strftime("%Y-%m-%d"), ticker, sigma])
-
 def refresh_sigma_if_stale(cfg: dict) -> list[str]:
     messages = []
     today = datetime.now(ZoneInfo("America/New_York")).date()
+
     positions_data = cfg.setdefault("POSITIONS", {})
 
     for ticker in TARGET_TICKERS:
         pos = positions_data.setdefault(ticker, {})
         lookback_days = int(pos.get("LOOKBACK_DAYS", 90))
-        
-        # 날짜 비교 로직
+
         last_str = pos.get("LAST_SIGMA_UPDATE", "2000-01-01")
-        last_dt = datetime.strptime(last_str, "%Y-%m-%d").date() if last_str != "2000-01-01" else datetime(2000, 1, 1).date()
+        try:
+            last_dt = datetime.strptime(last_str, "%Y-%m-%d").date()
+        except ValueError:
+            last_dt = datetime(2000, 1, 1).date()
 
         if (today - last_dt).days < lookback_days:
             continue
 
         try:
-            # 넉넉한 데이터 조회
+            start_date = today - timedelta(days=lookback_days + 10)
             hist = yf.Ticker(ticker).history(
-                period=f"{lookback_days + 30}d", 
+                start=start_date.strftime("%Y-%m-%d"),
+                end=today.strftime("%Y-%m-%d"),
                 auto_adjust=True
             )
-            
-            # 유효 데이터 확인
-            returns = hist["Close"].pct_change().dropna()
-            if len(returns) < lookback_days:
+            if hist.empty or len(hist) < 10:
                 messages.append(f"⚠️ {ticker} 시그마 갱신 실패: 데이터 부족")
                 continue
-                
-            new_sigma = round(float(returns.std()), 6)
-            
-            # 값 갱신
-            pos["DAILY_SIGMA"] = new_sigma
+            new_sigma = round(float(hist["Close"].pct_change().dropna().std()), 6)
+            pos["DAILY_SIGMA"]       = new_sigma
             pos["LAST_SIGMA_UPDATE"] = today.strftime("%Y-%m-%d")
-            
-            # [로그 기록 및 메시지 추가]
-            log_sigma_update(ticker, new_sigma)
             messages.append(f"📊 {ticker} 시그마 갱신 ({lookback_days}일 기준): {new_sigma:.6f}")
-            
         except Exception as e:
             messages.append(f"⚠️ {ticker} 시그마 갱신 실패: {e}")
 
@@ -150,6 +134,7 @@ def _safe_float(val) -> float | None:
         return None if np.isnan(f) else f
     except (TypeError, ValueError):
         return None
+ 
  
 def get_prev_close(ticker: str) -> float | None:
     """
