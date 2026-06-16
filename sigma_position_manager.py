@@ -262,18 +262,26 @@ def execute_dual_tactical_trader() -> None:
 
     for ticker in TARGET_TICKERS:
         pos_cfg    = positions.get(ticker, {})
+        
+        # 날짜를 확인하기 위해 get_prev_close에서 날짜 정보도 같이 가져올 수 있도록 수정이 필요합니다.
+        # 여기서는 편의를 위해 yfinance 객체를 다시 활용해 날짜를 추출합니다.
+        t = yf.Ticker(ticker)
+        hist = t.history(period="5d", interval="1d", auto_adjust=True, prepost=False)
         prev_close = get_prev_close(ticker)
 
-        if prev_close is None:
+        if prev_close is None or hist.empty:
             lines.append(f"\n🔹 **{ticker}** — 가격 조회 실패 ⚠️")
             continue
 
+        # 마지막 데이터의 날짜 추출 (MM-DD 형식)
+        last_date_str = hist["Close"].dropna().index[-1].strftime('%m-%d')
+        
         multiplier = pos_cfg.get("ENTRY_MULTIPLIER", 1.41)
         sigma      = pos_cfg.get("DAILY_SIGMA", 0.05)
         loc_price  = prev_close * np.exp(-multiplier * sigma)
 
         lines.append(f"\n🔹 **{ticker}**")
-        lines.append(f"• 전일 종가: ${prev_close:.2f}  |  LOC: ${loc_price:.2f}")
+        lines.append(f"• 전일 종가: ${prev_close:.2f} ({last_date_str}) | LOC: ${loc_price:.2f}")
 
     if sigma_messages:
         lines.append("\n" + "\n".join(sigma_messages))
