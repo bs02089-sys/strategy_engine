@@ -152,44 +152,28 @@ def _safe_float(val) -> float | None:
         return None
  
 def get_prev_close(ticker: str) -> float | None:
-    """
-    야후 파이낸스 데이터 지연에 상관없이, 
-    가장 최근에 업데이트된 확정 종가를 무조건 반환합니다.
-    """
     try:
         t = yf.Ticker(ticker)
-        # period를 늘려 데이터 확보 확률을 높임
+        # 5일 치 데이터를 충분히 가져옵니다
         hist = t.history(period="5d", interval="1d", auto_adjust=True, prepost=False)
-
-        if hist.empty or len(hist) < 1:
-            print(f"⚠️ {ticker}: 가격 데이터 없음")
+        
+        if hist.empty:
             return None
 
-        close_valid = hist["Close"].dropna()
-        if close_valid.empty:
-            print(f"⚠️ {ticker}: 유효 Close 없음")
-            return None
-
-        # 로직 수정: 날짜 검증 없이 무조건 가장 마지막에 들어온 데이터(iloc[-1])를 반환
-        # 오늘 날짜 봉이 들어왔다면(아직 장 중인 경우) iloc[-2] 사용
+        # 1. 오늘 장이 시작되었더라도 우리는 '전일(어제)' 데이터가 필요합니다.
+        # 2. 오늘 날짜를 기준으로 어제 날짜를 구합니다.
         now_ny = datetime.now(ZoneInfo("America/New_York"))
-        today_ny = now_ny.date()
+        today = now_ny.date()
         
-        last_date = close_valid.index[-1].date()
-        
-        if last_date == today_ny:
-            # 오늘 데이터가 이미 있다면(미완성), 전일 종가인 iloc[-2] 사용
-            if len(close_valid) >= 2:
-                prev_close = _safe_float(close_valid.iloc[-2])
+        # 데이터의 마지막 날짜가 오늘(today)이라면, 전일 데이터는 iloc[-2]입니다.
+        # 데이터의 마지막 날짜가 오늘보다 이전(어제)이라면, 그게 바로 전일 종가(iloc[-1])입니다.
+        if hist.index[-1].date() == today:
+            if len(hist) >= 2:
+                prev_close = _safe_float(hist["Close"].iloc[-2])
             else:
-                prev_close = _safe_float(close_valid.iloc[-1])
+                prev_close = _safe_float(hist["Close"].iloc[-1])
         else:
-            # 오늘 데이터가 아직 없다면, 최신 데이터인 iloc[-1] 사용
-            prev_close = _safe_float(close_valid.iloc[-1])
-
-        if prev_close is None:
-            print(f"⚠️ {ticker}: prev_close 변환 실패")
-            return None
+            prev_close = _safe_float(hist["Close"].iloc[-1])
 
         return prev_close
 
