@@ -7,8 +7,8 @@ on:
       - '**.py'          # .py 파일 변경 시에만 실행
       - 'config.json'    # config.json 변경 시에도 실행    # 장부 수정 시 자동 실행
   schedule:
-    # 🎯 UTC 10:30 = KST 19:30 (정식 자동 브리핑 딱 한 번만 발송!)
-    - cron: '30 10 * * MON-FRI'
+    # 🎯 UTC 07:00 = KST 16:00 (깃허브 서버의 지연을 감안하여 7:00로 설정)
+    - cron: '0 7 * * 1-5'
   workflow_dispatch:
     # 🎯 원할 때 언제든 Actions 탭에서 버튼 눌러서 수동 실행 가능!
 
