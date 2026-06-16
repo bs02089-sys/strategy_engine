@@ -33,27 +33,14 @@ if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
 
-# ==================== yfinance 안정화 설정 ====================
+# ==================== yfinance 안정화 ====================
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=UserWarning, module="yfinance")
 
-# yfinance 캐싱 문제 해결
 try:
     yf.set_tz_cache_location("/tmp/yfinance_cache")
 except:
     pass
-
-# 캐시 초기화 시도
-if hasattr(yf, "download"):
-    try:
-        if hasattr(yf.download, "cache_clear"):
-            yf.download.cache_clear()
-    except:
-        pass
-
-
-# ====================== 기타 설정 ======================
-warnings.filterwarnings("ignore", category=FutureWarning)
 
 
 TARGET_TICKERS         = ["AIQ", "SOXQ", "SOXL"]
@@ -177,35 +164,28 @@ def _safe_float(val) -> float | None:
  
 def get_prev_close(ticker: str) -> tuple[float | None, str]:
     try:
+        print(f"🔍 {ticker} 가격 조회 시작...")
+        
+        # 방법 1: Ticker.history (기존)
         t = yf.Ticker(ticker)
+        hist = t.history(period="15d", interval="1d", auto_adjust=True, prepost=False, timeout=15)
         
-        # 1. 캐시 강제 클리어
-        t.history = t.history.__wrapped__ if hasattr(t.history, '__wrapped__') else t.history
-        if hasattr(yf, 'download'):
-            yf.download.cache_clear() if hasattr(yf.download, 'cache_clear') else None
+        # 방법 2: download fallback (더 안정적일 때가 많음)
+        if hist.empty or len(hist) < 3:
+            print(f"   ↳ history 실패 → download fallback")
+            hist = yf.download(ticker, period="15d", interval="1d", 
+                             auto_adjust=True, progress=False, timeout=15)
         
-        # 2. 여러 방법으로 데이터 조회 시도
-        hist = None
-        for period in ["10d", "15d", "1mo"]:
-            try:
-                hist = t.history(
-                    period=period,
-                    interval="1d",
-                    auto_adjust=True,
-                    prepost=False,
-                    timeout=20
-                )
-                if not hist.empty and len(hist) >= 3:
-                    break
-            except:
-                continue
-
-        if hist is None or hist.empty or len(hist) < 2:
-            # fallback: download 사용
-            hist = yf.download(ticker, period="15d", interval="1d", auto_adjust=True, progress=False)
+        # 방법 3: 최후의 수단 (start/end 직접 지정)
+        if hist.empty or len(hist) < 3:
+            print(f"   ↳ download 실패 → start/end 직접 지정")
+            end = datetime.now(ZoneInfo("America/New_York"))
+            start = end - timedelta(days=20)
+            hist = yf.download(ticker, start=start, end=end, interval="1d", 
+                             auto_adjust=True, progress=False)
 
         if hist.empty or len(hist) < 2:
-            print(f"❌ {ticker} history empty after retry")
+            print(f"❌ {ticker} 모든 방법 실패")
             return None, "N/A"
 
         closes = hist["Close"].dropna()
@@ -214,32 +194,28 @@ def get_prev_close(ticker: str) -> tuple[float | None, str]:
 
         now_ny = datetime.now(ZoneInfo("America/New_York"))
         today = now_ny.date()
+        last_date = closes.index[-1].date()
 
-        # 가장 최근 거래일
-        last_trading_date = closes.index[-1].date()
-        
-        print(f"📊 {ticker} - Last data date: {last_trading_date} | Today: {today} | Rows: {len(closes)}")
+        print(f"   📅 Last data: {last_date} | Today: {today} | Rows: {len(closes)}")
 
-        # 오늘 데이터가 있으면 → 전일 종가
-        if last_trading_date == today and len(closes) >= 2:
+        # 오늘 데이터가 있으면 전일, 없으면 마지막 데이터
+        if last_date == today and len(closes) >= 2:
             prev_close = _safe_float(closes.iloc[-2])
             prev_date = closes.index[-2].date()
         else:
             prev_close = _safe_float(closes.iloc[-1])
-            prev_date = last_trading_date
+            prev_date = last_date
 
         last_date_str = prev_date.strftime('%m-%d')
 
         if prev_close is None:
             return None, last_date_str
 
-        print(f"✅ {ticker} 전일 종가: ${prev_close:.2f} ({last_date_str})")
+        print(f"✅ {ticker} 성공: ${prev_close:.2f} ({last_date_str})")
         return prev_close, last_date_str
 
     except Exception as e:
-        print(f"❌ {ticker} 가격 조회 실패: {e}")
-        import traceback
-        traceback.print_exc()
+        print(f"❌ {ticker} 예외 발생: {e}")
         return None, "N/A"
                                     
 
