@@ -153,18 +153,13 @@ def _safe_float(val) -> float | None:
  
 def get_prev_close(ticker: str) -> float | None:
     """
-    전일 확정 종가를 반환한다.
-
-    - period="1mo", prepost=False: 정규장 데이터만, 누락 방지
-    - auto_adjust=True: 배당락 조정 반영
-    - BDay 기반 날짜 검증:
-        last_date == today_ny  → 오늘 미완성 봉 → iloc[-2]
-        last_date == prev_bday → 정상 전일 종가 → iloc[-1]
-        last_date <  prev_bday → 데이터 지연 경고 → iloc[-1]
+    야후 파이낸스 데이터 지연에 상관없이, 
+    가장 최근에 업데이트된 확정 종가를 무조건 반환합니다.
     """
     try:
-        t    = yf.Ticker(ticker)
-        hist = t.history(period="1mo", interval="1d", auto_adjust=True, prepost=False)
+        t = yf.Ticker(ticker)
+        # period를 늘려 데이터 확보 확률을 높임
+        hist = t.history(period="5d", interval="1d", auto_adjust=True, prepost=False)
 
         if hist.empty or len(hist) < 1:
             print(f"⚠️ {ticker}: 가격 데이터 없음")
@@ -175,27 +170,25 @@ def get_prev_close(ticker: str) -> float | None:
             print(f"⚠️ {ticker}: 유효 Close 없음")
             return None
 
-        now_ny    = datetime.now(ZoneInfo("America/New_York"))
-        today_ny  = now_ny.date()
-        prev_bday = (pd.Timestamp(today_ny) - BDay(1)).date()
+        # 로직 수정: 날짜 검증 없이 무조건 가장 마지막에 들어온 데이터(iloc[-1])를 반환
+        # 오늘 날짜 봉이 들어왔다면(아직 장 중인 경우) iloc[-2] 사용
+        now_ny = datetime.now(ZoneInfo("America/New_York"))
+        today_ny = now_ny.date()
+        
         last_date = close_valid.index[-1].date()
-
+        
         if last_date == today_ny:
-            # 오늘 미완성 봉 포함 → 전일 확정 봉 사용
-            if len(close_valid) < 2:
-                print(f"⚠️ {ticker}: 전일 봉 없음")
-                return None
-            prev_close = _safe_float(close_valid.iloc[-2])
-        elif last_date == prev_bday:
-            # 정상: 직전 거래일 종가
-            prev_close = _safe_float(close_valid.iloc[-1])
+            # 오늘 데이터가 이미 있다면(미완성), 전일 종가인 iloc[-2] 사용
+            if len(close_valid) >= 2:
+                prev_close = _safe_float(close_valid.iloc[-2])
+            else:
+                prev_close = _safe_float(close_valid.iloc[-1])
         else:
-            # 데이터 지연: 경고 후 최선값 반환
-            print(f"⚠️ {ticker}: 데이터 지연 — 기대 {prev_bday}, 실제 {last_date}")
+            # 오늘 데이터가 아직 없다면, 최신 데이터인 iloc[-1] 사용
             prev_close = _safe_float(close_valid.iloc[-1])
 
         if prev_close is None:
-            print(f"⚠️ {ticker}: prev_close NaN")
+            print(f"⚠️ {ticker}: prev_close 변환 실패")
             return None
 
         return prev_close
@@ -203,7 +196,7 @@ def get_prev_close(ticker: str) -> float | None:
     except Exception as e:
         print(f"❌ {ticker} 가격 조회 실패: {e}")
         return None
-                                
+                                    
 
 # ═══════════════════════════════════════════════════════════
 # 디스코드
