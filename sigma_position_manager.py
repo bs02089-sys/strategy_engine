@@ -18,19 +18,43 @@ import shutil
 import tempfile
 import numpy as np
 import pandas as pd
-from pandas.tseries.offsets import BDay
 import warnings
 import requests
 import yfinance as yf
+
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 
+
+# ====================== 인코딩 설정 ======================
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
+
+# ==================== yfinance 안정화 설정 ====================
 warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", category=UserWarning, module="yfinance")
+
+# yfinance 캐싱 문제 해결
+try:
+    yf.set_tz_cache_location("/tmp/yfinance_cache")
+except:
+    pass
+
+# 캐시 초기화 시도
+if hasattr(yf, "download"):
+    try:
+        if hasattr(yf.download, "cache_clear"):
+            yf.download.cache_clear()
+    except:
+        pass
+
+
+# ====================== 기타 설정 ======================
+warnings.filterwarnings("ignore", category=FutureWarning)
+
 
 TARGET_TICKERS         = ["AIQ", "SOXQ", "SOXL"]
 CONFIG_PATH            = "config.json"
@@ -154,16 +178,34 @@ def _safe_float(val) -> float | None:
 def get_prev_close(ticker: str) -> tuple[float | None, str]:
     try:
         t = yf.Ticker(ticker)
-        # 10일치로 충분히 여유롭게 가져옴
-        hist = t.history(
-            period="10d", 
-            interval="1d", 
-            auto_adjust=True, 
-            prepost=False
-        )
         
-        if hist.empty or len(hist) < 1:
-            print(f"❌ {ticker} history empty")
+        # 1. 캐시 강제 클리어
+        t.history = t.history.__wrapped__ if hasattr(t.history, '__wrapped__') else t.history
+        if hasattr(yf, 'download'):
+            yf.download.cache_clear() if hasattr(yf.download, 'cache_clear') else None
+        
+        # 2. 여러 방법으로 데이터 조회 시도
+        hist = None
+        for period in ["10d", "15d", "1mo"]:
+            try:
+                hist = t.history(
+                    period=period,
+                    interval="1d",
+                    auto_adjust=True,
+                    prepost=False,
+                    timeout=20
+                )
+                if not hist.empty and len(hist) >= 3:
+                    break
+            except:
+                continue
+
+        if hist is None or hist.empty or len(hist) < 2:
+            # fallback: download 사용
+            hist = yf.download(ticker, period="15d", interval="1d", auto_adjust=True, progress=False)
+
+        if hist.empty or len(hist) < 2:
+            print(f"❌ {ticker} history empty after retry")
             return None, "N/A"
 
         closes = hist["Close"].dropna()
@@ -173,10 +215,12 @@ def get_prev_close(ticker: str) -> tuple[float | None, str]:
         now_ny = datetime.now(ZoneInfo("America/New_York"))
         today = now_ny.date()
 
+        # 가장 최근 거래일
         last_trading_date = closes.index[-1].date()
         
-        print(f"📊 {ticker} - Last data date: {last_trading_date} | Today: {today}")
+        print(f"📊 {ticker} - Last data date: {last_trading_date} | Today: {today} | Rows: {len(closes)}")
 
+        # 오늘 데이터가 있으면 → 전일 종가
         if last_trading_date == today and len(closes) >= 2:
             prev_close = _safe_float(closes.iloc[-2])
             prev_date = closes.index[-2].date()
@@ -194,6 +238,8 @@ def get_prev_close(ticker: str) -> tuple[float | None, str]:
 
     except Exception as e:
         print(f"❌ {ticker} 가격 조회 실패: {e}")
+        import traceback
+        traceback.print_exc()
         return None, "N/A"
                                     
 
