@@ -151,35 +151,50 @@ def _safe_float(val) -> float | None:
     except (TypeError, ValueError):
         return None
  
-def get_prev_close(ticker: str) -> float | None:
+def get_prev_close(ticker: str) -> tuple[float | None, str]:
     try:
         t = yf.Ticker(ticker)
-        # 5일 치 데이터를 충분히 가져옵니다
-        hist = t.history(period="5d", interval="1d", auto_adjust=True, prepost=False)
+        # 10일치로 충분히 여유롭게 가져옴
+        hist = t.history(
+            period="10d", 
+            interval="1d", 
+            auto_adjust=True, 
+            prepost=False
+        )
         
-        if hist.empty:
-            return None
+        if hist.empty or len(hist) < 1:
+            print(f"❌ {ticker} history empty")
+            return None, "N/A"
 
-        # 1. 오늘 장이 시작되었더라도 우리는 '전일(어제)' 데이터가 필요합니다.
-        # 2. 오늘 날짜를 기준으로 어제 날짜를 구합니다.
+        closes = hist["Close"].dropna()
+        if closes.empty:
+            return None, "N/A"
+
         now_ny = datetime.now(ZoneInfo("America/New_York"))
         today = now_ny.date()
-        
-        # 데이터의 마지막 날짜가 오늘(today)이라면, 전일 데이터는 iloc[-2]입니다.
-        # 데이터의 마지막 날짜가 오늘보다 이전(어제)이라면, 그게 바로 전일 종가(iloc[-1])입니다.
-        if hist.index[-1].date() == today:
-            if len(hist) >= 2:
-                prev_close = _safe_float(hist["Close"].iloc[-2])
-            else:
-                prev_close = _safe_float(hist["Close"].iloc[-1])
-        else:
-            prev_close = _safe_float(hist["Close"].iloc[-1])
 
-        return prev_close
+        last_trading_date = closes.index[-1].date()
+        
+        print(f"📊 {ticker} - Last data date: {last_trading_date} | Today: {today}")
+
+        if last_trading_date == today and len(closes) >= 2:
+            prev_close = _safe_float(closes.iloc[-2])
+            prev_date = closes.index[-2].date()
+        else:
+            prev_close = _safe_float(closes.iloc[-1])
+            prev_date = last_trading_date
+
+        last_date_str = prev_date.strftime('%m-%d')
+
+        if prev_close is None:
+            return None, last_date_str
+
+        print(f"✅ {ticker} 전일 종가: ${prev_close:.2f} ({last_date_str})")
+        return prev_close, last_date_str
 
     except Exception as e:
         print(f"❌ {ticker} 가격 조회 실패: {e}")
-        return None
+        return None, "N/A"
                                     
 
 # ═══════════════════════════════════════════════════════════
@@ -245,21 +260,22 @@ def execute_dual_tactical_trader() -> None:
     positions = cfg.get("POSITIONS", {})
 
     for ticker in TARGET_TICKERS:
-        pos_cfg    = positions.get(ticker, {})
+        pos_cfg = positions.get(ticker, {})
         
-        # 날짜를 확인하기 위해 get_prev_close에서 날짜 정보도 같이 가져올 수 있도록 수정이 필요합니다.
-        # 여기서는 편의를 위해 yfinance 객체를 다시 활용해 날짜를 추출합니다.
-        t = yf.Ticker(ticker)
-        hist = t.history(period="5d", interval="1d", auto_adjust=True, prepost=False)
-        prev_close = get_prev_close(ticker)
+        # get_prev_close에서 가격 + 날짜를 함께 반환하도록 개선
+        result = get_prev_close(ticker)
+        
+        if isinstance(result, tuple):
+            prev_close, last_date_str = result
+        else:
+            # 이전 버전과의 호환성
+            prev_close = result
+            last_date_str = "N/A"
 
-        if prev_close is None or hist.empty:
+        if prev_close is None:
             lines.append(f"\n🔹 **{ticker}** — 가격 조회 실패 ⚠️")
             continue
 
-        # 마지막 데이터의 날짜 추출 (MM-DD 형식)
-        last_date_str = hist["Close"].dropna().index[-1].strftime('%m-%d')
-        
         multiplier = pos_cfg.get("ENTRY_MULTIPLIER", 1.41)
         sigma      = pos_cfg.get("DAILY_SIGMA", 0.05)
         loc_price  = prev_close * np.exp(-multiplier * sigma)
