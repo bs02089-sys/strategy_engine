@@ -149,47 +149,69 @@ def _safe_float(val) -> float | None:
         if val is None:
             return None
         f = float(val)
-        return None if np.isnan(f) else f
+        return None if (np.isnan(f) or np.isinf(f)) else f
     except (TypeError, ValueError):
         return None
-
+    
 def get_prev_close(ticker: str) -> tuple[float | None, str]:
-    """최종 강화 버전 - 안정성 극대화"""
+    """최종 안정화 버전 - NaN 처리 + 다중 fallback 강화"""
     print(f"🔍 {ticker} 가격 조회 시작...")
     
-    # yfinance를 최우선으로, 캐싱 기법 + 재시도 로직 추가
-    for attempt in range(2):  # 최대 2회 시도
-        try:
-            stock = yf.Ticker(ticker)
-            hist = stock.history(period="10d", auto_adjust=False, rounding=True)
-            
-            if not hist.empty:
-                prev_close = float(hist['Close'].iloc[-1])
-                last_date = hist.index[-1].date()
+    # ==================== 1. yfinance History (주력) ====================
+    try:
+        print(f"   → yfinance history 시도...")
+        stock = yf.Ticker(ticker)
+        hist = stock.history(period="10d", auto_adjust=False, rounding=True)
+        
+        if not hist.empty:
+            # NaN 제거하고 가장 최근 유효한 종가 사용
+            valid_hist = hist['Close'].dropna()
+            if not valid_hist.empty:
+                prev_close = float(valid_hist.iloc[-1])
+                last_date = valid_hist.index[-1].date()
                 date_str = last_date.strftime("%m-%d")
                 
-                print(f"✅ {ticker} 성공: ${prev_close:.2f} ({date_str})")
+                print(f"✅ {ticker} yfinance 성공: ${prev_close:.2f} ({date_str})")
                 return prev_close, date_str
-                
-        except Exception as e:
-            print(f"   ⚠️ 시도 {attempt+1} 실패: {e}")
-            if attempt == 0:
-                import time
-                time.sleep(1.5)  # 잠시 대기 후 재시도
+    except Exception as e:
+        print(f"   ⚠️ yfinance history 실패: {e}")
 
-    # info fallback
+    # ==================== 2. yfinance info 강력 fallback ====================
     try:
+        print(f"   → yfinance info 시도...")
         info = stock.info
-        prev_close = (_safe_float(info.get("previousClose")) or
-                     _safe_float(info.get("regularMarketPreviousClose")) or
-                     _safe_float(info.get("currentPrice")))
-        if prev_close is not None:
-            print(f"✅ {ticker} info 성공: ${prev_close:.2f}")
-            return prev_close, "N/A"
-    except:
-        pass
+        
+        for key in ["previousClose", "regularMarketPreviousClose", 
+                   "regularMarketPrice", "currentPrice", "navPrice"]:
+            price = _safe_float(info.get(key))
+            if price is not None and not np.isnan(price):
+                print(f"✅ {ticker} yfinance info 성공: ${price:.2f}")
+                return price, "N/A"
+    except Exception as e:
+        print(f"   ⚠️ yfinance info 실패: {e}")
 
-    print(f"❌ {ticker} 최종 실패")
+    # ==================== 3. Alpha Vantage ====================
+    try:
+        key = os.environ.get("ALPHA_VANTAGE_KEY")
+        if key:
+            print(f"   → Alpha Vantage 시도...")
+            url = f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={ticker}&apikey={key}"
+            resp = requests.get(url, timeout=15)
+            if resp.ok:
+                data = resp.json()
+                if "Global Quote" in data and data["Global Quote"]:
+                    quote = data["Global Quote"]
+                    prev_close = _safe_float(quote.get("08. previous close"))
+                    if prev_close is not None and not np.isnan(prev_close):
+                        latest_day = quote.get("07. latest trading day", "")
+                        date_str = latest_day[-5:] if len(latest_day) >= 5 else "N/A"
+                        print(f"✅ {ticker} Alpha Vantage 성공: ${prev_close:.2f} ({date_str})")
+                        return prev_close, date_str
+    except Exception as e:
+        print(f"   ⚠️ Alpha Vantage 실패: {e}")
+
+    # ==================== 최종 실패 ====================
+    print(f"❌ {ticker} 모든 방법 실패 → NaN 처리")
     return None, "N/A"
                                             
 
