@@ -18,6 +18,7 @@ import shutil
 import tempfile
 import numpy as np
 import requests
+import yfinance as yf
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from alpha_vantage.timeseries import TimeSeries
@@ -156,46 +157,60 @@ def _safe_float(val) -> float | None:
 
 
 def get_prev_close(ticker: str) -> tuple[float | None, str]:
-    """Alpha Vantage GLOBAL_QUOTE로 전일 종가 조회"""
-    try:
-        print(f"🔍 {ticker} Alpha Vantage GLOBAL_QUOTE 조회...")
-        
-        key = os.environ.get("ALPHA_VANTAGE_KEY")
-        if not key:
-            print("❌ API 키가 설정되지 않았습니다.")
-            return None, "N/A"
-            
-        url = f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={ticker}&apikey={key}"
-        resp = requests.get(url, timeout=15)
-        resp.raise_for_status()
-        data = resp.json()
-        
-        if "Global Quote" not in data or not data["Global Quote"]:
-            error_msg = data.get("Note") or data.get("Information") or "데이터 없음"
-            print(f"⚠️ {ticker} 조회 실패: {error_msg}")
-            return None, "N/A"
-
-        quote = data["Global Quote"]
-        prev_close = _safe_float(quote.get("08. previous close"))
-        latest_day = quote.get("07. latest trading day", "N/A")
-        
-        if prev_close is None:
-            # fallback: 현재 가격이라도 사용
-            current = _safe_float(quote.get("05. price"))
-            if current:
-                prev_close = current
-                print(f"⚠️ {ticker} previous close 없음 → 현재가 사용")
-        
-        last_date_str = latest_day[-5:] if latest_day != "N/A" else "N/A"  # MM-DD 형식
-        
-        print(f"✅ {ticker} 성공: ${prev_close:.2f} ({last_date_str})")
-        return prev_close, last_date_str
-
-    except requests.exceptions.RequestException as e:
-        print(f"❌ {ticker} 네트워크 오류: {e}")
-    except Exception as e:
-        print(f"❌ {ticker} Alpha Vantage 예외: {e}")
+    """전일 종가 조회 (Alpha Vantage → yfinance Fallback)"""
+    print(f"🔍 {ticker} 가격 조회 시작...")
     
+    # ==================== 1. Alpha Vantage 시도 ====================
+    try:
+        key = os.environ.get("ALPHA_VANTAGE_KEY")
+        if key:
+            url = f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={ticker}&apikey={key}"
+            resp = requests.get(url, timeout=12)
+            resp.raise_for_status()
+            data = resp.json()
+            
+            if "Global Quote" in data and data["Global Quote"]:
+                quote = data["Global Quote"]
+                prev_close = _safe_float(quote.get("08. previous close"))
+                latest_day = quote.get("07. latest trading day", "")
+                
+                if prev_close is not None:
+                    date_str = latest_day[-5:] if len(latest_day) >= 5 else "N/A"
+                    print(f"✅ {ticker} Alpha Vantage 성공: ${prev_close:.2f} ({date_str})")
+                    return prev_close, date_str
+    except Exception as e:
+        print(f"⚠️ Alpha Vantage 실패 ({ticker}): {e}")
+
+    # ==================== 2. yfinance Fallback ====================
+    try:
+        print(f"🔄 {ticker} yfinance fallback 시도...")
+        stock = yf.Ticker(ticker)
+        
+        # 방법 1: 최근 거래일 데이터
+        hist = stock.history(period="5d", auto_adjust=False)
+        if not hist.empty:
+            prev_close = float(hist['Close'].iloc[-1])
+            last_date = hist.index[-1].date()
+            date_str = last_date.strftime("%m-%d")
+            
+            print(f"✅ {ticker} yfinance 성공: ${prev_close:.2f} ({date_str})")
+            return prev_close, date_str
+        
+        # 방법 2: info에서 previousClose 가져오기
+        info = stock.info
+        prev_close = (_safe_float(info.get("previousClose")) or 
+                     _safe_float(info.get("regularMarketPreviousClose")) or
+                     _safe_float(info.get("regularMarketPrice")))
+        
+        if prev_close is not None:
+            print(f"✅ {ticker} yfinance info 성공: ${prev_close:.2f}")
+            return prev_close, "N/A"
+            
+    except Exception as e:
+        print(f"❌ {ticker} yfinance 실패: {e}")
+
+    # ==================== 최종 실패 ====================
+    print(f"❌ {ticker} 모든 가격 조회 방법 실패")
     return None, "N/A"
                                             
 
@@ -254,13 +269,13 @@ def execute_dual_tactical_trader() -> None:
     webhook = os.environ.get("DISCORD_WEBHOOK") or cfg.get("DISCORD_WEBHOOK", "")
     user_id = os.environ.get("DISCORD_USER_ID") or cfg.get("DISCORD_USER_ID", "")
 
-    # 2. 시스템 루틴 실행
+    # 2. 시스템 루틴 실행 (시그마 갱신은 여기서 한 번만 수행)
     sigma_messages = refresh_sigma_if_stale(cfg)
     send_monthly_ping_if_due(cfg, webhook, user_id)
     save_config(cfg)
 
     # 3. 브리핑 메시지 생성
-    briefing_lines = _build_briefing_lines(now_ny, cfg)
+    briefing_lines = _build_briefing_lines(now_ny, cfg, sigma_messages)
 
     # 4. 디스코드 전송
     _send_discord(
@@ -270,7 +285,12 @@ def execute_dual_tactical_trader() -> None:
         content="\n".join(briefing_lines)
     )
 
-def _build_briefing_lines(now_ny: datetime, cfg: dict) -> list[str]:
+
+def _build_briefing_lines(
+    now_ny: datetime, 
+    cfg: dict, 
+    sigma_messages: list[str]
+) -> list[str]:
     """브리핑 본문 라인들을 생성하는 헬퍼 함수"""
     lines = [f"🌙 {now_ny.strftime('%Y-%m-%d %H:%M %Z')}"]
 
@@ -290,10 +310,13 @@ def _build_briefing_lines(now_ny: datetime, cfg: dict) -> list[str]:
         loc_price = prev_close * np.exp(-multiplier * sigma)
 
         lines.append(f"\n🔹 **{ticker}**")
-        lines.append(f"• 전일 종가: ${prev_close:.2f} ({last_date_str}) | LOC: ${loc_price:.2f}")
+        lines.append(
+            f"• 전일 종가: ${prev_close:.2f} ({last_date_str}) | "
+            f"LOC: ${loc_price:.2f}"
+        )
 
-    # 시그마 갱신 메시지 추가
-    if sigma_messages := refresh_sigma_if_stale(cfg):  # walrus operator (Python 3.8+)
+    # 시그마 갱신 메시지 추가 (있을 경우에만)
+    if sigma_messages:
         lines.append("\n" + "\n".join(sigma_messages))
 
     return lines
