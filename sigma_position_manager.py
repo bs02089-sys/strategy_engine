@@ -143,6 +143,8 @@ def send_monthly_ping_if_due(cfg: dict, webhook: str, user_id: str) -> None:
 # 가격 조회
 # ═══════════════════════════════════════════════════════════
 
+# ====================== 가격 조회 (개선 버전) ======================
+
 def _safe_float(val) -> float | None:
     try:
         if val is None:
@@ -151,38 +153,50 @@ def _safe_float(val) -> float | None:
         return None if np.isnan(f) else f
     except (TypeError, ValueError):
         return None
- 
+
+
 def get_prev_close(ticker: str) -> tuple[float | None, str]:
+    """Alpha Vantage GLOBAL_QUOTE로 전일 종가 조회"""
     try:
-        print(f"🔍 {ticker} 알파빈티지 조회 시작...")
+        print(f"🔍 {ticker} Alpha Vantage GLOBAL_QUOTE 조회...")
         
-        # 1. 함수 내부에서 API 키를 확실하게 가져옵니다
         key = os.environ.get("ALPHA_VANTAGE_KEY")
         if not key:
             print("❌ API 키가 설정되지 않았습니다.")
             return None, "N/A"
             
-        ts = TimeSeries(key=key, output_format='pandas')
+        url = f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={ticker}&apikey={key}"
+        resp = requests.get(url, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
         
-        # 2. 데이터 조회
-        data, meta_data = ts.get_daily(symbol=ticker, outputsize='compact')
-        
-        if data.empty:
-            print(f"❌ {ticker} 데이터 없음")
+        if "Global Quote" not in data or not data["Global Quote"]:
+            error_msg = data.get("Note") or data.get("Information") or "데이터 없음"
+            print(f"⚠️ {ticker} 조회 실패: {error_msg}")
             return None, "N/A"
 
-        # 3. 최신 종가 가져오기
-        closes = data['4. close']
-        last_date = closes.index[-1].date()
-        prev_close = _safe_float(closes.iloc[-1])
-        last_date_str = last_date.strftime('%m-%d')
-
+        quote = data["Global Quote"]
+        prev_close = _safe_float(quote.get("08. previous close"))
+        latest_day = quote.get("07. latest trading day", "N/A")
+        
+        if prev_close is None:
+            # fallback: 현재 가격이라도 사용
+            current = _safe_float(quote.get("05. price"))
+            if current:
+                prev_close = current
+                print(f"⚠️ {ticker} previous close 없음 → 현재가 사용")
+        
+        last_date_str = latest_day[-5:] if latest_day != "N/A" else "N/A"  # MM-DD 형식
+        
         print(f"✅ {ticker} 성공: ${prev_close:.2f} ({last_date_str})")
         return prev_close, last_date_str
 
+    except requests.exceptions.RequestException as e:
+        print(f"❌ {ticker} 네트워크 오류: {e}")
     except Exception as e:
-        print(f"❌ {ticker} Alpha Vantage 예외 발생: {e}")
-        return None, "N/A"
+        print(f"❌ {ticker} Alpha Vantage 예외: {e}")
+    
+    return None, "N/A"
                                             
 
 # ═══════════════════════════════════════════════════════════
@@ -232,17 +246,32 @@ def _send_discord(webhook_url: str, user_id: str, title: str, content: str) -> N
 # ═══════════════════════════════════════════════════════════
 
 def execute_dual_tactical_trader() -> None:
-    now_ny  = datetime.now(ZoneInfo("America/New_York"))
-    cfg     = load_config()
+    """Sigma DCA LOC 브리핑 실행 메인 함수"""
+    now_ny = datetime.now(ZoneInfo("America/New_York"))
+    
+    # 1. 설정 로드 및 초기화
+    cfg = load_config()
     webhook = os.environ.get("DISCORD_WEBHOOK") or cfg.get("DISCORD_WEBHOOK", "")
-    user_id = os.environ.get("DISCORD_USER_ID")  or cfg.get("DISCORD_USER_ID",  "")
+    user_id = os.environ.get("DISCORD_USER_ID") or cfg.get("DISCORD_USER_ID", "")
 
-    # ── 시스템 루틴 ───────────────────────────────────────
+    # 2. 시스템 루틴 실행
     sigma_messages = refresh_sigma_if_stale(cfg)
     send_monthly_ping_if_due(cfg, webhook, user_id)
     save_config(cfg)
 
-    # ── 브리핑 ────────────────────────────────────────────
+    # 3. 브리핑 메시지 생성
+    briefing_lines = _build_briefing_lines(now_ny, cfg)
+
+    # 4. 디스코드 전송
+    _send_discord(
+        webhook_url=webhook,
+        user_id=user_id,
+        title="📋 LOC 브리핑",
+        content="\n".join(briefing_lines)
+    )
+
+def _build_briefing_lines(now_ny: datetime, cfg: dict) -> list[str]:
+    """브리핑 본문 라인들을 생성하는 헬퍼 함수"""
     lines = [f"🌙 {now_ny.strftime('%Y-%m-%d %H:%M %Z')}"]
 
     positions = cfg.get("POSITIONS", {})
@@ -250,31 +279,24 @@ def execute_dual_tactical_trader() -> None:
     for ticker in TARGET_TICKERS:
         pos_cfg = positions.get(ticker, {})
         
-        # get_prev_close에서 가격 + 날짜를 함께 반환하도록 개선
-        result = get_prev_close(ticker)
-        
-        if isinstance(result, tuple):
-            prev_close, last_date_str = result
-        else:
-            # 이전 버전과의 호환성
-            prev_close = result
-            last_date_str = "N/A"
+        prev_close, last_date_str = get_prev_close(ticker)
 
         if prev_close is None:
             lines.append(f"\n🔹 **{ticker}** — 가격 조회 실패 ⚠️")
             continue
 
         multiplier = pos_cfg.get("ENTRY_MULTIPLIER", 1.41)
-        sigma      = pos_cfg.get("DAILY_SIGMA", 0.05)
-        loc_price  = prev_close * np.exp(-multiplier * sigma)
+        sigma = pos_cfg.get("DAILY_SIGMA", 0.05)
+        loc_price = prev_close * np.exp(-multiplier * sigma)
 
         lines.append(f"\n🔹 **{ticker}**")
         lines.append(f"• 전일 종가: ${prev_close:.2f} ({last_date_str}) | LOC: ${loc_price:.2f}")
 
-    if sigma_messages:
+    # 시그마 갱신 메시지 추가
+    if sigma_messages := refresh_sigma_if_stale(cfg):  # walrus operator (Python 3.8+)
         lines.append("\n" + "\n".join(sigma_messages))
 
-    _send_discord(webhook, user_id, "📋 LOC 브리핑", "\n".join(lines))
+    return lines
 
 
 if __name__ == "__main__":
