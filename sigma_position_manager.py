@@ -154,25 +154,16 @@ def _safe_float(val) -> float | None:
         return None
     
 def get_prev_close(ticker: str) -> tuple[float | None, str]:
-    """GitHub Actions + 수동 실행 모두 안정적으로 동작하는 최종 버전"""
+    """실무용 안정 버전 - GitHub Actions에서도 최대한 잘 돌아가도록"""
     print(f"🔍 {ticker} 가격 조회 시작...")
     
-    # 재시도 횟수
-    for attempt in range(3):   # 최대 3회 시도
+    # 최대 3회 재시도 (GitHub 환경 고려)
+    for attempt in range(3):
         try:
-            print(f"   → yfinance history 시도 ({attempt+1}/3)...")
             stock = yf.Ticker(ticker)
-            
-            # period를 15d로 늘리고, prepost 포함
-            hist = stock.history(
-                period="15d", 
-                auto_adjust=False, 
-                rounding=True,
-                prepost=True
-            )
+            hist = stock.history(period="10d", auto_adjust=False, rounding=True)
             
             if not hist.empty:
-                # NaN 제거 후 가장 최근 유효 종가
                 close_series = hist['Close'].dropna()
                 if not close_series.empty:
                     prev_close = float(close_series.iloc[-1])
@@ -183,17 +174,15 @@ def get_prev_close(ticker: str) -> tuple[float | None, str]:
                     return prev_close, date_str
                     
         except Exception as e:
-            print(f"   ⚠️ 시도 {attempt+1} 실패: {e}")
+            print(f"   ⚠️ 시도 {attempt+1}/3 실패: {e}")
             if attempt < 2:
                 import time
-                time.sleep(1.8 * (attempt + 1))   # 점점 대기 시간 증가
+                time.sleep(1.5)   # GitHub 환경에서 잠시 대기
     
-    # ==================== Info Fallback ====================
+    # info fallback
     try:
-        print(f"   → yfinance info fallback 시도...")
         info = stock.info
-        for key in ["previousClose", "regularMarketPreviousClose", 
-                   "regularMarketPrice", "currentPrice", "navPrice"]:
+        for key in ["previousClose", "regularMarketPreviousClose", "currentPrice"]:
             price = _safe_float(info.get(key))
             if price is not None and not np.isnan(price):
                 print(f"✅ {ticker} info 성공: ${price:.2f}")
@@ -201,26 +190,7 @@ def get_prev_close(ticker: str) -> tuple[float | None, str]:
     except Exception as e:
         print(f"   ⚠️ info fallback 실패: {e}")
 
-    # Alpha Vantage는 마지막 보루
-    try:
-        key = os.environ.get("ALPHA_VANTAGE_KEY")
-        if key:
-            print(f"   → Alpha Vantage 시도...")
-            url = f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={ticker}&apikey={key}"
-            resp = requests.get(url, timeout=15)
-            if resp.ok:
-                data = resp.json()
-                if "Global Quote" in data and data["Global Quote"]:
-                    quote = data["Global Quote"]
-                    prev_close = _safe_float(quote.get("08. previous close"))
-                    if prev_close is not None and not np.isnan(prev_close):
-                        date_str = quote.get("07. latest trading day", "")[-5:] or "N/A"
-                        print(f"✅ {ticker} Alpha Vantage 성공: ${prev_close:.2f}")
-                        return prev_close, date_str
-    except:
-        pass
-
-    print(f"❌ {ticker} 최종 실패 → NaN 처리")
+    print(f"❌ {ticker} 최종 실패")
     return None, "N/A"
                                             
 
