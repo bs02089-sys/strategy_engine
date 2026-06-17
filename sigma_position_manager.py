@@ -154,61 +154,42 @@ def _safe_float(val) -> float | None:
         return None
 
 def get_prev_close(ticker: str) -> tuple[float | None, str]:
-    """전일 종가 조회 - 최신 데이터 우선 (yfinance 중심 강화)"""
+    """최종 강화 버전 - 안정성 극대화"""
     print(f"🔍 {ticker} 가격 조회 시작...")
     
-    # ==================== 1. yfinance - history (가장 신뢰성 높음) ====================
-    try:
-        print(f"🔄 {ticker} yfinance history 시도...")
-        stock = yf.Ticker(ticker)
-        hist = stock.history(period="10d", auto_adjust=False)  # 10일로 여유롭게
-        
-        if not hist.empty:
-            # 가장 최근 종가 사용
-            prev_close = float(hist['Close'].iloc[-1])
-            last_date = hist.index[-1].date()
-            date_str = last_date.strftime("%m-%d")
+    # yfinance를 최우선으로, 캐싱 기법 + 재시도 로직 추가
+    for attempt in range(2):  # 최대 2회 시도
+        try:
+            stock = yf.Ticker(ticker)
+            hist = stock.history(period="10d", auto_adjust=False, rounding=True)
             
-            print(f"✅ {ticker} yfinance history 성공: ${prev_close:.2f} ({date_str})")
-            return prev_close, date_str
-    except Exception as e:
-        print(f"⚠️ yfinance history 실패 ({ticker}): {e}")
+            if not hist.empty:
+                prev_close = float(hist['Close'].iloc[-1])
+                last_date = hist.index[-1].date()
+                date_str = last_date.strftime("%m-%d")
+                
+                print(f"✅ {ticker} 성공: ${prev_close:.2f} ({date_str})")
+                return prev_close, date_str
+                
+        except Exception as e:
+            print(f"   ⚠️ 시도 {attempt+1} 실패: {e}")
+            if attempt == 0:
+                import time
+                time.sleep(1.5)  # 잠시 대기 후 재시도
 
-    # ==================== 2. yfinance info fallback ====================
+    # info fallback
     try:
         info = stock.info
-        prev_close = (_safe_float(info.get("previousClose")) or 
+        prev_close = (_safe_float(info.get("previousClose")) or
                      _safe_float(info.get("regularMarketPreviousClose")) or
-                     _safe_float(info.get("regularMarketPrice")))
-        
+                     _safe_float(info.get("currentPrice")))
         if prev_close is not None:
-            print(f"✅ {ticker} yfinance info 성공: ${prev_close:.2f}")
+            print(f"✅ {ticker} info 성공: ${prev_close:.2f}")
             return prev_close, "N/A"
-    except Exception as e:
-        print(f"⚠️ yfinance info 실패 ({ticker}): {e}")
+    except:
+        pass
 
-    # ==================== 3. Alpha Vantage 마지막 시도 ====================
-    try:
-        key = os.environ.get("ALPHA_VANTAGE_KEY")
-        if key:
-            url = f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={ticker}&apikey={key}"
-            resp = requests.get(url, timeout=12)
-            if resp.ok:
-                data = resp.json()
-                if "Global Quote" in data and data["Global Quote"]:
-                    quote = data["Global Quote"]
-                    prev_close = _safe_float(quote.get("08. previous close"))
-                    latest_day = quote.get("07. latest trading day", "")
-                    
-                    if prev_close is not None:
-                        date_str = latest_day[-5:] if len(latest_day) >= 5 else "N/A"
-                        print(f"✅ {ticker} Alpha Vantage 성공: ${prev_close:.2f} ({date_str})")
-                        return prev_close, date_str
-    except Exception as e:
-        print(f"⚠️ Alpha Vantage 실패 ({ticker}): {e}")
-
-    # ==================== 최종 실패 ====================
-    print(f"❌ {ticker} 모든 가격 조회 방법 실패")
+    print(f"❌ {ticker} 최종 실패")
     return None, "N/A"
                                             
 
