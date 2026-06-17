@@ -154,43 +154,54 @@ def _safe_float(val) -> float | None:
         return None
     
 def get_prev_close(ticker: str) -> tuple[float | None, str]:
-    """최종 안정화 버전 - NaN 처리 + 다중 fallback 강화"""
+    """GitHub Actions + 수동 실행 모두 안정적으로 동작하는 최종 버전"""
     print(f"🔍 {ticker} 가격 조회 시작...")
     
-    # ==================== 1. yfinance History (주력) ====================
+    # 재시도 횟수
+    for attempt in range(3):   # 최대 3회 시도
+        try:
+            print(f"   → yfinance history 시도 ({attempt+1}/3)...")
+            stock = yf.Ticker(ticker)
+            
+            # period를 15d로 늘리고, prepost 포함
+            hist = stock.history(
+                period="15d", 
+                auto_adjust=False, 
+                rounding=True,
+                prepost=True
+            )
+            
+            if not hist.empty:
+                # NaN 제거 후 가장 최근 유효 종가
+                close_series = hist['Close'].dropna()
+                if not close_series.empty:
+                    prev_close = float(close_series.iloc[-1])
+                    last_date = close_series.index[-1].date()
+                    date_str = last_date.strftime("%m-%d")
+                    
+                    print(f"✅ {ticker} 성공: ${prev_close:.2f} ({date_str})")
+                    return prev_close, date_str
+                    
+        except Exception as e:
+            print(f"   ⚠️ 시도 {attempt+1} 실패: {e}")
+            if attempt < 2:
+                import time
+                time.sleep(1.8 * (attempt + 1))   # 점점 대기 시간 증가
+    
+    # ==================== Info Fallback ====================
     try:
-        print(f"   → yfinance history 시도...")
-        stock = yf.Ticker(ticker)
-        hist = stock.history(period="10d", auto_adjust=False, rounding=True)
-        
-        if not hist.empty:
-            # NaN 제거하고 가장 최근 유효한 종가 사용
-            valid_hist = hist['Close'].dropna()
-            if not valid_hist.empty:
-                prev_close = float(valid_hist.iloc[-1])
-                last_date = valid_hist.index[-1].date()
-                date_str = last_date.strftime("%m-%d")
-                
-                print(f"✅ {ticker} yfinance 성공: ${prev_close:.2f} ({date_str})")
-                return prev_close, date_str
-    except Exception as e:
-        print(f"   ⚠️ yfinance history 실패: {e}")
-
-    # ==================== 2. yfinance info 강력 fallback ====================
-    try:
-        print(f"   → yfinance info 시도...")
+        print(f"   → yfinance info fallback 시도...")
         info = stock.info
-        
         for key in ["previousClose", "regularMarketPreviousClose", 
                    "regularMarketPrice", "currentPrice", "navPrice"]:
             price = _safe_float(info.get(key))
             if price is not None and not np.isnan(price):
-                print(f"✅ {ticker} yfinance info 성공: ${price:.2f}")
+                print(f"✅ {ticker} info 성공: ${price:.2f}")
                 return price, "N/A"
     except Exception as e:
-        print(f"   ⚠️ yfinance info 실패: {e}")
+        print(f"   ⚠️ info fallback 실패: {e}")
 
-    # ==================== 3. Alpha Vantage ====================
+    # Alpha Vantage는 마지막 보루
     try:
         key = os.environ.get("ALPHA_VANTAGE_KEY")
         if key:
@@ -203,15 +214,13 @@ def get_prev_close(ticker: str) -> tuple[float | None, str]:
                     quote = data["Global Quote"]
                     prev_close = _safe_float(quote.get("08. previous close"))
                     if prev_close is not None and not np.isnan(prev_close):
-                        latest_day = quote.get("07. latest trading day", "")
-                        date_str = latest_day[-5:] if len(latest_day) >= 5 else "N/A"
-                        print(f"✅ {ticker} Alpha Vantage 성공: ${prev_close:.2f} ({date_str})")
+                        date_str = quote.get("07. latest trading day", "")[-5:] or "N/A"
+                        print(f"✅ {ticker} Alpha Vantage 성공: ${prev_close:.2f}")
                         return prev_close, date_str
-    except Exception as e:
-        print(f"   ⚠️ Alpha Vantage 실패: {e}")
+    except:
+        pass
 
-    # ==================== 최종 실패 ====================
-    print(f"❌ {ticker} 모든 방법 실패 → NaN 처리")
+    print(f"❌ {ticker} 최종 실패 → NaN 처리")
     return None, "N/A"
                                             
 
