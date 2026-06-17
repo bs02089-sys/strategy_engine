@@ -17,31 +17,16 @@ import json
 import shutil
 import tempfile
 import numpy as np
-import pandas as pd
-import warnings
 import requests
-import yfinance as yf
-
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
-
+from alpha_vantage.timeseries import TimeSeries
 
 # ====================== 인코딩 설정 ======================
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
-
-
-# ==================== yfinance 안정화 ====================
-warnings.filterwarnings("ignore", category=FutureWarning)
-warnings.filterwarnings("ignore", category=UserWarning, module="yfinance")
-
-try:
-    yf.set_tz_cache_location("/tmp/yfinance_cache")
-except:
-    pass
-
 
 TARGET_TICKERS         = ["AIQ", "SOXQ", "SOXL"]
 CONFIG_PATH            = "config.json"
@@ -93,11 +78,17 @@ def refresh_sigma_if_stale(cfg: dict) -> list[str]:
     today = datetime.now(ZoneInfo("America/New_York")).date()
     positions_data = cfg.setdefault("POSITIONS", {})
 
+    # 함수 내부에서 환경 변수를 다시 호출하여 안전하게 가져옵니다
+    current_api_key = os.environ.get("ALPHA_VANTAGE_KEY")
+    if not current_api_key:
+        return ["⚠️ API 키가 설정되지 않아 시그마 갱신 불가"]
+
+    ts = TimeSeries(key=current_api_key, output_format='pandas')
+
     for ticker in TARGET_TICKERS:
         pos = positions_data.setdefault(ticker, {})
         lookback_days = int(pos.get("LOOKBACK_DAYS", 90))
         
-        # 날짜 비교 로직
         last_str = pos.get("LAST_SIGMA_UPDATE", "2000-01-01")
         last_dt = datetime.strptime(last_str, "%Y-%m-%d").date() if last_str != "2000-01-01" else datetime(2000, 1, 1).date()
 
@@ -105,25 +96,24 @@ def refresh_sigma_if_stale(cfg: dict) -> list[str]:
             continue
 
         try:
-            # 넉넉한 데이터 조회
-            hist = yf.Ticker(ticker).history(
-                period=f"{lookback_days + 30}d", 
-                auto_adjust=True
-            )
+            data, _ = ts.get_daily(symbol=ticker, outputsize='compact')
             
-            # 유효 데이터 확인
-            returns = hist["Close"].pct_change().dropna()
-            if len(returns) < lookback_days:
-                messages.append(f"⚠️ {ticker} 시그마 갱신 실패: 데이터 부족")
+            if data.empty:
+                messages.append(f"⚠️ {ticker} 시그마 갱신 실패: 데이터 없음")
                 continue
                 
-            new_sigma = round(float(returns.std()), 6)
+            closes = data['4. close']
+            returns = closes.pct_change().dropna()
             
-            # 값 갱신
+            if len(returns) < lookback_days:
+                messages.append(f"⚠️ {ticker} 시그마 갱신 실패: 데이터 부족 (확보: {len(returns)}일)")
+                continue
+                
+            new_sigma = round(float(returns.tail(lookback_days).std()), 6)
+            
             pos["DAILY_SIGMA"] = new_sigma
             pos["LAST_SIGMA_UPDATE"] = today.strftime("%Y-%m-%d")
             
-            # [로그 기록 및 메시지 추가]
             log_sigma_update(ticker, new_sigma)
             messages.append(f"📊 {ticker} 시그마 갱신 ({lookback_days}일 기준): {new_sigma:.6f}")
             
@@ -164,60 +154,36 @@ def _safe_float(val) -> float | None:
  
 def get_prev_close(ticker: str) -> tuple[float | None, str]:
     try:
-        print(f"🔍 {ticker} 가격 조회 시작...")
+        print(f"🔍 {ticker} 알파빈티지 조회 시작...")
         
-        # 방법 1: Ticker.history (기존)
-        t = yf.Ticker(ticker)
-        hist = t.history(period="15d", interval="1d", auto_adjust=True, prepost=False, timeout=15)
+        # 1. 함수 내부에서 API 키를 확실하게 가져옵니다
+        key = os.environ.get("ALPHA_VANTAGE_KEY")
+        if not key:
+            print("❌ API 키가 설정되지 않았습니다.")
+            return None, "N/A"
+            
+        ts = TimeSeries(key=key, output_format='pandas')
         
-        # 방법 2: download fallback (더 안정적일 때가 많음)
-        if hist.empty or len(hist) < 3:
-            print(f"   ↳ history 실패 → download fallback")
-            hist = yf.download(ticker, period="15d", interval="1d", 
-                             auto_adjust=True, progress=False, timeout=15)
+        # 2. 데이터 조회
+        data, meta_data = ts.get_daily(symbol=ticker, outputsize='compact')
         
-        # 방법 3: 최후의 수단 (start/end 직접 지정)
-        if hist.empty or len(hist) < 3:
-            print(f"   ↳ download 실패 → start/end 직접 지정")
-            end = datetime.now(ZoneInfo("America/New_York"))
-            start = end - timedelta(days=20)
-            hist = yf.download(ticker, start=start, end=end, interval="1d", 
-                             auto_adjust=True, progress=False)
-
-        if hist.empty or len(hist) < 2:
-            print(f"❌ {ticker} 모든 방법 실패")
+        if data.empty:
+            print(f"❌ {ticker} 데이터 없음")
             return None, "N/A"
 
-        closes = hist["Close"].dropna()
-        if closes.empty:
-            return None, "N/A"
-
-        now_ny = datetime.now(ZoneInfo("America/New_York"))
-        today = now_ny.date()
+        # 3. 최신 종가 가져오기
+        closes = data['4. close']
         last_date = closes.index[-1].date()
-
-        print(f"   📅 Last data: {last_date} | Today: {today} | Rows: {len(closes)}")
-
-        # 오늘 데이터가 있으면 전일, 없으면 마지막 데이터
-        if last_date == today and len(closes) >= 2:
-            prev_close = _safe_float(closes.iloc[-2])
-            prev_date = closes.index[-2].date()
-        else:
-            prev_close = _safe_float(closes.iloc[-1])
-            prev_date = last_date
-
-        last_date_str = prev_date.strftime('%m-%d')
-
-        if prev_close is None:
-            return None, last_date_str
+        prev_close = _safe_float(closes.iloc[-1])
+        last_date_str = last_date.strftime('%m-%d')
 
         print(f"✅ {ticker} 성공: ${prev_close:.2f} ({last_date_str})")
         return prev_close, last_date_str
 
     except Exception as e:
-        print(f"❌ {ticker} 예외 발생: {e}")
+        print(f"❌ {ticker} Alpha Vantage 예외 발생: {e}")
         return None, "N/A"
-                                    
+                                            
 
 # ═══════════════════════════════════════════════════════════
 # 디스코드

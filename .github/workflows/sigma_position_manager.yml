@@ -4,19 +4,21 @@ on:
   push:
     branches: [main]
     paths:
-      - '**.py'          # .py 파일 변경 시에만 실행
-      - 'config.json'    # config.json 변경 시에도 실행    # 장부 수정 시 자동 실행
+      - '**.py'
+      - 'config.json'
   schedule:
-    # 🎯 UTC 07:00 = KST 16:00 (깃허브 서버의 지연을 감안하여 7:00로 설정)
     - cron: '0 7 * * 1-5'
   workflow_dispatch:
-    # 🎯 원할 때 언제든 Actions 탭에서 버튼 눌러서 수동 실행 가능!
 
 permissions:
   contents: write
 
 env:
   PYTHONIOENCODING: utf-8
+  # 여기서 API 키를 안전하게 secrets에서 가져옵니다
+  ALPHA_VANTAGE_KEY: ${{ secrets.ALPHA_VANTAGE_KEY }}
+  DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+  DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
 
 jobs:
   sigma_position_manager:
@@ -48,23 +50,19 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install numpy pandas requests yfinance pytz holidays
+          # alpha_vantage 라이브러리를 추가했습니다
+          pip install numpy pandas requests yfinance pytz holidays alpha_vantage
 
       - name: Run sigma_position_manager
-        env:
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-          DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
         run: |
           for i in {1..3}; do
             python sigma_position_manager.py && break || echo "Retry $i failed..." && sleep 10
           done
 
       - name: Commit and push config.json
-        # push 트리거일 때 bot 커밋이 재귀 실행되지 않도록 조건 추가
         if: always() && github.actor != 'Automated Bot'
         run: |
           [ -f config.json ] && git add config.json
-
           if ! git diff --cached --quiet; then
             git commit -m "chore: sync config.json after sigma_position_manager run ($(date -u +'%Y-%m-%d %H:%M UTC'))"
             git push
