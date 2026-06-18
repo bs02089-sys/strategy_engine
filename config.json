@@ -2,10 +2,10 @@
     "DISCORD_WEBHOOK": "",
     "DISCORD_USER_ID": "",
     "POSITIONS": {
-        "AIQ": {
-            "ENTRY_MULTIPLIER": 1.4,
-            "DAILY_SIGMA": 0.0207,
-            "LAST_SIGMA_UPDATE": "2026-06-11",
+        "TQQQ": {
+            "ENTRY_MULTIPLIER": 1.49,
+            "DAILY_SIGMA": 0.0398,
+            "LAST_SIGMA_UPDATE": "2026-06-18",
             "LOOKBACK_DAYS": 90
         },
         "SOXQ": {
@@ -40,7 +40,7 @@
             "SOXL ETF",
             "TSLA stock",
             "IONQ stock",
-            "AIQ",
+            "TQQQ",
             "SOXQ"
         ],
         "MAX_NEWS_PER_KEYWORD": 5
