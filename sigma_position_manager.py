@@ -159,21 +159,37 @@ def _safe_float(val) -> float | None:
         return None
     
 def get_prev_close(ticker: str) -> tuple[float | None, str]:
-    """SOXL 고변동성 종목 + GitHub Actions 환경에 최적화된 최종 버전"""
+    """Alpha Vantage 우선 + yfinance fallback (GitHub Actions 최적화)"""
     print(f"🔍 {ticker} 가격 조회 시작...")
     
-    # 최대 4회 재시도 + 점진적 대기
-    for attempt in range(4):
+    av_key = os.environ.get("ALPHA_VANTAGE_KEY")
+    
+    # ==================== 1. Alpha Vantage 우선 시도 ====================
+    if av_key:
         try:
+            print(f"   → Alpha Vantage GLOBAL_QUOTE 시도...")
+            url = f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={ticker}&apikey={av_key}"
+            resp = requests.get(url, timeout=15)
+            if resp.ok:
+                data = resp.json()
+                quote = data.get("Global Quote")
+                if quote:
+                    prev_close = _safe_float(quote.get("08. previous close"))
+                    latest_day = quote.get("07. latest trading day", "")
+                    
+                    if prev_close is not None:
+                        date_str = latest_day[-5:] if len(latest_day) >= 5 else "N/A"
+                        print(f"✅ {ticker} Alpha Vantage 성공: ${prev_close:.2f} ({date_str})")
+                        return prev_close, date_str
+        except Exception as e:
+            print(f"   ⚠️ Alpha Vantage 실패: {e}")
+
+    # ==================== 2. yfinance 재시도 (fallback) ====================
+    for attempt in range(3):
+        try:
+            print(f"   → yfinance 시도 ({attempt+1}/3)...")
             stock = yf.Ticker(ticker)
-            
-            # period를 크게 늘리고, interval 명시
-            hist = stock.history(
-                period="20d", 
-                interval="1d",
-                auto_adjust=False, 
-                rounding=True
-            )
+            hist = stock.history(period="20d", interval="1d", auto_adjust=False, rounding=True)
             
             if not hist.empty:
                 close_series = hist['Close'].dropna()
@@ -184,27 +200,24 @@ def get_prev_close(ticker: str) -> tuple[float | None, str]:
                     
                     print(f"✅ {ticker} yfinance 성공: ${prev_close:.2f} ({date_str})")
                     return prev_close, date_str
-                    
         except Exception as e:
-            print(f"   ⚠️ 시도 {attempt+1}/4 실패: {e}")
-            if attempt < 3:
+            print(f"   ⚠️ yfinance 시도 {attempt+1} 실패: {e}")
+            if attempt < 2:
                 import time
-                time.sleep(2.0 * (attempt + 1))  # 2초 → 4초 → 6초 대기
-    
-    # info fallback (여러 키 시도)
+                time.sleep(2)
+
+    # ==================== 3. 마지막 info fallback ====================
     try:
-        print(f"   → info fallback 시도...")
         info = stock.info
-        for key in ["previousClose", "regularMarketPreviousClose", 
-                   "currentPrice", "regularMarketPrice", "navPrice"]:
+        for key in ["previousClose", "regularMarketPreviousClose", "currentPrice"]:
             price = _safe_float(info.get(key))
             if price is not None and not np.isnan(price):
                 print(f"✅ {ticker} info 성공: ${price:.2f}")
                 return price, "N/A"
-    except Exception as e:
-        print(f"   ⚠️ info fallback 실패: {e}")
+    except:
+        pass
 
-    print(f"❌ {ticker} 최종 실패")
+    print(f"❌ {ticker} 모든 방법 실패")
     return None, "N/A"
                                             
 
