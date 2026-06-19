@@ -1,34 +1,34 @@
 {
-  "DISCORD_WEBHOOK": "",
-  "DISCORD_USER_ID": "",
-  "POSITIONS": {
-    "SOXL": {
-      "ENTRY_MULTIPLIER": 1.46,
-      "DAILY_SIGMA": 0.0866,
-      "LAST_SIGMA_UPDATE": "2026-06-11",
-      "LOOKBACK_DAYS": 90
+    "DISCORD_WEBHOOK": "",
+    "DISCORD_USER_ID": "",
+    "POSITIONS": {
+        "SOXL": {
+            "ENTRY_MULTIPLIER": 1.46,
+            "DAILY_SIGMA": 0.0866,
+            "LAST_SIGMA_UPDATE": "2026-06-11",
+            "LOOKBACK_DAYS": 90
+        }
+    },
+    "STRATEGY": {
+        "CYCLE_YEARS": 2,
+        "BUY_DURATION_DAYS": 252,
+        "HOLD_DURATION_DAYS": 252,
+        "DEFAULT_LOOKBACK_DAYS": 365
+    },
+    "exchange_status": {
+        "LAST_CHECK_DATE": "2026-06-19 08:34:01 UTC",
+        "CURRENT_APPLIED_RATE": 1530.21,
+        "CURRENT_PERCENTILE": 98.8
+    },
+    "news_settings": {
+        "KEYWORDS": [
+            "AI Infrastructure",
+            "semiconductor stock",
+            "NVDA",
+            "SOXL ETF",
+            "TSLA stock",
+            "IONQ stock"
+        ],
+        "MAX_NEWS_PER_KEYWORD": 5
     }
-  },
-  "STRATEGY": {
-    "CYCLE_YEARS": 2,
-    "BUY_DURATION_DAYS": 252,
-    "HOLD_DURATION_DAYS": 252,
-    "DEFAULT_LOOKBACK_DAYS": 365
-  },
-  "exchange_status": {
-    "LAST_CHECK_DATE": "2026-06-19 08:34:01 UTC",
-    "CURRENT_APPLIED_RATE": 1530.21,
-    "CURRENT_PERCENTILE": 98.8
-  },
-  "news_settings": {
-    "KEYWORDS": [
-      "AI Infrastructure",
-      "semiconductor stock",
-      "NVDA",
-      "SOXL ETF",
-      "TSLA stock",
-      "IONQ stock"
-    ],
-    "MAX_NEWS_PER_KEYWORD": 5
-  }
 }
