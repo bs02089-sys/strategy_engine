@@ -79,12 +79,9 @@ def refresh_sigma_if_stale(cfg: dict) -> list[str]:
     today = datetime.now(ZoneInfo("America/New_York")).date()
     positions_data = cfg.setdefault("POSITIONS", {})
 
-    # 함수 내부에서 환경 변수를 다시 호출하여 안전하게 가져옵니다
-    current_api_key = os.environ.get("ALPHA_VANTAGE_KEY")
-    if not current_api_key:
-        return ["⚠️ API 키가 설정되지 않아 시그마 갱신 불가"]
-
-    ts = TimeSeries(key=current_api_key, output_format='pandas')
+    # GitHub Secrets에서 API 키 불러오기
+    av_key = os.environ.get("ALPHA_VANTAGE_KEY")
+    print(f"🔑 Alpha Vantage 키 로드 상태: {'설정됨' if av_key else '미설정'}")
 
     for ticker in TARGET_TICKERS:
         pos = positions_data.setdefault(ticker, {})
@@ -97,8 +94,16 @@ def refresh_sigma_if_stale(cfg: dict) -> list[str]:
             continue
 
         try:
-            data, _ = ts.get_daily(symbol=ticker, outputsize='compact')
-            
+            if av_key:
+                print(f"📡 {ticker} Alpha Vantage로 시그마 계산 중...")
+                ts = TimeSeries(key=av_key, output_format='pandas')
+                data, _ = ts.get_daily(symbol=ticker, outputsize='compact')
+            else:
+                print(f"⚠️ Alpha Vantage 키 없음 → {ticker} yfinance로 대체")
+                stock = yf.Ticker(ticker)
+                hist = stock.history(period=f"{lookback_days + 30}d")
+                data = hist['Close'].to_frame(name='4. close')
+
             if data.empty:
                 messages.append(f"⚠️ {ticker} 시그마 갱신 실패: 데이터 없음")
                 continue
@@ -107,7 +112,7 @@ def refresh_sigma_if_stale(cfg: dict) -> list[str]:
             returns = closes.pct_change().dropna()
             
             if len(returns) < lookback_days:
-                messages.append(f"⚠️ {ticker} 시그마 갱신 실패: 데이터 부족 (확보: {len(returns)}일)")
+                messages.append(f"⚠️ {ticker} 시그마 갱신 실패: 데이터 부족 ({len(returns)}일)")
                 continue
                 
             new_sigma = round(float(returns.tail(lookback_days).std()), 6)
@@ -154,14 +159,13 @@ def _safe_float(val) -> float | None:
         return None
     
 def get_prev_close(ticker: str) -> tuple[float | None, str]:
-    """실무용 안정 버전 - GitHub Actions에서도 최대한 잘 돌아가도록"""
+    """SOXL 같은 고변동성 종목에 최적화된 버전"""
     print(f"🔍 {ticker} 가격 조회 시작...")
     
-    # 최대 3회 재시도 (GitHub 환경 고려)
     for attempt in range(3):
         try:
             stock = yf.Ticker(ticker)
-            hist = stock.history(period="10d", auto_adjust=False, rounding=True)
+            hist = stock.history(period="15d", auto_adjust=False, rounding=True)
             
             if not hist.empty:
                 close_series = hist['Close'].dropna()
@@ -177,12 +181,12 @@ def get_prev_close(ticker: str) -> tuple[float | None, str]:
             print(f"   ⚠️ 시도 {attempt+1}/3 실패: {e}")
             if attempt < 2:
                 import time
-                time.sleep(1.5)   # GitHub 환경에서 잠시 대기
+                time.sleep(1.5)
     
     # info fallback
     try:
         info = stock.info
-        for key in ["previousClose", "regularMarketPreviousClose", "currentPrice"]:
+        for key in ["previousClose", "regularMarketPreviousClose", "currentPrice", "regularMarketDayHigh"]:
             price = _safe_float(info.get(key))
             if price is not None and not np.isnan(price):
                 print(f"✅ {ticker} info 성공: ${price:.2f}")
