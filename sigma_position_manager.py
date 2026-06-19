@@ -159,13 +159,21 @@ def _safe_float(val) -> float | None:
         return None
     
 def get_prev_close(ticker: str) -> tuple[float | None, str]:
-    """SOXL 같은 고변동성 종목에 최적화된 버전"""
+    """SOXL 고변동성 종목 + GitHub Actions 환경에 최적화된 최종 버전"""
     print(f"🔍 {ticker} 가격 조회 시작...")
     
-    for attempt in range(3):
+    # 최대 4회 재시도 + 점진적 대기
+    for attempt in range(4):
         try:
             stock = yf.Ticker(ticker)
-            hist = stock.history(period="15d", auto_adjust=False, rounding=True)
+            
+            # period를 크게 늘리고, interval 명시
+            hist = stock.history(
+                period="20d", 
+                interval="1d",
+                auto_adjust=False, 
+                rounding=True
+            )
             
             if not hist.empty:
                 close_series = hist['Close'].dropna()
@@ -174,19 +182,21 @@ def get_prev_close(ticker: str) -> tuple[float | None, str]:
                     last_date = close_series.index[-1].date()
                     date_str = last_date.strftime("%m-%d")
                     
-                    print(f"✅ {ticker} 성공: ${prev_close:.2f} ({date_str})")
+                    print(f"✅ {ticker} yfinance 성공: ${prev_close:.2f} ({date_str})")
                     return prev_close, date_str
                     
         except Exception as e:
-            print(f"   ⚠️ 시도 {attempt+1}/3 실패: {e}")
-            if attempt < 2:
+            print(f"   ⚠️ 시도 {attempt+1}/4 실패: {e}")
+            if attempt < 3:
                 import time
-                time.sleep(1.5)
+                time.sleep(2.0 * (attempt + 1))  # 2초 → 4초 → 6초 대기
     
-    # info fallback
+    # info fallback (여러 키 시도)
     try:
+        print(f"   → info fallback 시도...")
         info = stock.info
-        for key in ["previousClose", "regularMarketPreviousClose", "currentPrice", "regularMarketDayHigh"]:
+        for key in ["previousClose", "regularMarketPreviousClose", 
+                   "currentPrice", "regularMarketPrice", "navPrice"]:
             price = _safe_float(info.get(key))
             if price is not None and not np.isnan(price):
                 print(f"✅ {ticker} info 성공: ${price:.2f}")
