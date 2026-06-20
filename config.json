@@ -3,16 +3,16 @@
     "DISCORD_USER_ID": "",
     "POSITIONS": {
         "SOXL": {
+            "LOOKBACK_DAYS": 90,
             "ENTRY_MULTIPLIER": 1.41,
-            "DAILY_SIGMA": 0.09347,
-            "LAST_SIGMA_UPDATE": "2026-06-18",
-            "LOOKBACK_DAYS": 90
+            "DAILY_SIGMA": 0.093467,
+            "LAST_SIGMA_UPDATE": "2026-06-20"
         },
         "MVLL": {
+            "LOOKBACK_DAYS": 90,
             "ENTRY_MULTIPLIER": 1.41,
-            "DAILY_SIGMA": 0.11194,
-            "LAST_SIGMA_UPDATE": "2026-06-18",
-            "LOOKBACK_DAYS": 90
+            "DAILY_SIGMA": 0.111945,
+            "LAST_SIGMA_UPDATE": "2026-06-20"
         }
     },
     "STRATEGY": {

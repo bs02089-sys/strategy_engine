@@ -22,6 +22,13 @@ from datetime import datetime, timezone, timedelta, date
 from zoneinfo import ZoneInfo
 from alpha_vantage.timeseries import TimeSeries
 
+# .env 파일이 존재할 경우 로드 (로컬 환경 변수 매핑용, 라이브러리가 없어도 예외 처리)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 # ====================== 인코딩 설정 ======================
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -84,12 +91,20 @@ def refresh_sigma_if_stale(cfg: dict) -> list[str]:
 
     for ticker in TARGET_TICKERS:
         pos = positions_data.setdefault(ticker, {})
-        lookback_days = int(pos.get("LOOKBACK_DAYS", 90))
+        lookback_days = int(pos.setdefault("LOOKBACK_DAYS", 90))
         
+        # ENTRY_MULTIPLIER가 없으면 기본값인 1.41로 자동 입력
+        if "ENTRY_MULTIPLIER" not in pos:
+            pos["ENTRY_MULTIPLIER"] = 1.41
+
         last_str = pos.get("LAST_SIGMA_UPDATE", "2000-01-01")
         last_dt = datetime.strptime(last_str, "%Y-%m-%d").date() if last_str != "2000-01-01" else datetime(2000, 1, 1).date()
 
-        if (today - last_dt).days < lookback_days:
+        # DAILY_SIGMA가 없거나, 마지막 갱신일로부터 lookback_days 이상 경과했으면 자동 갱신 실행
+        is_missing = "DAILY_SIGMA" not in pos
+        is_stale = (today - last_dt).days >= lookback_days
+
+        if not (is_missing or is_stale):
             continue
 
         try:
@@ -97,17 +112,20 @@ def refresh_sigma_if_stale(cfg: dict) -> list[str]:
                 print(f"📡 {ticker} Alpha Vantage로 시그마 계산 중...")
                 ts = TimeSeries(key=av_key, output_format='pandas')
                 data, _ = ts.get_daily(symbol=ticker, outputsize='compact')
+                closes = data['4. close']
             else:
                 print(f"⚠️ Alpha Vantage 키 없음 → {ticker} yfinance로 대체")
                 stock = yf.Ticker(ticker)
-                hist = stock.history(period=f"{lookback_days + 30}d")
-                data = hist['Close'].to_frame(name='4. close')
+                hist = stock.history(period=f"{lookback_days + 15}d", interval="1d", auto_adjust=False)
+                closes = hist['Close']
 
-            if data.empty:
+            if closes.empty:
                 messages.append(f"⚠️ {ticker} 시그마 갱신 실패: 데이터 없음")
                 continue
                 
-            closes = data['4. close']
+            # 과거 데이터를 오름차순(시간 순)으로 정렬
+            closes = closes.sort_index(ascending=True).dropna()
+
             if not closes.empty:
                 last_idx = closes.index[-1]
                 if hasattr(last_idx, "date"):
@@ -125,19 +143,21 @@ def refresh_sigma_if_stale(cfg: dict) -> list[str]:
                 if last_date == today and datetime.now(ZoneInfo("America/New_York")).hour < 16:
                     closes = closes.iloc[:-1]
 
-            returns = closes.pct_change().dropna()
+            # 로그 수익률 계산 (국제 표준이자 월가 정석)
+            log_returns = np.log(closes / closes.shift(1)).dropna()
             
-            if len(returns) < lookback_days:
-                messages.append(f"⚠️ {ticker} 시그마 갱신 실패: 데이터 부족 ({len(returns)}일)")
+            if len(log_returns) < lookback_days:
+                messages.append(f"⚠️ {ticker} 시그마 갱신 실패: 데이터 부족 ({len(log_returns)}일, 필요: {lookback_days}일)")
                 continue
                 
-            new_sigma = round(float(returns.tail(lookback_days).std()), 6)
+            # ddof=1 표본표준편차 구하기
+            new_sigma = round(float(np.std(log_returns.tail(lookback_days), ddof=1)), 6)
             
             pos["DAILY_SIGMA"] = new_sigma
             pos["LAST_SIGMA_UPDATE"] = today.strftime("%Y-%m-%d")
             
             log_sigma_update(ticker, new_sigma)
-            messages.append(f"📊 {ticker} 시그마 갱신 ({lookback_days}일 기준): {new_sigma:.6f}")
+            messages.append(f"📊 {ticker} 시그마 자동 갱신 ({lookback_days}일 기준 로그수익률): {new_sigma:.6f}")
             
         except Exception as e:
             messages.append(f"⚠️ {ticker} 시그마 갱신 실패: {e}")
@@ -311,41 +331,45 @@ def get_prev_close(ticker: str) -> tuple[float | None, str]:
     # ==================== 최종 실패 ====================
     print(f"❌ {ticker} 모든 가격 조회 방법 실패")
     return None, "N/A"
-                                            
 
-def calculate_loc_price(ticker: str, prev_close: float) -> float:
+
+def calculate_loc_price(ticker: str, prev_close: float, cfg: dict) -> float:
     """
-    90일 로그 수익률 표준편차와 1.41 진입배수를 적용하여
+    설정 파일(config.json)의 1시그마와 진입배수를 적용하여
     최종 오늘 밤 LOC 매수 지정가를 계산하는 함수
     """
+    pos_cfg = cfg.setdefault("POSITIONS", {}).setdefault(ticker, {})
+    multiplier = pos_cfg.get("ENTRY_MULTIPLIER", 1.41)
+    sigma = pos_cfg.get("DAILY_SIGMA")
+ 
+    if sigma is not None:
+        target_drop_rate = sigma * multiplier
+        loc_price = prev_close * (1 - target_drop_rate)
+        print(f"   [설정 값 사용] 1시그마(로그변동성): {sigma*100:.6f}% (진입 배수: {multiplier}배)")
+        print(f"   [설정 값 사용] 목표 진입 하락률       : {target_drop_rate*100:.3f}%")
+        return round(loc_price, 2)
+ 
+    # ==================== Fallback (설정값 없을 시 실시간 연산) ====================
+    print(f"   ⚠️ {ticker}의 설정값이 없어 실시간으로 시그마를 계산합니다...")
     stock = yf.Ticker(ticker)
-    # 로그 수익률 계산을 위해 여유 있게 92일 추출
     hist = stock.history(period="92d", interval="1d", auto_adjust=False)
     
     if len(hist) < 90:
         raise ValueError(f"{ticker}의 90영업일 데이터가 충분하지 않습니다.")
         
-    close_prices = hist['Close'].dropna().tail(91) # 최신 91개 확보
-    
-    # 1. 월가 정석: 로그 수익률(Log Return) 계산
+    close_prices = hist['Close'].dropna().tail(91)
     log_returns = np.log(close_prices / close_prices.shift(1)).dropna()
-    
-    # 2. 90일 표본 표준편차(STDEV.S) 구하기 (ddof=1 필수)
     sigma_90 = np.std(log_returns.tail(90), ddof=1)
-    
-    # 3. 252영업일 기준 연 20회 이벤트 발생용 고정 배수 1.41 적용
-    target_drop_rate = sigma_90 * 1.40935
-    
-    # 4. 정답 공식: 전일 종가에 (1 - 하락률)을 곱하기
+    target_drop_rate = sigma_90 * multiplier
     loc_price = prev_close * (1 - target_drop_rate)
     
-    print(f"   [통계 분석] 90일 1시그마(로그변동성): {sigma_90*100:.3f}%")
-    print(f"   [통계 분석] 목표 진입 하락률(1.41배) : {target_drop_rate*100:.3f}%")
+    print(f"   [실시간 분석] 90일 1시그마(로그변동성): {sigma_90*100:.6f}% (진입 배수: {multiplier}배)")
+    print(f"   [실시간 분석] 목표 진입 하락률       : {target_drop_rate*100:.3f}%")
     
-    return round(loc_price, 2) # 소수점 둘째 자리 반올림 (달러 센트 규격)
+    return round(loc_price, 2)
 
 
-def run_integrated_system(ticker: str):
+def run_integrated_system(ticker: str, cfg: dict):
     """수집 엔진과 연산 엔진을 유기적으로 제어하는 메인 실행 함수"""
     print("=" * 60)
     print(f"📡 {ticker} 통합 LOC 연산 시스템 가동")
@@ -358,13 +382,13 @@ def run_integrated_system(ticker: str):
         print(f"🚨 {ticker} 가격 데이터를 수집하는 데 실패했습니다.")
         print("=" * 60)
         return
-
+ 
     print(f"✅ 전일 종가 수집 성공: ${prev_close:.2f} (거래일 기준: {trading_date})")
     print("-" * 60)
     
     # Step 2: 목표 LOC 가격 자동 연산
     try:
-        final_loc_price = calculate_loc_price(ticker, prev_close)
+        final_loc_price = calculate_loc_price(ticker, prev_close, cfg)
         print("-" * 60)
         print(f"🎯 오늘 밤 {ticker} LOC 매수 지정가: ${final_loc_price:.2f}")
         print("=" * 60)
@@ -465,7 +489,7 @@ def _build_briefing_lines(
 
         multiplier = pos_cfg.get("ENTRY_MULTIPLIER", 1.41)
         sigma = pos_cfg.get("DAILY_SIGMA", 0.05)
-        loc_price = prev_close * np.exp(-multiplier * sigma)
+        loc_price = prev_close * (1 - multiplier * sigma)
 
         lines.append(f"\n🔹 **{ticker}**")
         lines.append(
@@ -480,7 +504,21 @@ def _build_briefing_lines(
     return lines
 
 if __name__ == "__main__":
-    # 포트폴리오의 두 주인공인 SOXL과 MVLL를 차례대로 연산하여 출력
-    run_integrated_system("SOXL")
-    print("\n")
-    run_integrated_system("MVLL")
+    # 1. 설정 로드 및 시그마/진입배수 자동 갱신
+    print("⚙️ 시스템 설정 및 변동성 자동 갱신 시작...")
+    cfg = load_config()
+    sigma_messages = refresh_sigma_if_stale(cfg)
+    save_config(cfg)
+    if sigma_messages:
+        print("\n".join(sigma_messages))
+        print()
+    print("✅ 설정 로드 및 시그마 갱신 완료\n")
+
+    # 2. 포트폴리오의 두 주인공인 SOXL과 MVLL를 차례대로 연산하여 출력
+    for ticker in TARGET_TICKERS:
+        run_integrated_system(ticker, cfg)
+        print("\n")
+
+    # 3. 디스코드 브리핑 전송 및 시스템 루틴 완료 (월초 핑 등 포함)
+    print("📡 디스코드 브리핑 전송 시작...")
+    execute_dual_tactical_trader()
