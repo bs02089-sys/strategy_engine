@@ -1,4 +1,4 @@
-name: sigma_position_manager
+name: sigma_DCA_manager
 
 on:
   push:
@@ -21,7 +21,7 @@ env:
   DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
 
 jobs:
-  sigma_position_manager:
+  sigma_DCA_manager:
     runs-on: ubuntu-latest
 
     steps:
@@ -53,10 +53,10 @@ jobs:
           # alpha_vantage 라이브러리를 추가했습니다
           pip install numpy pandas requests yfinance pytz holidays alpha_vantage
 
-      - name: Run sigma_position_manager
+      - name: Run sigma_DCA_manager
         run: |
           for i in {1..3}; do
-            python sigma_position_manager.py && break || echo "Retry $i failed..." && sleep 10
+            python sigma_DCA_manager.py && break || echo "Retry $i failed..." && sleep 10
           done
 
       - name: Commit and push config.json
@@ -64,7 +64,7 @@ jobs:
         run: |
           [ -f config.json ] && git add config.json
           if ! git diff --cached --quiet; then
-            git commit -m "chore: sync config.json after sigma_position_manager run ($(date -u +'%Y-%m-%d %H:%M UTC'))"
+            git commit -m "chore: sync config.json after sigma_DCA_manager run ($(date -u +'%Y-%m-%d %H:%M UTC'))"
             git push
           else
             echo "No changes to commit. Skipping push."
