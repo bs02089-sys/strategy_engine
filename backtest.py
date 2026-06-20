@@ -1,12 +1,12 @@
 """
-backtest_soxl_tqqq_vectorbt_fixed.py — vectorbt 비중 최적화 (최종 수정版)
+backtest_soxl_tqqq_vectorbt_final.py — vectorbt 비중 최적화 (완전 수정版)
 """
 
 import numpy as np
 import pandas as pd
 import vectorbt as vbt
 import matplotlib.pyplot as plt
-import seaborn as sns   # ← 추가됨!
+import seaborn as sns
 
 plt.rcParams['font.family'] = 'Malgun Gothic'
 plt.rcParams['axes.unicode_minus'] = False
@@ -20,10 +20,11 @@ print("📥 데이터 다운로드 중...")
 data = vbt.YFData.download(TICKERS, start=START, end=END, auto_adjust=True)
 price = data.get("Close")
 
-print(f"📊 데이터 기간: {price.index[0].date()} ~ {price.index[-1].date()}\n")
+print(f"📊 데이터 기간: {price.index[0].date()} ~ {price.index[-1].date()} | "
+      f"행 개수: {len(price)}\n")
 
 # ====================== 그리드 서치 ======================
-weight_steps = np.arange(0.30, 0.81, 0.05)   # SOXL 30% ~ 80%
+weight_steps = np.arange(0.30, 0.81, 0.05)
 
 results = []
 best_cagr = -np.inf
@@ -34,14 +35,20 @@ print("🚀 SOXL/TQQQ 비중 그리드 서치 시작...\n")
 
 for w_soxl in weight_steps:
     w_tqqq = 1 - w_soxl
-    weights = pd.Series([w_soxl, w_tqqq], index=TICKERS)
+    
+    # === 핵심 수정: weights를 시간축에 맞춘 DataFrame으로 생성 ===
+    target_weights = pd.DataFrame(
+        [[w_soxl, w_tqqq]] * len(price),
+        index=price.index,
+        columns=TICKERS
+    )
     
     pf = vbt.Portfolio.from_orders(
-        price, 
-        size=weights,
+        price,
+        size=target_weights,           # (시간, 종목) 형태
         size_type='targetpercent',
         init_cash=100_000,
-        fees=0.0005,
+        fees=0.0005,                   # 0.05%
         slippage=0.0005,
         freq='D',
         cash_sharing=True,
@@ -68,31 +75,29 @@ for w_soxl in weight_steps:
     
     if cagr > best_cagr:
         best_cagr = cagr
-        best_weights = weights
+        best_weights = (w_soxl, w_tqqq)
         best_pf = pf
 
 # ====================== 결과 출력 ======================
 results_df = pd.DataFrame(results)
 
-print("\n" + "="*100)
+print("\n" + "="*110)
 print("🎯 최적화 결과 Top 5 (CAGR 기준)")
-print("="*100)
-print(results_df.sort_values('CAGR_%', ascending=False).head(5))
+print("="*110)
+print(results_df.sort_values('CAGR_%', ascending=False).head(7).to_string(index=False))
 
 print("\n" + "="*90)
-print(f"🏆 BEST 조합: SOXL {best_weights['SOXL']*100:.1f}% | "
-      f"TQQQ {best_weights['TQQQ']*100:.1f}%")
-print(f"CAGR       : {best_pf.annualized_return():.2%}")
-print(f"총수익률   : {best_pf.total_return():.1%}")
+print(f"🏆 BEST 조합: SOXL {best_weights[0]*100:.1f}% | TQQQ {best_weights[1]*100:.1f}%")
+print(f"CAGR        : {best_pf.annualized_return():.2%}")
+print(f"총수익률    : {best_pf.total_return():.1%}")
 print(f"Max Drawdown: {best_pf.max_drawdown():.1%}")
 print(f"Sharpe Ratio: {best_pf.sharpe_ratio():.2f}")
 print("="*90)
 
 # ====================== 차트 ======================
 fig = plt.figure(figsize=(15, 10))
-
 ax1 = plt.subplot(2, 1, 1)
-best_pf.plot_value(ax=ax1, title=f'Best Portfolio Equity Curve (SOXL {best_weights["SOXL"]*100:.1f}%)')
+best_pf.plot_value(ax=ax1, title=f'Best Portfolio Equity Curve (SOXL {best_weights[0]*100:.1f}%)')
 ax1.grid(True)
 
 ax2 = plt.subplot(2, 1, 2)
@@ -107,7 +112,7 @@ plt.show()
 pivot = results_df.pivot(index='SOXL_%', columns='TQQQ_%', values='CAGR_%')
 
 plt.figure(figsize=(10, 8))
-sns.heatmap(pivot, annot=True, fmt=".1f", cmap="viridis")
+sns.heatmap(pivot, annot=True, fmt=".1f", cmap="viridis", linewidths=0.5)
 plt.title('SOXL vs TQQQ 비중별 CAGR Heatmap (%)')
 plt.xlabel('TQQQ %')
 plt.ylabel('SOXL %')
