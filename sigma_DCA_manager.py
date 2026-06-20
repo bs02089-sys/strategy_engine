@@ -28,7 +28,7 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
-TARGET_TICKERS         = ["SOXL", "TQQQ"]
+TARGET_TICKERS         = ["SOXL", "MVLL"]
 CONFIG_PATH            = "config.json"
 _DISCORD_TITLE_LIMIT   = 256
 _DISCORD_CONTENT_LIMIT = 4096
@@ -480,7 +480,7 @@ def _build_briefing_lines(
     return lines
 
 if __name__ == "__main__":
-    # 포트폴리오의 두 주인공인 SOXL과 TQQQ를 차례대로 연산하여 출력
+    # 포트폴리오의 두 주인공인 SOXL과 MVLL를 차례대로 연산하여 출력
     run_integrated_system("SOXL")
     print("\n")
-    run_integrated_system("TQQQ")
+    run_integrated_system("MVLL")

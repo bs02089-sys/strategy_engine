@@ -8,9 +8,9 @@
             "LAST_SIGMA_UPDATE": "2026-06-18",
             "LOOKBACK_DAYS": 90
         },
-        "TQQQ": {
+        "MVLL": {
             "ENTRY_MULTIPLIER": 1.41,
-            "DAILY_SIGMA": 0.04067,
+            "DAILY_SIGMA": 0.1197,
             "LAST_SIGMA_UPDATE": "2026-06-18",
             "LOOKBACK_DAYS": 90
         }
