@@ -8,10 +8,10 @@
             "DAILY_SIGMA": 0.093467,
             "LAST_SIGMA_UPDATE": "2026-06-20"
         },
-        "SOXQ": {
+        "QLD": {
             "LOOKBACK_DAYS": 90,
             "ENTRY_MULTIPLIER": 1.41,
-            "DAILY_SIGMA": 0.0304,
+            "DAILY_SIGMA": 0.0272,
             "LAST_SIGMA_UPDATE": "2026-06-20"
         }
     },
@@ -32,7 +32,7 @@
             "semiconductor stock",
             "NVDA",
             "SOXL ETF",
-            "SOXQ ETF",
+            "QLD ETF",
             "TSLA stock",
             "IONQ stock"
         ],

@@ -29,7 +29,7 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
-TARGET_TICKERS         = ["SOXL", "SOXQ"]
+TARGET_TICKERS         = ["SOXL", "QLD"]
 CONFIG_PATH            = "config.json"
 _DISCORD_TITLE_LIMIT   = 256
 _DISCORD_CONTENT_LIMIT = 4096
@@ -508,7 +508,7 @@ if __name__ == "__main__":
         print()
     print("✅ 설정 로드 및 시그마 갱신 완료\n")
 
-    # 2. 포트폴리오의 두 주인공인 SOXL과 SOXQ를 차례대로 연산하여 출력
+    # 2. 포트폴리오의 두 주인공인 SOXL과 QLD를 차례대로 연산하여 출력
     for ticker in TARGET_TICKERS:
         run_integrated_system(ticker, cfg)
         print("\n")
