@@ -4,13 +4,13 @@
     "POSITIONS": {
         "SOXL": {
             "ENTRY_MULTIPLIER": 1.41,
-            "DAILY_SIGMA": 0.0925,
+            "DAILY_SIGMA": 0.09347,
             "LAST_SIGMA_UPDATE": "2026-06-18",
             "LOOKBACK_DAYS": 90
         },
         "TQQQ": {
             "ENTRY_MULTIPLIER": 1.41,
-            "DAILY_SIGMA": 0.0405,
+            "DAILY_SIGMA": 0.04067,
             "LAST_SIGMA_UPDATE": "2026-06-18",
             "LOOKBACK_DAYS": 90
         }
