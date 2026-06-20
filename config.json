@@ -13,6 +13,10 @@
             "DAILY_SIGMA": 0.0405,
             "LAST_SIGMA_UPDATE": "2026-06-18",
             "LOOKBACK_DAYS": 90
+        },
+        "QQQM": {
+            "DAILY_SIGMA": 0.01274,
+            "LAST_SIGMA_UPDATE": "2026-06-19"
         }
     },
     "STRATEGY": {
