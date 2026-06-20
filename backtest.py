@@ -1,143 +1,132 @@
 """
-backtest_soxl_tqqq_vectorbt_final.py — vectorbt 최적화 (플롯 에러 해결)
+loc_dca_comparison.py — LOC 분할매수 비중 비교 (No Rebalancing)
+SOXL + TQQQ 1년 계획 검증용
 """
 
+import json
 import numpy as np
 import pandas as pd
-import vectorbt as vbt
+import yfinance as yf
 import matplotlib.pyplot as plt
-import seaborn as sns
 
 plt.rcParams['font.family'] = 'Malgun Gothic'
 plt.rcParams['axes.unicode_minus'] = False
 
 # ====================== 설정 ======================
-TICKERS = ["SOXL", "TQQQ"]
+TARGET_TICKERS = ["SOXL", "TQQQ"]
 START = "2022-01-01"
-END = "2026-06-05"
+END = "2026-06-20"
 
-print("📥 데이터 다운로드 중...")
-data = vbt.YFData.download(TICKERS, start=START, end=END, auto_adjust=True)
-price = data.get("Close")
+# 당신 상황
+ALREADY_SOXL_BUYS = 1          # 이미 SOXL 1회 진입
+TOTAL_BUYS_PLANNED = 24        # 앞으로 1년 동안 총 매수 회차 계획 (예: 2주에 1회)
 
-print(f"📊 데이터 기간: {price.index[0].date()} ~ {price.index[-1].date()} | "
-      f"행 개수: {len(price)}\n")
+print("🔍 LOC 분할매수 비중 비교 백테스트\n")
 
-# ====================== 안전한 scalar 변환 함수 ======================
-def to_scalar(x):
-    if isinstance(x, pd.Series):
-        return float(x.iloc[-1]) if not x.empty else 0.0
-    elif isinstance(x, pd.DataFrame):
-        return float(x.iloc[-1, -1]) if not x.empty else 0.0
-    else:
-        return float(x)
+# ====================== 데이터 로드 ======================
+data = yf.download(TARGET_TICKERS, start=START, end=END, auto_adjust=True, group_by='ticker')
 
-# ====================== 그리드 서치 ======================
-weight_steps = np.arange(0.30, 0.81, 0.05)
+# ====================== LOC 신호 함수 ======================
+def add_loc_signal(df, multiplier=1.48, lookback=365):
+    df = df.copy()
+    df['Return'] = df['Close'].pct_change()
+    df['Sigma'] = df['Return'].rolling(lookback).std()
+    df['LOC'] = df['Close'].shift(1) * np.exp(-multiplier * df['Sigma'].shift(1))
+    df['Signal'] = (df['Close'] <= df['LOC']) & df['LOC'].notna()
+    return df
 
-results = []
-best_cagr = -np.inf
-best_weights = None
-best_pf = None
-
-print("🚀 SOXL/TQQQ 비중 그리드 서치 시작...\n")
-
-for w_soxl in weight_steps:
-    w_tqqq = 1 - w_soxl
+# ====================== LOC DCA 시뮬레이션 ======================
+def simulate_loc_dca(soxl_weight=0.3, plot=False):
+    weights = {"SOXL": soxl_weight, "TQQQ": 1 - soxl_weight}
     
-    target_weights = pd.DataFrame(
-        [[w_soxl, w_tqqq]] * len(price),
-        index=price.index,
-        columns=TICKERS
-    )
+    equity_curves = {}
+    results = {}
     
-    pf = vbt.Portfolio.from_orders(
-        price,
-        size=target_weights,
-        size_type='targetpercent',
-        init_cash=100_000,
-        fees=0.0005,
-        slippage=0.0005,
-        freq='D',
-        cash_sharing=True,
-        group_by=False
-    )
+    total_buys = 0
+    max_buys = TOTAL_BUYS_PLANNED
     
-    tr = to_scalar(pf.total_return())
-    cagr = to_scalar(pf.annualized_return())
-    mdd = to_scalar(pf.max_drawdown())
-    sharpe = to_scalar(pf.sharpe_ratio(risk_free=0.0))
-    final_value = to_scalar(pf.value())
+    for ticker in TARGET_TICKERS:
+        df = add_loc_signal(data[ticker])
+        equity = 1.0
+        position = 0.0
+        buys_in_period = 0
+        already = ALREADY_SOXL_BUYS if ticker == "SOXL" else 0
+        
+        df['Equity'] = 1.0
+        df['Position'] = 0.0
+        
+        for i in range(1, len(df)):
+            price = df['Close'].iloc[i]
+            signal = df['Signal'].iloc[i]
+            
+            # 매수 로직 (이미 진입분 + 앞으로 분할)
+            if buys_in_period + already < max_buys and signal and position < 1.0:
+                add_size = 1.0 / (max_buys - already)
+                position += add_size
+                buys_in_period += 1
+                total_buys += 1
+            
+            # 일일 수익률 (No Rebalancing)
+            if position > 0:
+                daily_ret = (price / df['Close'].iloc[i-1] - 1) * position
+            else:
+                daily_ret = 0
+            
+            equity *= (1 + daily_ret)
+            df.loc[df.index[i], 'Equity'] = equity
+            df.loc[df.index[i], 'Position'] = position
+        
+        total_ret = equity - 1
+        years = (df.index[-1] - df.index[0]).days / 365.25
+        cagr = (equity ** (1 / years) - 1) if years > 0 else 0
+        mdd = ((df['Equity'] / df['Equity'].cummax()) - 1).min()
+        calmar = cagr / abs(mdd) if mdd != 0 else 0
+        
+        results[ticker] = {'CAGR': cagr, 'MDD': mdd, 'Calmar': calmar, 'Final_Position': position}
+        equity_curves[ticker] = df['Equity']
     
-    results.append({
-        'SOXL_%': round(w_soxl * 100, 1),
-        'TQQQ_%': round(w_tqqq * 100, 1),
-        'Total_Return': tr,
-        'CAGR_%': round(cagr * 100, 2),
-        'MDD_%': round(mdd * 100, 2),
-        'Sharpe': round(sharpe, 2),
-        'Final_Value': final_value
-    })
+    # 포트폴리오 (No Rebalancing)
+    portfolio = sum(equity_curves[t] * weights[t] for t in TARGET_TICKERS)
+    port_final = portfolio.iloc[-1]
+    port_cagr = (port_final ** (1 / years) - 1)
+    port_mdd = ((portfolio / portfolio.cummax()) - 1).min()
+    port_calmar = port_cagr / abs(port_mdd)
     
-    print(f"SOXL {w_soxl*100:5.1f}% | TQQQ {w_tqqq*100:5.1f}% → "
-          f"CAGR: {cagr:6.2%} | MDD: {mdd:6.1%} | Sharpe: {sharpe:.2f}")
+    if plot:
+        plt.figure(figsize=(14, 8))
+        for t in TARGET_TICKERS:
+            plt.plot(equity_curves[t], label=f"{t} ({weights[t]*100:.0f}%)")
+        plt.plot(portfolio, label="Portfolio", linewidth=3, color='red')
+        plt.title(f'LOC DCA 전략 - SOXL {weights["SOXL"]*100:.0f}% : TQQQ {weights["TQQQ"]*100:.0f}%')
+        plt.legend()
+        plt.grid(True)
+        plt.show()
     
-    if cagr > best_cagr:
-        best_cagr = cagr
-        best_weights = (w_soxl, w_tqqq)
-        best_pf = pf
+    return {
+        'SOXL_%': int(weights["SOXL"]*100),
+        'CAGR': port_cagr,
+        'MDD': port_mdd,
+        'Calmar': port_calmar,
+        'Total_Return': port_final - 1
+    }
 
-# ====================== 결과 출력 ======================
-results_df = pd.DataFrame(results)
+# ====================== 여러 비중 테스트 ======================
+test_weights = [0.2, 0.3, 0.4, 0.5, 0.6]
+comparison = []
 
-print("\n" + "="*110)
-print("🎯 최적화 결과 Top 5 (CAGR 기준)")
-print("="*110)
-print(results_df.sort_values('CAGR_%', ascending=False).head(7).round(2))
+print("비중별 LOC 분할매수 백테스트 시작...\n")
+for w in test_weights:
+    res = simulate_loc_dca(soxl_weight=w)
+    comparison.append(res)
+    print(f"SOXL {res['SOXL_%']:2}% | CAGR {res['CAGR']:6.2%} | MDD {res['MDD']:6.1%} | Calmar {res['Calmar']:.2f}")
 
-print("\n" + "="*90)
-print(f"🏆 BEST 조합: SOXL {best_weights[0]*100:.1f}% | TQQQ {best_weights[1]*100:.1f}%")
-print(f"CAGR        : {to_scalar(best_pf.annualized_return()):.2%}")
-print(f"총수익률    : {to_scalar(best_pf.total_return()):.1%}")
-print(f"Max Drawdown: {to_scalar(best_pf.max_drawdown()):.1%}")
-print(f"Sharpe Ratio: {to_scalar(best_pf.sharpe_ratio(risk_free=0.0)):.2f}")
-print(f"Final Value : {to_scalar(best_pf.value()):,.0f}")
-print("="*90)
+# 결과 정리
+comp_df = pd.DataFrame(comparison)
+print("\n" + "="*80)
+print("📊 LOC 분할매수 비중 비교 결과")
+print("="*80)
+print(comp_df.sort_values('Calmar', ascending=False).round(4))
 
-# ====================== 차트 (플롯 에러 해결) ======================
-fig = plt.figure(figsize=(15, 10))
-
-# Equity Curve - 안전하게 total value 플롯
-ax1 = plt.subplot(2, 1, 1)
-value_series = best_pf.value()
-if isinstance(value_series, pd.DataFrame):
-    value_series = value_series.iloc[:, -1]   # 마지막 컬럼 (total)
-
-value_series.plot(ax=ax1, title=f'Best Portfolio Equity Curve (SOXL {best_weights[0]*100:.1f}%)')
-ax1.set_ylabel('Portfolio Value')
-ax1.grid(True)
-
-# Drawdown
-ax2 = plt.subplot(2, 1, 2)
-dd_series = best_pf.drawdown()
-if isinstance(dd_series, pd.DataFrame):
-    dd_series = dd_series.iloc[:, -1]
-
-dd_series.plot(ax=ax2, title='Portfolio Drawdown')
-ax2.set_ylabel('Drawdown')
-ax2.grid(True)
-
-plt.tight_layout()
-plt.savefig('soxl_tqqq_vectorbt_best.png', dpi=200, bbox_inches='tight')
-plt.show()
-
-# ====================== Heatmap ======================
-pivot = results_df.pivot(index='SOXL_%', columns='TQQQ_%', values='CAGR_%')
-
-plt.figure(figsize=(10, 8))
-sns.heatmap(pivot, annot=True, fmt=".1f", cmap="viridis", linewidths=0.5)
-plt.title('SOXL vs TQQQ 비중별 CAGR Heatmap (%)')
-plt.xlabel('TQQQ %')
-plt.ylabel('SOXL %')
-plt.savefig('soxl_tqqq_heatmap.png', dpi=200)
-plt.show()
+# 최고 성과 비중
+best = comp_df.loc[comp_df['Calmar'].idxmax()]
+print(f"\n🏆 Calmar 기준 최적 비중: SOXL {best['SOXL_%']}%")
