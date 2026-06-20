@@ -1,5 +1,5 @@
 """
-backtest_soxl_tqqq_vectorbt_final.py — vectorbt 비중 최적화 (완전 수정版)
+backtest_soxl_tqqq_vectorbt_final.py — vectorbt 최적화 (에러 완전 해결版)
 """
 
 import numpy as np
@@ -36,7 +36,6 @@ print("🚀 SOXL/TQQQ 비중 그리드 서치 시작...\n")
 for w_soxl in weight_steps:
     w_tqqq = 1 - w_soxl
     
-    # === 핵심 수정: weights를 시간축에 맞춘 DataFrame으로 생성 ===
     target_weights = pd.DataFrame(
         [[w_soxl, w_tqqq]] * len(price),
         index=price.index,
@@ -45,25 +44,34 @@ for w_soxl in weight_steps:
     
     pf = vbt.Portfolio.from_orders(
         price,
-        size=target_weights,           # (시간, 종목) 형태
+        size=target_weights,
         size_type='targetpercent',
         init_cash=100_000,
-        fees=0.0005,                   # 0.05%
+        fees=0.0005,
         slippage=0.0005,
         freq='D',
         cash_sharing=True,
         group_by=False
     )
     
-    tr = pf.total_return()
-    cagr = pf.annualized_return()
-    mdd = pf.max_drawdown()
-    sharpe = pf.sharpe_ratio(risk_free=0.0)
+    # ====================== 안전한 scalar 변환 ======================
+    def to_scalar(x):
+        if isinstance(x, pd.Series):
+            return float(x.iloc[0]) if not x.empty else 0.0
+        elif isinstance(x, pd.DataFrame):
+            return float(x.iloc[-1, 0]) if not x.empty else 0.0
+        else:
+            return float(x)
+    
+    tr = to_scalar(pf.total_return())
+    cagr = to_scalar(pf.annualized_return())
+    mdd = to_scalar(pf.max_drawdown())
+    sharpe = to_scalar(pf.sharpe_ratio(risk_free=0.0))
     
     results.append({
         'SOXL_%': round(w_soxl * 100, 1),
         'TQQQ_%': round(w_tqqq * 100, 1),
-        'Total_Return': float(tr),
+        'Total_Return': tr,
         'CAGR_%': round(cagr * 100, 2),
         'MDD_%': round(mdd * 100, 2),
         'Sharpe': round(sharpe, 2),
@@ -84,14 +92,14 @@ results_df = pd.DataFrame(results)
 print("\n" + "="*110)
 print("🎯 최적화 결과 Top 5 (CAGR 기준)")
 print("="*110)
-print(results_df.sort_values('CAGR_%', ascending=False).head(7).to_string(index=False))
+print(results_df.sort_values('CAGR_%', ascending=False).head(7).round(2))
 
 print("\n" + "="*90)
 print(f"🏆 BEST 조합: SOXL {best_weights[0]*100:.1f}% | TQQQ {best_weights[1]*100:.1f}%")
-print(f"CAGR        : {best_pf.annualized_return():.2%}")
-print(f"총수익률    : {best_pf.total_return():.1%}")
-print(f"Max Drawdown: {best_pf.max_drawdown():.1%}")
-print(f"Sharpe Ratio: {best_pf.sharpe_ratio():.2f}")
+print(f"CAGR        : {to_scalar(best_pf.annualized_return()):.2%}")
+print(f"총수익률    : {to_scalar(best_pf.total_return()):.1%}")
+print(f"Max Drawdown: {to_scalar(best_pf.max_drawdown()):.1%}")
+print(f"Sharpe Ratio: {to_scalar(best_pf.sharpe_ratio(risk_free=0.0)):.2f}")
 print("="*90)
 
 # ====================== 차트 ======================
