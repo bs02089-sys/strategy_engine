@@ -3,9 +3,15 @@
     "DISCORD_USER_ID": "",
     "POSITIONS": {
         "SOXL": {
-            "ENTRY_MULTIPLIER": 1.46,
-            "DAILY_SIGMA": 0.0866,
-            "LAST_SIGMA_UPDATE": "2026-06-11",
+            "ENTRY_MULTIPLIER": 1.41,
+            "DAILY_SIGMA": 0.0925,
+            "LAST_SIGMA_UPDATE": "2026-06-18",
+            "LOOKBACK_DAYS": 90
+        },
+        "TQQQ": {
+            "ENTRY_MULTIPLIER": 1.41,
+            "DAILY_SIGMA": 0.0405,
+            "LAST_SIGMA_UPDATE": "2026-06-18",
             "LOOKBACK_DAYS": 90
         }
     },
