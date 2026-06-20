@@ -1,5 +1,5 @@
 """
-backtest_soxl_tqqq_vectorbt_final.py — vectorbt 최적화 (에러 완전 해결)
+backtest_soxl_tqqq_vectorbt_final.py — vectorbt 최적화 (플롯 에러 해결)
 """
 
 import numpy as np
@@ -63,7 +63,6 @@ for w_soxl in weight_steps:
         group_by=False
     )
     
-    # 안전 변환
     tr = to_scalar(pf.total_return())
     cagr = to_scalar(pf.annualized_return())
     mdd = to_scalar(pf.max_drawdown())
@@ -105,14 +104,27 @@ print(f"Sharpe Ratio: {to_scalar(best_pf.sharpe_ratio(risk_free=0.0)):.2f}")
 print(f"Final Value : {to_scalar(best_pf.value()):,.0f}")
 print("="*90)
 
-# ====================== 차트 ======================
+# ====================== 차트 (플롯 에러 해결) ======================
 fig = plt.figure(figsize=(15, 10))
+
+# Equity Curve - 안전하게 total value 플롯
 ax1 = plt.subplot(2, 1, 1)
-best_pf.plot_value(ax=ax1, title=f'Best Portfolio Equity Curve (SOXL {best_weights[0]*100:.1f}%)')
+value_series = best_pf.value()
+if isinstance(value_series, pd.DataFrame):
+    value_series = value_series.iloc[:, -1]   # 마지막 컬럼 (total)
+
+value_series.plot(ax=ax1, title=f'Best Portfolio Equity Curve (SOXL {best_weights[0]*100:.1f}%)')
+ax1.set_ylabel('Portfolio Value')
 ax1.grid(True)
 
+# Drawdown
 ax2 = plt.subplot(2, 1, 2)
-best_pf.plot_drawdown(ax=ax2)
+dd_series = best_pf.drawdown()
+if isinstance(dd_series, pd.DataFrame):
+    dd_series = dd_series.iloc[:, -1]
+
+dd_series.plot(ax=ax2, title='Portfolio Drawdown')
+ax2.set_ylabel('Drawdown')
 ax2.grid(True)
 
 plt.tight_layout()
