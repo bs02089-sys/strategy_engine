@@ -1,5 +1,5 @@
 """
-backtest_soxl_tqqq_vectorbt_final.py — vectorbt 최적화 (에러 완전 해결版)
+backtest_soxl_tqqq_vectorbt_final.py — vectorbt 최적화 (에러 완전 해결)
 """
 
 import numpy as np
@@ -22,6 +22,15 @@ price = data.get("Close")
 
 print(f"📊 데이터 기간: {price.index[0].date()} ~ {price.index[-1].date()} | "
       f"행 개수: {len(price)}\n")
+
+# ====================== 안전한 scalar 변환 함수 ======================
+def to_scalar(x):
+    if isinstance(x, pd.Series):
+        return float(x.iloc[-1]) if not x.empty else 0.0
+    elif isinstance(x, pd.DataFrame):
+        return float(x.iloc[-1, -1]) if not x.empty else 0.0
+    else:
+        return float(x)
 
 # ====================== 그리드 서치 ======================
 weight_steps = np.arange(0.30, 0.81, 0.05)
@@ -54,19 +63,12 @@ for w_soxl in weight_steps:
         group_by=False
     )
     
-    # ====================== 안전한 scalar 변환 ======================
-    def to_scalar(x):
-        if isinstance(x, pd.Series):
-            return float(x.iloc[0]) if not x.empty else 0.0
-        elif isinstance(x, pd.DataFrame):
-            return float(x.iloc[-1, 0]) if not x.empty else 0.0
-        else:
-            return float(x)
-    
+    # 안전 변환
     tr = to_scalar(pf.total_return())
     cagr = to_scalar(pf.annualized_return())
     mdd = to_scalar(pf.max_drawdown())
     sharpe = to_scalar(pf.sharpe_ratio(risk_free=0.0))
+    final_value = to_scalar(pf.value())
     
     results.append({
         'SOXL_%': round(w_soxl * 100, 1),
@@ -75,7 +77,7 @@ for w_soxl in weight_steps:
         'CAGR_%': round(cagr * 100, 2),
         'MDD_%': round(mdd * 100, 2),
         'Sharpe': round(sharpe, 2),
-        'Final_Value': float(pf.value().iloc[-1])
+        'Final_Value': final_value
     })
     
     print(f"SOXL {w_soxl*100:5.1f}% | TQQQ {w_tqqq*100:5.1f}% → "
@@ -100,6 +102,7 @@ print(f"CAGR        : {to_scalar(best_pf.annualized_return()):.2%}")
 print(f"총수익률    : {to_scalar(best_pf.total_return()):.1%}")
 print(f"Max Drawdown: {to_scalar(best_pf.max_drawdown()):.1%}")
 print(f"Sharpe Ratio: {to_scalar(best_pf.sharpe_ratio(risk_free=0.0)):.2f}")
+print(f"Final Value : {to_scalar(best_pf.value()):,.0f}")
 print("="*90)
 
 # ====================== 차트 ======================
