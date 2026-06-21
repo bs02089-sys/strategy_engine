@@ -15,12 +15,12 @@ import sys
 import json
 import shutil
 import tempfile
+import time
 import numpy as np
 import requests
 import yfinance as yf
 from datetime import datetime, timezone, timedelta, date
 from zoneinfo import ZoneInfo
-from alpha_vantage.timeseries import TimeSeries
 
 
 # ====================== 인코딩 설정 ======================
@@ -79,68 +79,33 @@ def refresh_sigma_if_stale(cfg: dict) -> list[str]:
     today = datetime.now(ZoneInfo("America/New_York")).date()
     positions_data = cfg.setdefault("POSITIONS", {})
 
-    av_key = os.environ.get("ALPHA_VANTAGE_KEY")
-    
     for ticker, pos in positions_data.items():
-        # 1. 설정값 로드 (기본값: 장기 투자 표준 252일)
         lookback_days = int(pos.get("LOOKBACK_DAYS", 252))
-        pos["LOOKBACK_DAYS"] = lookback_days # 컨피그에 명시적으로 반영
+        pos["LOOKBACK_DAYS"] = lookback_days
         pos.setdefault("ENTRY_MULTIPLIER", 1.41)
         
         last_str = pos.get("LAST_SIGMA_UPDATE", "2000-01-01")
         last_dt = datetime.strptime(last_str, "%Y-%m-%d").date()
         
-        # 2. 갱신 조건: 시그마가 없거나, 날짜가 지났으면 무조건 갱신
-        is_missing = "DAILY_SIGMA" not in pos
-        is_stale = (today > last_dt)
-        
-        if not (is_missing or is_stale):
+        if "DAILY_SIGMA" in pos and today <= last_dt:
             continue
 
         try:
-            # 3. 데이터 로드 (yfinance의 경우 넉넉하게 2배수 정도 가져와서 필터링)
-            if av_key:
-                ts = TimeSeries(key=av_key, output_format='pandas')
-                data, _ = ts.get_daily(symbol=ticker, outputsize='full') # compact는 부족할 수 있음
-                closes = data['4. close']
-            else:
-                stock = yf.Ticker(ticker)
-                # lookback_days만큼의 수익률을 구하려면 최소 252+1일의 종가가 필요함
-                hist = stock.history(period=f"{lookback_days + 30}d", interval="1d")
-                closes = hist['Close']
-
-            if closes.empty:
-                messages.append(f"⚠️ {ticker} 갱신 실패: 데이터 없음")
-                continue
-                
-            closes = closes.sort_index(ascending=True).dropna()
+            stock = yf.Ticker(ticker)
+            hist = stock.history(period=f"{lookback_days + 30}d", interval="1d", auto_adjust=False)
+            closes = hist['Close'].dropna()
             
-            # 장중이라면 오늘 데이터는 제외하고 계산 (변동성 왜곡 방지)
-            if closes.index[-1].date() == today and datetime.now(ZoneInfo("America/New_York")).hour < 16:
-                closes = closes.iloc[:-1]
-
-            # 4. 핵심: 로그 수익률 계산 및 변동성 추출
             log_returns = np.log(closes / closes.shift(1)).dropna()
-            
-            # 요청한 lookback_days만큼의 최근 데이터 사용
             recent_returns = log_returns.tail(lookback_days)
             
-            if len(recent_returns) < lookback_days:
-                messages.append(f"⚠️ {ticker} 갱신 실패: 데이터 부족 (필요: {lookback_days}일, 확보: {len(recent_returns)}일)")
-                continue
-                
             new_sigma = round(float(recent_returns.std(ddof=1)), 6)
             
-            # 5. 결과 업데이트
             pos["DAILY_SIGMA"] = new_sigma
             pos["LAST_SIGMA_UPDATE"] = today.strftime("%Y-%m-%d")
-            
             log_sigma_update(ticker, new_sigma)
             messages.append(f"📊 {ticker} 자동 갱신 [{lookback_days}일]: {new_sigma:.6f}")
-            
         except Exception as e:
             messages.append(f"⚠️ {ticker} 갱신 오류: {e}")
-
     return messages
 
 
@@ -171,69 +136,18 @@ def get_prev_trading_date(d: date) -> date:
 
 def get_prev_close(ticker: str) -> tuple[float | None, str]:
     """
-    SOXL 전일 종가 조회 함수 (최종 리팩토링 버전)
-    우선순위: Alpha Vantage → yfinance history (재시도) → info fallback
+    yfinance를 활용한 안정적인 전일 종가 조회 함수 (3회 재시도 적용)
     """
     print(f"🔍 {ticker} 가격 조회 시작...")
-    av_key = os.environ.get("ALPHA_VANTAGE_KEY")
-    
     now_ny = datetime.now(ZoneInfo("America/New_York"))
     today_ny = now_ny.date()
-
-    # ==================== 1. Alpha Vantage 우선 시도 ====================
-    if av_key:
+    
+    # 3회 재시도 루프
+    for attempt in range(1, 4):
         try:
-            print(f"   → Alpha Vantage GLOBAL_QUOTE 시도...")
-            url = f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={ticker}&apikey={av_key}"
-            resp = requests.get(url, timeout=15)
-            
-            if resp.ok:
-                data = resp.json()
-                quote = data.get("Global Quote")
-                if quote:
-                    price_val = _safe_float(quote.get("05. price"))
-                    prev_close_val = _safe_float(quote.get("08. previous close"))
-                    latest_day_str = quote.get("07. latest trading day", "")
-                    
-                    if price_val is not None and latest_day_str:
-                        latest_date = datetime.strptime(latest_day_str, "%Y-%m-%d").date()
-                        
-                        if latest_date < today_ny:
-                            # API의 마지막 거래일이 과거이면, 해당 거래일 종가(05. price)를 사용
-                            prev_close = price_val
-                            date_str = latest_date.strftime("%m-%d")
-                        elif latest_date == today_ny:
-                            # API의 마지막 거래일이 오늘인 경우
-                            # 16:00 (장 마감) 전이면 오늘의 가격은 실시간이므로 직전 거래일 종가(08. previous close) 사용
-                            if now_ny.hour < 16:
-                                prev_close = prev_close_val
-                                prev_date = get_prev_trading_date(latest_date)
-                                date_str = prev_date.strftime("%m-%d")
-                            else:
-                                # 16:00 이후이면 오늘 종가가 마감되었으므로 오늘의 종가(05. price) 사용
-                                prev_close = price_val
-                                date_str = latest_date.strftime("%m-%d")
-                        else:
-                            prev_close = price_val
-                            date_str = latest_date.strftime("%m-%d")
-                            
-                        if prev_close is not None:
-                            print(f"✅ {ticker} Alpha Vantage 성공: ${prev_close:.2f} ({date_str})")
-                            return prev_close, date_str
-        except Exception as e:
-            print(f"   ⚠️ Alpha Vantage 실패: {e}")
-
-    # ==================== 2. yfinance History (재시도 강화) ====================
-    for attempt in range(3):
-        try:
-            print(f"   → yfinance history 시도 ({attempt+1}/3)...")
+            print(f"   → yfinance history 시도 ({attempt}/3)...")
             stock = yf.Ticker(ticker)
-            hist = stock.history(
-                period="15d", 
-                interval="1d", 
-                auto_adjust=False, 
-                rounding=True
-            )
+            hist = stock.history(period="15d", interval="1d", auto_adjust=False, rounding=True)
             
             if not hist.empty:
                 close_series = hist['Close'].dropna()
@@ -241,49 +155,28 @@ def get_prev_close(ticker: str) -> tuple[float | None, str]:
                     last_idx = close_series.index[-1]
                     last_date = last_idx.date() if hasattr(last_idx, "date") else last_idx
                     
-                    if last_date < today_ny:
-                        # 마지막 데이터 날짜가 과거이면, 그 날의 종가를 사용
-                        prev_close = float(close_series.iloc[-1])
-                        date_str = last_date.strftime("%m-%d")
-                    elif last_date == today_ny:
-                        # 마지막 데이터 날짜가 오늘인 경우
-                        # 16:00 전이면 오늘의 데이터는 실시간봉이므로 직전 거래일 봉(index -2)을 사용
-                        if now_ny.hour < 16 and len(close_series) >= 2:
-                            prev_close = float(close_series.iloc[-2])
-                            prev_date = close_series.index[-2].date()
-                            date_str = prev_date.strftime("%m-%d")
-                        else:
-                            # 16:00 이후이면 오늘 종가가 확정되었으므로 오늘의 종가를 사용
-                            prev_close = float(close_series.iloc[-1])
-                            date_str = last_date.strftime("%m-%d")
+                    # 로직: 장중이면 전일 종가(index -2), 장 마감 후면 당일 종가(index -1)
+                    if last_date == today_ny and now_ny.hour < 16 and len(close_series) >= 2:
+                        prev_close = float(close_series.iloc[-2])
+                        prev_date = close_series.index[-2].date()
+                        date_str = prev_date.strftime("%m-%d")
                     else:
                         prev_close = float(close_series.iloc[-1])
                         date_str = last_date.strftime("%m-%d")
                         
                     print(f"✅ {ticker} yfinance 성공: ${prev_close:.2f} ({date_str})")
                     return prev_close, date_str
-                    
+        
         except Exception as e:
-            print(f"   ⚠️ yfinance 시도 {attempt+1} 실패: {e}")
-            if attempt < 2:
-                import time
-                time.sleep(2.0)
+            print(f"   ⚠️ yfinance 시도 {attempt} 실패: {e}")
+            if attempt < 3:
+                time.sleep(2.0) # 2초 대기 후 재시도
 
-    # ==================== 3. yfinance Info Fallback ====================
+    # 최후의 수단: info fallback
     try:
         print(f"   → yfinance info fallback 시도...")
-        info = stock.info
-        
-        is_weekday = now_ny.weekday() < 5
-        is_market_hours = is_weekday and (9 <= now_ny.hour < 16 or (now_ny.hour == 9 and now_ny.minute >= 30))
-        
-        # 장중일 때는 이전 영업일 종가인 previousClose를 우선 참조하고, 장외/휴일일 때는 최신 가격인 currentPrice/regularMarketPrice를 우선 참조
-        if is_market_hours:
-            keys_priority = ["previousClose", "regularMarketPreviousClose", "currentPrice", "regularMarketPrice"]
-        else:
-            keys_priority = ["currentPrice", "regularMarketPrice", "previousClose", "regularMarketPreviousClose", "navPrice"]
-            
-        for key in keys_priority:
+        info = yf.Ticker(ticker).info
+        for key in ["previousClose", "regularMarketPreviousClose", "currentPrice", "regularMarketPrice"]:
             price = _safe_float(info.get(key))
             if price is not None and not np.isnan(price):
                 print(f"✅ {ticker} info 성공: ${price:.2f} (key: {key})")
@@ -291,7 +184,6 @@ def get_prev_close(ticker: str) -> tuple[float | None, str]:
     except Exception as e:
         print(f"   ⚠️ info fallback 실패: {e}")
 
-    # ==================== 최종 실패 ====================
     print(f"❌ {ticker} 모든 가격 조회 방법 실패")
     return None, "N/A"
 
