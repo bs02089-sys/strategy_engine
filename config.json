@@ -5,20 +5,20 @@
         "SOXL": {
             "LOOKBACK_DAYS": 252,
             "ENTRY_MULTIPLIER": 1.41,
-            "DAILY_SIGMA": 0.0,
-            "LAST_SIGMA_UPDATE": "2026-06-20"
+            "DAILY_SIGMA": 0.072416,
+            "LAST_SIGMA_UPDATE": "2026-06-21"
         },
         "QLD": {
             "LOOKBACK_DAYS": 252,
             "ENTRY_MULTIPLIER": 1.41,
-            "DAILY_SIGMA": 0.0,
-            "LAST_SIGMA_UPDATE": "2026-06-20"
+            "DAILY_SIGMA": 0.022176,
+            "LAST_SIGMA_UPDATE": "2026-06-21"
         },
         "NVDU": {
             "LOOKBACK_DAYS": 63,
             "ENTRY_MULTIPLIER": 1.41,
-            "DAILY_SIGMA": 0.0,
-            "LAST_SIGMA_UPDATE": "2026-06-20"
+            "DAILY_SIGMA": 0.050969,
+            "LAST_SIGMA_UPDATE": "2026-06-21"
         }
     },
     "STRATEGY": {
