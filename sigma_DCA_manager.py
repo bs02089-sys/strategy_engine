@@ -98,12 +98,12 @@ def refresh_sigma_if_stale(cfg: dict) -> list[str]:
             log_returns = np.log(closes / closes.shift(1)).dropna()
             recent_returns = log_returns.tail(lookback_days)
             
-            new_sigma = round(float(recent_returns.std(ddof=1)), 6)
+            new_sigma = round(float(recent_returns.std(ddof=1)), 4)
             
             pos["DAILY_SIGMA"] = new_sigma
             pos["LAST_SIGMA_UPDATE"] = today.strftime("%Y-%m-%d")
             log_sigma_update(ticker, new_sigma)
-            messages.append(f"📊 {ticker} 자동 갱신 [{lookback_days}일]: {new_sigma:.6f}")
+            messages.append(f"📊 {ticker} 자동 갱신 [{lookback_days}일]: {new_sigma:.4f}")
         except Exception as e:
             messages.append(f"⚠️ {ticker} 갱신 오류: {e}")
     return messages
