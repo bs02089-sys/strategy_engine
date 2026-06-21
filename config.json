@@ -11,7 +11,7 @@
         "AIPO": {
             "LOOKBACK_DAYS": 252,
             "ENTRY_MULTIPLIER": 1.6,
-            "DAILY_SIGMA": 0.0314,
+            "DAILY_SIGMA": 0.0223,
             "LAST_SIGMA_UPDATE": "2026-06-21"
         },
         "NVDU": {
