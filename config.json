@@ -3,15 +3,21 @@
     "DISCORD_USER_ID": "",
     "POSITIONS": {
         "SOXL": {
-            "LOOKBACK_DAYS": 90,
+            "LOOKBACK_DAYS": 252,
             "ENTRY_MULTIPLIER": 1.41,
-            "DAILY_SIGMA": 0.093467,
+            "DAILY_SIGMA": 0.0,
             "LAST_SIGMA_UPDATE": "2026-06-20"
         },
         "QLD": {
-            "LOOKBACK_DAYS": 90,
+            "LOOKBACK_DAYS": 252,
             "ENTRY_MULTIPLIER": 1.41,
-            "DAILY_SIGMA": 0.0272,
+            "DAILY_SIGMA": 0.0,
+            "LAST_SIGMA_UPDATE": "2026-06-20"
+        },
+        "NVDU": {
+            "LOOKBACK_DAYS": 63,
+            "ENTRY_MULTIPLIER": 1.41,
+            "DAILY_SIGMA": 0.0,
             "LAST_SIGMA_UPDATE": "2026-06-20"
         }
     },
