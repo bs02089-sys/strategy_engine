@@ -8,10 +8,10 @@
             "DAILY_SIGMA": 0.072416,
             "LAST_SIGMA_UPDATE": "2026-06-21"
         },
-        "QLD": {
+        "AIPO": {
             "LOOKBACK_DAYS": 252,
-            "ENTRY_MULTIPLIER": 1.41,
-            "DAILY_SIGMA": 0.022176,
+            "ENTRY_MULTIPLIER": 1.60,
+            "DAILY_SIGMA": 0.0314,
             "LAST_SIGMA_UPDATE": "2026-06-21"
         },
         "NVDU": {
@@ -38,7 +38,7 @@
             "semiconductor stock",
             "NVDA",
             "SOXL ETF",
-            "QLD ETF",
+            "AIPO ETF",
             "TSLA stock",
             "IONQ stock"
         ],

@@ -29,15 +29,15 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
-TARGET_TICKERS         = ["SOXL", "QLD", "NVDU"]
+TARGET_TICKERS         = ["SOXL", "AIPO", "NVDU"]
 CONFIG_PATH            = "config.json"
 _DISCORD_TITLE_LIMIT   = 256
 _DISCORD_CONTENT_LIMIT = 4096
 
 
-# ═══════════════════════════════════════════════════════════
+# ════════════════════════════════════════════
 # I/O
-# ═══════════════════════════════════════════════════════════
+# ════════════════════════════════════════════
 
 def load_config() -> dict:
     try:
