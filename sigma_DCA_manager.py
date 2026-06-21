@@ -87,7 +87,9 @@ def refresh_sigma_if_stale(cfg: dict) -> list[str]:
         last_str = pos.get("LAST_SIGMA_UPDATE", "2000-01-01")
         last_dt = datetime.strptime(last_str, "%Y-%m-%d").date()
         
-        if "DAILY_SIGMA" in pos and today <= last_dt:
+        # [수정된 로직] 63 영업일 주기 체크 (달력상 약 90일 경과 시 갱신)
+        days_passed = (today - last_dt).days
+        if "DAILY_SIGMA" in pos and days_passed < 90:
             continue
 
         try:
