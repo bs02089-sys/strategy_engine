@@ -29,7 +29,7 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
-TARGET_TICKERS         = ["SOXL", "AIPO", "NVDU"]
+TARGET_TICKERS         = ["SOXL", "AIPO", "NVDX"]
 CONFIG_PATH            = "config.json"
 _DISCORD_TITLE_LIMIT   = 256
 _DISCORD_CONTENT_LIMIT = 4096
@@ -87,7 +87,7 @@ def refresh_sigma_if_stale(cfg: dict) -> list[str]:
         last_str = pos.get("LAST_SIGMA_UPDATE", "2000-01-01")
         last_dt = datetime.strptime(last_str, "%Y-%m-%d").date()
         
-        # [수정된 로직] 63 영업일 주기 체크 (달력상 약 90일 경과 시 갱신)
+        # 63 영업일 주기 체크 (달력상 약 90일 경과 시 갱신)
         days_passed = (today - last_dt).days
         if "DAILY_SIGMA" in pos and days_passed < 90:
             continue

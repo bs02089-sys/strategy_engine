@@ -14,10 +14,10 @@
             "DAILY_SIGMA": 0.0223,
             "LAST_SIGMA_UPDATE": "2026-06-21"
         },
-        "NVDU": {
+        "NVDX": {
             "LOOKBACK_DAYS": 63,
             "ENTRY_MULTIPLIER": 1.41,
-            "DAILY_SIGMA": 0.050969,
+            "DAILY_SIGMA": 0.0445,
             "LAST_SIGMA_UPDATE": "2026-06-21"
         }
     },
@@ -39,6 +39,7 @@
             "NVDA",
             "SOXL ETF",
             "AIPO ETF",
+            "NVDX ETF",
             "TSLA stock",
             "IONQ stock"
         ],
