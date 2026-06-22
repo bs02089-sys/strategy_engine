@@ -17,7 +17,7 @@
         "NVDX": {
             "LOOKBACK_DAYS": 63,
             "ENTRY_MULTIPLIER": 1.41,
-            "DAILY_SIGMA": 0.0445,
+            "DAILY_SIGMA": 0.0516,
             "LAST_SIGMA_UPDATE": "2026-06-21"
         }
     },
