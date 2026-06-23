@@ -16,13 +16,13 @@
         },
         "NVDX": {
             "LOOKBACK_DAYS": 63,
-            "ENTRY_MULTIPLIER": 1.14,
+            "ENTRY_MULTIPLIER": 1.07,
             "DAILY_SIGMA": 0.0516,
             "LAST_SIGMA_UPDATE": "2026-06-21"
         },
         "TQQQ": {
             "LOOKBACK_DAYS": 63,
-            "ENTRY_MULTIPLIER": 1.14,
+            "ENTRY_MULTIPLIER": 1.07,
             "DAILY_SIGMA": 0.0438,
             "LAST_SIGMA_UPDATE": "2026-06-21"
         }
