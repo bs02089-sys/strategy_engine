@@ -29,7 +29,7 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     getattr(sys.stderr, "reconfigure")(encoding="utf-8")
     
-TARGET_TICKERS         = ["SOXL", "AIPO", "QNDX", "NVDX", "TQQQ"]
+TARGET_TICKERS         = ["SOXX", "AIPO", "QNDX", "NVDX", "TQQQ"]
 CONFIG_PATH            = "config.json"
 _DISCORD_TITLE_LIMIT   = 256
 _DISCORD_CONTENT_LIMIT = 4096
@@ -97,8 +97,11 @@ def refresh_sigma_if_stale(cfg: dict) -> list[str]:
             hist = stock.history(period=f"{lookback_days + 30}d", interval="1d", auto_adjust=False)
             closes = hist['Close'].dropna()
             
-            log_returns = np.log(closes / closes.shift(1)).dropna()
-            recent_returns = log_returns.tail(lookback_days)
+            # [수정] 타입 검사기의 ndarray 오판 우회를 위해 .dropna()와 .tail()을 
+            # 각각 Numpy 불리언 인덱싱과 슬라이싱 기법으로 변경하여 에러 밑줄을 제거합니다.
+            log_returns = np.log(closes / closes.shift(1))
+            log_returns_clean = log_returns[~np.isnan(log_returns)]
+            recent_returns = log_returns_clean[-lookback_days:]
             
             new_sigma = round(float(recent_returns.std(ddof=1)), 4)
             
@@ -192,19 +195,50 @@ def get_prev_close(ticker: str) -> tuple[float | None, str]:
 
 def get_realtime_sigma(ticker: str, lookback_days: int) -> float:
     """
-    1. 먼저 데이터 계산 함수를 정의합니다 (준비 과정)
+    yfinance를 활용해 실시간으로 종목의 로그 수익률 표준편차(Sigma)를 계산하는 함수.
+    네트워크 오류 및 API 제한에 대응하기 위해 3회 재시도(Retry) 루프를 포함합니다.
     """
-    stock = yf.Ticker(ticker)
-    hist = stock.history(period=f"{lookback_days + 30}d", interval="1d", auto_adjust=False)
+    print(f"📊 {ticker} 실시간 시그마(Sigma) 계산 시작 (룩백: {lookback_days}일)...")
     
-    if len(hist) < lookback_days:
-        raise ValueError(f"{ticker}의 {lookback_days}영업일 데이터가 부족합니다.")
-        
-    closes = hist['Close'].dropna()
-    log_returns = np.log(closes / closes.shift(1)).dropna()
-    
-    sigma = np.std(log_returns.tail(lookback_days), ddof=1)
-    return float(sigma)
+    for attempt in range(1, 4):
+        try:
+            print(f"   → yfinance history 데이터 수집 시도 ({attempt}/3)...")
+            stock = yf.Ticker(ticker)
+            # 로그 수익률 계산을 위해 요구하는 룩백 일수보다 넉넉하게 (+30일) 수집합니다.
+            hist = stock.history(period=f"{lookback_days + 30}d", interval="1d", auto_adjust=False)
+            
+            if hist.empty:
+                raise ValueError("수집된 데이터가 비어 있습니다.")
+                
+            closes = hist['Close'].dropna()
+            if len(closes) < lookback_days:
+                raise ValueError(f"유효 종가 데이터 일수({len(closes)}일)가 요구되는 룩백 일수({lookback_days}일)보다 부족합니다.")
+                
+            # 로그 수익률 계산 및 지정된 룩백 영업일 데이터 추출
+            # 정적 타입 검사기가 np.log() 반환값을 ndarray로 인식해 .dropna()와 .tail()에서
+            # 붉은 밑줄을 긋는 현상을 방지하기 위해 표준 슬라이싱 및 Numpy 인덱싱을 적용합니다.
+            log_returns = np.log(closes / closes.shift(1))
+            log_returns_clean = log_returns[~np.isnan(log_returns)]
+            recent_returns = log_returns_clean[-lookback_days:]
+            
+            # 표준편차(Sigma) 산출
+            sigma = np.std(recent_returns, ddof=1)
+            new_sigma = float(sigma)
+            
+            print(f"✅ {ticker} 실시간 시그마 산출 성공: {new_sigma:.4f}")
+            return new_sigma
+            
+        except Exception as e:
+            print(f"   ⚠️ 시도 {attempt} 실패: {e}")
+            if attempt < 3:
+                time.sleep(2.0)  # 2초 대기 후 재시도
+            else:
+                # 3회 모두 실패 시, 에러를 상위 호출부로 전파하여 시스템이 인지하도록 합니다.
+                raise RuntimeError(f"❌ {ticker} 실시간 시그마 계산 실패 (3회 초과 재시도)") from e
+
+    # 루프 바깥 영역에도 예외 처리를 명시해 '-> float'의 None 반환 오판 문제를 차단합니다.
+    raise RuntimeError(f"❌ {ticker} 실시간 시그마 계산 실패 (알 수 없는 오류)")
+            
 
 def calculate_loc_price(ticker: str, prev_close: float, cfg: dict) -> float:
     """
