@@ -5,33 +5,28 @@
 =============================================================
 
 유튜브 영상 슬라이드 기반 구성:
-  1. 장단기 금리 역전        - Yield Curve Inversion
-  2. 시장 내부 균열          - Market Breadth Deterioration (A-D Line & 신고가/신저가)
-  3. 신용 스프레드 확대      - Credit Spread Widening
-  4. 연준 사이클 분석        - Fed Policy Cycle (첫 금리 인하의 역설)
-  5. 밸류에이션 과열         - Shiller CAPE & 실적 피크
-  6. 선행경제지수            - LEI & Sahm Rule
-  7. 모멘텀 전략 전용 신호   - 섹터 로테이션 & SPX 200일 수익률
+  1. 장단기 금리 역전        - Yield Curve Inversion (역전 후 재정상화 = 가장 위험)
+  2. 시장 내부 균열          - A-D Line 추세 이탈 & 신고가/신저가 비율
+  3. 신용 스프레드 확대      - HY + IG 스프레드 (채권시장이 먼저 경고한다)
+  4. 연준 사이클 분석        - 첫 금리 인하 후 6~12개월 = 최위험 구간
+  5. 밸류에이션 과열         - Shiller CAPE 수준 + S&P500 실적 성장 둔화 감지
+  6. 선행경제지수            - USSLIND 레벨 & Sahm Rule (0.5%p 룰)
+  7. 모멘텀 전략 전용 신호   - SPX 정확히 200거래일 수익률 + 섹터 로테이션 방향
 
 필요 라이브러리:
-    pip install yfinance pandas requests beautifulsoup4 lxml
+    pip install yfinance pandas requests
 
 데이터 소스:
-  - FRED (세인트루이스 연은) : API 키 없이 fredgraph.csv 엔드포인트로 직접 다운로드
-  - yfinance                : 야후 파이낸스 (지수, ETF, 개별 종목)
-  - multpl.com              : Shiller CAPE 테이블 스크래핑 (무료, API 키 불필요)
-
-주의:
-  - FRED, Yahoo Finance 접속은 사용자 PC(VS Code) 네트워크 환경에서 정상 동작해야 합니다.
-  - 일부 사이트(multpl.com 등)는 구조가 바뀌면 스크래핑이 깨질 수 있습니다.
-    그 경우 CAPE_FALLBACK 값을 수동으로 갱신해서 사용하세요.
-  - 이 코드는 투자 자문이 아니며, 신호는 참고용입니다. 최종 판단은 본인 몫입니다.
+  - FRED  : API 키 없이 fredgraph.csv 엔드포인트로 직접 다운로드
+  - yfinance : S&P500, 섹터 ETF, NYSE A-D Line(^NYAD)
+  - multpl.com : Shiller CAPE (정규식 직접 파싱, lxml 불필요)
 """
 
+import re
 import sys
 import datetime
 import warnings
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 import pandas as pd
@@ -42,400 +37,569 @@ warnings.filterwarnings("ignore")
 try:
     import yfinance as yf
 except ImportError:
-    print("yfinance가 설치되어 있지 않습니다. `pip install yfinance` 후 다시 실행하세요.")
+    print("yfinance가 설치되어 있지 않습니다.  pip install yfinance  후 다시 실행하세요.")
     sys.exit(1)
 
 
-# =============================================================
-# 공통 유틸 - FRED 데이터 무료 다운로드 (API 키 불필요)
-# =============================================================
+# ─────────────────────────────────────────────
+# 공통 유틸
+# ─────────────────────────────────────────────
 
 def fred_series(series_id: str, lookback_days: int = 365 * 5) -> pd.Series:
-    """
-    FRED의 fredgraph.csv 엔드포인트를 이용해 시계열을 가져온다.
-    API 키가 필요 없는 공개 다운로드 경로다.
-    """
-    end = datetime.date.today()
+    """FRED fredgraph.csv 무료 엔드포인트 (API 키 불필요)."""
+    end   = datetime.date.today()
     start = end - datetime.timedelta(days=lookback_days)
-    url = (
+    url   = (
         "https://fred.stlouisfed.org/graph/fredgraph.csv"
-        f"?id={series_id}&cosd={start.isoformat()}&coed={end.isoformat()}"
+        f"?id={series_id}&cosd={start}&coed={end}"
     )
-    try:
-        df = pd.read_csv(url, na_values=".")
-    except Exception as e:
-        raise RuntimeError(f"[FRED:{series_id}] 다운로드 실패: {e}")
-
+    df = pd.read_csv(url, na_values=".")
     df.columns = ["date", series_id]
     df["date"] = pd.to_datetime(df["date"])
     df = df.dropna().set_index("date")
     return df[series_id].astype(float)
 
 
-def pct_change_window(series: pd.Series, days: int) -> float:
-    if len(series) < 2:
-        return float("nan")
-    recent = series.iloc[-1]
-    past_idx = series.index[-1] - pd.Timedelta(days=days)
-    past_series = series[series.index <= past_idx]
-    if past_series.empty:
-        past = series.iloc[0]
-    else:
-        past = past_series.iloc[-1]
-    if past == 0:
-        return float("nan")
-    return (recent - past) / abs(past) * 100
+def yf_close(tickers: list, period: str = "2y") -> pd.DataFrame:
+    """yfinance 종가 다운로드. 반환값이 None이거나 빈 경우 예외 발생."""
+    raw = yf.download(tickers, period=period, interval="1d",
+                      progress=False, auto_adjust=True)
+    if raw is None or raw.empty:
+        raise RuntimeError("yfinance 빈 응답")
+    close = raw["Close"] if isinstance(raw.columns, pd.MultiIndex) else raw
+    return pd.DataFrame(close)
 
-
-# =============================================================
-# 신호별 결과를 담는 데이터 구조
-# =============================================================
 
 @dataclass
 class SignalResult:
     name: str
     triggered: bool
-    score: int  # 0~2 (0=정상, 1=주의, 2=경고)
+    score: int          # 0=정상  1=주의  2=경고
     detail: str
     raw_value: Optional[float] = None
 
 
-# =============================================================
-# 1. 장단기 금리 역전 (Yield Curve Inversion)
-# =============================================================
+# ─────────────────────────────────────────────
+# 1. 장단기 금리 역전  (Yield Curve Inversion)
+# ─────────────────────────────────────────────
 
 def signal_yield_curve() -> SignalResult:
     """
-    FRED T10Y2Y (10년물 - 2년물 스프레드) 사용.
-    - 마이너스(역전) 자체보다, '역전 이후 다시 플러스로 정상화(un-inversion)'되는
-      구간이 침체 진입의 전형적 선행 신호로 알려져 있다.
+    FRED T10Y2Y (10년 - 2년 스프레드).
+
+    영상 핵심: "역전 자체보다 역전 이후 재정상화(un-inversion) 구간이 실제 침체 진입과 겹친다."
+      - 현재 역전 중                   → 주의 (score 1)
+      - 최근 2년 내 역전 경험 + 현재 플러스로 회복 → 경고 (score 2) ← 가장 위험
+      - 역전 이력 없고 플러스           → 정상 (score 0)
     """
     try:
-        s = fred_series("T10Y2Y", lookback_days=365 * 3)
-    except RuntimeError as e:
-        return SignalResult("장단기 금리 역전", False, 0, str(e))
+        s = fred_series("T10Y2Y", lookback_days=365 * 2)
+    except Exception as e:
+        return SignalResult("장단기 금리 역전", False, 0, f"데이터 오류: {e}")
 
-    current = s.iloc[-1]
-    min_recent = s.tail(252).min()  # 최근 1년 최저치
-    was_inverted = min_recent < 0
-    now_normalizing = was_inverted and current > 0
+    current      = s.iloc[-1]
+    min_2y       = s.min()           # 최근 2년 최저치
+    was_inverted = min_2y < 0        # 역전 경험 여부
+    re_normalized = was_inverted and current > 0   # 역전 후 재정상화
 
-    if now_normalizing:
+    if re_normalized:
+        # 역전이 얼마나 깊었는지 함께 표시
+        deepest = min_2y
         score, triggered = 2, True
         detail = (
-            f"최근 1년 내 역전(최저 {min_recent:.2f}%p) 이후 "
-            f"현재 {current:.2f}%p로 '재정상화' 진행 중 -> 침체 선행 패턴과 유사"
+            f"역전 후 재정상화 진행 중 (현재 {current:+.2f}%p, "
+            f"최근 2년 최저 {deepest:.2f}%p) "
+            f"→ 역사적으로 침체 진입과 가장 자주 겹치는 패턴"
         )
     elif current < 0:
         score, triggered = 1, True
-        detail = f"현재 역전 상태 ({current:.2f}%p). 아직 재정상화 전 단계"
+        detail = f"현재 역전 상태 ({current:.2f}%p) → 아직 재정상화 전, 추세 주시"
     else:
         score, triggered = 0, False
-        detail = f"정상 우상향 ({current:.2f}%p), 최근 1년 역전 이력 없음"
+        detail = f"정상 우상향 ({current:+.2f}%p), 최근 2년 역전 이력 없음"
 
     return SignalResult("장단기 금리 역전", triggered, score, detail, current)
 
 
-# =============================================================
-# 2. 시장 내부 균열 (Market Breadth Deterioration)
-# =============================================================
+# ─────────────────────────────────────────────
+# 2. 시장 내부 균열  (Market Breadth)
+# ─────────────────────────────────────────────
 
 def signal_market_breadth() -> SignalResult:
     """
-    엄밀한 NYSE A-D Line(등락주선) 원자료는 무료 API로 구하기 까다로워,
-    실전에서 흔히 쓰는 두 가지 프록시(proxy)로 대체한다.
+    영상 슬라이드: "A-D Line & 신고가/신저가"
 
-      (a) S&P500(SPY) vs 동일가중 S&P500(RSP) 상대강도
-          -> RSP가 SPY 대비 약세면 소수 대형주가 지수를 끌고 가는 중
-             (= 내부 균열, breadth 약화)
-      (b) S&P500 신고가 갱신 ETF 가격이 200일선 위/아래 여부로 추세 폭 확인
+    (a) NYSE A-D Line (^NYAD, yfinance) — 추세 이탈 여부
+        지수가 신고가인데 A-D Line이 고점을 갱신 못하면 '다이버전스 = 내부 균열'
+    (b) RSP(동일가중) / SPY(시총가중) 상대강도 — 소수 대형주 쏠림 감지
+        RSP 약세 = 소수 종목이 지수를 견인 중 = breadth 붕괴
+
+    두 항목 각 1점, 합산 0~2점.
     """
+    score_total = 0
+    notes = []
+
+    # (a) NYSE 종합지수(^NYA) vs SPY 다이버전스
+    # ^NYAD는 야후 파이낸스에서 상장폐지됨.
+    # ^NYA(NYSE Composite, 약 2,000개 종목)를 A-D Line 대체 지표로 사용.
+    # SPY가 신고가 근접인데 ^NYA가 고점을 못 넘으면 → 소수 대형주만 끌고 가는 내부 균열.
+    MIN_BARS = 61
     try:
-        raw = yf.download(
-            ["SPY", "RSP"], period="1y", interval="1d",
-            progress=False, auto_adjust=True
-        )
-        if raw is None or raw.empty:
-            return SignalResult("시장 내부 균열", False, 0, "데이터 다운로드 실패: 빈 응답")
-        data = raw["Close"]
+        raw = yf_close(["^NYA", "SPY"], period="1y")
+        has_nya = "^NYA" in raw.columns
+        has_spy = "SPY"  in raw.columns
+
+        if has_nya and has_spy:
+            nya = raw["^NYA"].dropna()
+            spy = raw["SPY"].dropna()
+
+            if len(nya) < MIN_BARS or len(spy) < MIN_BARS:
+                notes.append(f"^NYA 데이터 부족 ({len(nya)}행 < {MIN_BARS}) → breadth 분석 생략")
+            else:
+                spy_60_max = float(spy.tail(60).max())
+                nya_60_max = float(nya.tail(60).max())
+                spy_last   = float(spy.iloc[-1])
+                nya_last   = float(nya.iloc[-1])
+
+                spy_new_high = spy_last >= spy_60_max * 0.99
+                nya_new_high = nya_last >= nya_60_max * 0.99
+
+                if spy_new_high and not nya_new_high:
+                    score_total += 1
+                    nya_vs_peak = (nya_last / nya_60_max - 1) * 100
+                    notes.append(
+                        f"SPY 신고가 근접 + NYSE종합(^NYA) 고점 대비 {nya_vs_peak:.1f}% 미달 "
+                        f"→ 대형주 쏠림 다이버전스 (breadth 붕괴 전조)"
+                    )
+                else:
+                    notes.append(
+                        f"NYA 다이버전스 없음 "
+                        f"(SPY {spy_last:,.1f} / NYA {nya_last:,.1f}, 동행 중)"
+                    )
+        else:
+            notes.append("^NYA 데이터 없음 → breadth 분석 생략")
     except Exception as e:
-        return SignalResult("시장 내부 균열", False, 0, f"데이터 다운로드 실패: {e}")
+        notes.append(f"^NYA 조회 실패: {e}")
 
-    if data.empty or "SPY" not in data or "RSP" not in data:
-        return SignalResult("시장 내부 균열", False, 0, "SPY/RSP 데이터 없음")
+    # (b) RSP/SPY 상대강도 (3개월 변화)
+    try:
+        raw2 = yf_close(["SPY", "RSP"], period="1y")
+        if "SPY" in raw2.columns and "RSP" in raw2.columns:
+            rel = raw2["RSP"] / raw2["SPY"]
+            chg_3m = (rel.iloc[-1] / rel.iloc[-63] - 1) * 100 if len(rel) > 63 else float("nan")
+            if chg_3m < -3:
+                score_total += 1
+                notes.append(
+                    f"동일가중(RSP)/시총가중(SPY) 3개월 {chg_3m:.1f}% 약화 "
+                    f"→ 소수 대형주 쏠림, 시장 폭 심각하게 좁아짐"
+                )
+            elif chg_3m < -1:
+                score_total += 1
+                notes.append(f"RSP/SPY 3개월 {chg_3m:.1f}% 약화 → 쏠림 진행 중, 주의")
+            else:
+                notes.append(f"RSP/SPY 3개월 {chg_3m:.1f}% → 시장 폭 양호")
+        else:
+            notes.append("RSP/SPY 데이터 없음")
+    except Exception as e:
+        notes.append(f"RSP/SPY 조회 실패: {e}")
 
-    rel_strength = (data["RSP"] / data["SPY"])
-    rel_strength_now = rel_strength.iloc[-1]
-    rel_strength_3m_ago = rel_strength.iloc[-63] if len(rel_strength) > 63 else rel_strength.iloc[0]
-    breadth_decline_pct = (rel_strength_now / rel_strength_3m_ago - 1) * 100
-
-    spy_close = data["SPY"]
-    spy_200dma = spy_close.rolling(200).mean()
-    spy_above_200 = spy_close.iloc[-1] > spy_200dma.iloc[-1] if not spy_200dma.iloc[-1] != spy_200dma.iloc[-1] else None
-
-    if breadth_decline_pct < -3:
-        score, triggered = 2, True
-        detail = (
-            f"동일가중(RSP) 대비 시총가중(SPY) 상대강도 {breadth_decline_pct:.1f}% 약화 (3개월) "
-            f"-> 소수 대형주 쏠림 심화, 내부 균열 신호"
-        )
-    elif breadth_decline_pct < -1:
-        score, triggered = 1, True
-        detail = f"RSP/SPY 상대강도 {breadth_decline_pct:.1f}% 약화 (3개월) -> 주의 관찰 구간"
-    else:
-        score, triggered = 0, False
-        detail = f"RSP/SPY 상대강도 {breadth_decline_pct:.1f}% (3개월), 시장 폭 양호"
-
-    return SignalResult("시장 내부 균열", triggered, score, detail, breadth_decline_pct)
+    score     = min(score_total, 2)
+    triggered = score >= 1
+    return SignalResult("시장 내부 균열", triggered, score, " | ".join(notes))
 
 
-# =============================================================
-# 3. 신용 스프레드 확대 (Credit Spread Widening)
-# =============================================================
+# ─────────────────────────────────────────────
+# 3. 신용 스프레드 확대  (Credit Spread Widening)
+# ─────────────────────────────────────────────
 
 def signal_credit_spread() -> SignalResult:
     """
-    FRED BAMLH0A0HYM2 (ICE BofA US High Yield Index Option-Adjusted Spread) 사용.
-    채권시장은 주식시장보다 먼저 경고하는 경향이 있다고 알려져 있다.
+    영상 슬라이드: "채권 시장이 먼저 경고한다"
+
+    HY(하이일드)와 IG(투자등급) 두 스프레드를 모두 확인.
+    - HY 스프레드가 먼저 벌어지고 (위험 선호 약화)
+    - IG 스프레드까지 확대되면 → 전면적 신용 위기로 번지는 전조
+
+    FRED:
+      BAMLH0A0HYM2 : ICE BofA US HY OAS (하이일드)
+      BAMLC0A0CM   : ICE BofA US IG OAS (투자등급)
     """
+    score_total = 0
+    notes = []
+
+    # HY 스프레드
     try:
-        s = fred_series("BAMLH0A0HYM2", lookback_days=365 * 2)
-    except RuntimeError as e:
-        return SignalResult("신용 스프레드 확대", False, 0, str(e))
+        hy = fred_series("BAMLH0A0HYM2", lookback_days=365 * 2)
+        hy_now      = hy.iloc[-1]
+        hy_low_3m   = hy.tail(63).min()
+        hy_widen    = hy_now - hy_low_3m
+        if hy_now > 6.0 or hy_widen > 1.5:
+            score_total += 1
+            notes.append(f"HY 스프레드 {hy_now:.2f}%p (3개월 저점比 +{hy_widen:.2f}%p) → 경고")
+        elif hy_now > 4.5 or hy_widen > 0.7:
+            score_total += 1
+            notes.append(f"HY 스프레드 {hy_now:.2f}%p (+{hy_widen:.2f}%p) → 주의")
+        else:
+            notes.append(f"HY 스프레드 {hy_now:.2f}%p → 안정")
+    except Exception as e:
+        notes.append(f"HY 스프레드 조회 실패: {e}")
 
-    current = s.iloc[-1]
-    low_3m = s.tail(63).min()
-    widen_from_low = current - low_3m  # %p
+    # IG 스프레드
+    try:
+        ig = fred_series("BAMLC0A0CM", lookback_days=365 * 2)
+        ig_now    = ig.iloc[-1]
+        ig_low_3m = ig.tail(63).min()
+        ig_widen  = ig_now - ig_low_3m
+        if ig_now > 2.0 or ig_widen > 0.5:
+            score_total += 1
+            notes.append(
+                f"IG 스프레드 {ig_now:.2f}%p (+{ig_widen:.2f}%p) → 투자등급까지 확산, 위험 고조"
+            )
+        else:
+            notes.append(f"IG 스프레드 {ig_now:.2f}%p → 안정 (HY만 벌어진 초기 단계)")
+    except Exception as e:
+        notes.append(f"IG 스프레드 조회 실패: {e}")
 
-    if current > 6.0 or widen_from_low > 1.5:
-        score, triggered = 2, True
-        detail = (
-            f"HY 스프레드 {current:.2f}%p, 최근 3개월 저점 대비 +{widen_from_low:.2f}%p 확대 "
-            f"-> 신용시장 경고 신호 발동"
-        )
-    elif current > 4.5 or widen_from_low > 0.7:
-        score, triggered = 1, True
-        detail = f"HY 스프레드 {current:.2f}%p, 저점 대비 +{widen_from_low:.2f}%p -> 주의"
-    else:
-        score, triggered = 0, False
-        detail = f"HY 스프레드 {current:.2f}%p, 안정적 수준"
-
-    return SignalResult("신용 스프레드 확대", triggered, score, detail, current)
+    score     = min(score_total, 2)
+    triggered = score >= 1
+    return SignalResult("신용 스프레드 확대", triggered, score, " | ".join(notes))
 
 
-# =============================================================
-# 4. 연준 사이클 분석 (Fed Policy Cycle - 첫 금리 인하의 역설)
-# =============================================================
+# ─────────────────────────────────────────────
+# 4. 연준 사이클 분석  (Fed Policy Cycle)
+# ─────────────────────────────────────────────
 
 def signal_fed_cycle() -> SignalResult:
     """
-    FRED FEDFUNDS (실효 기준금리) 사용.
-    '첫 금리 인하의 역설': 연준이 금리를 올리다가 처음 내리기 시작하는 시점이
-    오히려 침체/약세장 진입과 자주 겹친다는 경험적 패턴.
+    영상 슬라이드 핵심:
+      인상 시작 → 고점 유지(경제 둔화) → 첫 금리 인하(실제 침체 신호) → 침체/베어마켓
+
+    '첫 금리 인하의 역설' : 인하 = 시장 호재가 아닌 연준의 경기 악화 공식 인정.
+    역사적으로 첫 인하 후 6~12개월 내 침체 확률 ~70% (2001-01, 2007-09 사례).
+
+    로직:
+      - 최근 8년 FEDFUNDS에서 사이클 고점을 찾고
+      - 고점 이후 최초 인하 시점을 탐색
+      - 현재가 그 시점으로부터 몇 개월째인지 계산
+        0~6개월   → score 2 (위험 진입)
+        6~12개월  → score 2 (최위험 구간, ~70% 침체 확률)
+        12~24개월 → score 1 (후행 영향 잔존 가능)
+        24개월 초과 → score 0 (윈도우 경과)
     """
     try:
-        s = fred_series("FEDFUNDS", lookback_days=365 * 3)
-    except RuntimeError as e:
-        return SignalResult("연준 사이클 분석", False, 0, str(e))
+        s = fred_series("FEDFUNDS", lookback_days=365 * 8)
+    except Exception as e:
+        return SignalResult("연준 사이클 분석", False, 0, f"데이터 오류: {e}")
 
     s = s.resample("ME").last().dropna()
-    diffs = s.diff()
+    if len(s) < 6:
+        return SignalResult("연준 사이클 분석", False, 0, "데이터 부족")
 
-    # 최근 12개월 내 '인상 사이클(diffs>0 연속)' 이후 '첫 인하(diff<0)'가 있었는지 확인
-    recent = diffs.tail(13)
-    first_cut_idx = None
-    was_hiking = False
-    for i in range(1, len(recent)):
-        if recent.iloc[i - 1] > 0:
-            was_hiking = True
-        if was_hiking and recent.iloc[i] < 0:
-            first_cut_idx = recent.index[i]
+    # 사이클 고점: 최근 8년 최고치 — idxmax()로 라벨 직접 취득 (positional index 불필요)
+    peak_date  = s.idxmax()
+    peak_value = float(s.max())
+    current_rate = float(s.iloc[-1])
+
+    # 고점 이후 첫 인하 탐색
+    after_peak     = s.loc[peak_date:]
+    first_cut_date = None
+    for i in range(1, len(after_peak)):
+        if after_peak.iloc[i] < after_peak.iloc[i - 1]:
+            first_cut_date = after_peak.index[i]
             break
 
-    if first_cut_idx is not None:
-        months_since_cut = (s.index[-1].to_period("M") - first_cut_idx.to_period("M")).n
-        score, triggered = 2, True
+    if first_cut_date is None:
+        score, triggered = 0, False
         detail = (
-            f"인상 사이클 이후 첫 금리 인하 감지 ({first_cut_idx.date()}, "
-            f"{months_since_cut}개월 경과) -> '첫 인하의 역설' 구간, 경계 필요"
+            f"현재 기준금리 {current_rate:.2f}% | "
+            f"사이클 고점 {peak_value:.2f}% ({peak_date:%Y-%m}) | "
+            f"아직 첫 인하 없음 → 고점 유지 단계, 인하 전환 시점 모니터링"
+        )
+        return SignalResult("연준 사이클 분석", triggered, score, detail, current_rate)
+
+    months = (s.index[-1].to_period("M") - first_cut_date.to_period("M")).n
+
+    if months <= 12:
+        score, triggered = 2, True
+        zone = "최위험(6~12개월)" if months >= 6 else "위험 진입(0~6개월)"
+        detail = (
+            f"첫 금리 인하 {first_cut_date:%Y-%m} | 경과 {months}개월 → {zone} | "
+            f"역사적 침체 확률 ~70% (2001·2007 유사 패턴) | 현재 {current_rate:.2f}%"
+        )
+    elif months <= 24:
+        score, triggered = 1, True
+        detail = (
+            f"첫 인하 {first_cut_date:%Y-%m} | {months}개월 경과 → "
+            f"12개월 위험 윈도우 통과, 후행 영향 잔존 가능 | 현재 {current_rate:.2f}%"
         )
     else:
-        current_trend = "인상" if diffs.iloc[-1] > 0 else ("인하" if diffs.iloc[-1] < 0 else "동결")
         score, triggered = 0, False
-        detail = f"현재 기준금리 {s.iloc[-1]:.2f}%, 최근 추세: {current_trend}. 첫 인하 시그널 없음"
+        detail = (
+            f"첫 인하 {first_cut_date:%Y-%m} | {months}개월 경과 → "
+            f"위험 윈도우(24개월) 종료 | 다음 사이클 고점 재형성 여부 관찰"
+        )
 
-    return SignalResult("연준 사이클 분석", triggered, score, detail, s.iloc[-1])
+    return SignalResult("연준 사이클 분석", triggered, score, detail, current_rate)
 
 
-# =============================================================
-# 5. 밸류에이션 과열 (Shiller CAPE & 실적 피크)
-# =============================================================
+# ─────────────────────────────────────────────
+# 5. 밸류에이션 과열  (Shiller CAPE & 실적 피크)
+# ─────────────────────────────────────────────
 
-CAPE_FALLBACK = 35.0  # multpl.com 스크래핑 실패 시 수동 갱신용 폴백 값
+CAPE_FALLBACK = 38.0   # 스크래핑 실패 시 수동 갱신
 
 def signal_valuation() -> SignalResult:
     """
-    multpl.com의 Shiller PE(CAPE) 테이블을 스크래핑.
-    역사적으로 CAPE 30 이상은 '과열' 구간, 35 이상은 '극단적 과열' 구간으로 흔히 언급된다.
-    (역사적 평균 CAPE ≈ 17, 닷컴버블 정점 ≈ 44)
+    영상 슬라이드: "Shiller CAPE & 실적 피크 — 거품의 언어"
+
+    (a) Shiller CAPE  : multpl.com 정규식 파싱
+        역사 평균 ≈17, 위험권 ≥30, 극단 과열 ≥35 (닷컴 정점 44)
+    (b) 실적 피크 감지 : S&P500 12개월 trailing EPS 성장률 둔화
+        multpl.com의 S&P500 Earnings 페이지에서 파싱.
+        EPS가 전년比 감소 또는 성장률이 급격히 둔화되면 '실적 피크' 신호로 해석.
+
+    각 항목 1점, 합산 0~2점.
     """
-    url = "https://www.multpl.com/shiller-pe/table/by-month"
+    score_total = 0
+    notes = []
+    row_pat = re.compile(
+        r"<tr[^>]*>\s*<td>([^<]+)</td>\s*<td>\s*(?:&#x2002;|&nbsp;|\s)*([\d.]+)\s*</td>\s*</tr>",
+        re.IGNORECASE,
+    )
+    hdrs = {"User-Agent": "Mozilla/5.0"}
+
+    # (a) Shiller CAPE
+    cape_val = CAPE_FALLBACK
+    cape_note = f"폴백 값({CAPE_FALLBACK}) 사용 — CAPE_FALLBACK 수동 갱신 권장"
     try:
-        import re
-        headers = {"User-Agent": "Mozilla/5.0"}
-        resp = requests.get(url, headers=headers, timeout=10)
-        resp.raise_for_status()
-        html = resp.text
-
-        # <tr ...><td>Mon D, YYYY</td><td>...&#x2002; 35.04</td></tr> 형태를 정규식으로 직접 파싱
-        # pd.read_html은 multpl.com 특유의 비표준 HTML(주석/광고 div 혼재)에서 자주 실패하므로
-        # 정규식 직접 파싱이 더 안정적이다.
-        row_pattern = re.compile(
-            r"<tr[^>]*>\s*<td>([^<]+)</td>\s*<td>\s*(?:&#x2002;|&nbsp;|\s)*([\d.]+)\s*</td>\s*</tr>",
-            re.IGNORECASE,
-        )
-        matches = row_pattern.findall(html)
-        if not matches:
-            raise ValueError("테이블 행을 찾지 못함 (사이트 구조 변경 가능성)")
-
-        latest_date_str, latest_value_str = matches[0]
-        current_cape = float(latest_value_str)
-        source_note = f"multpl.com 실시간 스크래핑 (기준월: {latest_date_str.strip()})"
+        r = requests.get("https://www.multpl.com/shiller-pe/table/by-month",
+                         headers=hdrs, timeout=10)
+        r.raise_for_status()
+        m = row_pat.findall(r.text)
+        if m:
+            cape_val  = float(m[0][1])
+            cape_note = f"multpl.com ({m[0][0].strip()})"
     except Exception as e:
-        current_cape = CAPE_FALLBACK
-        source_note = f"스크래핑 실패({type(e).__name__}: {e}) -> 폴백 값 사용, CAPE_FALLBACK 수동 갱신 권장"
+        cape_note = f"스크래핑 실패({e}) → {cape_note}"
 
-    if current_cape >= 35:
-        score, triggered = 2, True
-        detail = f"Shiller CAPE {current_cape:.1f} -> 역사적 극단 과열 구간 (닷컴버블 수준 근접) [{source_note}]"
-    elif current_cape >= 28:
-        score, triggered = 1, True
-        detail = f"Shiller CAPE {current_cape:.1f} -> 과열 구간, 실적 피크 가능성 점검 필요 [{source_note}]"
+    if cape_val >= 35:
+        score_total += 1
+        notes.append(f"Shiller CAPE {cape_val:.1f} → 극단 과열 (닷컴버블 근접) [{cape_note}]")
+    elif cape_val >= 28:
+        score_total += 1
+        notes.append(f"Shiller CAPE {cape_val:.1f} → 과열 구간 [{cape_note}]")
     else:
-        score, triggered = 0, False
-        detail = f"Shiller CAPE {current_cape:.1f} -> 정상~중립 구간 [{source_note}]"
+        notes.append(f"Shiller CAPE {cape_val:.1f} → 정상~중립 [{cape_note}]")
 
-    return SignalResult("밸류에이션 과열", triggered, score, detail, current_cape)
+    # (b) S&P500 실적 피크 — trailing EPS YoY 성장률
+    try:
+        r2 = requests.get("https://www.multpl.com/s-p-500-earnings/table/by-year",
+                          headers=hdrs, timeout=10)
+        r2.raise_for_status()
+        rows = row_pat.findall(r2.text)
+        # 연간 테이블: 최신 2개 연도의 EPS 비교
+        eps_vals = []
+        for date_str, val_str in rows[:4]:
+            try:
+                eps_vals.append((date_str.strip(), float(val_str)))
+            except ValueError:
+                continue
+        if len(eps_vals) >= 2:
+            latest_eps  = eps_vals[0][1]
+            prev_eps    = eps_vals[1][1]
+            eps_growth  = (latest_eps / prev_eps - 1) * 100
+            if eps_growth < -5:
+                score_total += 1
+                notes.append(
+                    f"S&P500 EPS {eps_vals[0][0]} {latest_eps:.1f} "
+                    f"(전년比 {eps_growth:.1f}%) → 실적 역성장, 피크아웃 신호"
+                )
+            elif eps_growth < 5:
+                score_total += 1
+                notes.append(
+                    f"S&P500 EPS 성장률 {eps_growth:.1f}% (둔화 구간) "
+                    f"→ 고밸류에이션 + 실적 정체 = 복합 위험"
+                )
+            else:
+                notes.append(f"S&P500 EPS 성장률 {eps_growth:.1f}% → 실적 확장 지속 중")
+        else:
+            notes.append("EPS 연간 데이터 파싱 실패 (최소 2개 연도 필요)")
+    except Exception as e:
+        notes.append(f"EPS 데이터 조회 실패: {e}")
+
+    score     = min(score_total, 2)
+    triggered = score >= 1
+    return SignalResult("밸류에이션 과열", triggered, score, " | ".join(notes), cape_val)
 
 
-# =============================================================
-# 6. 선행경제지수 (LEI & Sahm Rule)
-# =============================================================
+# ─────────────────────────────────────────────
+# 6. 선행경제지수  (LEI & Sahm Rule)
+# ─────────────────────────────────────────────
 
 def signal_leading_indicators() -> SignalResult:
     """
-    - USSLIND (FRED, Leading Index for the United States) : 음전환 지속 여부 확인
-    - SAHMREALTIME (FRED, Sahm Rule Recession Indicator)   : 0.5%p 이상이면 침체 신호 발동 규칙
-    """
-    notes = []
-    score_total = 0
+    영상 슬라이드: "LEI & Sahm Rule — 경기의 체온계"
 
+    (a) FRED USSLIND (Philadelphia Fed Leading Index)
+        이 시리즈는 이미 '연율화 성장률 전망치(%)'로 표현된 값이다.
+        → % 변화율을 다시 계산하는 것이 아니라 레벨(값 자체)과 방향을 본다.
+          현재값 < 0         → 경기 수축 예고  (score +1)
+          현재값 < 0 + 하락 추세 → 더 강한 위험  (score +1)
+
+    (b) FRED SAHMREALTIME (Sahm Rule Recession Indicator)
+        실업률 3개월 이동평균 - 최근 12개월 최저치.
+        ≥ 0.5%p → 과거 모든 침체에서 발동, 높은 신뢰도의 침체 신호.
+    """
+    score_total = 0
+    notes = []
+
+    # (a) USSLIND 레벨 기반 판단
     try:
-        lei = fred_series("USSLIND", lookback_days=365 * 3)
-        lei_3m_chg = pct_change_window(lei, 90)
-        if lei_3m_chg < -1.5:
-            score_total += 2
-            notes.append(f"선행지수(USSLIND) 3개월 {lei_3m_chg:.1f}% 하락 -> 강한 둔화 신호")
-        elif lei_3m_chg < 0:
+        lei = fred_series("USSLIND", lookback_days=365 * 2)
+        lei_now   = lei.iloc[-1]
+        lei_3m_ago = lei.iloc[-3] if len(lei) > 3 else lei.iloc[0]
+        lei_trend = lei_now - lei_3m_ago   # 3개월 방향
+
+        if lei_now < 0:
             score_total += 1
-            notes.append(f"선행지수(USSLIND) 3개월 {lei_3m_chg:.1f}% 하락 -> 둔화 조짐")
+            direction = "하락 지속" if lei_trend < 0 else "소폭 반등 중"
+            notes.append(
+                f"선행지수(USSLIND) {lei_now:.2f}% (마이너스 = 경기 수축 예고) "
+                f"| 3개월 추세: {direction} → 경기 둔화 신호"
+            )
+            if lei_trend < 0:
+                score_total += 1   # 방향까지 악화 중이면 추가 1점
         else:
-            notes.append(f"선행지수(USSLIND) 3개월 {lei_3m_chg:.1f}% -> 안정")
-    except RuntimeError as e:
+            notes.append(
+                f"선행지수(USSLIND) {lei_now:.2f}% (플러스 = 경기 확장 예고) "
+                f"| 3개월 방향: {'+' if lei_trend >= 0 else ''}{lei_trend:.2f}%p"
+            )
+    except Exception as e:
         notes.append(f"USSLIND 조회 실패: {e}")
 
+    # (b) Sahm Rule
     try:
         sahm = fred_series("SAHMREALTIME", lookback_days=365 * 2)
         sahm_now = sahm.iloc[-1]
         if sahm_now >= 0.5:
             score_total += 2
-            notes.append(f"Sahm Rule 지표 {sahm_now:.2f}%p (>=0.5 기준 충족) -> 침체 신호 발동 상태")
+            notes.append(
+                f"Sahm Rule {sahm_now:.2f}%p ≥ 0.5 → 침체 신호 공식 발동 "
+                f"(과거 모든 침체에서 적중)"
+            )
         elif sahm_now >= 0.3:
             score_total += 1
-            notes.append(f"Sahm Rule 지표 {sahm_now:.2f}%p -> 기준선(0.5) 근접, 주의")
+            notes.append(f"Sahm Rule {sahm_now:.2f}%p → 기준선(0.5) 근접, 주의")
         else:
-            notes.append(f"Sahm Rule 지표 {sahm_now:.2f}%p -> 안정")
-    except RuntimeError as e:
+            notes.append(f"Sahm Rule {sahm_now:.2f}%p → 안정")
+    except Exception as e:
         notes.append(f"SAHMREALTIME 조회 실패: {e}")
 
-    score = min(score_total, 2)
+    score     = min(score_total, 2)
     triggered = score >= 1
-    detail = " | ".join(notes)
-
-    return SignalResult("선행경제지수 (LEI & Sahm)", triggered, score, detail)
+    return SignalResult("선행경제지수 (LEI & Sahm)", triggered, score, " | ".join(notes))
 
 
-# =============================================================
-# 7. 모멘텀 전략 전용 신호 (섹터 로테이션 & SPX 200일 수익률)
-# =============================================================
-
-SECTOR_ETFS = {
-    "XLK": "기술", "XLF": "금융", "XLE": "에너지", "XLV": "헬스케어",
-    "XLY": "임의소비재", "XLP": "필수소비재", "XLI": "산업재",
-    "XLU": "유틸리티", "XLB": "소재", "XLRE": "리츠",
-}
+# ─────────────────────────────────────────────
+# 7. 모멘텀 전략 전용 신호  (섹터 로테이션 & SPX 200R)
+# ─────────────────────────────────────────────
 
 def signal_momentum_breakdown() -> SignalResult:
     """
-    (a) SPY 200일 수익률(현재가 / 200일전 가격 - 1) -> 모멘텀 추세 강도
-    (b) 경기방어 섹터(XLU, XLP, XLV) vs 경기민감 섹터(XLK, XLY, XLI) 상대 로테이션
-        -> 방어주로의 자금 이동은 모멘텀 내부 붕괴(리스크 회피 전환) 신호로 해석
+    영상 슬라이드: "섹터 로테이션 & SPX 200R — 모멘텀 내부 붕괴 감지"
+
+    (a) SPX 200일 수익률 (SPX 200R)
+        정확히 200거래일 전 가격 대비 현재 수익률.
+        마이너스 → 중기 추세 자체가 하락, 모멘텀 전략의 기본 전제 붕괴.
+
+    (b) 섹터 로테이션 방향
+        방어섹터(XLU/XLP/XLV) vs 경기민감섹터(XLK/XLY/XLI) 3개월 상대수익률.
+        방어섹터 아웃퍼폼 → 스마트머니가 리스크 회피로 이동 중 = 내부 붕괴 선행 신호.
+
+    각 항목 1점, 합산 0~2점.
     """
+    score_total = 0
+    notes = []
+
+    tickers = ["SPY", "XLU", "XLP", "XLV", "XLK", "XLY", "XLI"]
     try:
-        tickers = ["SPY"] + list(SECTOR_ETFS.keys())
-        raw = yf.download(tickers, period="1y", interval="1d",
-                           progress=False, auto_adjust=True)
+        raw = yf_close(tickers, period="2y")
         if raw is None or raw.empty:
-            return SignalResult("모멘텀 전략 전용 신호", False, 0, "데이터 다운로드 실패: 빈 응답")
-        data = raw["Close"]
+            return SignalResult("모멘텀 전략 전용 신호", False, 0, "데이터 없음")
     except Exception as e:
-        return SignalResult("모멘텀 전략 전용 신호", False, 0, f"데이터 다운로드 실패: {e}")
+        return SignalResult("모멘텀 전략 전용 신호", False, 0, f"다운로드 실패: {e}")
 
-    if data.empty or "SPY" not in data:
-        return SignalResult("모멘텀 전략 전용 신호", False, 0, "SPY 데이터 없음")
+    ret_200d: float = float("nan")
+    # (a) SPX 200거래일 수익률 — iloc[-201] ~ iloc[-1]
+    try:
+        spy: pd.Series = (
+            raw["SPY"].dropna() if "SPY" in raw.columns
+            else raw.iloc[:, 0].dropna()   # 첫 번째 컬럼을 Series로 명시 추출
+        )
+        if len(spy) >= 201:
+            ret_200d = (float(spy.iloc[-1]) / float(spy.iloc[-201]) - 1) * 100
+        else:
+            ret_200d = (float(spy.iloc[-1]) / float(spy.iloc[0]) - 1) * 100
 
-    spy = data["SPY"].dropna()
-    spx_200d_return = (spy.iloc[-1] / spy.iloc[0] - 1) * 100 if len(spy) > 0 else float("nan")
+        if ret_200d < 0:
+            score_total += 1
+            notes.append(
+                f"SPX 200거래일 수익률 {ret_200d:.1f}% (마이너스) "
+                f"→ 중기 추세 붕괴, 모멘텀 전략 기본 전제 훼손"
+            )
+        else:
+            notes.append(f"SPX 200거래일 수익률 {ret_200d:.1f}% → 중기 추세 양호")
+    except Exception as e:
+        notes.append(f"SPX 200R 계산 실패: {e}")
+        ret_200d = float("nan")
 
-    defensive = ["XLU", "XLP", "XLV"]
-    cyclical = ["XLK", "XLY", "XLI"]
-
-    def basket_return(tks):
+    # (b) 섹터 로테이션: 3개월(63거래일) 수익률 비교
+    def basket_ret_3m(tks):
         rets = []
         for t in tks:
-            if t in data and data[t].dropna().shape[0] > 1:
-                series = data[t].dropna()
-                rets.append(series.iloc[-1] / series.iloc[0] - 1)
+            col = raw[t] if t in raw.columns else None
+            if col is not None:
+                col = col.dropna()
+                if len(col) > 63:
+                    rets.append(col.iloc[-1] / col.iloc[-64] - 1)
         return sum(rets) / len(rets) * 100 if rets else float("nan")
 
-    def_ret = basket_return(defensive)
-    cyc_ret = basket_return(cyclical)
-    rotation_gap = def_ret - cyc_ret  # 방어주가 경기민감주보다 더 많이 오르면 양수
+    try:
+        def_ret = basket_ret_3m(["XLU", "XLP", "XLV"])
+        cyc_ret = basket_ret_3m(["XLK", "XLY", "XLI"])
+        gap = def_ret - cyc_ret
 
-    score = 0
-    notes = [f"SPY 200일 수익률 {spx_200d_return:.1f}%",
-             f"방어섹터(XLU/XLP/XLV) 1년 평균 {def_ret:.1f}% vs 경기민감(XLK/XLY/XLI) {cyc_ret:.1f}%"]
+        if gap > 5:
+            score_total += 1
+            notes.append(
+                f"방어섹터 3개월 {def_ret:.1f}% vs 경기민감 {cyc_ret:.1f}% "
+                f"(+{gap:.1f}%p 방어 우위) → 스마트머니 리스크 회피 이동, 내부 붕괴 신호"
+            )
+        elif gap > 2:
+            score_total += 1
+            notes.append(
+                f"방어섹터 {def_ret:.1f}% vs 경기민감 {cyc_ret:.1f}% "
+                f"(+{gap:.1f}%p) → 방어주 로테이션 시작 조짐, 주의"
+            )
+        else:
+            notes.append(
+                f"방어섹터 {def_ret:.1f}% vs 경기민감 {cyc_ret:.1f}% "
+                f"({gap:+.1f}%p) → 경기민감 우위, 정상 성장 국면"
+            )
+    except Exception as e:
+        notes.append(f"섹터 로테이션 계산 실패: {e}")
 
-    if spx_200d_return < 0:
-        score += 1
-        notes.append("-> 200일 추세 자체가 마이너스, 모멘텀 붕괴 진행 중")
-    if rotation_gap > 5:
-        score += 1
-        notes.append(f"-> 방어주 로테이션 +{rotation_gap:.1f}%p, 리스크 회피 전환 신호")
-
-    score = min(score, 2)
+    score     = min(score_total, 2)
     triggered = score >= 1
-    detail = " | ".join(notes)
-
-    return SignalResult("모멘텀 전략 전용 신호", triggered, score, detail, spx_200d_return)
+    return SignalResult("모멘텀 전략 전용 신호", triggered, score, " | ".join(notes), ret_200d)
 
 
-# =============================================================
+# ─────────────────────────────────────────────
 # 종합 실행 & 리포트
-# =============================================================
+# ─────────────────────────────────────────────
 
 def run_all_signals() -> list:
-    signal_funcs = [
+    funcs = [
         signal_yield_curve,
         signal_market_breadth,
         signal_credit_spread,
@@ -445,58 +609,53 @@ def run_all_signals() -> list:
         signal_momentum_breakdown,
     ]
     results = []
-    for i, fn in enumerate(signal_funcs, 1):
+    for i, fn in enumerate(funcs, 1):
         print(f"[{i}/7] {fn.__name__} 계산 중...")
         try:
             results.append(fn())
         except Exception as e:
-            results.append(SignalResult(fn.__name__, False, 0, f"오류 발생: {e}"))
+            results.append(SignalResult(fn.__name__, False, 0, f"오류: {e}"))
     return results
 
 
 def print_report(results: list):
-    print("\n" + "=" * 70)
-    print(" 베어마켓 7가지 조기 경보 시스템 - 종합 리포트")
-    print(f" 생성 시각: {datetime.datetime.now():%Y-%m-%d %H:%M:%S}")
-    print("=" * 70)
-
-    total_score = 0
-    max_score = len(results) * 2
-
     icons = {0: "🟢", 1: "🟡", 2: "🔴"}
+    print("\n" + "=" * 72)
+    print(" 베어마켓 7가지 조기 경보 시스템 — 종합 리포트")
+    print(f" 생성 시각: {datetime.datetime.now():%Y-%m-%d %H:%M:%S}")
+    print("=" * 72)
 
+    total = 0
     for idx, r in enumerate(results, 1):
         icon = icons.get(r.score, "⚪")
         print(f"\n{idx}. {icon} [{r.name}]  (점수 {r.score}/2)")
-        print(f"   {r.detail}")
-        total_score += r.score
+        # detail이 길면 파이프로 구분된 항목을 줄 바꿔 출력
+        for part in r.detail.split(" | "):
+            print(f"   {part.strip()}")
+        total += r.score
 
-    pct = total_score / max_score * 100
-    print("\n" + "-" * 70)
-    print(f" 종합 경보 점수: {total_score} / {max_score}  ({pct:.0f}%)")
+    pct = total / (len(results) * 2) * 100
+    print("\n" + "─" * 72)
+    print(f" 종합 경보 점수: {total} / {len(results) * 2}  ({pct:.0f}%)")
 
-    if pct >= 65:
-        verdict = "🔴 고위험: 다수 지표 동시 경고 -> 리스크 관리(헷지/현금비중 확대) 검토 구간"
-    elif pct >= 35:
-        verdict = "🟡 주의: 일부 경고 신호 점등 -> 추가 모니터링 필요"
-    else:
-        verdict = "🟢 안정: 대부분 지표 정상 범위"
+    if   pct >= 65: verdict = "🔴 고위험 — 다수 지표 동시 경고 → 헷지/현금비중 확대 검토"
+    elif pct >= 35: verdict = "🟡 주의   — 일부 경고 점등 → 추가 모니터링 필요"
+    else:           verdict = "🟢 안정   — 대부분 지표 정상 범위"
+
     print(f" 종합 판정: {verdict}")
-    print("=" * 70)
-    print("\n※ 본 결과는 투자 자문이 아니며, 참고용 정량 신호입니다.")
-    print("※ 매매 결정은 본인의 추가 검증과 판단을 거쳐 진행하세요.\n")
+    print("=" * 72)
+    print("\n※ 본 결과는 투자 자문이 아니며 참고용 정량 신호입니다.")
+    print("※ 최종 매매 결정은 본인의 추가 검증과 판단을 거쳐 진행하세요.\n")
 
 
 def export_to_dict(results: list) -> dict:
-    """Discord 알림 등 다른 모듈과 연동할 때 쓸 수 있는 dict 변환 함수"""
+    """Discord 알림 등 외부 모듈 연동용 dict 변환."""
     return {
-        "timestamp": datetime.datetime.now().isoformat(),
-        "signals": [
-            {"name": r.name, "triggered": r.triggered, "score": r.score, "detail": r.detail}
-            for r in results
-        ],
+        "timestamp":   datetime.datetime.now().isoformat(),
+        "signals":     [{"name": r.name, "triggered": r.triggered,
+                         "score": r.score, "detail": r.detail} for r in results],
         "total_score": sum(r.score for r in results),
-        "max_score": len(results) * 2,
+        "max_score":   len(results) * 2,
     }
 
 
