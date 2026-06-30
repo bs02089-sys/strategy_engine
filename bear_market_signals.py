@@ -281,20 +281,29 @@ def signal_valuation() -> SignalResult:
     """
     url = "https://www.multpl.com/shiller-pe/table/by-month"
     try:
+        import re
         headers = {"User-Agent": "Mozilla/5.0"}
         resp = requests.get(url, headers=headers, timeout=10)
-        try:
-            tables = pd.read_html(resp.text, flavor="lxml")
-        except (ImportError, ValueError):
-            tables = pd.read_html(resp.text, flavor="bs4")
-        df = tables[0]
-        df.columns = ["date", "cape"]
-        df["cape"] = df["cape"].astype(str).str.extract(r"([\d.]+)").astype(float)
-        current_cape = df["cape"].iloc[0]
-        source_note = "multpl.com 실시간 스크래핑"
+        resp.raise_for_status()
+        html = resp.text
+
+        # <tr ...><td>Mon D, YYYY</td><td>...&#x2002; 35.04</td></tr> 형태를 정규식으로 직접 파싱
+        # pd.read_html은 multpl.com 특유의 비표준 HTML(주석/광고 div 혼재)에서 자주 실패하므로
+        # 정규식 직접 파싱이 더 안정적이다.
+        row_pattern = re.compile(
+            r"<tr[^>]*>\s*<td>([^<]+)</td>\s*<td>\s*(?:&#x2002;|&nbsp;|\s)*([\d.]+)\s*</td>\s*</tr>",
+            re.IGNORECASE,
+        )
+        matches = row_pattern.findall(html)
+        if not matches:
+            raise ValueError("테이블 행을 찾지 못함 (사이트 구조 변경 가능성)")
+
+        latest_date_str, latest_value_str = matches[0]
+        current_cape = float(latest_value_str)
+        source_note = f"multpl.com 실시간 스크래핑 (기준월: {latest_date_str.strip()})"
     except Exception as e:
         current_cape = CAPE_FALLBACK
-        source_note = f"스크래핑 실패({e}) -> 폴백 값 사용, CAPE_FALLBACK 수동 갱신 권장"
+        source_note = f"스크래핑 실패({type(e).__name__}: {e}) -> 폴백 값 사용, CAPE_FALLBACK 수동 갱신 권장"
 
     if current_cape >= 35:
         score, triggered = 2, True
