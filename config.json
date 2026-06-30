@@ -4,7 +4,7 @@
     "POSITIONS": {
         "SOXX": {
             "LOOKBACK_DAYS": 252,
-            "ENTRY_MULTIPLIER": 1.41,
+            "ENTRY_MULTIPLIER": 1.67,
             "DAILY_SIGMA": 0.0252,
             "LAST_SIGMA_UPDATE": "2026-06-30"
         },
