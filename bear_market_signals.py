@@ -22,6 +22,7 @@
   - multpl.com : Shiller CAPE (정규식 직접 파싱, lxml 불필요)
 """
 
+import json
 import re
 import sys
 import datetime
@@ -569,6 +570,14 @@ def export_to_dict(results: list) -> dict:
     }
 
 
+def save_report_to_json(results: list, filename="signal_report.json"):
+    """결과를 JSON 파일로 저장"""
+    data = export_to_dict(results)
+    with open(filename, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
+
+
 if __name__ == "__main__":
     results = run_all_signals()
     print_report(results)
+    save_report_to_json(results)  # 여기서 호출!

@@ -263,6 +263,27 @@ def calculate_loc_price(ticker: str, prev_close: float, cfg: dict) -> float:
     return round(loc_price, 2)
 
 
+def get_market_score(filepath="signal_report.json"):
+    """경보 시스템의 결과물을 읽어와 점수를 반환"""
+    if not os.path.exists(filepath):
+        return 0 
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data.get("total_score", 0)
+    except:
+        return 0
+
+
+def calculate_final_loc(base_price: float) -> float:
+    """기본 계산된 LOC에 위험 점수 반영하여 보정"""
+    score = get_market_score()
+    if score >= 10: discount = 0.95
+    elif score >= 6: discount = 0.98
+    else: discount = 1.0
+    return base_price * discount
+
+
 def run_integrated_system(ticker: str, cfg: dict):
     """수집 엔진과 연산 엔진을 유기적으로 제어하는 메인 실행 함수"""
     print("=" * 60)
@@ -270,26 +291,34 @@ def run_integrated_system(ticker: str, cfg: dict):
     
     # 설정값 로드
     pos_cfg = cfg.get("POSITIONS", {}).get(ticker, {})
-    lookback = pos_cfg.get("LOOKBACK_DAYS", 252) # 기본값 252
+    lookback = pos_cfg.get("LOOKBACK_DAYS", 252)
     print(f"⚙️ 전략: {lookback}일 룩백 기준 (배수: {pos_cfg.get('ENTRY_MULTIPLIER', 1.41)})")
     print("-" * 60)
     
     # Step 1: 전일 종가 자동 수집
     prev_close, trading_date = get_prev_close(ticker)
-    
     if prev_close is None or prev_close <= 0:
-        print(f"🚨 {ticker} 가격 데이터 수집 실패 혹은 비정상적인 가격: ${prev_close}")
+        print(f"🚨 {ticker} 가격 데이터 수집 실패: ${prev_close}")
         print("=" * 60)
         return
 
     print(f"✅ 전일 종가 수집 성공: ${prev_close:.2f} (거래일: {trading_date})")
     
-    # Step 2: 목표 LOC 가격 자동 연산
+    # Step 2: 시장 위험 점수 확인
+    market_score = get_market_score()
+    print(f"📊 현재 시장 위험 점수: {market_score}/14")
+    
+    # Step 3: 목표 LOC 가격 자동 연산 및 위험 점수 보정
     try:
-        final_loc_price = calculate_loc_price(ticker, prev_close, cfg)
+        base_loc = calculate_loc_price(ticker, prev_close, cfg)
+        final_loc = calculate_final_loc(base_loc) # 시장 상황 반영 보정
+        
         print("-" * 60)
-        print(f"🎯 오늘 밤 {ticker} LOC 매수 지정가: ${final_loc_price:.2f}")
+        if base_loc != final_loc:
+            print(f"⚠️ 시장 위험 반영: 기본값 ${base_loc:.2f} → 최종가 ${final_loc:.2f}")
+        print(f"🎯 오늘 밤 {ticker} LOC 매수 지정가: ${final_loc:.2f}")
         print("=" * 60)
+        
     except Exception as e:
         print(f"🚨 통계 연산 중 오류 발생: {e}")
         print("=" * 60)
