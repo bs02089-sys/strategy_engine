@@ -23,6 +23,7 @@
 """
 
 import json
+import os
 import re
 import sys
 import datetime
@@ -571,10 +572,15 @@ def export_to_dict(results: list) -> dict:
 
 
 def save_report_to_json(results: list, filename="signal_report.json"):
-    """결과를 JSON 파일로 저장"""
+    # 현재 스크립트 파일이 위치한 폴더를 기준으로 경로 지정
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    file_path = os.path.join(base_dir, filename)
+    
     data = export_to_dict(results)
-    with open(filename, "w", encoding="utf-8") as f:
+    with open(file_path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
+        
+    print(f"✅ 파일이 다음 경로에 저장되었습니다: {file_path}")
 
 
 if __name__ == "__main__":
