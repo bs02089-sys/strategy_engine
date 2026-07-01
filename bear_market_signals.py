@@ -540,6 +540,24 @@ def print_report(results: list):
     print(f" 종합 판정: {verdict}\n{'='*72}\n※ 참고용 정량 신호입니다. 최종 판단은 본인의 몫입니다.\n")
 
 
+def print_mobile_report(results: list):
+    """모바일 메신저 가독성을 위한 요약 리포트"""
+    total_score = sum(r.score for r in results)
+    
+    msg = "📊 [베어마켓 조기 경보]\n"
+    msg += f"종합 점수: {total_score}/14\n"
+    msg += f"판정: {'🟢 안정' if total_score < 6 else '🟡 주의' if total_score < 10 else '🔴 위험'}\n"
+    msg += "-" * 20 + "\n"
+    
+    for r in results:
+        status_icon = "🟢" if r.score == 0 else "🟡" if r.score == 1 else "🔴"
+        msg += f"{status_icon} {r.name}: {r.score}점\n"
+    
+    msg += "-" * 20 + "\n"
+    msg += "상세 확인 필요시 PC 로그를 확인하세요."
+    print(msg)
+    
+
 def export_to_dict(results: list) -> dict:
     """Discord 알림 등 외부 모듈 연동용 dict 변환."""
     return {
