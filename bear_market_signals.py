@@ -175,24 +175,31 @@ def signal_yield_curve() -> SignalResult:
 def signal_market_breadth() -> SignalResult:
     """시장 내부 균열 감지 (Market Breadth)"""
     score_total, notes = 0, []
+    # 딕셔너리로 티커 매핑
     tickers = {"SPY": "SPY", "NYA": "^NYA", "RSP": "RSP"}
+    ticker_values = list(tickers.values())
 
     try:
-        raw = yf.download(list(tickers.values()), period="1y")
-        data = validate_yf_data(raw, list(tickers.values()))
+        raw = yf.download(ticker_values, period="1y")
+        data = validate_yf_data(raw, ticker_values)
+        
+        # 딕셔너리 키를 이용해 데이터에 접근 (데이터프레임 컬럼명이 ^NYA라면 그대로 참조)
+        spy_col = tickers["SPY"]
+        nya_col = tickers["NYA"]
+        rsp_col = tickers["RSP"]
         
         # 1. 시장 폭 균열 분석 (SPY vs NYA)
-        spy_dd = (data["SPY"].iloc[-1] / data["SPY"].max() - 1)
-        nya_dd = (data["NYA"].iloc[-1] / data["NYA"].max() - 1)
+        spy_dd = (data[spy_col].iloc[-1] / data[spy_col].max() - 1)
+        nya_dd = (data[nya_col].iloc[-1] / data[nya_col].max() - 1)
         
         if spy_dd > -0.05 and nya_dd < -0.10: 
             score_total += 1
-            notes.append("시장 폭 균열 발생: SPY 대비 NYSE 종합지수(^NYA) 상대적 약세 (+1점)")
+            notes.append(f"시장 폭 균열 발생: SPY 대비 NYSE 종합지수 상대적 약세 (+1점)")
         else:
             notes.append("시장 폭 양호: 종합지수 및 대형주 동반 흐름 (+0점)")
 
         # 2. 소수 종목 쏠림 분석 (RSP/SPY 상대강도)
-        ratio = data["RSP"] / data["SPY"]
+        ratio = data[rsp_col] / data[spy_col]
         ratio_growth = (ratio.iloc[-1] / ratio.iloc[-20] - 1) * 100 
         
         if ratio_growth < -2.0:
@@ -202,14 +209,11 @@ def signal_market_breadth() -> SignalResult:
             notes.append(f"종목 균형 유지: RSP/SPY 상대강도 안정 ({ratio_growth:.1f}%) (+0점)")
 
     except Exception as e:
-        notes.append(get_error_message(e, "시장 내부 균열 분석(yfinance)"))
+        notes.append(f"{get_error_message(e, '시장 내부 균열 분석')} (+0점)")
         return SignalResult("시장 내부 균열", False, 0, " | ".join(notes), 0)
 
-    # 최종 결과: 합산 점수 로직 유지
     score = min(score_total, 2)
-    # 합산 점수를 notes와 함께 전달
     detail = f"{' | '.join(notes)} | 총점: {score}/2"
-    
     return SignalResult("시장 내부 균열", score >= 1, score, detail, score)
 
 
