@@ -85,17 +85,31 @@ def validate_yf_data(raw_data: Optional[pd.DataFrame], symbols: list) -> pd.Data
     if raw_data is None or raw_data.empty:
         raise ValueError("yfinance returned no data")
     
-    # 멀티인덱스 처리 (Close만 추출)
-    data = raw_data["Close"] if isinstance(raw_data.columns, pd.MultiIndex) else raw_data
+    # 1. 'Close' 컬럼 추출 (MultiIndex 대응)
+    if isinstance(raw_data.columns, pd.MultiIndex):
+        if "Close" in raw_data.columns.levels[0]:
+            data = raw_data["Close"]
+        else:
+            # MultiIndex 구조가 다를 경우를 대비해 첫 번째 레벨을 사용
+            data = raw_data.xs('Close', axis=1, level=0)
+    else:
+        data = raw_data
+
+    # 2. 결과가 Series(티커가 1개일 때)라면 DataFrame으로 변환
     if isinstance(data, pd.Series):
         data = data.to_frame()
-        raise ValueError("Close price data unavailable")
         
+    # 3. 데이터가 비어 있는지 확인
+    if data.empty:
+        raise ValueError("Close price data is empty")
+        
+    # 4. 티커 검증
     missing = [s for s in symbols if s not in data.columns]
     if missing:
-        raise ValueError(f"Missing symbols: {missing}")
+        # 에러 메시지에 실제 존재하는 컬럼을 명시하여 디버깅 용이하게 함
+        raise KeyError(f"Missing symbols: {missing}. Available columns: {list(data.columns)}")
         
-    return data
+    return data[symbols]
 
 
 @dataclass
