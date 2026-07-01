@@ -56,5 +56,6 @@
             "IONQ stock"
         ],
         "MAX_NEWS_PER_KEYWORD": 5
-    }
+    },
+    "LAST_MONTHLY_PING": "2026-07"
 }
