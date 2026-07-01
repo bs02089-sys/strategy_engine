@@ -572,7 +572,7 @@ def export_to_dict(results: list) -> dict:
 
 
 def save_report_to_json(results: list, filename="signal_report.json"):
-    # 현재 스크립트 파일이 위치한 폴더를 기준으로 경로 지정
+    # 현재 실행 중인 파일(bear_market_signals.py)이 있는 위치를 기준으로 경로를 잡습니다.
     base_dir = os.path.dirname(os.path.abspath(__file__))
     file_path = os.path.join(base_dir, filename)
     
@@ -580,7 +580,7 @@ def save_report_to_json(results: list, filename="signal_report.json"):
     with open(file_path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
         
-    print(f"✅ 파일이 다음 경로에 저장되었습니다: {file_path}")
+    print(f"✅ 파일이 생성되었습니다: {file_path}")
 
 
 if __name__ == "__main__":
