@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write  # 깃허브에 파일을 저장(Push)하려면 이 권한이 필수입니다.
+  contents: write
 
 jobs:
   run-investment-engine:
@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          token: ${{ github.token }} # 동기화를 위해 토큰 필요
+          token: ${{ github.token }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -22,7 +22,7 @@ jobs:
       
       - run: pip install yfinance pandas requests numpy pytz holidays
       
-      # 1. 스크립트 실행 (파일이 생성됨)
+      # 1. 스크립트 실행
       - name: Run scripts
         run: |
           python bear_market_signals.py
@@ -39,13 +39,17 @@ jobs:
             git push
           fi
           
-      # 3. Discord로 결과 알림 (파일 내용을 직접 읽어서 발송)
+      # 3. Discord로 결과 알림 (env 설정 추가)
       - name: Send Discord notification
         if: always()
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
         run: |
-          python - << 'EOF'
+          python -c "
           import os, requests
-          # 필요한 경우 여기서 result.txt나 json 파일을 읽어 메시지를 보낼 수 있습니다.
-          payload = {"content": f"<@{os.environ['DISCORD_USER_ID']}> 🤖 투자 엔진 가동 및 데이터 동기화 완료."}
-          requests.post(os.environ['DISCORD_WEBHOOK'], json=payload)
-          EOF
+          webhook = os.environ.get('DISCORD_WEBHOOK')
+          user_id = os.environ.get('DISCORD_USER_ID')
+          content = f'<@{user_id}> 🤖 투자 엔진 가동 및 데이터 동기화 완료.'
+          requests.post(webhook, json={'content': content})
+          "
