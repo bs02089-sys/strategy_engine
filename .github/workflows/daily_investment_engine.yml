@@ -11,6 +11,9 @@ permissions:
 jobs:
   run-investment-engine:
     runs-on: ubuntu-latest
+    env:
+      DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+      DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -22,34 +25,41 @@ jobs:
       
       - run: pip install yfinance pandas requests numpy pytz holidays
       
-      # 1. 스크립트 실행
-      - name: Run scripts
+      # [핵심] 스크립트를 실행하면서 결과를 log.txt에 저장합니다.
+      - name: Run and Capture
         run: |
-          python bear_market_signals.py
-          python sigma_DCA_manager.py
+          {
+            python bear_market_signals.py
+            python sigma_DCA_manager.py
+          } > full_log.txt 2>&1
       
-      # 2. 결과 파일들을 깃허브로 동기화(Push)
-      - name: Sync results to GitHub
+      # 깃허브 동기화
+      - name: Sync results
         run: |
           git config --global user.name "Automated Bot"
           git config --global user.email "bot@example.com"
           git add .
           if ! git diff --cached --quiet; then
-            git commit -m "chore: sync investment data $(date -u +'%Y-%m-%d %H:%M UTC')"
+            git commit -m "sync: $(date +'%Y-%m-%d')"
             git push
           fi
           
-      # 3. Discord로 결과 알림 (env 설정 추가)
+      # [핵심] 저장된 log.txt를 읽어서 Discord로 쏩니다.
       - name: Send Discord notification
         if: always()
-        env:
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-          DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
         run: |
           python -c "
           import os, requests
-          webhook = os.environ.get('DISCORD_WEBHOOK')
-          user_id = os.environ.get('DISCORD_USER_ID')
-          content = f'<@{user_id}> 🤖 투자 엔진 가동 및 데이터 동기화 완료.'
-          requests.post(webhook, json={'content': content})
+          
+          # 로그 파일 전체 읽기
+          with open('full_log.txt', 'r', encoding='utf-8') as f:
+              log_content = f.read()
+          
+          # Discord는 메시지 2000자 제한이 있으므로 뒷부분만 추출
+          message = log_content[-1900:]
+          
+          payload = {
+              'content': f'<@{os.environ[\"DISCORD_USER_ID\"]}>\n```\n{message}\n```'
+          }
+          requests.post(os.environ['DISCORD_WEBHOOK'], json=payload)
           "
