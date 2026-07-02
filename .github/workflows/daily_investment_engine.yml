@@ -51,7 +51,7 @@ jobs:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
         run: |
-          python -c "
+          cat << 'EOF' > notify.py
           import os, requests
           
           webhook = os.environ.get('DISCORD_WEBHOOK')
@@ -64,6 +64,5 @@ jobs:
               start_marker = '종합 리포트'
               if start_marker in log_content:
                   clean_content = log_content.split(start_marker)[1].strip()
-                  # 안전하게 문자열 연결
                   header = f'<@{user_id}> 📊 **투자 엔진 상세 리포트**'
                   body = '
