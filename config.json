@@ -35,7 +35,7 @@
         "IONQ": {
             "LOOKBACK_DAYS": 126,
             "ENTRY_MULTIPLIER": 1.0,
-            "DAILY_SIGMA": 0.0620,
+            "DAILY_SIGMA": 0.062,
             "LAST_SIGMA_UPDATE": "2026-07-02"
         }
     },
