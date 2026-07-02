@@ -47,29 +47,30 @@ jobs:
       # 3. Discord로 결과 알림 (요약 표 + 상세 내역 포함)
       - name: Send Discord notification
         if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const webhook = process.env.DISCORD_WEBHOOK;
+            const userId = process.env.DISCORD_USER_ID;
+            
+            try {
+                const logData = fs.readFileSync('full_log.txt', 'utf8');
+                const target = '종합 리포트';
+                const msg = logData.includes(target) ? target + logData.split(target)[1] : logData;
+                
+                const payload = {
+                    content: `<@${userId}>\n📊 **투자 엔진 리포트**\n\`\`\`\n${msg.slice(-1800)}\n\`\`\``
+                };
+                
+                await fetch(webhook, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+            } catch (error) {
+                console.error('전송 실패:', error);
+            }
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
-        run: |
-          python -c "
-          import os, requests
-          
-          webhook = os.environ.get('DISCORD_WEBHOOK')
-          user_id = os.environ.get('DISCORD_USER_ID')
-          
-          # 로그 파일을 읽어옵니다. 없으면 빈 문자열 반환
-          try:
-              with open('full_log.txt', 'r', encoding='utf-8') as f:
-                  log_data = f.read()
-          except:
-              log_data = '로그 파일을 찾을 수 없습니다.'
-          
-          # '종합 리포트'가 있는 위치부터 끝까지 자릅니다.
-          target = '종합 리포트'
-          if target in log_data:
-              msg = target + log_data.split(target)[1]
-          else:
-              msg = log_data
-          
-          # 메시지 완성
-          final_msg = f'<@{user_id}>\n📊 **투자 엔진 리포트**\n
