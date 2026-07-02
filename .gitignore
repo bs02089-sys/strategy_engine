@@ -11,6 +11,7 @@ __pycache__/
 env/
 venv/
 .venv/
+*_log.txt
 
 # 환경설정 파일 (민감 정보 보호)
 .env
