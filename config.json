@@ -26,11 +26,11 @@
             "DAILY_SIGMA": 0.0516,
             "LAST_SIGMA_UPDATE": "2026-06-21"
         },
-        "TQQQ": {
+        "SOXL": {
             "LOOKBACK_DAYS": 63,
-            "ENTRY_MULTIPLIER": 1.07,
-            "DAILY_SIGMA": 0.0438,
-            "LAST_SIGMA_UPDATE": "2026-06-21"
+            "ENTRY_MULTIPLIER": 1.41,
+            "DAILY_SIGMA": 0.1079,
+            "LAST_SIGMA_UPDATE": "2026-07-02"
         }
     },
     "STRATEGY": {

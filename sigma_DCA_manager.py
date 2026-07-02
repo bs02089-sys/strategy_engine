@@ -29,7 +29,7 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     getattr(sys.stderr, "reconfigure")(encoding="utf-8")
     
-TARGET_TICKERS         = ["SOXX", "AIPO", "QNDX", "NVDX", "TQQQ"]
+TARGET_TICKERS         = ["SOXX", "AIPO", "QNDX", "NVDX", "SOXL"]
 CONFIG_PATH            = "config.json"
 _DISCORD_TITLE_LIMIT   = 256
 _DISCORD_CONTENT_LIMIT = 4096
