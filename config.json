@@ -29,7 +29,7 @@
     "SOXL": {
       "LOOKBACK_DAYS": 63,
       "ENTRY_MULTIPLIER": 1.41,
-      "DAILY_SIGMA": 0.1079,
+      "DAILY_SIGMA": 0.1073,
       "LAST_SIGMA_UPDATE": "2026-07-02"
     }
   },
@@ -49,9 +49,9 @@
       "AI Infrastructure",
       "semiconductor stock",
       "NVDA",
-      "SOXL ETF",
-      "AIPO ETF",
       "NVDX ETF",
+      "SOXX ETF",
+      "SOXL ETF",
       "TSLA stock",
       "IONQ stock"
     ],
