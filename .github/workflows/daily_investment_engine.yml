@@ -44,7 +44,7 @@ jobs:
             git push
           fi
           
-      # Discord로 결과 알림 (안전한 파이썬 스크립트 실행)
+      # 3. Discord로 결과 알림 (요약 표 + 상세 내역 포함)
       - name: Send Discord notification
         if: always()
         env:
@@ -52,23 +52,20 @@ jobs:
           DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
         run: |
           python - << 'EOF'
-          import os
-          import requests
+          import os, requests
           
           webhook = os.environ.get('DISCORD_WEBHOOK')
           user_id = os.environ.get('DISCORD_USER_ID')
           
-          # full_log.txt 읽기 (없을 경우 대비)
           try:
               with open('full_log.txt', 'r', encoding='utf-8') as f:
                   log_content = f.read()
-          except FileNotFoundError:
-              log_content = "로그 파일을 찾을 수 없습니다."
-          
-          # 메시지 구성
-          message = log_content[-1800:] # 내용 제한
-          content = f"<@{user_id}>\n```\n{message}\n```"
-          
-          # 전송
-          requests.post(webhook, json={"content": content})
-          EOF
+              
+              start_marker = "종합 리포트"
+              if start_marker in log_content:
+                  # 상세 내용을 추출하고 깔끔하게 정리
+                  clean_content = log_content.split(start_marker)[1].strip()
+                  
+                  # 메시지 본문을 구성합니다
+                  header = f"<@{user_id}> 📊 **투자 엔진 상세 리포트**"
+                  body = f"
