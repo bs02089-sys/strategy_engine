@@ -31,16 +31,13 @@
             "ENTRY_MULTIPLIER": 1.41,
             "DAILY_SIGMA": 0.1073,
             "LAST_SIGMA_UPDATE": "2026-07-02"
-<<<<<<< HEAD
-        }
-=======
         },
         "IONQ": {
             "LOOKBACK_DAYS": 126,
             "ENTRY_MULTIPLIER": 1.0,
             "DAILY_SIGMA": 0.0620,
             "LAST_SIGMA_UPDATE": "2026-07-02"
->>>>>>> a534002 (코드 수정)
+        }
     },
     "STRATEGY": {
         "CYCLE_YEARS": 2,
