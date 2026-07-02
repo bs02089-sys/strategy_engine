@@ -51,18 +51,25 @@ jobs:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
         run: |
-          cat << 'EOF' > notify.py
+          python -c "
           import os, requests
           
           webhook = os.environ.get('DISCORD_WEBHOOK')
           user_id = os.environ.get('DISCORD_USER_ID')
           
+          # 로그 파일을 읽어옵니다. 없으면 빈 문자열 반환
           try:
               with open('full_log.txt', 'r', encoding='utf-8') as f:
-                  log_content = f.read()
-              
-              start_marker = '종합 리포트'
-              if start_marker in log_content:
-                  clean_content = log_content.split(start_marker)[1].strip()
-                  header = f'<@{user_id}> 📊 **투자 엔진 상세 리포트**'
-                  body = '
+                  log_data = f.read()
+          except:
+              log_data = '로그 파일을 찾을 수 없습니다.'
+          
+          # '종합 리포트'가 있는 위치부터 끝까지 자릅니다.
+          target = '종합 리포트'
+          if target in log_data:
+              msg = target + log_data.split(target)[1]
+          else:
+              msg = log_data
+          
+          # 메시지 완성
+          final_msg = f'<@{user_id}>\n📊 **투자 엔진 리포트**\n
