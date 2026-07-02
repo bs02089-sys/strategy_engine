@@ -1,68 +1,51 @@
-name: 매일 투자 엔진 (신호 및 매매 관리)
+name: 매일 투자 엔진
 
 on:
   schedule:
-    - cron: "0 23 * * 1-5" # KST 08:00
+    - cron: "0 23 * * 1-5"
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: write  # 깃허브에 파일을 저장(Push)하려면 이 권한이 필수입니다.
 
 jobs:
   run-investment-engine:
     runs-on: ubuntu-latest
-    env:
-      DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-      DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
-      PYTHONIOENCODING: utf-8
-    
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
-          token: ${{ github.token }}
+          token: ${{ github.token }} # 동기화를 위해 토큰 필요
 
-      - name: Set up Python 3.12
+      - name: Set up Python
         uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Install dependencies
+        with: {python-version: '3.12'}
+      
+      - run: pip install yfinance pandas requests numpy pytz holidays
+      
+      # 1. 스크립트 실행 (파일이 생성됨)
+      - name: Run scripts
         run: |
-          python -m pip install --upgrade pip
-          pip install yfinance pandas requests numpy pytz holidays
-
-      # 1단계: 신호 생성기 실행
-      - name: Run bear market signals
-        run: python bear_market_signals.py
-
-      # 2단계: 매매 매니저 실행
-      - name: Run sigma_DCA_manager
-        run: |
-          for i in {1..3}; do
-            python sigma_DCA_manager.py && break || echo "Retry $i failed..." && sleep 10
-          done
-
-      # 3단계: 결과 Git 반영
-      - name: Commit and push changes
+          python bear_market_signals.py
+          python sigma_DCA_manager.py
+      
+      # 2. 결과 파일들을 깃허브로 동기화(Push)
+      - name: Sync results to GitHub
         run: |
           git config --global user.name "Automated Bot"
           git config --global user.email "bot@example.com"
           git add .
           if ! git diff --cached --quiet; then
-            git commit -m "chore: update investment data $(date -u +'%Y-%m-%d %H:%M UTC')"
+            git commit -m "chore: sync investment data $(date -u +'%Y-%m-%d %H:%M UTC')"
             git push
           fi
-
-      # 4단계: Discord 알림
+          
+      # 3. Discord로 결과 알림 (파일 내용을 직접 읽어서 발송)
       - name: Send Discord notification
         if: always()
         run: |
-          python - << 'PYEOF'
-          import os, json, requests
-          webhook_url = os.environ["DISCORD_WEBHOOK"]
-          user_id = os.environ["DISCORD_USER_ID"]
-          
-          payload = {"content": f"<@{user_id}> 🤖 매일 투자 엔진 가동 완료. 신호 및 매매 가격 연산이 종료되었습니다."}
-          requests.post(webhook_url, json=payload, timeout=15)
-          PYEOF
+          python - << 'EOF'
+          import os, requests
+          # 필요한 경우 여기서 result.txt나 json 파일을 읽어 메시지를 보낼 수 있습니다.
+          payload = {"content": f"<@{os.environ['DISCORD_USER_ID']}> 🤖 투자 엔진 가동 및 데이터 동기화 완료."}
+          requests.post(os.environ['DISCORD_WEBHOOK'], json=payload)
+          EOF
