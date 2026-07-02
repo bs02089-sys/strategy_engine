@@ -25,13 +25,16 @@ jobs:
       
       - run: pip install yfinance pandas requests numpy pytz holidays
       
-      # [핵심] 스크립트를 실행하면서 결과를 log.txt에 저장합니다.
+      # [핵심] 두 스크립트의 출력을 각각 별도 파일에 저장합니다.
+      # (한 파일에 이어 붙이면 "종합 리포트" 이후 텍스트를 자를 때
+      #  뒤에 실행되는 sigma_DCA_manager.py의 로그까지 함께 잘려서 나옵니다.)
       - name: Run and Capture
         run: |
-          {
-            python bear_market_signals.py
-            python sigma_DCA_manager.py
-          } > full_log.txt 2>&1
+          python bear_market_signals.py > bear_log.txt 2>&1
+          cat bear_log.txt
+          python sigma_DCA_manager.py > sigma_log.txt 2>&1
+          cat sigma_log.txt
+          cat bear_log.txt sigma_log.txt > full_log.txt
       
       # 깃허브 동기화
       - name: Sync results
@@ -55,7 +58,9 @@ jobs:
             const userId = process.env.DISCORD_USER_ID;
             
             try {
-                const logData = fs.readFileSync('full_log.txt', 'utf8');
+                // "종합 리포트"는 bear_market_signals.py 로그에만 있으므로
+                // 해당 로그에서만 잘라내어 sigma_DCA_manager.py 출력이 섞이지 않게 합니다.
+                const logData = fs.readFileSync('bear_log.txt', 'utf8');
                 const target = '종합 리포트';
                 const msg = logData.includes(target) ? target + logData.split(target)[1] : logData;
                 
