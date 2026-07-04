@@ -7,48 +7,60 @@
             "ENTRY_MULTIPLIER": 1.59,
             "VOL_METHOD": "EWMA",
             "EWMA_LAMBDA": 0.94,
-            "DAILY_SIGMA": 0.0257,
-            "LAST_SIGMA_UPDATE": "2026-07-02"
+            "DAILY_SIGMA": 0.0475,
+            "LAST_SIGMA_UPDATE": "2026-07-04",
+            "LAST_SIGMA_METHOD": "EWMA",
+            "LAST_EWMA_LAMBDA": 0.94
         },
         "AIPO": {
             "LOOKBACK_DAYS": 252,
             "ENTRY_MULTIPLIER": 1.5,
             "VOL_METHOD": "EWMA",
             "EWMA_LAMBDA": 0.94,
-            "DAILY_SIGMA": 0.0226,
-            "LAST_SIGMA_UPDATE": "2026-07-02"
+            "DAILY_SIGMA": 0.0293,
+            "LAST_SIGMA_UPDATE": "2026-07-04",
+            "LAST_SIGMA_METHOD": "EWMA",
+            "LAST_EWMA_LAMBDA": 0.94
         },
         "QNDX": {
             "LOOKBACK_DAYS": 252,
             "ENTRY_MULTIPLIER": 1.41,
             "VOL_METHOD": "EWMA",
             "EWMA_LAMBDA": 0.94,
-            "DAILY_SIGMA": 0.0115,
-            "LAST_SIGMA_UPDATE": "2026-07-02"
+            "DAILY_SIGMA": 0.0163,
+            "LAST_SIGMA_UPDATE": "2026-07-04",
+            "LAST_SIGMA_METHOD": "EWMA",
+            "LAST_EWMA_LAMBDA": 0.94
         },
         "NVDX": {
             "LOOKBACK_DAYS": 63,
             "ENTRY_MULTIPLIER": 1.41,
             "VOL_METHOD": "EWMA",
             "EWMA_LAMBDA": 0.94,
-            "DAILY_SIGMA": 0.0494,
-            "LAST_SIGMA_UPDATE": "2026-07-02"
+            "DAILY_SIGMA": 0.0492,
+            "LAST_SIGMA_UPDATE": "2026-07-04",
+            "LAST_SIGMA_METHOD": "EWMA",
+            "LAST_EWMA_LAMBDA": 0.94
         },
         "SOXL": {
             "LOOKBACK_DAYS": 63,
             "ENTRY_MULTIPLIER": 1.41,
             "VOL_METHOD": "EWMA",
             "EWMA_LAMBDA": 0.94,
-            "DAILY_SIGMA": 0.1073,
-            "LAST_SIGMA_UPDATE": "2026-07-02"
+            "DAILY_SIGMA": 0.1406,
+            "LAST_SIGMA_UPDATE": "2026-07-04",
+            "LAST_SIGMA_METHOD": "EWMA",
+            "LAST_EWMA_LAMBDA": 0.94
         },
         "IONQ": {
             "LOOKBACK_DAYS": 126,
             "ENTRY_MULTIPLIER": 1.41,
-            "DAILY_SIGMA": 0.062,
+            "DAILY_SIGMA": 0.0585,
             "VOL_METHOD": "EWMA",
             "EWMA_LAMBDA": 0.94,
-            "LAST_SIGMA_UPDATE": "2026-07-02"
+            "LAST_SIGMA_UPDATE": "2026-07-04",
+            "LAST_SIGMA_METHOD": "EWMA",
+            "LAST_EWMA_LAMBDA": 0.94
         }
     },
     "STRATEGY": {
