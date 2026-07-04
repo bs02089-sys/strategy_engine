@@ -81,15 +81,21 @@ def refresh_sigma_if_stale(cfg: dict) -> list[str]:
 
     for ticker, pos in positions_data.items():
         lookback_days = int(pos.get("LOOKBACK_DAYS", 252))
+        vol_method = str(pos.get("VOL_METHOD", "EWMA")).upper()
+        ewma_lambda = float(pos.get("EWMA_LAMBDA", 0.94))
         pos["LOOKBACK_DAYS"] = lookback_days
         pos.setdefault("ENTRY_MULTIPLIER", 1.41)
+        pos["VOL_METHOD"] = vol_method
+        pos["EWMA_LAMBDA"] = ewma_lambda
         
         last_str = pos.get("LAST_SIGMA_UPDATE", "2000-01-01")
         last_dt = datetime.strptime(last_str, "%Y-%m-%d").date()
         
         # 63 영업일 주기 체크 (달력상 약 90일 경과 시 갱신)
         days_passed = (today - last_dt).days
-        if "DAILY_SIGMA" in pos and days_passed < 90:
+        method_changed = pos.get("LAST_SIGMA_METHOD") != vol_method
+        lambda_changed = vol_method == "EWMA" and pos.get("LAST_EWMA_LAMBDA") != ewma_lambda
+        if "DAILY_SIGMA" in pos and days_passed < 90 and not method_changed and not lambda_changed:
             continue
 
         try:
@@ -97,18 +103,14 @@ def refresh_sigma_if_stale(cfg: dict) -> list[str]:
             hist = stock.history(period=f"{lookback_days + 30}d", interval="1d", auto_adjust=False)
             closes = hist['Close'].dropna()
             
-            # [수정] 타입 검사기의 ndarray 오판 우회를 위해 .dropna()와 .tail()을 
-            # 각각 Numpy 불리언 인덱싱과 슬라이싱 기법으로 변경하여 에러 밑줄을 제거합니다.
-            log_returns = np.log(closes / closes.shift(1))
-            log_returns_clean = log_returns[~np.isnan(log_returns)]
-            recent_returns = log_returns_clean[-lookback_days:]
-            
-            new_sigma = round(float(recent_returns.std(ddof=1)), 4)
+            new_sigma = round(_calculate_volatility_from_closes(closes, lookback_days, vol_method, ewma_lambda), 4)
             
             pos["DAILY_SIGMA"] = new_sigma
             pos["LAST_SIGMA_UPDATE"] = today.strftime("%Y-%m-%d")
+            pos["LAST_SIGMA_METHOD"] = vol_method
+            pos["LAST_EWMA_LAMBDA"] = ewma_lambda if vol_method == "EWMA" else None
             log_sigma_update(ticker, new_sigma)
-            messages.append(f"📊 {ticker} 자동 갱신 [{lookback_days}일]: {new_sigma:.4f}")
+            messages.append(f"📊 {ticker} 자동 갱신 [{lookback_days}일/{vol_method}]: {new_sigma:.4f}")
         except Exception as e:
             messages.append(f"⚠️ {ticker} 갱신 오류: {e}")
     return messages
@@ -126,6 +128,45 @@ def _safe_float(val) -> float | None:
         return None if (np.isnan(f) or np.isinf(f)) else f
     except (TypeError, ValueError):
         return None
+
+
+def _get_recent_log_returns(closes, lookback_days: int):
+    log_returns = np.log(closes / closes.shift(1))
+    log_returns_clean = log_returns[~np.isnan(log_returns)]
+    return log_returns_clean[-lookback_days:]
+
+
+def _calculate_sigma_from_closes(closes, lookback_days: int) -> float:
+    recent_returns = _get_recent_log_returns(closes, lookback_days)
+    return float(recent_returns.std(ddof=1))
+
+
+def _calculate_ewma_sigma_from_closes(closes, lookback_days: int, ewma_lambda: float) -> float:
+    if not 0 < ewma_lambda < 1:
+        raise ValueError(f"EWMA_LAMBDA는 0과 1 사이여야 합니다: {ewma_lambda}")
+
+    recent_returns = _get_recent_log_returns(closes, lookback_days)
+    if len(recent_returns) < 2:
+        raise ValueError("EWMA 계산에 필요한 로그 수익률 데이터가 부족합니다.")
+
+    variance = float(recent_returns.var(ddof=1))
+    for r in recent_returns:
+        variance = ewma_lambda * variance + (1 - ewma_lambda) * float(r) ** 2
+    return float(np.sqrt(variance))
+
+
+def _calculate_volatility_from_closes(closes, lookback_days: int, vol_method: str, ewma_lambda: float) -> float:
+    method = vol_method.upper()
+    if method == "EWMA":
+        return _calculate_ewma_sigma_from_closes(closes, lookback_days, ewma_lambda)
+    if method in {"STD", "HISTORICAL", "SIMPLE"}:
+        return _calculate_sigma_from_closes(closes, lookback_days)
+    raise ValueError(f"지원하지 않는 VOL_METHOD입니다: {vol_method}")
+
+
+def _calculate_loc_from_sigma(prev_close: float, sigma: float, multiplier: float) -> float:
+    target_drop_rate = sigma * multiplier
+    return round(prev_close * (1 - target_drop_rate), 2)
     
 def get_prev_trading_date(d: date) -> date:
     """주말을 제외하고 직전 거래일 날짜를 계산하는 헬퍼 함수"""
@@ -193,12 +234,13 @@ def get_prev_close(ticker: str) -> tuple[float | None, str]:
     return None, "N/A"
 
 
-def get_realtime_sigma(ticker: str, lookback_days: int) -> float:
+def get_realtime_sigma(ticker: str, lookback_days: int, vol_method: str = "EWMA", ewma_lambda: float = 0.94) -> float:
     """
     yfinance를 활용해 실시간으로 종목의 로그 수익률 표준편차(Sigma)를 계산하는 함수.
     네트워크 오류 및 API 제한에 대응하기 위해 3회 재시도(Retry) 루프를 포함합니다.
     """
-    print(f"📊 {ticker} 실시간 시그마(Sigma) 계산 시작 (룩백: {lookback_days}일)...")
+    vol_method = vol_method.upper()
+    print(f"📊 {ticker} 실시간 시그마(Sigma) 계산 시작 (룩백: {lookback_days}일/{vol_method})...")
     
     for attempt in range(1, 4):
         try:
@@ -214,16 +256,8 @@ def get_realtime_sigma(ticker: str, lookback_days: int) -> float:
             if len(closes) < lookback_days:
                 raise ValueError(f"유효 종가 데이터 일수({len(closes)}일)가 요구되는 룩백 일수({lookback_days}일)보다 부족합니다.")
                 
-            # 로그 수익률 계산 및 지정된 룩백 영업일 데이터 추출
-            # 정적 타입 검사기가 np.log() 반환값을 ndarray로 인식해 .dropna()와 .tail()에서
-            # 붉은 밑줄을 긋는 현상을 방지하기 위해 표준 슬라이싱 및 Numpy 인덱싱을 적용합니다.
-            log_returns = np.log(closes / closes.shift(1))
-            log_returns_clean = log_returns[~np.isnan(log_returns)]
-            recent_returns = log_returns_clean[-lookback_days:]
-            
             # 표준편차(Sigma) 산출
-            sigma = np.std(recent_returns, ddof=1)
-            new_sigma = float(sigma)
+            new_sigma = _calculate_volatility_from_closes(closes, lookback_days, vol_method, ewma_lambda)
             
             print(f"✅ {ticker} 실시간 시그마 산출 성공: {new_sigma:.4f}")
             return new_sigma
@@ -247,20 +281,19 @@ def calculate_loc_price(ticker: str, prev_close: float, cfg: dict) -> float:
     pos_cfg = cfg.setdefault("POSITIONS", {}).setdefault(ticker, {})
     multiplier = pos_cfg.get("ENTRY_MULTIPLIER", 1.41)
     sigma = pos_cfg.get("DAILY_SIGMA")
+    lookback_days = int(pos_cfg.get("LOOKBACK_DAYS", 252))
+    vol_method = str(pos_cfg.get("VOL_METHOD", "EWMA")).upper()
+    ewma_lambda = float(pos_cfg.get("EWMA_LAMBDA", 0.94))
 
     # 설정값이 있으면 즉시 사용
     if sigma is not None:
-        target_drop_rate = sigma * multiplier
-        loc_price = prev_close * (1 - target_drop_rate)
-        return round(loc_price, 2)
+        return _calculate_loc_from_sigma(prev_close, sigma, multiplier)
 
     # 없으면 위에서 정의한 get_realtime_sigma를 호출
     print(f"  ⚠️ {ticker} 설정값 없음 → 실시간 계산 실행")
-    sigma = get_realtime_sigma(ticker, pos_cfg.get("LOOKBACK_DAYS", 252))
+    sigma = get_realtime_sigma(ticker, lookback_days, vol_method, ewma_lambda)
     
-    target_drop_rate = sigma * multiplier
-    loc_price = prev_close * (1 - target_drop_rate)
-    return round(loc_price, 2)
+    return _calculate_loc_from_sigma(prev_close, sigma, multiplier)
 
 
 def get_market_score(filepath="signal_report.json"):
