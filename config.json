@@ -1,67 +1,67 @@
 {
-  "DISCORD_WEBHOOK": "",
-  "DISCORD_USER_ID": "",
-  "POSITIONS": {
-    "SOXX": {
-      "LOOKBACK_DAYS": 252,
-      "ENTRY_MULTIPLIER": 1.59,
-      "DAILY_SIGMA": 0.0257,
-      "LAST_SIGMA_UPDATE": "2026-07-02"
+    "DISCORD_WEBHOOK": "",
+    "DISCORD_USER_ID": "",
+    "POSITIONS": {
+        "SOXX": {
+            "LOOKBACK_DAYS": 252,
+            "ENTRY_MULTIPLIER": 1.59,
+            "DAILY_SIGMA": 0.0257,
+            "LAST_SIGMA_UPDATE": "2026-07-02"
+        },
+        "AIPO": {
+            "LOOKBACK_DAYS": 252,
+            "ENTRY_MULTIPLIER": 1.5,
+            "DAILY_SIGMA": 0.0226,
+            "LAST_SIGMA_UPDATE": "2026-07-02"
+        },
+        "QNDX": {
+            "LOOKBACK_DAYS": 252,
+            "ENTRY_MULTIPLIER": 1.41,
+            "DAILY_SIGMA": 0.0115,
+            "LAST_SIGMA_UPDATE": "2026-07-02"
+        },
+        "NVDX": {
+            "LOOKBACK_DAYS": 63,
+            "ENTRY_MULTIPLIER": 1.41,
+            "DAILY_SIGMA": 0.0494,
+            "LAST_SIGMA_UPDATE": "2026-07-02"
+        },
+        "SOXL": {
+            "LOOKBACK_DAYS": 63,
+            "ENTRY_MULTIPLIER": 1.41,
+            "DAILY_SIGMA": 0.1073,
+            "LAST_SIGMA_UPDATE": "2026-07-02"
+        },
+        "IONQ": {
+            "LOOKBACK_DAYS": 126,
+            "ENTRY_MULTIPLIER": 1.41,
+            "DAILY_SIGMA": 0.062,
+            "LAST_SIGMA_UPDATE": "2026-07-02"
+        }
     },
-    "AIPO": {
-      "LOOKBACK_DAYS": 252,
-      "ENTRY_MULTIPLIER": 1.5,
-      "DAILY_SIGMA": 0.0226,
-      "LAST_SIGMA_UPDATE": "2026-07-02"
+    "STRATEGY": {
+        "CYCLE_YEARS": 2,
+        "BUY_DURATION_DAYS": 252,
+        "HOLD_DURATION_DAYS": 252,
+        "DEFAULT_LOOKBACK_DAYS": 365
     },
-    "QNDX": {
-      "LOOKBACK_DAYS": 252,
-      "ENTRY_MULTIPLIER": 1.41,
-      "DAILY_SIGMA": 0.0115,
-      "LAST_SIGMA_UPDATE": "2026-07-02"
+    "exchange_status": {
+        "LAST_CHECK_DATE": "2026-07-03 06:34:41 UTC",
+        "CURRENT_APPLIED_RATE": 1526.68,
+        "CURRENT_PERCENTILE": 94.6
     },
-    "NVDX": {
-      "LOOKBACK_DAYS": 63,
-      "ENTRY_MULTIPLIER": 1.41,
-      "DAILY_SIGMA": 0.0494,
-      "LAST_SIGMA_UPDATE": "2026-07-02"
+    "news_settings": {
+        "KEYWORDS": [
+            "AI Infrastructure",
+            "semiconductor stock",
+            "NVDA",
+            "NVDX ETF",
+            "SOXX ETF",
+            "SOXL ETF",
+            "TSLA stock",
+            "IONQ stock"
+        ],
+        "MAX_NEWS_PER_KEYWORD": 5
     },
-    "SOXL": {
-      "LOOKBACK_DAYS": 63,
-      "ENTRY_MULTIPLIER": 1.41,
-      "DAILY_SIGMA": 0.1073,
-      "LAST_SIGMA_UPDATE": "2026-07-02"
-    },
-    "IONQ": {
-      "LOOKBACK_DAYS": 126,
-      "ENTRY_MULTIPLIER": 1.41,
-      "DAILY_SIGMA": 0.062,
-      "LAST_SIGMA_UPDATE": "2026-07-02"
-    }
-  },
-  "STRATEGY": {
-    "CYCLE_YEARS": 2,
-    "BUY_DURATION_DAYS": 252,
-    "HOLD_DURATION_DAYS": 252,
-    "DEFAULT_LOOKBACK_DAYS": 365
-  },
-  "exchange_status": {
-    "LAST_CHECK_DATE": "2026-07-03 06:34:41 UTC",
-    "CURRENT_APPLIED_RATE": 1526.68,
-    "CURRENT_PERCENTILE": 94.6
-  },
-  "news_settings": {
-    "KEYWORDS": [
-      "AI Infrastructure",
-      "semiconductor stock",
-      "NVDA",
-      "NVDX ETF",
-      "SOXX ETF",
-      "SOXL ETF",
-      "TSLA stock",
-      "IONQ stock"
-    ],
-    "MAX_NEWS_PER_KEYWORD": 5
-  },
-  "LAST_MONTHLY_PING": "2026-07"
+    "LAST_MONTHLY_PING": "2026-07"
 }
