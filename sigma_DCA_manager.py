@@ -317,71 +317,51 @@ def calculate_final_loc(base_price: float) -> float:
     return base_price * discount
 
 
-def run_integrated_system(ticker: str, cfg: dict):
-    """수집 엔진과 연산 엔진을 유기적으로 제어하는 메인 실행 함수"""
-    print("=" * 60)
-    print(f"📡 {ticker} 통합 LOC 연산 시스템 가동")
-    
-    # 설정값 로드
-    pos_cfg = cfg.get("POSITIONS", {}).get(ticker, {})
-    lookback = pos_cfg.get("LOOKBACK_DAYS", 252)
-    print(f"⚙️ 전략: {lookback}일 룩백 기준 (배수: {pos_cfg.get('ENTRY_MULTIPLIER', 1.41)})")
-    print("-" * 60)
-    
-    # Step 1: 전일 종가 자동 수집
-    prev_close, trading_date = get_prev_close(ticker)
-    if prev_close is None or prev_close <= 0:
-        print(f"🚨 {ticker} 가격 데이터 수집 실패: ${prev_close}")
-        print("=" * 60)
-        return
-
-    print(f"✅ 전일 종가 수집 성공: ${prev_close:.2f} (거래일: {trading_date})")
-    
-    # Step 2: 시장 위험 점수 확인
-    market_score = get_market_score()
-    print(f"📊 현재 시장 위험 점수: {market_score}/14")
-    
-    # Step 3: 목표 LOC 가격 자동 연산 및 위험 점수 보정
-    try:
-        base_loc = calculate_loc_price(ticker, prev_close, cfg)
-        final_loc = calculate_final_loc(base_loc) # 시장 상황 반영 보정
-        
-        print("-" * 60)
-        if base_loc != final_loc:
-            print(f"⚠️ 시장 위험 반영: 기본값 ${base_loc:.2f} → 최종가 ${final_loc:.2f}")
-        print(f"🎯 오늘 밤 {ticker} LOC 매수 지정가: ${final_loc:.2f}")
-        print("=" * 60)
-        
-    except Exception as e:
-        print(f"🚨 통계 연산 중 오류 발생: {e}")
-        print("=" * 60)
-
-
 # ==============================================================================
 # 빅테크 CAPEX 및 기술 지표 참/거짓(True/False) 연산 엔진
 # ==============================================================================
 
-def check_macro_and_technical_signals(ticker: str) -> tuple[bool, bool, str]:
+def get_current_vix() -> float | None:
+    try:
+        vix_hist = yf.Ticker("^VIX").history(period="5d", interval="1d")
+        if vix_hist.empty:
+            return None
+        vix_closes = vix_hist['Close'].dropna()
+        if vix_closes.empty:
+            return None
+        return float(vix_closes.iloc[-1])
+    except Exception:
+        return None
+
+
+def check_macro_and_technical_signals(ticker: str, pos_cfg: dict, current_vix: float | None) -> tuple[bool, bool, str]:
     """
-    날짜 계산 없이 오직 주가 추세와 VIX 지수만 보고 매수/매도 참(True)/거짓(False)을 판정합니다.
+    설정된 투자 유형, 주가 추세, VIX 지수로 매수/매도 참(True)/거짓(False)을 판정합니다.
     """
+    if current_vix is None:
+        return False, False, "VIX 데이터 수집 지연 (관망)"
+
     try:
         stock = yf.Ticker(ticker)
-        hist = stock.history(period="60d", interval="1d", auto_adjust=False)
-        vix_hist = yf.Ticker("^VIX").history(period="5d", interval="1d")
+        hist = stock.history(period="120d", interval="1d", auto_adjust=False)
         
-        if hist.empty or vix_hist.empty:
-            return False, False, "데이터 수집 지연 (관망)"
+        if hist.empty:
+            return False, False, "주가 데이터 수집 지연 (관망)"
+
+        closes = hist['Close'].dropna()
+        if len(closes) < 60:
+            return False, False, f"60일 추세 데이터 부족 ({len(closes)}일)"
             
-        current_price = float(hist['Close'].iloc[-1])
-        ma20 = float(hist['Close'].rolling(window=20).mean().iloc[-1])
-        ma60 = float(hist['Close'].rolling(window=60).mean().iloc[-1])
-        current_vix = float(vix_hist['Close'].iloc[-1])
+        current_price = float(closes.iloc[-1])
+        ma20 = float(closes.rolling(window=20).mean().iloc[-1])
+        ma60 = float(closes.rolling(window=60).mean().iloc[-1])
     except Exception as e:
         return False, False, f"API 지연 ({e})"
 
-    # 1. 단기 모멘텀 자산 (SOXL, NVDX, IONQ) -> 정배열일 때만 안전하게 LOC 오픈
-    if ticker in ["SOXL", "NVDX", "IONQ"]:
+    invest_type = str(pos_cfg.get("INVEST_TYPE", "")).upper()
+
+    # 1. 단기 모멘텀/기한형 자산 -> 정배열일 때만 안전하게 LOC 오픈
+    if invest_type in {"ROTATION_3M", "END_DEC"}:
         buy_signal = bool(current_price > ma20 and current_price > ma60 and current_vix < 20)
         sell_signal = bool(current_price < ma60 or current_vix > 25)
         reason = f"정배열 추세 구간 (VIX: {current_vix:.1f})" if buy_signal else "추세 혼조 또는 리스크 관리 구간"
@@ -393,6 +373,23 @@ def check_macro_and_technical_signals(ticker: str) -> tuple[bool, bool, str]:
         reason = "AI 인프라 사이클 유효" if buy_signal else "글로벌 매크로 위험 경계"
 
     return buy_signal, sell_signal, reason
+
+
+def format_position_meta(pos_cfg: dict, today: date) -> str:
+    parts = []
+    invest_type = pos_cfg.get("INVEST_TYPE")
+    if invest_type:
+        parts.append(str(invest_type))
+
+    start_str = pos_cfg.get("START_DATE")
+    if start_str:
+        try:
+            start_date = datetime.strptime(start_str, "%Y-%m-%d").date()
+            parts.append(f"D+{max((today - start_date).days, 0)}")
+        except ValueError:
+            parts.append(f"START_DATE 오류: {start_str}")
+
+    return f" | {' / '.join(parts)}" if parts else ""
 
 
 # ═══════════════════════════════════════════════════════════
@@ -452,6 +449,7 @@ def send_monthly_ping_if_due(cfg: dict, webhook: str, user_id: str) -> None:
 # ═══════════════════════════════════════════════════════════
 def _build_briefing_lines(now_ny: datetime, cfg: dict, sigma_messages: list[str]) -> list[str]:
     lines = [f"🌙 **미국 증시 LOC 포트폴리오 브리핑** ({now_ny.strftime('%Y-%m-%d %H:%M %Z')})"]
+    today_ny = now_ny.date()
     
     # 위험 스코어 연동 (있으면 표기, 없으면 패스)
     market_score = get_market_score()
@@ -459,17 +457,19 @@ def _build_briefing_lines(now_ny: datetime, cfg: dict, sigma_messages: list[str]
     lines.append("─" * 40)
 
     positions = cfg.get("POSITIONS", {})
+    current_vix = get_current_vix()
 
-    for ticker in positions.keys():
+    for ticker, pos_cfg in positions.items():
         # 복잡한 날짜 배제하고 순수 시그널만 조회
-        buy_sig, sell_sig, reason = check_macro_and_technical_signals(ticker)
+        buy_sig, sell_sig, reason = check_macro_and_technical_signals(ticker, pos_cfg, current_vix)
         
         prev_close, last_date_str = get_prev_close(ticker)
         if prev_close is None:
             lines.append(f"\n🔹 **{ticker}** — 주가 조회 실패 ⚠️")
             continue
 
-        lines.append(f"\n🔹 **{ticker}** (종가: ${prev_close:.2f} | {last_date_str})")
+        position_meta = format_position_meta(pos_cfg, today_ny)
+        lines.append(f"\n🔹 **{ticker}** (종가: ${prev_close:.2f} | {last_date_str}{position_meta})")
         lines.append(f"• **시그널:** 매수[{buy_sig}] / 매도[{sell_sig}] | {reason}")
 
         # 조건 만족 시 기계적으로 걸어둘 LOC 가격 산출
