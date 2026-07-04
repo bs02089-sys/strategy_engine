@@ -392,6 +392,15 @@ def format_position_meta(pos_cfg: dict, today: date) -> str:
     return f" | {' / '.join(parts)}" if parts else ""
 
 
+def _format_loc_action_line(ticker: str, prev_close: float, cfg: dict) -> str:
+    base_loc = calculate_loc_price(ticker, prev_close, cfg)
+    final_loc = calculate_final_loc(base_loc)
+
+    if base_loc != final_loc:
+        return f"• 🎯 **[액션] LOC 매수 걸어두기:** ~~${base_loc:.2f}~~ ➡️ **${final_loc:.2f}** (위험 할인가)"
+    return f"• 🎯 **[액션] LOC 매수 걸어두기:** **${final_loc:.2f}**"
+
+
 # ═══════════════════════════════════════════════════════════
 # 디스코드 전송 엔진 
 # ═══════════════════════════════════════════════════════════
@@ -474,17 +483,18 @@ def _build_briefing_lines(now_ny: datetime, cfg: dict, sigma_messages: list[str]
 
         # 조건 만족 시 기계적으로 걸어둘 LOC 가격 산출
         if sell_sig is True:
-            lines.append(f"• 🚨 **[액션] 위험 매도!** 종가 대피 권장 (LOC 매도가: ${prev_close:.2f})")
-        elif buy_sig is True:
-            base_loc = calculate_loc_price(ticker, prev_close, cfg)
-            final_loc = calculate_final_loc(base_loc) # 리스크 점수 보정 적용
-            
-            if base_loc != final_loc:
-                lines.append(f"• 🎯 **[액션] LOC 매수 걸어두기:** ~~${base_loc:.2f}~~ ➡️ **${final_loc:.2f}** (위험 할인가)")
+            invest_type = str(pos_cfg.get("INVEST_TYPE", "")).upper()
+            if invest_type in {"ROTATION_3M", "END_DEC"}:
+                lines.append("• 🚨 **[경고] 위험 구간 — 매도보다 신규 LOC 기준을 보수적으로 확인**")
+                lines.append(_format_loc_action_line(ticker, prev_close, cfg))
             else:
-                lines.append(f"• 🎯 **[액션] LOC 매수 걸어두기:** **${final_loc:.2f}**")
+                lines.append("• 🚨 **[경고] 위험 구간 — LOC 체결 가능성을 보수적으로 점검**")
+                lines.append(_format_loc_action_line(ticker, prev_close, cfg))
+        elif buy_sig is True:
+            lines.append(_format_loc_action_line(ticker, prev_close, cfg))
         else:
-            lines.append("• 🟡 **[액션] 시그널 거짓(False) — 오늘 밤은 주문 없이 패스**")
+            lines.append("• 🟡 **[참고] 중립 구간 — 적극 진입 신호는 아니지만, 기계적 LOC 주문은 유효**")
+            lines.append(_format_loc_action_line(ticker, prev_close, cfg))
 
     if sigma_messages:
         lines.append("\n📝 **[시스템 로그]**")

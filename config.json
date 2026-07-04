@@ -79,7 +79,9 @@
         "CYCLE_YEARS": 2,
         "BUY_DURATION_DAYS": 252,
         "HOLD_DURATION_DAYS": 252,
-        "DEFAULT_LOOKBACK_DAYS": 365
+        "DEFAULT_LOOKBACK_DAYS": 365,
+        "ORDER_POLICY": "DAILY_LOC_ALL",
+        "NEUTRAL_ACTION": "SHOW_LOC_BUY_PRICE"
     },
     "exchange_status": {
         "LAST_CHECK_DATE": "2026-07-03 06:34:41 UTC",
