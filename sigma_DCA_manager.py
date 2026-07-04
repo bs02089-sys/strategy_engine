@@ -360,53 +360,107 @@ def run_integrated_system(ticker: str, cfg: dict):
 # ==============================================================================
 # 빅테크 CAPEX 및 기술 지표 참/거짓(True/False) 연산 엔진
 # ==============================================================================
-def check_macro_and_technical_signals(ticker: str) -> tuple[bool, bool, str]:
+
+def check_macro_and_technical_signals(ticker: str, cfg: dict) -> tuple[bool, bool, str, str]:
     """
-    종목별로 매수/매도 진입 조건을 참(True)과 거짓(False)으로 판정합니다.
+    공유 중인 STRATEGY 및 POSITIONS 설정을 100% 무파괴 상태로 보존하며,
+    투자 계획 유형에 따른 시그널과 스케줄을 연산합니다.
     """
+    today = datetime.now(ZoneInfo("America/New_York")).date()
+    pos_cfg = cfg.setdefault("POSITIONS", {}).setdefault(ticker, {})
+    strat_cfg = cfg.setdefault("STRATEGY", {})
+    
+    # 📌 1단계: 기존 파일의 수동 날짜(2026-07-02)를 보존하여 스케줄 기준일 주입
+    if "START_DATE" not in pos_cfg:
+        pos_cfg["START_DATE"] = pos_cfg.get("LAST_SIGMA_UPDATE", today.strftime("%Y-%m-%d"))
+        
+    if "INVEST_TYPE" not in pos_cfg:
+        if ticker in ["SOXL", "NVDX"]:
+            pos_cfg["INVEST_TYPE"] = "ROTATION_3M"
+        elif ticker == "IONQ":
+            pos_cfg["INVEST_TYPE"] = "END_DEC"
+        else:
+            pos_cfg["INVEST_TYPE"] = "LONG_YEAR"
+        save_config(cfg)
+
+    start_date = datetime.strptime(pos_cfg["START_DATE"], "%Y-%m-%d").date()
+    invest_type = pos_cfg["INVEST_TYPE"]
+    days_held = (today - start_date).days
+    schedule_msg = ""
+
+    # 📌 2단계: STRATEGY 파라미터 및 투자 유형별 일정 필터링
+    if invest_type == "ROTATION_3M":
+        # 단기 3개월 로테이션 판단
+        days_left = 90 - days_held
+        if days_left <= 0:
+            old_date = pos_cfg["START_DATE"]
+            pos_cfg["START_DATE"] = today.strftime("%Y-%m-%d")
+            save_config(cfg)
+            schedule_msg = f"🔄 **[3개월 주기 자동 갱신]** 리밸런싱 만료로 스케줄 날짜를 오늘로 동기화했습니다. (이전 진입일: {old_date})"
+        else:
+            schedule_msg = f"📅 3개월 단기 리밸런싱까지 **{days_left}일** 남음 (현재 {days_held}일차)"
+
+    elif invest_type == "END_DEC":
+        # 12월 말 한시적 자산 제어
+        end_date = date(2026, 12, 31)
+        days_to_end = (end_date - today).days
+        if days_to_end <= 0:
+            return False, True, "🚨 투자 기한 만료 (2026년 12월 종료)", "⚠️ **[최종 만기]** 투자 기한이 도달했습니다. 포지션 전량 청산을 검토하세요."
+        else:
+            schedule_msg = f"⏳ 2026년 12월 투자 종료까지 **{days_to_end}일** 남음"
+
+    elif invest_type == "LONG_YEAR":
+        # 1. config에서 영업일 기준 매수 기간(252일) 로드
+        buy_duration_business_days = int(strat_cfg.get("BUY_DURATION_DAYS", 252))
+        
+        # 2. 주말을 제외하고 정확히 N 영업일을 더하는 내장 연산 알고리즘
+        current_date = start_date
+        remaining_business_days = buy_duration_business_days
+        
+        while remaining_business_days > 0:
+            current_date += timedelta(days=1)
+            # weekday()가 5(토요일), 6(일요일)이 아닌 평일일 때만 1일 차감
+            if current_date.weekday() < 5:
+                remaining_business_days -= 1
+                
+        # 주말이 완벽히 제외된 정확한 최종 만기일 확정
+        end_date = current_date
+        
+        # 3. 디데이 카운트다운 계산 (실제 남은 일수)
+        days_left = (end_date - today).days
+        
+        if days_left <= 0:
+            return False, False, "🛑 1년 장기 적립 매수 종료", f" 영업일 {buy_duration_business_days}일 매수 기간 완료로 진입을 차단합니다."
+        else:
+            schedule_msg = f"📦 {buy_duration_business_days}영업일 적립 진행 중 (만기일: {end_date.strftime('%Y-%m-%d')} / **{days_left}일** 남음)"
+
+    # 📌 3단계: 기술적 마켓 데이터 스크래핑
     try:
-        # 기술적 지표 수집
         stock = yf.Ticker(ticker)
         hist = stock.history(period="60d", interval="1d", auto_adjust=False)
         vix_hist = yf.Ticker("^VIX").history(period="5d", interval="1d")
         
         if hist.empty or vix_hist.empty:
-            return False, False, "데이터 누락 (관망)"
+            return False, False, "마켓 데이터 지연 (관망)", schedule_msg
             
         current_price = float(hist['Close'].iloc[-1])
         ma20 = float(hist['Close'].rolling(window=20).mean().iloc[-1])
         ma60 = float(hist['Close'].rolling(window=60).mean().iloc[-1])
         current_vix = float(vix_hist['Close'].iloc[-1])
     except Exception as e:
-        return False, False, f"API 오류 ({e})"
+        return False, False, f"API 일시적 수집 오류 ({e})", schedule_msg
 
-    # 1. 레버리지 및 모멘텀 종목 (SOXL, NVDX, IONQ)
-    if ticker in ["SOXL", "NVDX", "IONQ"]:
+    # 📌 4단계: 최종 참/거짓 매매 시그널 확정
+    if invest_type == "ROTATION_3M":
         buy_signal = bool(current_price > ma20 and current_price > ma60 and current_vix < 20)
         sell_signal = bool(current_price < ma60 or current_vix > 25)
-        
-        if buy_signal:
-            reason = f"정배열 & VIX 안정({current_vix:.1f})"
-        elif sell_signal:
-            reason = f"🚨 추세 이탈 또는 변동성 발작({current_vix:.1f})"
-        else:
-            reason = "이평선 혼조 구간"
-            
-    # 2. 지수 및 인프라 종목 (SOXX, AIPO, QNDX)
+        reason = f"정배열 단기 진입 구간 (VIX: {current_vix:.1f})" if buy_signal else "단기 추세 이탈 리스크 방어 구간"
     else:
-        # 거시 지표(빅테크 합산 CAPEX 고공행진 및 전력 수요)가 유효하다고 가정 (True)
-        # 단, VIX 변동성 발작 시에는 매수를 보수적으로 차단(False)
         buy_signal = bool(current_vix < 23)
         sell_signal = bool(current_vix > 28)
-        
-        if buy_signal:
-            reason = "빅테크 CAPEX 투자 사이클 유효"
-        elif sell_signal:
-            reason = "🚨 매크로 변동성 위험 임계치 초과"
-        else:
-            reason = "매크로 지표 관망"
+        reason = "매크로 인프라 사이클 유효" if buy_signal else "글로벌 매크로 변동성 경계"
 
-    return buy_signal, sell_signal, reason
+    return buy_signal, sell_signal, reason, schedule_msg
 
 
 # ═══════════════════════════════════════════════════════════
@@ -467,7 +521,6 @@ def send_monthly_ping_if_due(cfg: dict, webhook: str, user_id: str) -> None:
 def _build_briefing_lines(now_ny: datetime, cfg: dict, sigma_messages: list[str]) -> list[str]:
     lines = [f"🌙 **미국 증시 브리핑** ({now_ny.strftime('%Y-%m-%d %H:%M %Z')})"]
     
-    # 위험 스코어 가져오기
     market_score = get_market_score()
     lines.append(f"📊 **시장 리스크 스코어:** {market_score} / 14")
     lines.append("─" * 30)
@@ -475,30 +528,28 @@ def _build_briefing_lines(now_ny: datetime, cfg: dict, sigma_messages: list[str]
     positions = cfg.get("POSITIONS", {})
 
     for ticker in positions.keys():
-        # 1. 실시간 참/거짓 시그널 계산
-        buy_sig, sell_sig, reason = check_macro_and_technical_signals(ticker)
+        # 업데이트된 시그널 및 스케줄 엔진 호출
+        buy_sig, sell_sig, reason, schedule_msg = check_macro_and_technical_signals(ticker, cfg)
         
-        # 2. 가격 수집 
         prev_close, last_date_str = get_prev_close(ticker)
         if prev_close is None:
             lines.append(f"\n🔹 **{ticker}** — 가격 조회 실패 ⚠️")
             continue
 
         lines.append(f"\n🔹 **{ticker}** ({last_date_str} 종가: ${prev_close:.2f})")
+        lines.append(f"• {schedule_msg}") # 3개월 만기 및 디데이 정보 노출
         lines.append(f"• **매수 시그널:** `{buy_sig}` | **매도 시그널:** `{sell_sig}`")
         lines.append(f"• **판정 근거:** {reason}")
 
-        # 3. 시그널 및 위험 점수 조건별 LOC 연산 분기 처리
+        # LOC 가격 보정 및 주문 액션 출력
         if sell_sig is True:
             lines.append(f"• 🚨 **[액션] 위험 매도 참!** 종가 탈출 권장 (LOC 매도가: ${prev_close:.2f})")
         elif buy_sig is True:
-            # 기본 통계적 LOC 계산 (블록 3 함수)
             base_loc = calculate_loc_price(ticker, prev_close, cfg)
-            # 위험 점수 반영 최종 디스카운트 가격 계산 (블록 3 함수)
             final_loc = calculate_final_loc(base_loc)
             
             if base_loc != final_loc:
-                lines.append(f"• 🎯 **[액션] 매수 진입 참!** LOC 지정가: ~~${base_loc:.2f}~~ ➡️ **${final_loc:.2f}** (리스크 할인 반영)")
+                lines.append(f"• 🎯 **[액션] 매수 진입 참!** LOC 지정가: ~~${base_loc:.2f}~~ ➡️ **${final_loc:.2f}** (할인 반영)")
             else:
                 lines.append(f"• 🎯 **[액션] 매수 진입 참!** LOC 지정가: **${final_loc:.2f}**")
         else:
