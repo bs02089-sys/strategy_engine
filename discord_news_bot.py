@@ -20,7 +20,7 @@ def get_market_analysis():
         response = client.chat.completions.create(
             messages=[{
                 "role": "user", 
-                "content": "SOXX, AIPO, QNDX, NVDX, SOXL, IONQ, TSLA와 관련되는 시장의 주요 이슈를 분석하고, 투자자가 참고할 만한 핵심 내용을 3줄 요약해줘."
+                "content": "SOXX, AIPO, QNDX, NVDX, SOXL, IONQ, TSLA를 포함하는 뉴스를 요약해서 월가 애널리스트의 관점에서분석해줘."
             }],
             model="llama-3.3-70b-versatile"
         )
