@@ -8,13 +8,16 @@ import json
 import requests
 import html  # 💡 HTML 특수문자(&amp; 등)를 안전하게 디코딩하기 위해 추가
 import xml.etree.ElementTree as ET
-import google.genai as genai
+# pyrefly: ignore [missing-import]
+from groq import Groq
 from datetime import datetime
 from pathlib import Path
+# pyrefly: ignore [missing-import]
 from dotenv import load_dotenv
 
 # 🛡️ [올라마 라이브러리 하이브리드 방어막 설정]
 try:
+    # pyrefly: ignore [missing-import]
     import ollama
     HAS_OLLAMA = True
 except ImportError:
@@ -22,7 +25,7 @@ except ImportError:
 
 # 1. 환경 변수 로드 (로컬 PC 구동 시 .env 파일 스캔용)
 load_dotenv()
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 # 2. 통합 설정 파일(config.json) 로드
 CONFIG_PATH = Path("config.json")
@@ -138,9 +141,9 @@ def send_to_discord(webhook_url, user_id, message_body, ping_prefix=""):
 
 
 def main():
-    global GEMINI_API_KEY
-    if not GEMINI_API_KEY:
-        GEMINI_API_KEY = config_data.get("GEMINI_API_KEY")
+    global GROQ_API_KEY
+    if not GROQ_API_KEY:
+        GROQ_API_KEY = config_data.get("GROQ_API_KEY")
 
     # 1. 뉴스 및 본문 설명문 수집 단계
     news_content = fetch_latest_news()
@@ -173,19 +176,19 @@ def main():
             )
             report = response['message']['content']
         except Exception as e:
-            print(f"❌ 로컬 Ollama 구동 실패: {e}. Gemini 백업 엔진 전환을 시도합니다.")
+            print(f"❌ 로컬 Ollama 구동 실패: {e}. Groq API 백업 엔진 전환을 시도합니다.")
 
-    # 🐙 깃허브 서버용 Gemini API 백업 구동 (동일한 프롬프트 적용)
+    # 🐙 깃허브 서버용 Groq API 백업 구동 (동일한 프롬프트 적용)
     if not report:
-        if not GEMINI_API_KEY:
-            print("❌ 에러: AI 처리를 위한 자격 증명(Ollama 또는 GEMINI_API_KEY)이 없습니다.")
+        if not GROQ_API_KEY:
+            print("❌ 에러: AI 처리를 위한 자격 증명(Ollama 또는 GROQ_API_KEY)이 없습니다.")
             return
             
-        ai_mode_notice = "✨ **[Gemini AI 뉴스 팩트 브리핑]**\n\n"
-        print("ℹ️ 클라우드 AI 엔진(Gemini) 구동: 팩트 요약 번역을 시작합니다.")
+        ai_mode_notice = "✨ **[Groq AI 뉴스 팩트 브리핑]**\n\n"
+        print("ℹ️ 클라우드 AI 엔진(Groq) 구동: 팩트 요약 번역을 시작합니다.")
         try:
-            client = genai.Client(
-                api_key=GEMINI_API_KEY,
+            client = GROQ_API_KEY.Client(
+                api_key=GROQ_API_KEY,
                 http_options={'api_version': 'v1beta'}
             )
             
@@ -202,12 +205,12 @@ def main():
             )
             
             response = client.models.generate_content(
-                model="models/gemini-2.5-flash",
+                model="models/groq-2.5-flash",
                 contents=prompt
             )
             report = response.text
         except Exception as e:
-            print(f"❌ Gemini 클라우드 AI 분석 실패: {e}")
+            print(f"❌ Groq 클라우드 AI 분석 실패: {e}")
 
     # 3. 메시지 타이틀 및 본문 결합
     if report:
