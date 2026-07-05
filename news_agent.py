@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import base64
 import html
 import json
 import os
@@ -23,6 +24,7 @@ import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlparse
 
 import requests
 
@@ -132,6 +134,28 @@ class Config:
 # 뉴스 수집
 # ============================================================
 
+def decode_google_news_link(google_link: str) -> Optional[str]:
+    """Google News RSS의 <link>는 실제 언론사 URL이 아니라 구글이 감싼 리다이렉트 URL이며,
+    진짜 리다이렉트는 자바스크립트로 처리되어 requests로는 따라갈 수 없습니다.
+
+    다행히 URL 경로의 마지막 base64 토큰 안에 원문 URL이 평문으로 인코딩되어 있는
+    경우가 많아(구형 포맷), 네트워크 호출 없이 로컬에서 바로 복원합니다.
+    (최근 구글 웹 UI에서 쓰는 신형 난독화 포맷은 이 방식으로 풀리지 않으며,
+    이 경우 별도의 구글 비공식 API 호출이 필요해 레이트리밋에 취약하므로 시도하지 않고
+    None을 반환해 기존 폴백 로직으로 넘깁니다.)
+    """
+    try:
+        token = urlparse(google_link).path.rstrip("/").split("/")[-1]
+        padded = token + "=" * (-len(token) % 4)
+        decoded = base64.urlsafe_b64decode(padded)
+        match = re.search(rb"https?://[\x21-\x7e]+", decoded)
+        if match:
+            return match.group(0).decode("utf-8", errors="ignore")
+    except Exception:
+        pass
+    return None
+
+
 def fetch_article_text(
     url: str, timeout: int, min_chars: int, headers: dict
 ) -> Optional[str]:
@@ -142,8 +166,9 @@ def fetch_article_text(
     실패로 간주하고 None을 반환합니다. 즉 언론사를 수동으로 화이트/블랙리스트
     관리할 필요 없이 자동으로 걸러집니다.
     """
+    real_url = decode_google_news_link(url) or url
     try:
-        resp = requests.get(url, headers=headers, timeout=timeout)
+        resp = requests.get(real_url, headers=headers, timeout=timeout)
         if resp.status_code != 200:
             return None
         extracted = trafilatura.extract(
