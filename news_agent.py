@@ -20,10 +20,14 @@ import os
 import re
 import sys
 import xml.etree.ElementTree as ET
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Optional
 
 import requests
+
+# pyrefly: ignore [missing-import]
+import trafilatura
 
 # pyrefly: ignore [missing-import]
 from groq import Groq
@@ -74,10 +78,12 @@ PROMPT_TEMPLATE = (
     "1. 단순 의문문이나 낚시성 제목에 낚이지 말고, 제공된 '내용'을 파악해서 실질적인 정보와 "
     "'팩트(Fact)' 중심의 결과물로 보정해줘.\n"
     "2. 각 기사는 반드시 아래의 형식을 똑같이 유지해서 한 줄 한 줄 깔끔하게 출력해줘.\n"
-    "3. 회사명, 주식 티커(NVDA, SOXL, TSLA 등), 고유명사는 번역하지 말고 영문 그대로 유지해줘.\n\n"
+    "3. 제목은 절대 번역하지 말고 기사에 주어진 영문 원제 그대로 출력해줘.\n"
+    "4. 핵심 팩트(내용 요약)는 반드시 한글로 작성해줘. 단, 회사명, 주식 티커(NVDA, SOXL, TSLA 등), "
+    "고유명사는 번역하지 말고 영문 그대로 유지해줘.\n\n"
     "📝 [출력 포맷 예시]\n"
-    "- **[한국어 번역 제목]** (영문 원제)\n"
-    "  └ 💡 **핵심 팩트:** 기사 본문 내용을 기반으로 한 알맹이 있는 실질적 내용 한 줄 요약\n\n"
+    "- **{{영문 원제 그대로}}**\n"
+    "  └ 💡 **핵심 팩트:** 기사 본문 내용을 기반으로 한 알맹이 있는 실질적 내용 한 줄 요약 (한글)\n\n"
     "이제 아래의 뉴스 데이터를 가지고 규칙과 포맷에 맞춰 작업해줘:\n\n{news_content}"
 )
 
@@ -112,16 +118,58 @@ class Config:
         )
         self.keywords: list[str] = news_settings.get("KEYWORDS", DEFAULT_KEYWORDS)
         self.max_news_per_keyword: int = news_settings.get("MAX_NEWS_PER_KEYWORD", 5)
+        # 기사 원문에서 추출할 본문 길이 상한
+        self.max_content_chars: int = news_settings.get("MAX_CONTENT_CHARS", 500)
+        # 원문 접속 타임아웃(초)
+        self.article_fetch_timeout: int = news_settings.get("ARTICLE_FETCH_TIMEOUT", 8)
+        # 이 길이 미만으로 추출되면 유료 구독/접근 차단으로 간주하고 폴백
+        self.min_content_chars: int = news_settings.get("MIN_CONTENT_CHARS", 200)
+        # 본문 병렬 fetch에 사용할 스레드 수
+        self.article_fetch_workers: int = news_settings.get("ARTICLE_FETCH_WORKERS", 8)
 
 
 # ============================================================
 # 뉴스 수집
 # ============================================================
 
-def fetch_latest_news(keywords: list[str], max_per_keyword: int) -> str:
-    """Google News RSS에서 제목과 본문 요약문(Snippet)을 안전하게 파싱하여 수집합니다."""
-    all_news_text = ""
+def fetch_article_text(
+    url: str, timeout: int, min_chars: int, headers: dict
+) -> Optional[str]:
+    """기사 원문 URL을 방문해 본문 텍스트를 추출합니다.
+
+    유료 구독 벽, 로그인 요구, 접근 차단 등으로 실제 본문을 가져오지 못하면
+    추출 결과가 매우 짧아지므로(쿠키 배너/안내문 정도), min_chars 미만이면
+    실패로 간주하고 None을 반환합니다. 즉 언론사를 수동으로 화이트/블랙리스트
+    관리할 필요 없이 자동으로 걸러집니다.
+    """
+    try:
+        resp = requests.get(url, headers=headers, timeout=timeout)
+        if resp.status_code != 200:
+            return None
+        extracted = trafilatura.extract(
+            resp.text, include_comments=False, include_tables=False
+        )
+        if not extracted or len(extracted.strip()) < min_chars:
+            return None
+        return extracted.strip()
+    except Exception:
+        return None
+
+
+def fetch_latest_news(
+    keywords: list[str],
+    max_per_keyword: int,
+    max_content_chars: int = 500,
+    article_fetch_timeout: int = 8,
+    min_content_chars: int = 200,
+    max_workers: int = 8,
+) -> str:
+    """Google News RSS에서 제목을 수집하고, 원문 링크를 병렬로 따라가 실제 본문을 추출합니다."""
     headers = {"User-Agent": "Mozilla/5.0"}
+
+    # 1단계: RSS 파싱 (가볍고 빠르므로 순차 처리)
+    # 각 항목: {keyword, idx, title, link, fallback_text}
+    parsed_items: list[dict] = []
 
     for kw in keywords:
         rss_url = f"https://news.google.com/rss/search?q={kw}+when:1d&hl=en-US&gl=US&ceid=US:en"
@@ -131,8 +179,6 @@ def fetch_latest_news(keywords: list[str], max_per_keyword: int) -> str:
 
             # 구글 RSS 인코딩 이슈를 피하기 위해 utf-8 바이트로 통일 후 파싱
             root = ET.fromstring(resp.text.encode("utf-8"))
-
-            all_news_text += f"\n### 📂 검색 키워드: {kw}\n"
             items = root.findall(".//item")
 
             for idx, item in enumerate(items[:max_per_keyword], 1):
@@ -145,22 +191,74 @@ def fetch_latest_news(keywords: list[str], max_per_keyword: int) -> str:
                     if description_el is not None and description_el.text
                     else ""
                 )
-
                 desc_unescaped = html.unescape(description_raw)
                 clean_text = re.sub(r"<[^>]*>", "", desc_unescaped).strip()
 
                 if "This article appeared in" in clean_text:
                     clean_text = clean_text.split("This article appeared in")[0].strip()
 
-                desc_text = clean_text[:200] if clean_text else "본문 요약 없음"
+                link_el = item.find("link")
+                link = link_el.text if link_el is not None and link_el.text else None
 
-                all_news_text += f"기사 {idx}.\n"
-                all_news_text += f"- 제목: {title}\n"
-                all_news_text += f"- 내용: {desc_text}\n\n"
-
+                parsed_items.append(
+                    {
+                        "keyword": kw,
+                        "idx": idx,
+                        "title": title,
+                        "link": link,
+                        "clean_text": clean_text,
+                    }
+                )
         except Exception as e:
             print(f"❌ 뉴스 수집 에러 ({kw}): {e}")
             continue
+
+    # 2단계: 기사 원문 본문을 병렬로 fetch (네트워크 대기가 병목이므로 스레드풀 사용)
+    article_texts: dict[int, Optional[str]] = {}
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_pos = {
+            executor.submit(
+                fetch_article_text, entry["link"], article_fetch_timeout, min_content_chars, headers
+            ): pos
+            for pos, entry in enumerate(parsed_items)
+            if entry["link"]
+        }
+        for future in as_completed(future_to_pos):
+            pos = future_to_pos[future]
+            try:
+                article_texts[pos] = future.result()
+            except Exception:
+                article_texts[pos] = None
+
+    # 3단계: 원래 순서(키워드 → idx)대로 최종 텍스트 조립
+    all_news_text = ""
+    current_kw = None
+    for pos, entry in enumerate(parsed_items):
+        if entry["keyword"] != current_kw:
+            current_kw = entry["keyword"]
+            all_news_text += f"\n### 📂 검색 키워드: {current_kw}\n"
+
+        article_text = article_texts.get(pos)
+        clean_text = entry["clean_text"]
+        title = entry["title"]
+
+        # 1순위: 병렬로 fetch한 원문 본문
+        if article_text:
+            truncated = len(article_text) > max_content_chars
+            desc_text = article_text[:max_content_chars]
+            if truncated:
+                desc_text += "..."
+        # 2순위: RSS description 폴백. 구글 RSS description은 흔히
+        # "제목 + 언론사명"만 담고 있어 제목보다 살짝 긴 정도로는
+        # 실질적인 추가 정보가 아니므로, 제목보다 충분히 길 때만 채택.
+        elif clean_text and len(clean_text) - len(title) >= 30:
+            desc_text = clean_text[:max_content_chars]
+        else:
+            desc_text = "본문 요약 없음 (유료 구독 또는 접근 차단 기사로 추정)"
+
+        all_news_text += f"기사 {entry['idx']}.\n"
+        all_news_text += f"- 제목: {title}\n"
+        all_news_text += f"- 내용: {desc_text}\n\n"
 
     return all_news_text
 
@@ -281,7 +379,14 @@ def send_to_discord(webhook_url: str, user_id: str, message_body: str) -> None:
 def main() -> None:
     config = Config(CONFIG_PATH)
 
-    news_content = fetch_latest_news(config.keywords, config.max_news_per_keyword)
+    news_content = fetch_latest_news(
+        config.keywords,
+        config.max_news_per_keyword,
+        max_content_chars=config.max_content_chars,
+        article_fetch_timeout=config.article_fetch_timeout,
+        min_content_chars=config.min_content_chars,
+        max_workers=config.article_fetch_workers,
+    )
     if not news_content.strip():
         print("ℹ️ 수집된 뉴스가 없습니다.")
         return
