@@ -74,6 +74,29 @@ def log_sigma_update(ticker: str, sigma: float):
             writer.writerow(['Date', 'Ticker', 'Sigma'])
         writer.writerow([datetime.now().strftime("%Y-%m-%d"), ticker, sigma])
 
+def recompute_sigma_for_ticker(ticker: str, pos: dict, today: date) -> float:
+    """
+    지정 종목의 DAILY_SIGMA를 주기 체크 없이 무조건 새로 계산해 pos에 반영합니다.
+    (로테이션 만기 리셋 등, 강제 재계산이 필요한 경우 사용)
+    """
+    lookback_days = int(pos.get("LOOKBACK_DAYS", 252))
+    vol_method = str(pos.get("VOL_METHOD", "EWMA")).upper()
+    ewma_lambda = float(pos.get("EWMA_LAMBDA", 0.94))
+
+    stock = yf.Ticker(ticker)
+    hist = stock.history(period=f"{lookback_days + 30}d", interval="1d", auto_adjust=False)
+    closes = hist['Close'].dropna()
+
+    new_sigma = round(_calculate_volatility_from_closes(closes, lookback_days, vol_method, ewma_lambda), 4)
+
+    pos["DAILY_SIGMA"] = new_sigma
+    pos["LAST_SIGMA_UPDATE"] = today.strftime("%Y-%m-%d")
+    pos["LAST_SIGMA_METHOD"] = vol_method
+    pos["LAST_EWMA_LAMBDA"] = ewma_lambda if vol_method == "EWMA" else None
+    log_sigma_update(ticker, new_sigma)
+    return new_sigma
+
+
 def refresh_sigma_if_stale(cfg: dict) -> list[str]:
     messages = []
     today = datetime.now(ZoneInfo("America/New_York")).date()
@@ -99,17 +122,7 @@ def refresh_sigma_if_stale(cfg: dict) -> list[str]:
             continue
 
         try:
-            stock = yf.Ticker(ticker)
-            hist = stock.history(period=f"{lookback_days + 30}d", interval="1d", auto_adjust=False)
-            closes = hist['Close'].dropna()
-            
-            new_sigma = round(_calculate_volatility_from_closes(closes, lookback_days, vol_method, ewma_lambda), 4)
-            
-            pos["DAILY_SIGMA"] = new_sigma
-            pos["LAST_SIGMA_UPDATE"] = today.strftime("%Y-%m-%d")
-            pos["LAST_SIGMA_METHOD"] = vol_method
-            pos["LAST_EWMA_LAMBDA"] = ewma_lambda if vol_method == "EWMA" else None
-            log_sigma_update(ticker, new_sigma)
+            new_sigma = recompute_sigma_for_ticker(ticker, pos, today)
             messages.append(f"📊 {ticker} 자동 갱신 [{lookback_days}일/{vol_method}]: {new_sigma:.4f}")
         except Exception as e:
             messages.append(f"⚠️ {ticker} 갱신 오류: {e}")
@@ -375,6 +388,93 @@ def check_macro_and_technical_signals(ticker: str, pos_cfg: dict, current_vix: f
     return buy_signal, sell_signal, reason
 
 
+def _get_nyse_holidays(start_date: date, end_date: date) -> np.ndarray | None:
+    """
+    pandas_market_calendars로 NYSE 공식 공휴일 목록을 가져옵니다.
+    라이브러리가 없으면 None을 반환해 주말만 반영하는 방식으로 자동 폴백합니다.
+    (pip install pandas_market_calendars 필요)
+    """
+    try:
+        import pandas_market_calendars as mcal
+    except ImportError:
+        return None
+
+    try:
+        nyse = mcal.get_calendar("NYSE")
+        all_holidays = np.array(nyse.holidays().holidays, dtype="datetime64[D]")
+        start64 = np.datetime64(start_date)
+        end64 = np.datetime64(end_date)
+        return all_holidays[(all_holidays >= start64) & (all_holidays <= end64)]
+    except Exception:
+        return None
+
+
+def business_days_elapsed(start_date: date, today: date) -> int:
+    """
+    START_DATE부터 오늘까지의 영업일 경과 일수를 계산합니다.
+    pandas_market_calendars가 설치돼 있으면 NYSE 공휴일(추수감사절, 독립기념일 대체휴장 등)까지
+    정확히 제외하고, 없으면 주말만 제외한 근사치로 계산합니다.
+    """
+    if today <= start_date:
+        return 0
+    holidays = _get_nyse_holidays(start_date, today)
+    if holidays is not None:
+        return int(np.busday_count(start_date, today, holidays=holidays))
+    return int(np.busday_count(start_date, today))
+
+
+def check_rotation_exit_signal(pos_cfg: dict, today: date) -> tuple[bool, int, int]:
+    """
+    ROTATION_3M(NVDX, SOXL 등) 종목의 D+63 로테이션 만기 여부를 판정합니다.
+    ROTATION_EXIT_DAYS(없으면 LOOKBACK_DAYS, 기본 63)에 도달하면 매도 시그널을 발생시킵니다.
+    """
+    invest_type = str(pos_cfg.get("INVEST_TYPE", "")).upper()
+    if invest_type != "ROTATION_3M":
+        return False, 0, 0
+
+    start_str = pos_cfg.get("START_DATE")
+    if not start_str:
+        return False, 0, 0
+
+    try:
+        start_date = datetime.strptime(start_str, "%Y-%m-%d").date()
+    except ValueError:
+        return False, 0, 0
+
+    exit_days = int(pos_cfg.get("ROTATION_EXIT_DAYS", pos_cfg.get("LOOKBACK_DAYS", 63)))
+    elapsed_bd = business_days_elapsed(start_date, today)
+    return elapsed_bd >= exit_days, elapsed_bd, exit_days
+
+
+def reset_matured_rotation_positions(cfg: dict, today: date) -> list[str]:
+    """
+    D+63(ROTATION_EXIT_DAYS) 만기에 도달한 ROTATION_3M 종목(NVDX, SOXL 등)을
+    '오늘 매도 후 신규 사이클 진입'을 전제로 자동 리셋합니다.
+      1) START_DATE를 오늘 날짜로 갱신 (D+0부터 재카운트)
+      2) DAILY_SIGMA를 주기 체크 없이 무조건 새로 계산 (신규 진입가 산출용)
+    ROTATION_3M이 아닌 종목(SOXX, AIPO, QNDX, IONQ)에는 영향을 주지 않습니다.
+    """
+    messages = []
+    positions = cfg.get("POSITIONS", {})
+
+    for ticker, pos in positions.items():
+        rotation_due, elapsed_bd, exit_days = check_rotation_exit_signal(pos, today)
+        if not rotation_due:
+            continue
+
+        try:
+            new_sigma = recompute_sigma_for_ticker(ticker, pos, today)
+            pos["START_DATE"] = today.strftime("%Y-%m-%d")
+            messages.append(
+                f"🔄 {ticker} D+{exit_days} 만기 → 포지션 리셋 완료 "
+                f"(영업일 경과 {elapsed_bd}일 / 신규 사이클 시작 / 시그마 재계산: {new_sigma:.4f})"
+            )
+        except Exception as e:
+            messages.append(f"⚠️ {ticker} 만기 리셋 실패 — START_DATE 미갱신, 수동 확인 필요: {e}")
+
+    return messages
+
+
 def format_position_meta(pos_cfg: dict, today: date) -> str:
     parts = []
     invest_type = pos_cfg.get("INVEST_TYPE")
@@ -481,6 +581,11 @@ def _build_briefing_lines(now_ny: datetime, cfg: dict, sigma_messages: list[str]
         lines.append(f"\n🔹 **{ticker}** (종가: ${prev_close:.2f} | {last_date_str}{position_meta})")
         lines.append(f"• **시그널:** 매수[{buy_sig}] / 매도[{sell_sig}] | {reason}")
 
+        # D+63(로테이션 만기) 시그널 — NVDX, SOXL 등 ROTATION_3M 종목 전용
+        rotation_due, elapsed_bd, exit_days = check_rotation_exit_signal(pos_cfg, today_ny)
+        if rotation_due:
+            lines.append(f"• 🔴 **[D+{exit_days} 로테이션 만기] 보유기간 만료 — 매도 검토 필요! (영업일 경과: {elapsed_bd}일)**")
+
         # 조건 만족 시 기계적으로 걸어둘 LOC 가격 산출
         if sell_sig is True:
             invest_type = str(pos_cfg.get("INVEST_TYPE", "")).upper()
@@ -516,8 +621,11 @@ def execute_dual_tactical_trader() -> None:
     webhook = os.environ.get("DISCORD_WEBHOOK") or cfg.get("DISCORD_WEBHOOK", "")
     user_id = os.environ.get("DISCORD_USER_ID") or cfg.get("DISCORD_USER_ID", "")
 
-    # 2. 시스템 루틴: 시그마 갱신 및 저장
-    sigma_messages = refresh_sigma_if_stale(cfg)
+    # 2. 시스템 루틴: D+63 로테이션 만기 종목 자동 리셋 (오늘 매도 → 오늘 신규 진입 전제)
+    reset_messages = reset_matured_rotation_positions(cfg, now_ny.date())
+
+    # 2-1. 시그마 갱신 및 저장 (방금 리셋된 종목은 LAST_SIGMA_UPDATE가 오늘이라 재갱신 스킵됨)
+    sigma_messages = reset_messages + refresh_sigma_if_stale(cfg)
     save_config(cfg) 
     
     # 3. [업데이트] 참/거짓 시그널과 결합된 최종 브리핑 생성
