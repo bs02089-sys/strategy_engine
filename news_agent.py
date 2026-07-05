@@ -20,7 +20,6 @@ import os
 import re
 import sys
 import xml.etree.ElementTree as ET
-from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -58,6 +57,7 @@ DEFAULT_KEYWORDS = [
     "AI Infrastructure",
     "semiconductor stock",
     "NVDA",
+    "NVDX ETF",
     "SOXX ETF",
     "SOXL ETF",
     "TSLA stock",
@@ -240,10 +240,9 @@ def summarize_with_groq(news_content: str, api_key: str) -> Optional[str]:
 # 디스코드 전송
 # ============================================================
 
-def send_to_discord(webhook_url: str, user_id: str, message_body: str, ping_prefix: str = "") -> None:
+def send_to_discord(webhook_url: str, user_id: str, message_body: str) -> None:
     """디스코드 2000자 제한을 우회하여 안전하게 분할 전송합니다."""
-    mention = f"<@{user_id}>\n" if user_id else ""
-    header = f"{mention}{ping_prefix}"
+    header = f"<@{user_id}>\n" if user_id else ""
     max_len = 1900
 
     if len(header + message_body) <= 2000:
@@ -299,13 +298,8 @@ def main() -> None:
     else:
         final_message = f"⚠️ **AI 번역 전원 실패 (뉴스 원문 출력)**\n\n{news_content}"
 
-    # 매월 1일 하트비트/핑 (디스코드 계정 활성 유지용)
-    ping_prefix = ""
-    if datetime.now().day == 1:
-        ping_prefix = "📡 **[System Ping]** 디스코드 계정 활성화 유지 신호 송신 중 (정상 작동)\n\n"
-
     if config.discord_webhook:
-        send_to_discord(config.discord_webhook, config.discord_user_id, final_message, ping_prefix)
+        send_to_discord(config.discord_webhook, config.discord_user_id, final_message)
     else:
         print("\n" + "=" * 60)
         print("ℹ️  로컬 편집기 환경 감지: 디스코드 웹훅이 없어 콘솔창에 결과를 출력합니다.")
