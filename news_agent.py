@@ -18,9 +18,12 @@ from dotenv import load_dotenv
 # 🛡️ [올라마 라이브러리 하이브리드 방어막 설정]
 try:
     # pyrefly: ignore [missing-import]
-    import ollama
+    # Some static analyzers may still flag this as missing; ignore type checking for this import
+    import ollama  # type: ignore
     HAS_OLLAMA = True
 except ImportError:
+    # Ensure name 'ollama' exists to avoid NameError elsewhere when import is absent
+    ollama = None
     HAS_OLLAMA = False
 
 # 1. 환경 변수 로드 (로컬 PC 구동 시 .env 파일 스캔용)
@@ -51,6 +54,7 @@ KEYWORDS = NEWS_SETTINGS.get("KEYWORDS", [
     "AI Infrastructure",
     "semiconductor stock",
     "NVDA",
+    "SOXX ETF",
     "SOXL ETF",
     "TSLA stock",
     "IONQ stock"
@@ -76,8 +80,10 @@ def fetch_latest_news():
                 items = root.findall(".//item")
                 
                 for idx, item in enumerate(items[:MAX_NEWS_PER_KEYWORD], 1):
-                    title = item.find('title').text or "No Title"
-                    description_raw = item.find('description').text or ""
+                    title_el = item.find('title')
+                    title = title_el.text if title_el is not None and title_el.text else "No Title"
+                    description_el = item.find('description')
+                    description_raw = description_el.text if description_el is not None and description_el.text else ""
                     
                     # 💡 구글 고유의 특수문자(&middot; 등) 및 HTML 태그를 안전하게 걷어내는 가벼운 로직
                     # ElementTree 대신 표준 내장 라이브러리를 활용해 오류를 완벽히 격리합니다.
@@ -170,11 +176,38 @@ def main():
                 f"  └ 💡 **핵심 팩트:** 기사 본문 내용을 기반으로 한 알맹이 있는 실질적 내용 한 줄 요약\n\n"
                 f"이제 아래의 뉴스 데이터를 가지고 규칙과 포맷에 맞춰 작업해줘:\n\n{news_content}"
             )
+            # Defensive: ensure ollama and its chat method are available
+            if not ollama or not hasattr(ollama, 'chat') or not callable(getattr(ollama, 'chat')):
+                raise AttributeError("ollama.chat is not available")
+
             response = ollama.chat(
                 model='llama3',
                 messages=[{'role': 'user', 'content': prompt}]
             )
-            report = response['message']['content']
+
+            # Normalize various possible response shapes
+            report = None
+            if isinstance(response, dict):
+                # common shape: {'message': {'content': '...'}}
+                msg = response.get('message') or response
+                if isinstance(msg, dict):
+                    report = msg.get('content') or msg.get('text')
+                else:
+                    report = str(msg)
+            else:
+                # object-like responses
+                if hasattr(response, 'message'):
+                    msg = getattr(response, 'message')
+                    if isinstance(msg, dict):
+                        report = msg.get('content') or msg.get('text')
+                    elif hasattr(msg, 'content'):
+                        report = getattr(msg, 'content')
+                if not report and hasattr(response, 'content'):
+                    report = getattr(response, 'content')
+                if not report and hasattr(response, 'text'):
+                    report = getattr(response, 'text')
+                if not report:
+                    report = str(response)
         except Exception as e:
             print(f"❌ 로컬 Ollama 구동 실패: {e}. Groq API 백업 엔진 전환을 시도합니다.")
 
@@ -187,9 +220,8 @@ def main():
         ai_mode_notice = "✨ **[Groq AI 뉴스 팩트 브리핑]**\n\n"
         print("ℹ️ 클라우드 AI 엔진(Groq) 구동: 팩트 요약 번역을 시작합니다.")
         try:
-            client = GROQ_API_KEY.Client(
-                api_key=GROQ_API_KEY,
-                http_options={'api_version': 'v1beta'}
+            client = Groq(
+                api_key=GROQ_API_KEY
             )
             
             prompt = (
@@ -204,11 +236,19 @@ def main():
                 f"이제 아래의 뉴스 데이터를 가지고 규칙과 포맷에 맞춰 작업해줘:\n\n{news_content}"
             )
             
-            response = client.models.generate_content(
-                model="models/groq-2.5-flash",
-                contents=prompt
+            # Use Groq's chat completions API
+            response = client.chat.completions.create(
+                model="mixtral-8x7b-32768",
+                messages=[
+                    {"role": "system", "content": "You are a professional financial analyst and translator specializing in Wall Street news."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.3,
+                max_tokens=2048
             )
-            report = response.text
+
+            # Extract text from response
+            report = response.choices[0].message.content if response.choices else None
         except Exception as e:
             print(f"❌ Groq 클라우드 AI 분석 실패: {e}")
 
