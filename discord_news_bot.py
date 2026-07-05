@@ -2,37 +2,52 @@ import os
 import requests
 from groq import Groq
 
-def get_market_analysis():
-    # 1. 환경변수에서 API 키와 웹훅 URL 불러오기
-    # 깃허브 시크릿에 등록한 이름과 동일하게 설정하세요
-    api_key = os.environ.get("GROQ_API_KEY")
-    webhook_url = os.environ.get("DISCORD_WEBHOOK")
+# 1. 환경변수 불러오기 (깃허브 시크릿에 설정한 이름 그대로 사용)
+API_KEY = os.environ.get("GROQ_API_KEY")
+WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK")
 
-    if not api_key or not webhook_url:
-        print("에러: API 키 또는 웹훅 URL이 설정되지 않았습니다.")
-        return
+def get_market_analysis(symbols):
+    """그록 API를 호출하여 시장 분석을 받아옵니다."""
+    client = Groq(api_key=API_KEY)
+    
+    system_prompt = (
+        "당신은 월가 애널리스트입니다. 모든 답변은 한국어로만 작성하세요. "
+        "한자, 히라가나 등 외국어 문자를 철저히 제외하고, "
+        "가독성을 위해 각 종목별로 명확하게 문단을 나누고 띄어쓰기를 적용하세요."
+    )
+    
+    symbols_str = ", ".join(symbols)
+    user_content = f"{symbols_str} 종목들을 포함하는 뉴스를 요약하고, 월가 애널리스트의 관점에서 분석해줘."
 
-    # 2. Groq 클라이언트 초기화
-    client = Groq(api_key=api_key)
+    response = client.chat.completions.create(
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_content}
+        ],
+        model="llama-3.3-70b-versatile"
+    )
+    return response.choices[0].message.content
 
-    # 3. 분석 요청
-    try:
-        response = client.chat.completions.create(
-            messages=[{
-                "role": "user", 
-                "content": "SOXX, AIPO, QNDX, NVDX, SOXL, IONQ, TSLA를 포함하는 뉴스를 요약해서 월가 애널리스트의 관점에서분석해줘."
-            }],
-            model="llama-3.3-70b-versatile"
-        )
-        analysis_text = response.choices[0].message.content
-        
-        # 4. 디스코드 전송
-        payload = {"content": f"### 💡 시장 분석 리포트\n{analysis_text}"}
-        requests.post(webhook_url, json=payload)
-        print("성공: 뉴스 분석이 디스코드에 전송되었습니다.")
-        
-    except Exception as e:
-        print(f"에러 발생: {e}")
+def send_to_discord(message, webhook_url):
+    """디스코드 웹훅으로 분석 결과를 전송합니다."""
+    payload = {"content": f"### 💡 시장 분석 리포트\n\n{message}"}
+    response = requests.post(webhook_url, json=payload)
+    response.raise_for_status()
 
 if __name__ == "__main__":
-    get_market_analysis()
+    # 필수 환경변수 체크
+    if not API_KEY or not WEBHOOK_URL:
+        print("에러: 환경변수(GROQ_API_KEY, DISCORD_WEBHOOK)가 설정되지 않았습니다.")
+    else:
+        try:
+            target_symbols = ["SOXX", "AIPO", "QNDX", "NVDX", "SOXL", "IONQ", "TSLA"]
+            
+            # 1. 분석 수행
+            analysis_text = get_market_analysis(target_symbols)
+            
+            # 2. 결과 전송
+            send_to_discord(analysis_text, WEBHOOK_URL)
+            print("분석 완료 및 디스코드 전송 성공.")
+            
+        except Exception as e:
+            print(f"프로세스 실행 중 오류 발생: {e}")
