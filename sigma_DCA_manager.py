@@ -401,7 +401,7 @@ def _get_nyse_holidays(start_date: date, end_date: date) -> np.ndarray | None:
 
     try:
         nyse = mcal.get_calendar("NYSE")
-        all_holidays = np.array(nyse.holidays().holidays, dtype="datetime64[D]")
+        all_holidays = np.array(nyse.holidays().holidays, dtype="datetime64[D]")  # type: ignore[attr-defined]
         start64 = np.datetime64(start_date)
         end64 = np.datetime64(end_date)
         return all_holidays[(all_holidays >= start64) & (all_holidays <= end64)]
