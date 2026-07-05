@@ -47,7 +47,7 @@ if __name__ == "__main__":
         print("에러: 환경변수가 설정되지 않았습니다.")
     else:
         try:
-            target_symbols = ["SOXX", "AIPO", "QNDX", "NVDX", "SOXL", "IONQ", "TSLA"]
+            target_symbols = ["SOXX", "SOXL", "IONQ", "TSLA"]
             
             # 분석 수행
             analysis_text = get_market_analysis(target_symbols)
