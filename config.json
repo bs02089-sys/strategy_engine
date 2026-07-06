@@ -88,18 +88,12 @@
         "CURRENT_APPLIED_RATE": 1526.68,
         "CURRENT_PERCENTILE": 94.6
     },
+    "FINNHUB_API_KEY": "",
     "news_settings": {
-        "KEYWORDS": [
-            "AI Infrastructure",
-            "semiconductor stock",
-            "NVDA",
-            "NVDX ETF",
-            "SOXX ETF",
-            "SOXL ETF",
-            "TSLA stock",
-            "IONQ stock"
-        ],
-        "MAX_NEWS_PER_KEYWORD": 5
+        "KEYWORDS": ["AI Infrastructure"],
+        "TICKERS": ["NVDA", "NVDX", "SOXX", "SOXL", "TSLA", "IONQ"],
+        "MAX_NEWS_PER_KEYWORD": 5,
+        "MAX_NEWS_PER_TICKER": 5
     },
     "LAST_MONTHLY_PING": "2026-07"
 }
