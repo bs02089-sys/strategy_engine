@@ -1,5 +1,14 @@
 """
-글로벌 시장 뉴스 수집 및 AI 번역 에러 핸들링 봇 (V2.2: 리팩토링 버전)
+글로벌 시장 뉴스 수집 및 AI 번역 에러 핸들링 봇 (V2.3: Finnhub 종목 뉴스 통합)
+
+주요 변경사항 (V2.2 → V2.3):
+- [구조 개편] "semiconductor stock" 등 개별 종목/ETF 키워드를 Google News RSS에서
+  제거하고, Finnhub company-news API로 이전. 실제 언론사 URL과 요약(summary)을
+  API가 직접 제공하므로 리다이렉트 디코딩·본문 스크래핑이 필요 없어짐.
+- [유지] "AI Infrastructure"처럼 특정 티커에 매이지 않는 주제어는 기존 Google News
+  RSS 파이프라인(디코딩·재시도·병렬 fetch)을 그대로 사용. 키워드 수가 줄어
+  구글의 자동화 접근 의심 차단(503) 위험도 자연히 낮아짐.
+- [신규] fetch_finnhub_news(), fetch_ticker_news() 추가.
 
 주요 변경사항 (V2.1 → V2.2):
 - [버그 수정] Groq 모델 `mixtral-8x7b-32768` → `openai/gpt-oss-120b` (전자는 Groq가
@@ -25,6 +34,7 @@ import threading
 import time
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
@@ -67,13 +77,16 @@ CONFIG_PATH = Path("config.json")
 
 DEFAULT_KEYWORDS = [
     "AI Infrastructure",
-    "semiconductor stock",
+]
+
+# 개별 종목/ETF 뉴스는 Finnhub company-news API로 수집 (리다이렉트/스크래핑 불필요)
+DEFAULT_TICKERS = [
     "NVDA",
-    "NVDX ETF",
-    "SOXX ETF",
-    "SOXL ETF",
-    "TSLA stock",
-    "IONQ stock",
+    "NVDX",
+    "SOXX",
+    "SOXL",
+    "TSLA",
+    "IONQ",
 ]
 
 # 현재(2026년 기준) Groq에서 지원하는 모델. mixtral-8x7b-32768은 폐기되어 사용 불가.
@@ -124,8 +137,17 @@ class Config:
         self.groq_api_key = os.environ.get("GROQ_API_KEY", "").strip() or data.get(
             "GROQ_API_KEY", ""
         )
+        self.finnhub_api_key = os.environ.get("FINNHUB_API_KEY", "").strip() or data.get(
+            "FINNHUB_API_KEY", ""
+        )
         self.keywords: list[str] = news_settings.get("KEYWORDS", DEFAULT_KEYWORDS)
         self.max_news_per_keyword: int = news_settings.get("MAX_NEWS_PER_KEYWORD", 5)
+        # Finnhub로 수집할 종목/ETF 티커 목록
+        self.tickers: list[str] = news_settings.get("TICKERS", DEFAULT_TICKERS)
+        self.max_news_per_ticker: int = news_settings.get("MAX_NEWS_PER_TICKER", 5)
+        # Finnhub 조회 기간(오늘 기준 며칠 전부터)
+        self.finnhub_days_back: int = news_settings.get("FINNHUB_DAYS_BACK", 1)
+        self.finnhub_fetch_timeout: int = news_settings.get("FINNHUB_FETCH_TIMEOUT", 10)
         # 기사 원문에서 추출할 본문 길이 상한
         self.max_content_chars: int = news_settings.get("MAX_CONTENT_CHARS", 500)
         # 원문 접속 타임아웃(초)
@@ -154,12 +176,18 @@ def decode_google_news_link(google_link: str, label: str = "") -> Optional[str]:
     """Google News RSS의 <link>는 실제 언론사 URL이 아니라 구글이 감싼 리다이렉트 URL이며,
     진짜 리다이렉트는 자바스크립트로 처리되어 requests로는 따라갈 수 없습니다.
 
+    구글 링크가 아닌 경우(Nasdaq 등 다른 소스의 직접 링크)는 디코딩이 필요 없으므로
+    그대로 통과시킵니다.
+
     1순위: URL 경로의 마지막 base64 토큰을 로컬에서 직접 디코딩합니다. 구형 포맷은
     이 안에 원문 URL이 평문으로 인코딩되어 있어 네트워크 호출 없이 바로 복원됩니다.
     2순위: 구글이 최근 도입한 난독화된 신형 포맷은 로컬 디코딩이 통하지 않으므로,
     googlenewsdecoder 라이브러리로 구글 비공식 API를 통해 복원을 시도합니다
     (추가 네트워크 호출 2회 발생, 레이트리밋 위험 있어 동시 실행 수를 제한합니다).
     """
+    if "news.google.com" not in urlparse(google_link).netloc:
+        return google_link  # 이미 직접 링크이므로 디코딩 불필요
+
     # 1순위: 로컬 디코딩 (네트워크 호출 없음)
     try:
         token = urlparse(google_link).path.rstrip("/").split("/")[-1]
@@ -245,6 +273,54 @@ def fetch_rss_with_retry(
             print(f"  ⏳ 요청 실패({e}) → {wait:.1f}초 대기 후 재시도 ({attempt + 1}/{max_retries})")
             time.sleep(wait)
     raise last_exc or requests.exceptions.RequestException("RSS 요청 재시도 모두 실패 (503 등)")
+
+
+# 키워드가 "NVDA", "NVDX ETF", "TSLA stock"처럼 사실상 티커+접미사 형태면
+# Nasdaq의 티커별 RSS로 보냅니다. "AI Infrastructure"처럼 여러 단어로 된
+# 주제어는 매치되지 않아 기존 Google News RSS 경로로 남습니다.
+_TICKER_PATTERN = re.compile(r"^([A-Za-z]{1,5})(?:\s+(?:ETF|Stock))?$", re.IGNORECASE)
+
+
+def extract_ticker(keyword: str) -> Optional[str]:
+    """키워드 문자열이 '티커' 또는 '티커 + ETF/Stock' 형태인지 판별합니다."""
+    match = _TICKER_PATTERN.match(keyword.strip())
+    return match.group(1).upper() if match else None
+
+
+def fetch_nasdaq_ticker_news(ticker: str, max_items: int, headers: dict) -> list[dict]:
+    """Nasdaq의 티커별 RSS 피드에서 뉴스를 가져옵니다.
+
+    Google News RSS와 달리 링크가 구글 리다이렉트로 감싸져 있지 않아 디코딩이
+    필요 없고(직접 nasdaq.com/articles/... URL), description에 이미 실제
+    요약("Key Points" 등)이 들어 있어 제목과 겹치지 않는 진짜 내용을 바로 얻습니다.
+    """
+    url = f"https://www.nasdaq.com/feed/rssoutbound?symbol={ticker}"
+    results: list[dict] = []
+    try:
+        resp = fetch_rss_with_retry(url, headers, timeout=15, max_retries=2)
+        root = ET.fromstring(resp.text.encode("utf-8"))
+        items = root.findall(".//item")
+
+        for item in items[:max_items]:
+            title_el = item.find("title")
+            title = title_el.text if title_el is not None and title_el.text else "No Title"
+
+            link_el = item.find("link")
+            link = link_el.text if link_el is not None and link_el.text else None
+
+            description_el = item.find("description")
+            description_raw = (
+                description_el.text
+                if description_el is not None and description_el.text
+                else ""
+            )
+            clean_text = re.sub(r"<[^>]*>", "", html.unescape(description_raw)).strip()
+
+            results.append({"title": title, "link": link, "clean_text": clean_text})
+    except Exception as e:
+        print(f"❌ Nasdaq 뉴스 수집 에러 ({ticker}): {e}")
+
+    return results
 
 
 def fetch_latest_news(
@@ -373,6 +449,75 @@ def fetch_latest_news(
 
 
 # ============================================================
+# 종목 뉴스 수집 (Finnhub company-news API)
+# ============================================================
+#
+# Google News RSS와 달리 공식 API로 실제 언론사 URL과 요약(summary)을 직접
+# 제공하므로, 리다이렉트 디코딩(decode_google_news_link)이나 본문 스크래핑
+# (trafilatura)이 필요 없습니다. 무료 티어 기준 분당 60회 호출 가능.
+
+def fetch_finnhub_news(
+    ticker: str, api_key: str, days_back: int, max_per_ticker: int, timeout: int
+) -> list[dict]:
+    """Finnhub company-news API에서 특정 티커의 최신 뉴스를 가져옵니다."""
+    to_date = datetime.now().date()
+    from_date = to_date - timedelta(days=days_back)
+    url = "https://finnhub.io/api/v1/company-news"
+    params = {
+        "symbol": ticker,
+        "from": from_date.isoformat(),
+        "to": to_date.isoformat(),
+        "token": api_key,
+    }
+    try:
+        resp = requests.get(url, params=params, timeout=timeout)
+        if resp.status_code != 200:
+            print(f"  ❌ [Finnhub:{ticker}] HTTP {resp.status_code}: {resp.text[:200]}")
+            return []
+        articles = resp.json()
+        if not isinstance(articles, list):
+            print(f"  ❌ [Finnhub:{ticker}] 예상치 못한 응답 형식: {str(articles)[:200]}")
+            return []
+        print(f"  ✅ [Finnhub:{ticker}] {len(articles)}건 수신 (최대 {max_per_ticker}건 사용)")
+        return articles[:max_per_ticker]
+    except Exception as e:
+        print(f"  ❌ [Finnhub:{ticker}] 요청 예외: {e}")
+        return []
+
+
+def fetch_ticker_news(
+    tickers: list[str],
+    api_key: str,
+    max_per_ticker: int = 5,
+    days_back: int = 1,
+    timeout: int = 10,
+    max_content_chars: int = 500,
+) -> str:
+    """설정된 모든 티커에 대해 Finnhub 뉴스를 수집해 기존 포맷과 동일한 텍스트로 조립합니다."""
+    if not api_key:
+        print("⚠️ FINNHUB_API_KEY가 없어 종목 뉴스 수집을 건너뜁니다.")
+        return ""
+
+    print(f"\nℹ️ Finnhub 종목 뉴스 수집 시작 (티커 {len(tickers)}개)")
+    all_text = ""
+    for ticker in tickers:
+        articles = fetch_finnhub_news(ticker, api_key, days_back, max_per_ticker, timeout)
+        if not articles:
+            continue
+
+        all_text += f"\n### 📂 종목: {ticker} (Finnhub)\n"
+        for idx, art in enumerate(articles, 1):
+            title = art.get("headline") or "No Title"
+            summary = (art.get("summary") or "").strip()
+            desc_text = summary[:max_content_chars] if summary else "본문 요약 없음"
+            all_text += f"기사 {idx}.\n"
+            all_text += f"- 제목: {title}\n"
+            all_text += f"- 내용: {desc_text}\n\n"
+
+    return all_text
+
+
+# ============================================================
 # AI 요약 (Ollama → Groq 순서로 시도)
 # ============================================================
 
@@ -488,16 +633,29 @@ def send_to_discord(webhook_url: str, user_id: str, message_body: str) -> None:
 def main() -> None:
     config = Config(CONFIG_PATH)
 
-    news_content = fetch_latest_news(
-        config.keywords,
-        config.max_news_per_keyword,
+    keyword_news = ""
+    if config.keywords:
+        keyword_news = fetch_latest_news(
+            config.keywords,
+            config.max_news_per_keyword,
+            max_content_chars=config.max_content_chars,
+            article_fetch_timeout=config.article_fetch_timeout,
+            min_content_chars=config.min_content_chars,
+            max_workers=config.article_fetch_workers,
+            rss_max_retries=config.rss_max_retries,
+            rss_request_delay_sec=config.rss_request_delay_sec,
+        )
+
+    ticker_news = fetch_ticker_news(
+        config.tickers,
+        config.finnhub_api_key,
+        max_per_ticker=config.max_news_per_ticker,
+        days_back=config.finnhub_days_back,
+        timeout=config.finnhub_fetch_timeout,
         max_content_chars=config.max_content_chars,
-        article_fetch_timeout=config.article_fetch_timeout,
-        min_content_chars=config.min_content_chars,
-        max_workers=config.article_fetch_workers,
-        rss_max_retries=config.rss_max_retries,
-        rss_request_delay_sec=config.rss_request_delay_sec,
     )
+
+    news_content = keyword_news + ticker_news
     if not news_content.strip():
         print("ℹ️ 수집된 뉴스가 없습니다.")
         return

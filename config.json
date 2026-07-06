@@ -1,105 +1,105 @@
 {
-  "DISCORD_WEBHOOK": "",
-  "DISCORD_USER_ID": "",
-  "POSITIONS": {
-    "SOXX": {
-      "LOOKBACK_DAYS": 252,
-      "ENTRY_MULTIPLIER": 1.59,
-      "VOL_METHOD": "EWMA",
-      "EWMA_LAMBDA": 0.94,
-      "DAILY_SIGMA": 0.0475,
-      "LAST_SIGMA_UPDATE": "2026-07-02",
-      "LAST_SIGMA_METHOD": "EWMA",
-      "LAST_EWMA_LAMBDA": 0.94,
-      "START_DATE": "2026-07-02",
-      "INVEST_TYPE": "LONG_YEAR"
+    "DISCORD_WEBHOOK": "",
+    "DISCORD_USER_ID": "",
+    "POSITIONS": {
+        "SOXX": {
+            "LOOKBACK_DAYS": 252,
+            "ENTRY_MULTIPLIER": 1.59,
+            "VOL_METHOD": "EWMA",
+            "EWMA_LAMBDA": 0.94,
+            "DAILY_SIGMA": 0.0475,
+            "LAST_SIGMA_UPDATE": "2026-07-02",
+            "LAST_SIGMA_METHOD": "EWMA",
+            "LAST_EWMA_LAMBDA": 0.94,
+            "START_DATE": "2026-07-02",
+            "INVEST_TYPE": "LONG_YEAR"
+        },
+        "AIPO": {
+            "LOOKBACK_DAYS": 252,
+            "ENTRY_MULTIPLIER": 1.5,
+            "VOL_METHOD": "EWMA",
+            "EWMA_LAMBDA": 0.94,
+            "DAILY_SIGMA": 0.0293,
+            "LAST_SIGMA_UPDATE": "2026-07-02",
+            "LAST_SIGMA_METHOD": "EWMA",
+            "LAST_EWMA_LAMBDA": 0.94,
+            "START_DATE": "2026-07-02",
+            "INVEST_TYPE": "LONG_YEAR"
+        },
+        "QNDX": {
+            "LOOKBACK_DAYS": 252,
+            "ENTRY_MULTIPLIER": 1.41,
+            "VOL_METHOD": "EWMA",
+            "EWMA_LAMBDA": 0.94,
+            "DAILY_SIGMA": 0.0163,
+            "LAST_SIGMA_UPDATE": "2026-07-02",
+            "LAST_SIGMA_METHOD": "EWMA",
+            "LAST_EWMA_LAMBDA": 0.94,
+            "START_DATE": "2026-07-02",
+            "INVEST_TYPE": "LONG_YEAR"
+        },
+        "NVDX": {
+            "LOOKBACK_DAYS": 63,
+            "ENTRY_MULTIPLIER": 1.41,
+            "VOL_METHOD": "EWMA",
+            "EWMA_LAMBDA": 0.94,
+            "DAILY_SIGMA": 0.0492,
+            "LAST_SIGMA_UPDATE": "2026-07-02",
+            "LAST_SIGMA_METHOD": "EWMA",
+            "LAST_EWMA_LAMBDA": 0.94,
+            "START_DATE": "2026-07-02",
+            "INVEST_TYPE": "ROTATION_3M"
+        },
+        "SOXL": {
+            "LOOKBACK_DAYS": 63,
+            "ENTRY_MULTIPLIER": 1.41,
+            "VOL_METHOD": "EWMA",
+            "EWMA_LAMBDA": 0.94,
+            "DAILY_SIGMA": 0.1406,
+            "LAST_SIGMA_UPDATE": "2026-07-02",
+            "LAST_SIGMA_METHOD": "EWMA",
+            "LAST_EWMA_LAMBDA": 0.94,
+            "START_DATE": "2026-07-02",
+            "INVEST_TYPE": "ROTATION_3M"
+        },
+        "IONQ": {
+            "LOOKBACK_DAYS": 126,
+            "ENTRY_MULTIPLIER": 1.41,
+            "VOL_METHOD": "EWMA",
+            "EWMA_LAMBDA": 0.94,
+            "DAILY_SIGMA": 0.0585,
+            "LAST_SIGMA_UPDATE": "2026-07-02",
+            "LAST_SIGMA_METHOD": "EWMA",
+            "LAST_EWMA_LAMBDA": 0.94,
+            "START_DATE": "2026-07-02",
+            "INVEST_TYPE": "END_DEC"
+        }
     },
-    "AIPO": {
-      "LOOKBACK_DAYS": 252,
-      "ENTRY_MULTIPLIER": 1.5,
-      "VOL_METHOD": "EWMA",
-      "EWMA_LAMBDA": 0.94,
-      "DAILY_SIGMA": 0.0293,
-      "LAST_SIGMA_UPDATE": "2026-07-02",
-      "LAST_SIGMA_METHOD": "EWMA",
-      "LAST_EWMA_LAMBDA": 0.94,
-      "START_DATE": "2026-07-02",
-      "INVEST_TYPE": "LONG_YEAR"
+    "STRATEGY": {
+        "CYCLE_YEARS": 2,
+        "BUY_DURATION_DAYS": 252,
+        "HOLD_DURATION_DAYS": 252,
+        "DEFAULT_LOOKBACK_DAYS": 365,
+        "ORDER_POLICY": "DAILY_LOC_ALL",
+        "NEUTRAL_ACTION": "SHOW_LOC_BUY_PRICE"
     },
-    "QNDX": {
-      "LOOKBACK_DAYS": 252,
-      "ENTRY_MULTIPLIER": 1.41,
-      "VOL_METHOD": "EWMA",
-      "EWMA_LAMBDA": 0.94,
-      "DAILY_SIGMA": 0.0163,
-      "LAST_SIGMA_UPDATE": "2026-07-02",
-      "LAST_SIGMA_METHOD": "EWMA",
-      "LAST_EWMA_LAMBDA": 0.94,
-      "START_DATE": "2026-07-02",
-      "INVEST_TYPE": "LONG_YEAR"
+    "exchange_status": {
+        "LAST_CHECK_DATE": "2026-07-03 06:34:41 UTC",
+        "CURRENT_APPLIED_RATE": 1526.68,
+        "CURRENT_PERCENTILE": 94.6
     },
-    "NVDX": {
-      "LOOKBACK_DAYS": 63,
-      "ENTRY_MULTIPLIER": 1.41,
-      "VOL_METHOD": "EWMA",
-      "EWMA_LAMBDA": 0.94,
-      "DAILY_SIGMA": 0.0492,
-      "LAST_SIGMA_UPDATE": "2026-07-02",
-      "LAST_SIGMA_METHOD": "EWMA",
-      "LAST_EWMA_LAMBDA": 0.94,
-      "START_DATE": "2026-07-02",
-      "INVEST_TYPE": "ROTATION_3M"
+    "news_settings": {
+        "KEYWORDS": [
+            "AI Infrastructure",
+            "semiconductor stock",
+            "NVDA",
+            "NVDX ETF",
+            "SOXX ETF",
+            "SOXL ETF",
+            "TSLA stock",
+            "IONQ stock"
+        ],
+        "MAX_NEWS_PER_KEYWORD": 5
     },
-    "SOXL": {
-      "LOOKBACK_DAYS": 63,
-      "ENTRY_MULTIPLIER": 1.41,
-      "VOL_METHOD": "EWMA",
-      "EWMA_LAMBDA": 0.94,
-      "DAILY_SIGMA": 0.1406,
-      "LAST_SIGMA_UPDATE": "2026-07-02",
-      "LAST_SIGMA_METHOD": "EWMA",
-      "LAST_EWMA_LAMBDA": 0.94,
-      "START_DATE": "2026-07-02",
-      "INVEST_TYPE": "ROTATION_3M"
-    },
-    "IONQ": {
-      "LOOKBACK_DAYS": 126,
-      "ENTRY_MULTIPLIER": 1.41,
-      "VOL_METHOD": "EWMA",
-      "EWMA_LAMBDA": 0.94,
-      "DAILY_SIGMA": 0.0585,
-      "LAST_SIGMA_UPDATE": "2026-07-02",
-      "LAST_SIGMA_METHOD": "EWMA",
-      "LAST_EWMA_LAMBDA": 0.94,
-      "START_DATE": "2026-07-02",
-      "INVEST_TYPE": "END_DEC"
-    }
-  },
-  "STRATEGY": {
-    "CYCLE_YEARS": 2,
-    "BUY_DURATION_DAYS": 252,
-    "HOLD_DURATION_DAYS": 252,
-    "DEFAULT_LOOKBACK_DAYS": 365,
-    "ORDER_POLICY": "DAILY_LOC_ALL",
-    "NEUTRAL_ACTION": "SHOW_LOC_BUY_PRICE"
-  },
-  "exchange_status": {
-    "LAST_CHECK_DATE": "2026-07-06 07:15:14 UTC",
-    "CURRENT_APPLIED_RATE": 1533.28,
-    "CURRENT_PERCENTILE": 95.4
-  },
-  "news_settings": {
-    "KEYWORDS": [
-      "AI Infrastructure",
-      "semiconductor stock",
-      "NVDA",
-      "NVDX ETF",
-      "SOXX ETF",
-      "SOXL ETF",
-      "TSLA stock",
-      "IONQ stock"
-    ],
-    "MAX_NEWS_PER_KEYWORD": 5
-  },
-  "LAST_MONTHLY_PING": "2026-07"
+    "LAST_MONTHLY_PING": "2026-07"
 }
