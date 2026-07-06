@@ -91,7 +91,7 @@
     "FINNHUB_API_KEY": "",
     "news_settings": {
         "KEYWORDS": ["AI Infrastructure"],
-        "TICKERS": ["NVDA", "NVDX", "SOXX", "SOXL", "TSLA", "IONQ"],
+        "TICKERS": ["NVDA", "SOXX", "TSLA", "IONQ"],
         "MAX_NEWS_PER_KEYWORD": 5,
         "MAX_NEWS_PER_TICKER": 5
     },

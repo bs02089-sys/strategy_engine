@@ -80,11 +80,11 @@ DEFAULT_KEYWORDS = [
 ]
 
 # 개별 종목/ETF 뉴스는 Finnhub company-news API로 수집 (리다이렉트/스크래핑 불필요)
+# NVDX(NVDA 2배 레버리지), SOXL(반도체지수 3배 레버리지)은 자체 기업 뉴스가 거의
+# 없어 제외 — 원본 종목/지수(NVDA, SOXX)로 관련 정보가 이미 커버됨.
 DEFAULT_TICKERS = [
     "NVDA",
-    "NVDX",
     "SOXX",
-    "SOXL",
     "TSLA",
     "IONQ",
 ]
