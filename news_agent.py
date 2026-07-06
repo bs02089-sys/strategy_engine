@@ -20,6 +20,7 @@ import json
 import os
 import re
 import sys
+import threading
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -30,6 +31,9 @@ import requests
 
 # pyrefly: ignore [missing-import]
 import trafilatura
+
+# pyrefly: ignore [missing-import]
+from googlenewsdecoder import gnewsdecoder
 
 # pyrefly: ignore [missing-import]
 from groq import Groq
@@ -134,30 +138,51 @@ class Config:
 # 뉴스 수집
 # ============================================================
 
-def decode_google_news_link(google_link: str) -> Optional[str]:
+# 구글 비공식 API(batchexecute)를 이용한 신형 포맷 디코딩은 동시 요청이 많으면
+# 429(Too Many Requests)가 잘 발생하므로, 이 부분만 동시 실행 개수를 별도로 제한합니다.
+_GNEWS_DECODE_SEMAPHORE = threading.Semaphore(2)
+
+
+def decode_google_news_link(google_link: str, label: str = "") -> Optional[str]:
     """Google News RSS의 <link>는 실제 언론사 URL이 아니라 구글이 감싼 리다이렉트 URL이며,
     진짜 리다이렉트는 자바스크립트로 처리되어 requests로는 따라갈 수 없습니다.
 
-    다행히 URL 경로의 마지막 base64 토큰 안에 원문 URL이 평문으로 인코딩되어 있는
-    경우가 많아(구형 포맷), 네트워크 호출 없이 로컬에서 바로 복원합니다.
-    (최근 구글 웹 UI에서 쓰는 신형 난독화 포맷은 이 방식으로 풀리지 않으며,
-    이 경우 별도의 구글 비공식 API 호출이 필요해 레이트리밋에 취약하므로 시도하지 않고
-    None을 반환해 기존 폴백 로직으로 넘깁니다.)
+    1순위: URL 경로의 마지막 base64 토큰을 로컬에서 직접 디코딩합니다. 구형 포맷은
+    이 안에 원문 URL이 평문으로 인코딩되어 있어 네트워크 호출 없이 바로 복원됩니다.
+    2순위: 구글이 최근 도입한 난독화된 신형 포맷은 로컬 디코딩이 통하지 않으므로,
+    googlenewsdecoder 라이브러리로 구글 비공식 API를 통해 복원을 시도합니다
+    (추가 네트워크 호출 2회 발생, 레이트리밋 위험 있어 동시 실행 수를 제한합니다).
     """
+    # 1순위: 로컬 디코딩 (네트워크 호출 없음)
     try:
         token = urlparse(google_link).path.rstrip("/").split("/")[-1]
         padded = token + "=" * (-len(token) % 4)
         decoded = base64.urlsafe_b64decode(padded)
         match = re.search(rb"https?://[\x21-\x7e]+", decoded)
         if match:
-            return match.group(0).decode("utf-8", errors="ignore")
+            resolved = match.group(0).decode("utf-8", errors="ignore")
+            print(f"  🔓 [{label}] 로컬 디코딩 성공 → {resolved[:80]}")
+            return resolved
     except Exception:
         pass
+
+    # 2순위: 신형 포맷 - googlenewsdecoder 폴백
+    with _GNEWS_DECODE_SEMAPHORE:
+        try:
+            result = gnewsdecoder(google_link, interval=1)
+            if result and result.get("status"):
+                resolved = result.get("decoded_url")
+                print(f"  🔓 [{label}] 신형 포맷 디코딩 성공(googlenewsdecoder) → {resolved[:80]}")
+                return resolved
+            print(f"  ⚠️ [{label}] googlenewsdecoder 디코딩 실패: {result.get('message') if result else '응답 없음'}")
+        except Exception as e:
+            print(f"  ⚠️ [{label}] googlenewsdecoder 예외: {e}")
+
     return None
 
 
 def fetch_article_text(
-    url: str, timeout: int, min_chars: int, headers: dict
+    url: str, timeout: int, min_chars: int, headers: dict, label: str = ""
 ) -> Optional[str]:
     """기사 원문 URL을 방문해 본문 텍스트를 추출합니다.
 
@@ -166,18 +191,27 @@ def fetch_article_text(
     실패로 간주하고 None을 반환합니다. 즉 언론사를 수동으로 화이트/블랙리스트
     관리할 필요 없이 자동으로 걸러집니다.
     """
-    real_url = decode_google_news_link(url) or url
+    real_url = decode_google_news_link(url, label=label)
+    if not real_url:
+        print(f"  ❌ [{label}] 원문 URL 디코딩 실패 → 본문 fetch 생략")
+        return None
+
     try:
         resp = requests.get(real_url, headers=headers, timeout=timeout)
         if resp.status_code != 200:
+            print(f"  ❌ [{label}] 원문 접속 실패 (HTTP {resp.status_code})")
             return None
         extracted = trafilatura.extract(
             resp.text, include_comments=False, include_tables=False
         )
-        if not extracted or len(extracted.strip()) < min_chars:
+        extracted_len = len(extracted.strip()) if extracted else 0
+        if extracted_len < min_chars:
+            print(f"  ❌ [{label}] 본문 추출 길이 부족 ({extracted_len}자 < {min_chars}자, 유료구독/차단 추정)")
             return None
+        print(f"  ✅ [{label}] 본문 추출 성공 ({extracted_len}자)")
         return extracted.strip()
-    except Exception:
+    except Exception as e:
+        print(f"  ❌ [{label}] 원문 fetch 예외: {e}")
         return None
 
 
@@ -239,11 +273,17 @@ def fetch_latest_news(
             continue
 
     # 2단계: 기사 원문 본문을 병렬로 fetch (네트워크 대기가 병목이므로 스레드풀 사용)
+    print(f"\nℹ️ 원문 본문 fetch 시작 (총 {sum(1 for e in parsed_items if e['link'])}건, 동시 실행 {max_workers}개)")
     article_texts: dict[int, Optional[str]] = {}
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_pos = {
             executor.submit(
-                fetch_article_text, entry["link"], article_fetch_timeout, min_content_chars, headers
+                fetch_article_text,
+                entry["link"],
+                article_fetch_timeout,
+                min_content_chars,
+                headers,
+                f"{entry['keyword']}-{entry['idx']}",
             ): pos
             for pos, entry in enumerate(parsed_items)
             if entry["link"]
