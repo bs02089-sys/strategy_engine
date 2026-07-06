@@ -205,8 +205,8 @@ def decode_google_news_link(google_link: str, label: str = "") -> Optional[str]:
     with _GNEWS_DECODE_SEMAPHORE:
         try:
             result = gnewsdecoder(google_link, interval=1)
-            if result and result.get("status"):
-                resolved = result.get("decoded_url")
+            resolved = result.get("decoded_url") if result and result.get("status") else None
+            if resolved:
                 print(f"  🔓 [{label}] 신형 포맷 디코딩 성공(googlenewsdecoder) → {resolved[:80]}")
                 return resolved
             print(f"  ⚠️ [{label}] googlenewsdecoder 디코딩 실패: {result.get('message') if result else '응답 없음'}")
@@ -239,12 +239,16 @@ def fetch_article_text(
         extracted = trafilatura.extract(
             resp.text, include_comments=False, include_tables=False
         )
-        extracted_len = len(extracted.strip()) if extracted else 0
-        if extracted_len < min_chars:
-            print(f"  ❌ [{label}] 본문 추출 길이 부족 ({extracted_len}자 < {min_chars}자, 유료구독/차단 추정)")
+        if not extracted:
+            print(f"  ❌ [{label}] 본문 추출 실패 (추출된 텍스트 없음)")
             return None
-        print(f"  ✅ [{label}] 본문 추출 성공 ({extracted_len}자)")
-        return extracted.strip()
+
+        extracted = extracted.strip()
+        if len(extracted) < min_chars:
+            print(f"  ❌ [{label}] 본문 추출 길이 부족 ({len(extracted)}자 < {min_chars}자, 유료구독/차단 추정)")
+            return None
+        print(f"  ✅ [{label}] 본문 추출 성공 ({len(extracted)}자)")
+        return extracted
     except Exception as e:
         print(f"  ❌ [{label}] 원문 fetch 예외: {e}")
         return None
