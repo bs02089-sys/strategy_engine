@@ -18,9 +18,11 @@ import base64
 import html
 import json
 import os
+import random
 import re
 import sys
 import threading
+import time
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -132,6 +134,11 @@ class Config:
         self.min_content_chars: int = news_settings.get("MIN_CONTENT_CHARS", 200)
         # 본문 병렬 fetch에 사용할 스레드 수
         self.article_fetch_workers: int = news_settings.get("ARTICLE_FETCH_WORKERS", 8)
+        # RSS 요청이 503(자동화 접근 의심 차단) 받을 때 재시도 횟수
+        self.rss_max_retries: int = news_settings.get("RSS_MAX_RETRIES", 3)
+        # 키워드별 RSS 요청 사이에 두는 최소 지연(초). 너무 빠른 연속 요청은
+        # 구글이 스크래핑으로 의심해 503을 반환할 수 있어 완충 역할.
+        self.rss_request_delay_sec: float = news_settings.get("RSS_REQUEST_DELAY_SEC", 1.5)
 
 
 # ============================================================
@@ -215,6 +222,31 @@ def fetch_article_text(
         return None
 
 
+def fetch_rss_with_retry(
+    rss_url: str, headers: dict, timeout: int, max_retries: int
+) -> requests.Response:
+    """구글이 잦은 연속 요청을 자동화된 접근(스크래핑)으로 의심해 503을 반환하는
+    경우가 있어, 503을 받으면 지수 백오프로 재시도합니다.
+    """
+    last_exc: Optional[Exception] = None
+    for attempt in range(max_retries):
+        try:
+            resp = requests.get(rss_url, headers=headers, timeout=timeout)
+            if resp.status_code == 503:
+                wait = (2 ** attempt) + random.uniform(0, 1)
+                print(f"  ⏳ 503 응답 (자동화 접근 의심 차단 추정) → {wait:.1f}초 대기 후 재시도 ({attempt + 1}/{max_retries})")
+                time.sleep(wait)
+                continue
+            resp.raise_for_status()
+            return resp
+        except requests.exceptions.RequestException as e:
+            last_exc = e
+            wait = (2 ** attempt) + random.uniform(0, 1)
+            print(f"  ⏳ 요청 실패({e}) → {wait:.1f}초 대기 후 재시도 ({attempt + 1}/{max_retries})")
+            time.sleep(wait)
+    raise last_exc or requests.exceptions.RequestException("RSS 요청 재시도 모두 실패 (503 등)")
+
+
 def fetch_latest_news(
     keywords: list[str],
     max_per_keyword: int,
@@ -222,19 +254,31 @@ def fetch_latest_news(
     article_fetch_timeout: int = 8,
     min_content_chars: int = 200,
     max_workers: int = 8,
+    rss_max_retries: int = 3,
+    rss_request_delay_sec: float = 1.5,
 ) -> str:
     """Google News RSS에서 제목을 수집하고, 원문 링크를 병렬로 따라가 실제 본문을 추출합니다."""
-    headers = {"User-Agent": "Mozilla/5.0"}
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+        ),
+        "Accept-Language": "en-US,en;q=0.9",
+    }
 
     # 1단계: RSS 파싱 (가볍고 빠르므로 순차 처리)
     # 각 항목: {keyword, idx, title, link, fallback_text}
     parsed_items: list[dict] = []
 
-    for kw in keywords:
+    for i, kw in enumerate(keywords):
+        # 키워드 사이에 약간의 랜덤 지연을 둬서 짧은 시간에 몰아치는 요청처럼
+        # 보이지 않게 함 (구글의 자동화 접근 의심 차단 완화)
+        if i > 0:
+            time.sleep(rss_request_delay_sec + random.uniform(0, 1))
+
         rss_url = f"https://news.google.com/rss/search?q={kw}+when:1d&hl=en-US&gl=US&ceid=US:en"
         try:
-            resp = requests.get(rss_url, headers=headers, timeout=15)
-            resp.raise_for_status()
+            resp = fetch_rss_with_retry(rss_url, headers, timeout=15, max_retries=rss_max_retries)
 
             # 구글 RSS 인코딩 이슈를 피하기 위해 utf-8 바이트로 통일 후 파싱
             root = ET.fromstring(resp.text.encode("utf-8"))
@@ -451,6 +495,8 @@ def main() -> None:
         article_fetch_timeout=config.article_fetch_timeout,
         min_content_chars=config.min_content_chars,
         max_workers=config.article_fetch_workers,
+        rss_max_retries=config.rss_max_retries,
+        rss_request_delay_sec=config.rss_request_delay_sec,
     )
     if not news_content.strip():
         print("ℹ️ 수집된 뉴스가 없습니다.")
