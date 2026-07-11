@@ -82,5 +82,6 @@
         "DEFAULT_LOOKBACK_DAYS": 365,
         "ORDER_POLICY": "DAILY_LOC_ALL",
         "NEUTRAL_ACTION": "SHOW_LOC_BUY_PRICE"
-    }
+    },
+    "LAST_MONTHLY_PING": "2026-07"
 }
