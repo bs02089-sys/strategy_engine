@@ -73,7 +73,7 @@ except ImportError:
 # 설정 로드
 # ============================================================
 
-CONFIG_PATH = Path("config.json")
+CONFIG_PATH = Path("news_config.json")
 
 DEFAULT_KEYWORDS = [
     "AI Infrastructure",

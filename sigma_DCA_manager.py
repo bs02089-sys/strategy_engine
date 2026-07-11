@@ -30,7 +30,7 @@ if hasattr(sys.stderr, "reconfigure"):
     getattr(sys.stderr, "reconfigure")(encoding="utf-8")
     
 TARGET_TICKERS         = ["SOXX", "AIPO", "QNDX", "NVDX", "SOXL", "IONQ"]
-CONFIG_PATH            = "config.json"
+CONFIG_PATH            = "portfolio.json"
 _DISCORD_TITLE_LIMIT   = 256
 _DISCORD_CONTENT_LIMIT = 4096
 
@@ -39,24 +39,20 @@ _DISCORD_CONTENT_LIMIT = 4096
 # I/O
 # ════════════════════════════════════════════
 
-def load_config() -> dict:
+CONFIG_PATH = "portfolio_config.json"  
+
+def load_portfolio() -> dict:
     try:
         with open(CONFIG_PATH, "r", encoding="utf-8") as f:
             return json.load(f)
     except FileNotFoundError:
-        print(f"⚠️ {CONFIG_PATH} not found — initializing with defaults.")
-        return {"POSITIONS": {}, "LAST_MONTHLY_PING": ""}
-    except json.JSONDecodeError as e:
-        raise RuntimeError(f"config.json parsing error: {e}") from e
+        return {"POSITIONS": {}}
 
-def save_config(cfg: dict) -> None:
-    try:
-        with tempfile.NamedTemporaryFile("w", delete=False, suffix=".json", encoding="utf-8") as tmp:
-            json.dump(cfg, tmp, indent=4, ensure_ascii=False)
-            tmp_path = tmp.name
-        shutil.move(tmp_path, CONFIG_PATH)
-    except Exception as e:
-        print(f"⚠️ Failed to save {CONFIG_PATH}: {e}")
+def save_portfolio(data: dict) -> None:
+    with tempfile.NamedTemporaryFile("w", delete=False, suffix=".json", encoding="utf-8") as tmp:
+        json.dump(data, tmp, indent=4, ensure_ascii=False)
+        temp_path = tmp.name
+    shutil.move(temp_path, CONFIG_PATH)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -388,7 +384,7 @@ def _get_nyse_holidays(start_date: date, end_date: date) -> np.ndarray | None:
 
     try:
         nyse = mcal.get_calendar("NYSE")
-        all_holidays = np.array(nyse.holidays().holidays, dtype="datetime64[D]")
+        all_holidays = np.array(nyse.holidays(), dtype="datetime64[D]")
         start64 = np.datetime64(start_date)
         end64 = np.datetime64(end_date)
         return all_holidays[(all_holidays >= start64) & (all_holidays <= end64)]
@@ -524,7 +520,7 @@ def send_monthly_ping_if_due(cfg: dict, webhook: str, user_id: str) -> None:
     _send_discord(webhook, user_id, "🗓️ Monthly Operation Ping", msg)
     
     cfg["LAST_MONTHLY_PING"] = today_ym
-    save_config(cfg)
+    save_portfolio(cfg)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -586,13 +582,13 @@ def execute_dual_tactical_trader() -> None:
     """Run integrated macro signal & LOC automation"""
     now_ny = datetime.now(ZoneInfo("America/New_York"))
     
-    cfg = load_config()
+    cfg = load_portfolio()
     webhook = os.environ.get("DISCORD_WEBHOOK") or cfg.get("DISCORD_WEBHOOK", "")
     user_id = os.environ.get("DISCORD_USER_ID") or cfg.get("DISCORD_USER_ID", "")
 
     reset_messages = reset_matured_rotation_positions(cfg, now_ny.date())
     sigma_messages = reset_messages + refresh_sigma_if_stale(cfg)
-    save_config(cfg) 
+    save_portfolio(cfg) 
     
     briefing_lines = _build_briefing_lines(now_ny, cfg, sigma_messages)
     
