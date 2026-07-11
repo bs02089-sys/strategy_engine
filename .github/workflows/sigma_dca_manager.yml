@@ -1,0 +1,31 @@
+name: Sigma DCA Manager Engine
+
+on:
+  schedule:
+    - cron: "15 23 * * 1-5" 
+  workflow_dispatch:
+
+jobs:
+  run-dca-manager:
+    runs-on: ubuntu-latest
+    env:
+      DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+      DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: pip install yfinance pandas requests numpy pytz holidays
+      
+      - name: Run DCA Manager
+        run: python sigma_DCA_manager.py > sigma_log.txt 2>&1
+        
+      - name: Sync and Notify
+        if: always()
+        run: |
+          git config --global user.name "DCA Bot"
+          git config --global user.email "bot@example.com"
+          git add sigma_log.txt config.json sigma_history.csv
+          git commit -m "update: dca-log $(date +'%Y-%m-%d')" || exit 0
+          git push
