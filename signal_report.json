@@ -1,49 +1,41 @@
 {
-    "timestamp": "2026-07-11T09:51:25.746533",
+    "timestamp": "2026-07-11T13:01:00.144843",
+    "total_score": 2,
     "signals": [
         {
-            "name": "장단기 금리 역전",
-            "triggered": true,
+            "name": "Yield Curve Inversion",
             "score": 2,
-            "detail": "재정상화 진행 중 (+0.35%p) (+2점) | → 역사적 침체 진입 패턴과 일치 | 총점: 2/2"
+            "detail": "Re-steepening in progress (+0.35%p) (+2)"
         },
         {
-            "name": "시장 내부 균열",
-            "triggered": false,
+            "name": "Market Breadth",
             "score": 0,
-            "detail": "시장 폭 양호: 종합지수 및 대형주 동반 흐름 (+0점) | 종목 균형 유지: RSP/SPY 상대강도 안정 (-0.0%) (+0점) | 총점: 0/2"
+            "detail": "Market breadth stable (+0) | Market balance maintained (+0)"
         },
         {
-            "name": "신용 스프레드 확대",
-            "triggered": false,
+            "name": "Credit Spread",
             "score": 0,
-            "detail": "HY 안정: 2.70%p (+0점) | IG 안정: 0.76%p (+0점) | 총점: 0/2"
+            "detail": "HY stable (2.70%) | IG stable (0.76%)"
         },
         {
-            "name": "연준 사이클 분석",
-            "triggered": true,
-            "score": 1,
-            "detail": "잔존 위험: 첫 인하 2024-09 후 21개월 경과 (+1점) | 총점: 1/2"
-        },
-        {
-            "name": "밸류에이션 과열",
-            "triggered": true,
-            "score": 1,
-            "detail": "CAPE 42.2 → 극단 과열 [multpl.com (Jul 10, 2026)] (+1점) | EPS 성장률 8.2% → 확장 지속 (+0점) | 총점: 1/2"
-        },
-        {
-            "name": "선행경제지수",
-            "triggered": false,
+            "name": "Fed Policy Cycle",
             "score": 0,
-            "detail": "LEI 1.72% (확장) (+0점) | Sahm Rule 0.07%p (안정) (+0점) | 총점: 0/2"
+            "detail": "Safe period"
         },
         {
-            "name": "모멘텀 전략 전용 신호",
-            "triggered": false,
+            "name": "Valuation Overheat",
             "score": 0,
-            "detail": "SPX 200D 모멘텀 14.2% (양호) (+0점) | 방어/민감 갭 -11.5%p (성장 국면) (+0점) | 총점: 0/2"
+            "detail": "Valuation data error"
+        },
+        {
+            "name": "Leading Indicators",
+            "score": 0,
+            "detail": ""
+        },
+        {
+            "name": "Momentum Strategy",
+            "score": 0,
+            "detail": "SPX momentum healthy"
         }
-    ],
-    "total_score": 4,
-    "max_score": 14
+    ]
 }
