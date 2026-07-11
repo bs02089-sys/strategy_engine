@@ -8,6 +8,8 @@ on:
 jobs:
   run-dca-manager:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     env:
       DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
       DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
@@ -35,7 +37,9 @@ jobs:
           git config --global user.name "DCA Bot"
           git config --global user.email "bot@example.com"
           
-          git add sigma_log.txt portfolio_config.json sigma_history.csv
+          [ -f "sigma_log.txt" ] && git add sigma_log.txt
+          [ -f "portfolio_config.json" ] && git add portfolio_config.json
+          [ -f "sigma_history.csv" ] && git add sigma_history.csv
           
           git commit -m "update: dca-log $(date +'%Y-%m-%d')" || echo "No changes to commit"
           git push
