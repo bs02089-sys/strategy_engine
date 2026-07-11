@@ -11,12 +11,20 @@ jobs:
     env:
       DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
       DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
+    
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Set up Python
         uses: actions/setup-python@v5
-        with: {python-version: '3.12'}
-      - run: pip install yfinance pandas requests numpy pytz holidays
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install yfinance pandas requests numpy pytz holidays
       
       - name: Run DCA Manager
         run: python sigma_DCA_manager.py > sigma_log.txt 2>&1
@@ -26,6 +34,8 @@ jobs:
         run: |
           git config --global user.name "DCA Bot"
           git config --global user.email "bot@example.com"
-          git add sigma_log.txt config.json sigma_history.csv
-          git commit -m "update: dca-log $(date +'%Y-%m-%d')" || exit 0
+          
+          git add sigma_log.txt portfolio_config.json sigma_history.csv
+          
+          git commit -m "update: dca-log $(date +'%Y-%m-%d')" || echo "No changes to commit"
           git push

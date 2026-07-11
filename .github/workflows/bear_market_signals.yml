@@ -11,12 +11,20 @@ jobs:
     env:
       DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
       DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
+    
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Set up Python
         uses: actions/setup-python@v5
-        with: {python-version: '3.12'}
-      - run: pip install yfinance pandas requests numpy pytz holidays
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install yfinance pandas requests numpy pytz holidays
       
       - name: Run Market Signals
         run: python bear_market_signals.py > bear_log.txt 2>&1
@@ -26,8 +34,8 @@ jobs:
         run: |
           git config --global user.name "Signals Bot"
           git config --global user.email "bot@example.com"
-          git add bear_log.txt signal_report.json
-          git commit -m "update: signals $(date +'%Y-%m-%d')" || exit 0
+          git add bear_log.txt signal_report.json bear_config.json
+          git commit -m "update: signals $(date +'%Y-%m-%d')" || echo "No changes to commit"
           git push
           
       - name: Send Discord notification
@@ -39,8 +47,11 @@ jobs:
             const logData = fs.readFileSync('bear_log.txt', 'utf8');
             const target = 'Summary Report';
             const msg = logData.includes(target) ? target + logData.split(target)[1] : logData;
+            
             await fetch(process.env.DISCORD_WEBHOOK, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({content: `<@${process.env.DISCORD_USER_ID}>\n📊 **Market Signals Report**\n\`\`\`\n${msg.slice(-1800)}\n\`\`\``})
+                body: JSON.stringify({
+                    content: `<@${process.env.DISCORD_USER_ID}>\n📊 **Market Signals Report**\n\`\`\`\n${msg.slice(-1800)}\n\`\`\``
+                })
             });
