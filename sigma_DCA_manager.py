@@ -1,13 +1,13 @@
 """
 ─────────────────────────────────────────────────────────────
-Sigma DCA 자동화 — LOC 예정가 디스코드 브리핑
+Sigma DCA Automation — LOC Target Price Discord Briefing
 ─────────────────────────────────────────────────────────────
-실행 흐름:
-  1. config.json 로드
-  2. 종목별 주기(LOOKBACK_DAYS)에 따라 시그마 자동 갱신
-  3. 월초(1일) 운영 핑 발송
-  4. 종목별 전일 종가 · LOC 예정가 계산
-  5. 디스코드 브리핑 전송
+Execution Flow:
+  1. Load config.json
+  2. Automatically update Sigma per ticker based on LOOKBACK_DAYS
+  3. Send monthly operation ping on the 1st
+  4. Calculate previous day's close and LOC target price per ticker
+  5. Dispatch Discord briefing
 """
 import csv
 import os
@@ -23,7 +23,7 @@ from datetime import datetime, timezone, timedelta, date
 from zoneinfo import ZoneInfo
 
 
-# ====================== 인코딩 설정 ======================
+# ====================== Encoding Settings ======================
 if hasattr(sys.stdout, "reconfigure"):
     getattr(sys.stdout, "reconfigure")(encoding="utf-8")
 if hasattr(sys.stderr, "reconfigure"):
@@ -44,10 +44,10 @@ def load_config() -> dict:
         with open(CONFIG_PATH, "r", encoding="utf-8") as f:
             return json.load(f)
     except FileNotFoundError:
-        print(f"⚠️ {CONFIG_PATH} 없음 — 기본값으로 초기화합니다.")
+        print(f"⚠️ {CONFIG_PATH} not found — initializing with defaults.")
         return {"POSITIONS": {}, "LAST_MONTHLY_PING": ""}
     except json.JSONDecodeError as e:
-        raise RuntimeError(f"config.json 파싱 오류: {e}") from e
+        raise RuntimeError(f"config.json parsing error: {e}") from e
 
 def save_config(cfg: dict) -> None:
     try:
@@ -56,14 +56,14 @@ def save_config(cfg: dict) -> None:
             tmp_path = tmp.name
         shutil.move(tmp_path, CONFIG_PATH)
     except Exception as e:
-        print(f"⚠️ {CONFIG_PATH} 저장 실패: {e}")
+        print(f"⚠️ Failed to save {CONFIG_PATH}: {e}")
 
 
 # ═══════════════════════════════════════════════════════════
-# 시그마 자동 갱신 — 종목별 LOOKBACK_DAYS 주기
+# Sigma Auto-Update — By LOOKBACK_DAYS
 # ═══════════════════════════════════════════════════════════
 
-# CSV 로그 기록 함수
+# Function to log Sigma updates to CSV
 def log_sigma_update(ticker: str, sigma: float):
     file_path = "sigma_history.csv"
     file_exists = os.path.isfile(file_path)
@@ -76,8 +76,8 @@ def log_sigma_update(ticker: str, sigma: float):
 
 def recompute_sigma_for_ticker(ticker: str, pos: dict, today: date) -> float:
     """
-    지정 종목의 DAILY_SIGMA를 주기 체크 없이 무조건 새로 계산해 pos에 반영합니다.
-    (로테이션 만기 리셋 등, 강제 재계산이 필요한 경우 사용)
+    Force recalculate DAILY_SIGMA for a ticker and update the config.
+    (Used for forced recalculations like rotation expiration resets)
     """
     lookback_days = int(pos.get("LOOKBACK_DAYS", 252))
     vol_method = str(pos.get("VOL_METHOD", "EWMA")).upper()
@@ -114,7 +114,7 @@ def refresh_sigma_if_stale(cfg: dict) -> list[str]:
         last_str = pos.get("LAST_SIGMA_UPDATE", "2000-01-01")
         last_dt = datetime.strptime(last_str, "%Y-%m-%d").date()
         
-        # 63 영업일 주기 체크 (달력상 약 90일 경과 시 갱신)
+        # Check 63 trading days (approx. 90 calendar days)
         days_passed = (today - last_dt).days
         method_changed = pos.get("LAST_SIGMA_METHOD") != vol_method
         lambda_changed = vol_method == "EWMA" and pos.get("LAST_EWMA_LAMBDA") != ewma_lambda
@@ -123,14 +123,14 @@ def refresh_sigma_if_stale(cfg: dict) -> list[str]:
 
         try:
             new_sigma = recompute_sigma_for_ticker(ticker, pos, today)
-            messages.append(f"📊 {ticker} 자동 갱신 [{lookback_days}일/{vol_method}]: {new_sigma:.4f}")
+            messages.append(f"📊 {ticker} auto-updated [{lookback_days} days/{vol_method}]: {new_sigma:.4f}")
         except Exception as e:
-            messages.append(f"⚠️ {ticker} 갱신 오류: {e}")
+            messages.append(f"⚠️ {ticker} update error: {e}")
     return messages
 
 
 # ═══════════════════════════════════════════════════════════
-# 가격 조회
+# Price Lookup
 # ═══════════════════════════════════════════════════════════
 
 def _safe_float(val) -> float | None:
@@ -156,11 +156,11 @@ def _calculate_sigma_from_closes(closes, lookback_days: int) -> float:
 
 def _calculate_ewma_sigma_from_closes(closes, lookback_days: int, ewma_lambda: float) -> float:
     if not 0 < ewma_lambda < 1:
-        raise ValueError(f"EWMA_LAMBDA는 0과 1 사이여야 합니다: {ewma_lambda}")
+        raise ValueError(f"EWMA_LAMBDA must be between 0 and 1: {ewma_lambda}")
 
     recent_returns = _get_recent_log_returns(closes, lookback_days)
     if len(recent_returns) < 2:
-        raise ValueError("EWMA 계산에 필요한 로그 수익률 데이터가 부족합니다.")
+        raise ValueError("Insufficient log return data for EWMA calculation.")
 
     variance = float(recent_returns.var(ddof=1))
     for r in recent_returns:
@@ -174,7 +174,7 @@ def _calculate_volatility_from_closes(closes, lookback_days: int, vol_method: st
         return _calculate_ewma_sigma_from_closes(closes, lookback_days, ewma_lambda)
     if method in {"STD", "HISTORICAL", "SIMPLE"}:
         return _calculate_sigma_from_closes(closes, lookback_days)
-    raise ValueError(f"지원하지 않는 VOL_METHOD입니다: {vol_method}")
+    raise ValueError(f"Unsupported VOL_METHOD: {vol_method}")
 
 
 def _calculate_loc_from_sigma(prev_close: float, sigma: float, multiplier: float) -> float:
@@ -182,29 +182,28 @@ def _calculate_loc_from_sigma(prev_close: float, sigma: float, multiplier: float
     return round(prev_close * (1 - target_drop_rate), 2)
     
 def get_prev_trading_date(d: date) -> date:
-    """주말을 제외하고 직전 거래일 날짜를 계산하는 헬퍼 함수"""
+    """Helper to calculate the previous business day"""
     wd = d.weekday()  # 0=Mon, ..., 6=Sun
-    if wd == 0:    # 월요일 -> 금요일 (3일 전)
+    if wd == 0:    # Monday -> Friday (3 days prior)
         return d - timedelta(days=3)
-    elif wd == 6:  # 일요일 -> 금요일 (2일 전)
+    elif wd == 6:  # Sunday -> Friday (2 days prior)
         return d - timedelta(days=2)
-    elif wd == 5:  # 토요일 -> 금요일 (1일 전)
+    elif wd == 5:  # Saturday -> Friday (1 day prior)
         return d - timedelta(days=1)
-    else:          # 화~금 -> 1일 전
+    else:          # Tue-Fri -> 1 day prior
         return d - timedelta(days=1)
 
 def get_prev_close(ticker: str) -> tuple[float | None, str]:
     """
-    yfinance를 활용한 안정적인 전일 종가 조회 함수 (3회 재시도 적용)
+    Reliable previous close lookup using yfinance (with 3 retries)
     """
-    print(f"🔍 {ticker} 가격 조회 시작...")
+    print(f"🔍 Starting price lookup for {ticker}...")
     now_ny = datetime.now(ZoneInfo("America/New_York"))
     today_ny = now_ny.date()
     
-    # 3회 재시도 루프
     for attempt in range(1, 4):
         try:
-            print(f"   → yfinance history 시도 ({attempt}/3)...")
+            print(f"   → Trying yfinance history ({attempt}/3)...")
             stock = yf.Ticker(ticker)
             hist = stock.history(period="15d", interval="1d", auto_adjust=False, rounding=True)
             
@@ -214,7 +213,7 @@ def get_prev_close(ticker: str) -> tuple[float | None, str]:
                     last_idx = close_series.index[-1]
                     last_date = last_idx.date() if hasattr(last_idx, "date") else last_idx
                     
-                    # 로직: 장중이면 전일 종가(index -2), 장 마감 후면 당일 종가(index -1)
+                    # Logic: If during trading hours, use index -2, otherwise index -1
                     if last_date == today_ny and now_ny.hour < 16 and len(close_series) >= 2:
                         prev_close = float(close_series.iloc[-2])
                         prev_date = close_series.index[-2].date()
@@ -223,73 +222,68 @@ def get_prev_close(ticker: str) -> tuple[float | None, str]:
                         prev_close = float(close_series.iloc[-1])
                         date_str = last_date.strftime("%m-%d")
                         
-                    print(f"✅ {ticker} yfinance 성공: ${prev_close:.2f} ({date_str})")
+                    print(f"✅ {ticker} yfinance success: ${prev_close:.2f} ({date_str})")
                     return prev_close, date_str
         
         except Exception as e:
-            print(f"   ⚠️ yfinance 시도 {attempt} 실패: {e}")
+            print(f"   ⚠️ Attempt {attempt} failed: {e}")
             if attempt < 3:
-                time.sleep(2.0) # 2초 대기 후 재시도
+                time.sleep(2.0)
 
-    # 최후의 수단: info fallback
+    # Info fallback
     try:
-        print(f"   → yfinance info fallback 시도...")
+        print(f"   → Trying yfinance info fallback...")
         info = yf.Ticker(ticker).info
         for key in ["previousClose", "regularMarketPreviousClose", "currentPrice", "regularMarketPrice"]:
             price = _safe_float(info.get(key))
             if price is not None and not np.isnan(price):
-                print(f"✅ {ticker} info 성공: ${price:.2f} (key: {key})")
+                print(f"✅ {ticker} info success: ${price:.2f} (key: {key})")
                 return price, "N/A"
     except Exception as e:
-        print(f"   ⚠️ info fallback 실패: {e}")
+        print(f"   ⚠️ Info fallback failed: {e}")
 
-    print(f"❌ {ticker} 모든 가격 조회 방법 실패")
+    print(f"❌ All price lookup methods failed for {ticker}")
     return None, "N/A"
 
 
 def get_realtime_sigma(ticker: str, lookback_days: int, vol_method: str = "EWMA", ewma_lambda: float = 0.94) -> float:
     """
-    yfinance를 활용해 실시간으로 종목의 로그 수익률 표준편차(Sigma)를 계산하는 함수.
-    네트워크 오류 및 API 제한에 대응하기 위해 3회 재시도(Retry) 루프를 포함합니다.
+    Calculates Sigma using yfinance in real-time.
     """
     vol_method = vol_method.upper()
-    print(f"📊 {ticker} 실시간 시그마(Sigma) 계산 시작 (룩백: {lookback_days}일/{vol_method})...")
+    print(f"📊 Calculating real-time Sigma for {ticker} (Lookback: {lookback_days}/{vol_method})...")
     
     for attempt in range(1, 4):
         try:
-            print(f"   → yfinance history 데이터 수집 시도 ({attempt}/3)...")
+            print(f"   → Data collection attempt ({attempt}/3)...")
             stock = yf.Ticker(ticker)
-            # 로그 수익률 계산을 위해 요구하는 룩백 일수보다 넉넉하게 (+30일) 수집합니다.
             hist = stock.history(period=f"{lookback_days + 30}d", interval="1d", auto_adjust=False)
             
             if hist.empty:
-                raise ValueError("수집된 데이터가 비어 있습니다.")
+                raise ValueError("Data empty.")
                 
             closes = hist['Close'].dropna()
             if len(closes) < lookback_days:
-                raise ValueError(f"유효 종가 데이터 일수({len(closes)}일)가 요구되는 룩백 일수({lookback_days}일)보다 부족합니다.")
+                raise ValueError(f"Insufficient data points ({len(closes)}).")
                 
-            # 표준편차(Sigma) 산출
             new_sigma = _calculate_volatility_from_closes(closes, lookback_days, vol_method, ewma_lambda)
             
-            print(f"✅ {ticker} 실시간 시그마 산출 성공: {new_sigma:.4f}")
+            print(f"✅ {ticker} Sigma calculation success: {new_sigma:.4f}")
             return new_sigma
             
         except Exception as e:
-            print(f"   ⚠️ 시도 {attempt} 실패: {e}")
+            print(f"   ⚠️ Attempt {attempt} failed: {e}")
             if attempt < 3:
-                time.sleep(2.0)  # 2초 대기 후 재시도
+                time.sleep(2.0)
             else:
-                # 3회 모두 실패 시, 에러를 상위 호출부로 전파하여 시스템이 인지하도록 합니다.
-                raise RuntimeError(f"❌ {ticker} 실시간 시그마 계산 실패 (3회 초과 재시도)") from e
+                raise RuntimeError(f"❌ {ticker} Sigma calculation failed after retries") from e
 
-    # 루프 바깥 영역에도 예외 처리를 명시해 '-> float'의 None 반환 오판 문제를 차단합니다.
-    raise RuntimeError(f"❌ {ticker} 실시간 시그마 계산 실패 (알 수 없는 오류)")
+    raise RuntimeError(f"❌ {ticker} Sigma calculation failed (unknown error)")
             
 
 def calculate_loc_price(ticker: str, prev_close: float, cfg: dict) -> float:
     """
-    2. 정의된 함수를 이용하여 실제 매수가를 산출합니다 (실행 과정)
+    Calculate LOC target price.
     """
     pos_cfg = cfg.setdefault("POSITIONS", {}).setdefault(ticker, {})
     multiplier = pos_cfg.get("ENTRY_MULTIPLIER", 1.41)
@@ -298,19 +292,17 @@ def calculate_loc_price(ticker: str, prev_close: float, cfg: dict) -> float:
     vol_method = str(pos_cfg.get("VOL_METHOD", "EWMA")).upper()
     ewma_lambda = float(pos_cfg.get("EWMA_LAMBDA", 0.94))
 
-    # 설정값이 있으면 즉시 사용
     if sigma is not None:
         return _calculate_loc_from_sigma(prev_close, sigma, multiplier)
 
-    # 없으면 위에서 정의한 get_realtime_sigma를 호출
-    print(f"  ⚠️ {ticker} 설정값 없음 → 실시간 계산 실행")
+    print(f"  ⚠️ No settings found for {ticker} → Calculating in real-time")
     sigma = get_realtime_sigma(ticker, lookback_days, vol_method, ewma_lambda)
     
     return _calculate_loc_from_sigma(prev_close, sigma, multiplier)
 
 
 def get_market_score(filepath="signal_report.json"):
-    """경보 시스템의 결과물을 읽어와 점수를 반환"""
+    """Returns the market score from the alert system."""
     if not os.path.exists(filepath):
         return 0 
     try:
@@ -322,7 +314,7 @@ def get_market_score(filepath="signal_report.json"):
 
 
 def calculate_final_loc(base_price: float) -> float:
-    """기본 계산된 LOC에 위험 점수 반영하여 보정"""
+    """Adjusts LOC price based on risk score."""
     score = get_market_score()
     if score >= 10: discount = 0.95
     elif score >= 6: discount = 0.98
@@ -331,7 +323,7 @@ def calculate_final_loc(base_price: float) -> float:
 
 
 # ==============================================================================
-# 빅테크 CAPEX 및 기술 지표 참/거짓(True/False) 연산 엔진
+# Macro/Technical Signal Engine
 # ==============================================================================
 
 def get_current_vix() -> float | None:
@@ -349,51 +341,46 @@ def get_current_vix() -> float | None:
 
 def check_macro_and_technical_signals(ticker: str, pos_cfg: dict, current_vix: float | None) -> tuple[bool, bool, str]:
     """
-    설정된 투자 유형, 주가 추세, VIX 지수로 매수/매도 참(True)/거짓(False)을 판정합니다.
+    Evaluates Buy/Sell signals based on investment type, price trends, and VIX.
     """
     if current_vix is None:
-        return False, False, "VIX 데이터 수집 지연 (관망)"
+        return False, False, "VIX data delay (neutral)"
 
     try:
         stock = yf.Ticker(ticker)
         hist = stock.history(period="120d", interval="1d", auto_adjust=False)
         
         if hist.empty:
-            return False, False, "주가 데이터 수집 지연 (관망)"
+            return False, False, "Price data delay (neutral)"
 
         closes = hist['Close'].dropna()
         if len(closes) < 60:
-            return False, False, f"60일 추세 데이터 부족 ({len(closes)}일)"
+            return False, False, f"Insufficient 60-day data ({len(closes)})"
             
         current_price = float(closes.iloc[-1])
         ma20 = float(closes.rolling(window=20).mean().iloc[-1])
         ma60 = float(closes.rolling(window=60).mean().iloc[-1])
     except Exception as e:
-        return False, False, f"API 지연 ({e})"
+        return False, False, f"API delay ({e})"
 
     invest_type = str(pos_cfg.get("INVEST_TYPE", "")).upper()
 
-    # 1. 단기 모멘텀/기한형 자산 -> 정배열일 때만 안전하게 LOC 오픈
+    # 1. Rotation/End-of-Cycle Assets -> Only enter when in a steady uptrend
     if invest_type in {"ROTATION_3M", "END_DEC"}:
         buy_signal = bool(current_price > ma20 and current_price > ma60 and current_vix < 20)
         sell_signal = bool(current_price < ma60 or current_vix > 25)
-        reason = f"정배열 추세 구간 (VIX: {current_vix:.1f})" if buy_signal else "추세 혼조 또는 리스크 관리 구간"
+        reason = f"Uptrend (VIX: {current_vix:.1f})" if buy_signal else "Mixed trend or risk management"
     
-    # 2. 인프라 및 적립식 자산 (SOXX, AIPO, QNDX) -> 매크로 폭락장(VIX 대발작)만 아니면 진입
+    # 2. Infrastructure/DCA Assets -> Enter unless VIX indicates panic
     else:
         buy_signal = bool(current_vix < 23)
         sell_signal = bool(current_vix > 28)
-        reason = "AI 인프라 사이클 유효" if buy_signal else "글로벌 매크로 위험 경계"
+        reason = "AI infra cycle valid" if buy_signal else "Global macro risk"
 
     return buy_signal, sell_signal, reason
 
 
 def _get_nyse_holidays(start_date: date, end_date: date) -> np.ndarray | None:
-    """
-    pandas_market_calendars로 NYSE 공식 공휴일 목록을 가져옵니다.
-    라이브러리가 없으면 None을 반환해 주말만 반영하는 방식으로 자동 폴백합니다.
-    (pip install pandas_market_calendars 필요)
-    """
     try:
         import pandas_market_calendars as mcal
     except ImportError:
@@ -401,7 +388,7 @@ def _get_nyse_holidays(start_date: date, end_date: date) -> np.ndarray | None:
 
     try:
         nyse = mcal.get_calendar("NYSE")
-        all_holidays = np.array(nyse.holidays().holidays, dtype="datetime64[D]")  # type: ignore[attr-defined]
+        all_holidays = np.array(nyse.holidays().holidays, dtype="datetime64[D]")
         start64 = np.datetime64(start_date)
         end64 = np.datetime64(end_date)
         return all_holidays[(all_holidays >= start64) & (all_holidays <= end64)]
@@ -410,11 +397,7 @@ def _get_nyse_holidays(start_date: date, end_date: date) -> np.ndarray | None:
 
 
 def business_days_elapsed(start_date: date, today: date) -> int:
-    """
-    START_DATE부터 오늘까지의 영업일 경과 일수를 계산합니다.
-    pandas_market_calendars가 설치돼 있으면 NYSE 공휴일(추수감사절, 독립기념일 대체휴장 등)까지
-    정확히 제외하고, 없으면 주말만 제외한 근사치로 계산합니다.
-    """
+    """Calculates elapsed business days."""
     if today <= start_date:
         return 0
     holidays = _get_nyse_holidays(start_date, today)
@@ -424,10 +407,7 @@ def business_days_elapsed(start_date: date, today: date) -> int:
 
 
 def check_rotation_exit_signal(pos_cfg: dict, today: date) -> tuple[bool, int, int]:
-    """
-    ROTATION_3M(NVDX, SOXL 등) 종목의 D+63 로테이션 만기 여부를 판정합니다.
-    ROTATION_EXIT_DAYS(없으면 LOOKBACK_DAYS, 기본 63)에 도달하면 매도 시그널을 발생시킵니다.
-    """
+    """Checks if ROTATION_3M position has reached expiration."""
     invest_type = str(pos_cfg.get("INVEST_TYPE", "")).upper()
     if invest_type != "ROTATION_3M":
         return False, 0, 0
@@ -447,13 +427,7 @@ def check_rotation_exit_signal(pos_cfg: dict, today: date) -> tuple[bool, int, i
 
 
 def reset_matured_rotation_positions(cfg: dict, today: date) -> list[str]:
-    """
-    D+63(ROTATION_EXIT_DAYS) 만기에 도달한 ROTATION_3M 종목(NVDX, SOXL 등)을
-    '오늘 매도 후 신규 사이클 진입'을 전제로 자동 리셋합니다.
-      1) START_DATE를 오늘 날짜로 갱신 (D+0부터 재카운트)
-      2) DAILY_SIGMA를 주기 체크 없이 무조건 새로 계산 (신규 진입가 산출용)
-    ROTATION_3M이 아닌 종목(SOXX, AIPO, QNDX, IONQ)에는 영향을 주지 않습니다.
-    """
+    """Resets rotation positions upon reaching maturity."""
     messages = []
     positions = cfg.get("POSITIONS", {})
 
@@ -466,11 +440,11 @@ def reset_matured_rotation_positions(cfg: dict, today: date) -> list[str]:
             new_sigma = recompute_sigma_for_ticker(ticker, pos, today)
             pos["START_DATE"] = today.strftime("%Y-%m-%d")
             messages.append(
-                f"🔄 {ticker} D+{exit_days} 만기 → 포지션 리셋 완료 "
-                f"(영업일 경과 {elapsed_bd}일 / 신규 사이클 시작 / 시그마 재계산: {new_sigma:.4f})"
+                f"🔄 {ticker} D+{exit_days} maturity reached → Position reset "
+                f"(Business days elapsed: {elapsed_bd} / New cycle starting / Sigma recalculated: {new_sigma:.4f})"
             )
         except Exception as e:
-            messages.append(f"⚠️ {ticker} 만기 리셋 실패 — START_DATE 미갱신, 수동 확인 필요: {e}")
+            messages.append(f"⚠️ {ticker} reset failed — Manual check required: {e}")
 
     return messages
 
@@ -487,7 +461,7 @@ def format_position_meta(pos_cfg: dict, today: date) -> str:
             start_date = datetime.strptime(start_str, "%Y-%m-%d").date()
             parts.append(f"D+{max((today - start_date).days, 0)}")
         except ValueError:
-            parts.append(f"START_DATE 오류: {start_str}")
+            parts.append(f"START_DATE error: {start_str}")
 
     return f" | {' / '.join(parts)}" if parts else ""
 
@@ -497,19 +471,19 @@ def _format_loc_action_line(ticker: str, prev_close: float, cfg: dict) -> str:
     final_loc = calculate_final_loc(base_loc)
 
     if base_loc != final_loc:
-        return f"• 🎯 **[액션] LOC 매수 걸어두기:** ~~${base_loc:.2f}~~ ➡️ **${final_loc:.2f}** (위험 할인가)"
-    return f"• 🎯 **[액션] LOC 매수 걸어두기:** **${final_loc:.2f}**"
+        return f"• 🎯 **[Action] LOC Buy:** ~~${base_loc:.2f}~~ ➡️ **${final_loc:.2f}** (Risk Discount)"
+    return f"• 🎯 **[Action] LOC Buy:** **${final_loc:.2f}**"
 
 
 # ═══════════════════════════════════════════════════════════
-# 디스코드 전송 엔진 
+# Discord Dispatcher
 # ═══════════════════════════════════════════════════════════
 def _send_discord(webhook_url: str, user_id: str, title: str, content: str) -> None:
     if not webhook_url:
-        print("⚠️ DISCORD_WEBHOOK 미설정 — 전송 생략")
+        print("⚠️ DISCORD_WEBHOOK not set — Skipping send.")
         return
     if not webhook_url.startswith("https://discord.com/api/webhooks/"):
-        print(f"⚠️ DISCORD_WEBHOOK 형식 오류: {webhook_url[:40]}...")
+        print(f"⚠️ DISCORD_WEBHOOK invalid format: {webhook_url[:40]}...")
         return
 
     if len(title) > _DISCORD_TITLE_LIMIT:
@@ -529,14 +503,14 @@ def _send_discord(webhook_url: str, user_id: str, title: str, content: str) -> N
     try:
         resp = requests.post(webhook_url, json=payload, timeout=15)
         if resp.ok:
-            print(f"✅ 디스코드 브리핑 전송 성공")
+            print(f"✅ Discord briefing sent successfully.")
         resp.raise_for_status()
     except Exception as e:
-        print(f"❌ 디스코드 전송 실패: {e}")
+        print(f"❌ Discord transmission failed: {e}")
 
 
 # ═══════════════════════════════════════════════════════════
-# 월초 운영 핑
+# Monthly Ping
 # ═══════════════════════════════════════════════════════════
 def send_monthly_ping_if_due(cfg: dict, webhook: str, user_id: str) -> None:
     now = datetime.now()
@@ -546,63 +520,59 @@ def send_monthly_ping_if_due(cfg: dict, webhook: str, user_id: str) -> None:
     if cfg.get("LAST_MONTHLY_PING") == today_ym:
         return
     
-    msg = f"🔔 **월초 핑** | {now.strftime('%Y년 %m월')}\n운용 시스템이 정상 가동 중입니다."
-    _send_discord(webhook, user_id, "🗓️ 월간 운영 핑", msg)
+    msg = f"🔔 **Monthly Ping** | {now.strftime('%Y-%m')}\nOperation system running normally."
+    _send_discord(webhook, user_id, "🗓️ Monthly Operation Ping", msg)
     
     cfg["LAST_MONTHLY_PING"] = today_ym
     save_config(cfg)
 
 
 # ═══════════════════════════════════════════════════════════
-# 통합 시그널 & LOC 반영 브리핑 빌더
+# Briefing Builder
 # ═══════════════════════════════════════════════════════════
 def _build_briefing_lines(now_ny: datetime, cfg: dict, sigma_messages: list[str]) -> list[str]:
-    lines = [f"🌙 **미국 증시 LOC 포트폴리오 브리핑** ({now_ny.strftime('%Y-%m-%d %H:%M %Z')})"]
+    lines = [f"🌙 **U.S. Market LOC Portfolio Briefing** ({now_ny.strftime('%Y-%m-%d %H:%M %Z')})"]
     today_ny = now_ny.date()
     
-    # 위험 스코어 연동 (있으면 표기, 없으면 패스)
     market_score = get_market_score()
-    lines.append(f"📊 **시장 리스크 스코어:** {market_score} / 14")
+    lines.append(f"📊 **Market Risk Score:** {market_score} / 14")
     lines.append("─" * 40)
 
     positions = cfg.get("POSITIONS", {})
     current_vix = get_current_vix()
 
     for ticker, pos_cfg in positions.items():
-        # 복잡한 날짜 배제하고 순수 시그널만 조회
         buy_sig, sell_sig, reason = check_macro_and_technical_signals(ticker, pos_cfg, current_vix)
         
         prev_close, last_date_str = get_prev_close(ticker)
         if prev_close is None:
-            lines.append(f"\n🔹 **{ticker}** — 주가 조회 실패 ⚠️")
+            lines.append(f"\n🔹 **{ticker}** — Price lookup failed ⚠️")
             continue
 
         position_meta = format_position_meta(pos_cfg, today_ny)
-        lines.append(f"\n🔹 **{ticker}** (종가: ${prev_close:.2f} | {last_date_str}{position_meta})")
-        lines.append(f"• **시그널:** 매수[{buy_sig}] / 매도[{sell_sig}] | {reason}")
+        lines.append(f"\n🔹 **{ticker}** (Close: ${prev_close:.2f} | {last_date_str}{position_meta})")
+        lines.append(f"• **Signals:** Buy[{buy_sig}] / Sell[{sell_sig}] | {reason}")
 
-        # D+63(로테이션 만기) 시그널 — NVDX, SOXL 등 ROTATION_3M 종목 전용
         rotation_due, elapsed_bd, exit_days = check_rotation_exit_signal(pos_cfg, today_ny)
         if rotation_due:
-            lines.append(f"• 🔴 **[D+{exit_days} 로테이션 만기] 보유기간 만료 — 매도 검토 필요! (영업일 경과: {elapsed_bd}일)**")
+            lines.append(f"• 🔴 **[D+{exit_days} Rotation Maturity] Period expired — Review for sell! (Elapsed: {elapsed_bd} days)**")
 
-        # 조건 만족 시 기계적으로 걸어둘 LOC 가격 산출
         if sell_sig is True:
             invest_type = str(pos_cfg.get("INVEST_TYPE", "")).upper()
             if invest_type in {"ROTATION_3M", "END_DEC"}:
-                lines.append("• 🚨 **[경고] 위험 구간 — 매도보다 신규 LOC 기준을 보수적으로 확인**")
+                lines.append("• 🚨 **[Warning] Risk area — Check LOC criteria conservatively**")
                 lines.append(_format_loc_action_line(ticker, prev_close, cfg))
             else:
-                lines.append("• 🚨 **[경고] 위험 구간 — LOC 체결 가능성을 보수적으로 점검**")
+                lines.append("• 🚨 **[Warning] Risk area — Review LOC execution probability**")
                 lines.append(_format_loc_action_line(ticker, prev_close, cfg))
         elif buy_sig is True:
             lines.append(_format_loc_action_line(ticker, prev_close, cfg))
         else:
-            lines.append("• 🟡 **[참고] 중립 구간 — 적극 진입 신호는 아니지만, 기계적 LOC 주문은 유효**")
+            lines.append("• 🟡 **[Note] Neutral area — No active buy signal, but mechanical LOC order remains valid**")
             lines.append(_format_loc_action_line(ticker, prev_close, cfg))
 
     if sigma_messages:
-        lines.append("\n📝 **[시스템 로그]**")
+        lines.append("\n📝 **[System Logs]**")
         for msg in sigma_messages:
             lines.append(f"• {msg}")
             
@@ -610,40 +580,33 @@ def _build_briefing_lines(now_ny: datetime, cfg: dict, sigma_messages: list[str]
 
 
 # ═══════════════════════════════════════════════════════════
-# 메인 제어 루프 실행 
+# Execution Loop
 # ═══════════════════════════════════════════════════════════
 def execute_dual_tactical_trader() -> None:
-    """통합 매크로 시그널 & LOC 자동화 시스템 가동"""
+    """Run integrated macro signal & LOC automation"""
     now_ny = datetime.now(ZoneInfo("America/New_York"))
     
-    # 1. 설정 로드
     cfg = load_config()
     webhook = os.environ.get("DISCORD_WEBHOOK") or cfg.get("DISCORD_WEBHOOK", "")
     user_id = os.environ.get("DISCORD_USER_ID") or cfg.get("DISCORD_USER_ID", "")
 
-    # 2. 시스템 루틴: D+63 로테이션 만기 종목 자동 리셋 (오늘 매도 → 오늘 신규 진입 전제)
     reset_messages = reset_matured_rotation_positions(cfg, now_ny.date())
-
-    # 2-1. 시그마 갱신 및 저장 (방금 리셋된 종목은 LAST_SIGMA_UPDATE가 오늘이라 재갱신 스킵됨)
     sigma_messages = reset_messages + refresh_sigma_if_stale(cfg)
     save_config(cfg) 
     
-    # 3. [업데이트] 참/거짓 시그널과 결합된 최종 브리핑 생성
     briefing_lines = _build_briefing_lines(now_ny, cfg, sigma_messages)
     
-    # 4. 디스코드 전송
     _send_discord(
         webhook_url=webhook, 
         user_id=user_id, 
-        title="📋 AI & 반도체 포트폴리오 LOC 운용 브리핑", 
+        title="📋 AI & Semi Portfolio LOC Briefing", 
         content="\n".join(briefing_lines)
     )
     
-    # 5. 월초 핑 관리
     try:
         send_monthly_ping_if_due(cfg, webhook, user_id)
     except Exception as e:
-        print(f"⚠️ 월초 핑 전송 중 오류 발생: {e}")
+        print(f"⚠️ Error sending monthly ping: {e}")
 
 
 if __name__ == "__main__":
