@@ -61,7 +61,7 @@ class DiscordMarketTracker:
             print(f"전송 오류: {e}")
 
     def update_all(self, data_map):
-        self.send_discord("시스템 테스트: 알림이 정상적으로 오는지 확인 중입니다.") # type: ignore
+        self._send_discord("시스템 테스트: 알림이 정상적으로 오는지 확인 중입니다.") # type: ignore
         for ticker, df in data_map.items():
             current_stage = self.trackers[ticker].update(df)
             
