@@ -2,6 +2,8 @@ import os
 import requests
 import pandas as pd
 import json
+import yfinance as yf
+
 
 class MarketBottomTracker:
     def __init__(self):
@@ -67,3 +69,26 @@ class DiscordMarketTracker:
                     else:
                         msg = f"📢 **[{ticker}] 단계 변경:** {current_stage}단계 진입"
                     self.send_discord(msg)
+
+def get_data(ticker):
+    # 최근 100일간의 데이터를 가져와서 필요한 컬럼만 추출
+    df = yf.download(ticker, period="100d", interval="1d")
+    df.columns = df.columns.str.lower() # type: ignore
+    return df
+
+if __name__ == "__main__":
+    # 1. 트래커 초기화
+    tracker = DiscordMarketTracker()
+    
+    # 2. 각 티커별 데이터 수집 및 업데이트 수행
+    data_map = {}
+    for ticker in tracker.tickers:
+        try:
+            print(f"데이터 수집 중: {ticker}")
+            data_map[ticker] = get_data(ticker)
+        except Exception as e:
+            print(f"{ticker} 데이터 수집 실패: {e}")
+            
+    # 3. 전체 데이터 맵을 넣고 단계 업데이트 실행
+    tracker.update_all(data_map)
+    print("시장 모니터링 시스템 실행 완료.")
