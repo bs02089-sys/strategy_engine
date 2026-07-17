@@ -61,16 +61,21 @@ class DiscordMarketTracker:
             print(f"전송 오류: {e}")
 
     def update_all(self, data_map):
-        self._send_discord("시스템 테스트: 알림이 정상적으로 오는지 확인 중입니다.") # type: ignore
+        # 1. 메시지 리스트 생성
+        report_msg = "📊 **[현재 시장 단계 리포트]**\n"
+        
         for ticker, df in data_map.items():
+            # 현재 단계 업데이트
             current_stage = self.trackers[ticker].update(df)
             
-            if current_stage != self.last_stages[ticker]:
-                self.last_stages[ticker] = current_stage
-                msg = (f"🔥 **[긴급] {ticker} 4단계 도달!** 매수 검토 구간입니다." 
-                       if current_stage == 4 
-                       else f"📢 **[{ticker}] 단계 변경:** {current_stage}단계 진입")
-                self._send_discord(msg)
+            # 단계별 메시지 설정
+            if current_stage == 4:
+                report_msg += f"🔥 **{ticker}**: 4단계 (매수 검토 구간!)\n"
+            else:
+                report_msg += f"• **{ticker}**: {current_stage}단계\n"
+        
+        # 2. 메시지 전송 (한 번에 모아서 전송)
+        self._send_discord(report_msg)
 
 def get_data(ticker):
     """yfinance 데이터 수집 및 전처리"""
