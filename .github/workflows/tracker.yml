@@ -15,8 +15,13 @@ jobs:
       - uses: actions/setup-python@v5
         with: {python-version: '3.12'}
       - run: pip install pandas requests yfinance
+      
       - name: Run Tracker
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
         run: python MarketBottomSystem.py > market_log.txt 2>&1
+        
       - name: Commit and Push
         run: |
           git config --global user.name "Market Bot"
