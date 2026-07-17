@@ -28,9 +28,12 @@ class MarketBottomTracker:
     def _is_exhaustion(self, df):
         # 최근 5일간 종가가 하락 추세이면서, 종가 종류가 거의 바뀌지 않을 정도로
         # 매도 압력이 소진된 상태인지 확인
-        last5_diff_sum = df['close'].diff().tail(5).sum()
+        # (주의: diff().tail(5).sum()은 텔레스코핑으로 인해 실제로는
+        #  "오늘 대비 6일 전" 비교가 되어 아래 nunique(최근 5일)와 범위가
+        #  어긋났던 부분 -> "오늘 대비 5일 전"으로 통일)
+        last5_change = df['close'].iloc[-1] - df['close'].iloc[-5]
         last5_nunique = df['close'].tail(5).nunique()
-        return bool(last5_diff_sum < 0 and last5_nunique < 3)
+        return bool(last5_change < 0 and last5_nunique < 3)
 
     def _is_retest(self, df):
         # '오늘'을 제외한 구간의 저점을 기준으로 재접근(재테스트) 여부 확인
