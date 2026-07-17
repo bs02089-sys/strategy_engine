@@ -21,6 +21,6 @@ jobs:
         run: |
           git config --global user.name "Market Bot"
           git config --global user.email "bot@tracker.com"
-          git add market_log.txt
+          git add -f market_log.txt  
           git commit -m "Auto-update logs" || echo "No changes"
           git push
