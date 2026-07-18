@@ -501,8 +501,8 @@ def _format_loc_action_line(ticker: str, prev_close: float, cfg: dict) -> str:
     final_loc = calculate_final_loc(base_loc)
 
     if base_loc != final_loc:
-        return f"• 🎯 **[Action] LOC Buy:** ~~${base_loc:.2f}~~ ➡️ **${final_loc:.2f}** (Risk Discount)"
-    return f"• 🎯 **[Action] LOC Buy:** **${final_loc:.2f}**"
+        return f"• 🎯 {SYSTEM_TAG} **[Action] LOC Buy:** ~~${base_loc:.2f}~~ ➡️ **${final_loc:.2f}** (Risk Discount)"
+    return f"• 🎯 {SYSTEM_TAG} **[Action] LOC Buy:** **${final_loc:.2f}**"
 
 
 # ═══════════════════════════════════════════════════════════
@@ -603,11 +603,11 @@ def _build_briefing_lines(now_ny: datetime, cfg: dict, sigma_messages: list[str]
             lines.append("• 🟡 **[Note] Neutral area — No active buy signal, but mechanical LOC order remains valid**")
             lines.append(_format_loc_action_line(ticker, prev_close, cfg))
 
-    if sigma_messages:
-        lines.append("\n📝 **[System Logs]**")
-        for msg in sigma_messages:
-            lines.append(f"• {msg}")
-            
+    # NOTE: sigma_messages (recompute/rotation-reset/error notices) are
+    # intentionally NOT appended to the Discord content anymore — they're
+    # printed to the console (see execute_dual_tactical_trader) so they still
+    # show up in the GitHub Actions log, without cluttering the notification.
+
     return lines
 
 
@@ -625,7 +625,12 @@ def execute_dual_tactical_trader() -> None:
     reset_messages = reset_matured_rotation_positions(cfg, now_ny.date())
     sigma_messages = reset_messages + refresh_sigma_if_stale(cfg)
     save_portfolio(cfg) 
-    
+
+    # Keep these visible in the GitHub Actions run log even though they no
+    # longer appear in the Discord notification content.
+    for msg in sigma_messages:
+        print(f"📝 [System Log] {msg}")
+
     briefing_lines = _build_briefing_lines(now_ny, cfg, sigma_messages)
     
     _send_discord(
