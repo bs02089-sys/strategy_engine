@@ -34,6 +34,7 @@ TARGET_TICKERS         = ["SOXX", "AIPO", "QNDX", "NVDX", "SOXL"]
 CONFIG_PATH = "portfolio_config_garch.json"
 _DISCORD_TITLE_LIMIT   = 256
 _DISCORD_CONTENT_LIMIT = 4096
+SYSTEM_TAG             = "[GARCH]"  # Distinguishes this engine's Discord messages from the plain-STAT variant
 
 
 # ════════════════════════════════════════════
@@ -570,7 +571,7 @@ def send_monthly_ping_if_due(cfg: dict, webhook: str, user_id: str, now_ny: date
         return
     
     msg = f"🔔 **Monthly Ping** | {now_ny.strftime('%Y-%m')}\nOperation system running normally."
-    _send_discord(webhook, user_id, "🗓️ Monthly Operation Ping", msg)
+    _send_discord(webhook, user_id, f"🗓️ {SYSTEM_TAG} Monthly Operation Ping", msg)
     
     cfg["LAST_MONTHLY_PING"] = today_ym
     save_portfolio(cfg)
@@ -580,7 +581,7 @@ def send_monthly_ping_if_due(cfg: dict, webhook: str, user_id: str, now_ny: date
 # Briefing Builder
 # ═══════════════════════════════════════════════════════════
 def _build_briefing_lines(now_ny: datetime, cfg: dict, sigma_messages: list[str]) -> list[str]:
-    lines = [f"🌙 **U.S. Market LOC Portfolio Briefing** ({now_ny.strftime('%Y-%m-%d %H:%M %Z')})"]
+    lines = [f"🌙 {SYSTEM_TAG} **U.S. Market LOC Portfolio Briefing** ({now_ny.strftime('%Y-%m-%d %H:%M %Z')})"]
     today_ny = now_ny.date()
     
     market_score = get_market_score()
@@ -648,7 +649,7 @@ def execute_dual_tactical_trader() -> None:
     _send_discord(
         webhook_url=webhook, 
         user_id=user_id, 
-        title="📋 AI & Semi Portfolio LOC Briefing", 
+        title=f"📋 {SYSTEM_TAG} AI & Semi Portfolio LOC Briefing", 
         content="\n".join(briefing_lines)
     )
     

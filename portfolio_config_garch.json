@@ -5,7 +5,7 @@
         "SOXX": {
             "LOOKBACK_DAYS": 252,
             "ENTRY_MULTIPLIER": 1.59,
-            "VOL_METHOD": "EWMA",
+            "VOL_METHOD": "GARCH",
             "EWMA_LAMBDA": 0.94,
             "DAILY_SIGMA": 0.0475,
             "LAST_SIGMA_UPDATE": "2026-07-02",
@@ -17,7 +17,7 @@
         "AIPO": {
             "LOOKBACK_DAYS": 252,
             "ENTRY_MULTIPLIER": 1.5,
-            "VOL_METHOD": "EWMA",
+            "VOL_METHOD": "GARCH",
             "EWMA_LAMBDA": 0.94,
             "DAILY_SIGMA": 0.0293,
             "LAST_SIGMA_UPDATE": "2026-07-02",
@@ -29,7 +29,7 @@
         "QNDX": {
             "LOOKBACK_DAYS": 252,
             "ENTRY_MULTIPLIER": 1.41,
-            "VOL_METHOD": "EWMA",
+            "VOL_METHOD": "GARCH",
             "EWMA_LAMBDA": 0.94,
             "DAILY_SIGMA": 0.0163,
             "LAST_SIGMA_UPDATE": "2026-07-02",
@@ -41,7 +41,7 @@
         "NVDX": {
             "LOOKBACK_DAYS": 63,
             "ENTRY_MULTIPLIER": 1.41,
-            "VOL_METHOD": "EWMA",
+            "VOL_METHOD": "GARCH",
             "EWMA_LAMBDA": 0.94,
             "DAILY_SIGMA": 0.0492,
             "LAST_SIGMA_UPDATE": "2026-07-02",
@@ -53,7 +53,7 @@
         "SOXL": {
             "LOOKBACK_DAYS": 63,
             "ENTRY_MULTIPLIER": 1.41,
-            "VOL_METHOD": "EWMA",
+            "VOL_METHOD": "GARCH",
             "EWMA_LAMBDA": 0.94,
             "DAILY_SIGMA": 0.1406,
             "LAST_SIGMA_UPDATE": "2026-07-02",
