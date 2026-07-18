@@ -1,3 +1,8 @@
+📝 [System Log] 📊 SOXX auto-updated [252 days/GARCH]: 0.0369
+📝 [System Log] ⚠️ AIPO update error: ❌ AIPO price history fetch failed after 3 attempts
+📝 [System Log] ⚠️ QNDX update error: ❌ QNDX price history fetch failed after 3 attempts
+📝 [System Log] 📊 NVDX auto-updated [63 days/GARCH]: 0.0523
+📝 [System Log] 📊 SOXL auto-updated [63 days/GARCH]: 0.1210
 🔍 Starting price lookup for SOXX...
    → Trying yfinance history (1/3)...
 ✅ SOXX yfinance success: $521.81 (07-17)
