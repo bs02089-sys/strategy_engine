@@ -5,7 +5,7 @@ import requests
 import pandas as pd
 import yfinance as yf
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional
 
 # ====================== 설정 ======================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -23,11 +23,10 @@ def calculate_rsi(close: pd.Series, period: int = 14) -> pd.Series:
     avg_gain = gain.ewm(alpha=1 / period, adjust=False).mean()
     avg_loss = loss.ewm(alpha=1 / period, adjust=False).mean()
     rs = avg_gain / avg_loss.replace(0, float('nan'))
-    rsi = 100 - (100 / (1 + rs))
-    return rsi
+    return 100 - (100 / (1 + rs))
 
 
-def calculate_macd(close: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9) -> Tuple[pd.Series, pd.Series]:
+def calculate_macd(close: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9):
     ema_fast = close.ewm(span=fast, adjust=False).mean()
     ema_slow = close.ewm(span=slow, adjust=False).mean()
     macd_line = ema_fast - ema_slow
@@ -39,8 +38,7 @@ def calculate_bollinger(close: pd.Series, period: int = 20, num_std: float = 2.0
     mid = close.rolling(period).mean()
     std = close.rolling(period).std()
     upper = mid + num_std * std
-    lower = mid - num_std * std
-    return upper, mid, lower
+    return upper
 
 
 # ====================== 트래커 베이스 ======================
@@ -51,7 +49,6 @@ class StageInfo:
 
 
 class MarketStageTracker:
-    """바닥/천장 트래커의 공통 로직"""
     MIN_ROWS = 60
 
     def __init__(self, stage: int = 0):
@@ -78,13 +75,13 @@ class MarketBottomTracker(MarketStageTracker):
     def _is_exhaustion(self, df: pd.DataFrame) -> bool:
         last5 = df['close'].tail(5)
         change = last5.iloc[-1] - last5.iloc[0]
-        return bool(change < 0 and last5.nunique() <= 2)
+        return bool(change < 0 and last5.nunique() <= 3)
 
     def _is_retest(self, df: pd.DataFrame) -> bool:
         prior_low = df['close'].iloc[:-1].min()
         vol_ma20 = df['volume'].shift(1).rolling(20).mean()
-        is_near_low = df['close'].iloc[-1] <= prior_low * 1.02
-        is_low_vol = df['volume'].iloc[-1] < vol_ma20.iloc[-1] * 0.8
+        is_near_low = df['close'].iloc[-1] <= prior_low * 1.045
+        is_low_vol = df['volume'].iloc[-1] < vol_ma20.iloc[-1] * 0.85
         return bool(is_near_low and is_low_vol)
 
     def _is_trap(self, df: pd.DataFrame) -> bool:
@@ -92,14 +89,14 @@ class MarketBottomTracker(MarketStageTracker):
             return False
         prev_low = df['close'].iloc[:-2].min()
         broke_low_yest = df['close'].iloc[-2] < prev_low
-        recovered_today = df['close'].iloc[-1] > prev_low * 0.995
+        recovered_today = df['close'].iloc[-1] > prev_low * 0.99
         return bool(broke_low_yest and recovered_today)
 
     def _is_shift(self, df: pd.DataFrame) -> bool:
         recent_high = df['close'].rolling(20).max().shift(1)
         vol_ma20 = df['volume'].shift(1).rolling(20).mean()
-        breakout = df['close'].iloc[-1] > recent_high.iloc[-1] * 1.001
-        high_vol = df['volume'].iloc[-1] > vol_ma20.iloc[-1] * 1.5
+        breakout = df['close'].iloc[-1] > recent_high.iloc[-1] * 1.005
+        high_vol = df['volume'].iloc[-1] > vol_ma20.iloc[-1] * 1.4
         return bool(breakout and high_vol)
 
     def _is_buy_signal(self, df: pd.DataFrame) -> bool:
@@ -108,7 +105,7 @@ class MarketBottomTracker(MarketStageTracker):
         ma20 = df['close'].rolling(20).mean()
         ma60 = df['close'].rolling(60).mean()
 
-        high_vol = df['volume'].iloc[-1] > vol_ma20.iloc[-1] * 2
+        high_vol = df['volume'].iloc[-1] > vol_ma20.iloc[-1] * 1.75
         alignment = (ma5.iloc[-1] > ma20.iloc[-1]) and (ma20.iloc[-1] > ma60.iloc[-1])
         return bool(high_vol and alignment)
 
@@ -160,8 +157,7 @@ class MarketTopTracker(MarketStageTracker):
         return bool(made_new_high and dead_cross)
 
     def _is_band_trap(self, df: pd.DataFrame) -> bool:
-        upper, _, _ = calculate_bollinger(df['close'])
-        upper = upper.dropna()
+        upper = calculate_bollinger(df['close']).dropna()
         if len(upper) < 6:
             return False
 
@@ -172,8 +168,8 @@ class MarketTopTracker(MarketStageTracker):
     def _is_distribution(self, df: pd.DataFrame) -> bool:
         vol_ma20 = df['volume'].shift(1).rolling(20).mean()
         price_change = df['close'].pct_change().iloc[-1]
-        high_vol = df['volume'].iloc[-1] > vol_ma20.iloc[-1] * 1.5
-        flat_or_down = price_change <= 0.002
+        high_vol = df['volume'].iloc[-1] > vol_ma20.iloc[-1] * 1.4
+        flat_or_down = price_change <= 0.003
         return bool(flat_or_down and high_vol)
 
     def _is_sell_signal(self, df: pd.DataFrame) -> bool:
@@ -182,8 +178,8 @@ class MarketTopTracker(MarketStageTracker):
         ma20 = df['close'].rolling(20).mean()
         ma60 = df['close'].rolling(60).mean()
 
-        dropping = df['close'].pct_change().iloc[-1] < 0
-        high_vol = df['volume'].iloc[-1] > vol_ma20.iloc[-1] * 2
+        dropping = df['close'].pct_change().iloc[-1] < -0.001
+        high_vol = df['volume'].iloc[-1] > vol_ma20.iloc[-1] * 1.75
         bearish_align = (ma5.iloc[-1] < ma20.iloc[-1]) and (ma20.iloc[-1] < ma60.iloc[-1])
         return bool(dropping and high_vol and bearish_align)
 
@@ -233,9 +229,9 @@ class DiscordMarketTracker:
                     self.top_trackers[ticker] = MarketTopTracker(
                         state.get(ticker, {}).get("top", 0)
                     )
-            except Exception as e:
-                logging.warning(f"상태 로드 실패: {e}")
-        # 초기화
+            except Exception:
+                pass
+
         for ticker in self.tickers:
             if ticker not in self.bottom_trackers:
                 self.bottom_trackers[ticker] = MarketBottomTracker()
@@ -260,40 +256,26 @@ class DiscordMarketTracker:
             logging.info("DISCORD_WEBHOOK이 설정되지 않음")
             return
         try:
-            requests.post(
-                self.webhook_url,
-                json={"content": f"<@{self.user_id}> {message}" if self.user_id else message},
-                timeout=10
-            )
+            content = f"<@{self.user_id}> {message}" if self.user_id else message
+            requests.post(self.webhook_url, json={"content": content}, timeout=10)
         except Exception as e:
             logging.error(f"Discord 전송 실패: {e}")
 
     def get_data(self, ticker: str) -> Optional[pd.DataFrame]:
         try:
-            df = yf.download(
-                ticker, 
-                period="6mo", 
-                interval="1d", 
-                progress=False,
-                auto_adjust=True  # 추가: 배당/분할 자동 조정
-            )
-            
+            df = yf.download(ticker, period="6mo", interval="1d", progress=False, auto_adjust=True)
             if df is None or df.empty:
                 return None
 
-            # MultiIndex 처리 (yfinance가 가끔 반환)
             if isinstance(df.columns, pd.MultiIndex):
                 df = df.droplevel(1, axis=1)
 
-            # 컬럼명을 소문자로 변환
             df.columns = [col.lower() for col in df.columns]
-
             return df
-
         except Exception as e:
             logging.error(f"{ticker} 데이터 다운로드 실패: {e}")
             return None
-        
+
     def update_all(self):
         report = "📊 **[시장 단계 리포트]**\n"
         data_map = {t: self.get_data(t) for t in self.tickers}
@@ -324,4 +306,3 @@ if __name__ == "__main__":
         print("✅ 시스템 실행 완료")
     except Exception as e:
         logging.error(f"치명적 오류: {e}")
-        raise
