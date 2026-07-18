@@ -212,6 +212,14 @@ def _calculate_garch_sigma_from_closes(closes, lookback_days: int) -> float:
     returns = 100 * np.log(closes / closes.shift(1)).dropna() 
     model = arch_model(returns, vol='Garch', p=1, q=1, dist='Normal', rescale=False) # type: ignore
     model_fit = model.fit(disp='off')
+
+    # If the optimizer didn't actually converge, don't trust the resulting
+    # sigma silently — raise so the caller's try/except falls back to EWMA
+    # instead of shipping a possibly-garbage GARCH estimate.
+    convergence_flag = getattr(model_fit, "convergence_flag", 0)
+    if convergence_flag != 0:
+        raise RuntimeError(f"GARCH fit did not converge (flag={convergence_flag})")
+
     forecast = model_fit.forecast(horizon=1)
     cond_vol = np.sqrt(forecast.variance.iloc[-1, 0]) # type: ignore
     return float(cond_vol / 100)
@@ -519,8 +527,8 @@ def _format_loc_action_line(ticker: str, prev_close: float, cfg: dict) -> str:
     final_loc = calculate_final_loc(base_loc)
 
     if base_loc != final_loc:
-        return f"• 🎯 **[Action] LOC Buy:** ~~${base_loc:.2f}~~ ➡️ **${final_loc:.2f}** (Risk Discount)"
-    return f"• 🎯 **[Action] LOC Buy:** **${final_loc:.2f}**"
+        return f"• 🎯 {SYSTEM_TAG} **[Action] LOC Buy:** ~~${base_loc:.2f}~~ ➡️ **${final_loc:.2f}** (Risk Discount)"
+    return f"• 🎯 {SYSTEM_TAG} **[Action] LOC Buy:** **${final_loc:.2f}**"
 
 
 # ═══════════════════════════════════════════════════════════
