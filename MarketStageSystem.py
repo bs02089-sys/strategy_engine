@@ -279,6 +279,7 @@ class DiscordMarketTracker:
     def update_all(self):
         report = "📊 **[시장 단계 리포트]**\n"
         data_map = {t: self.get_data(t) for t in self.tickers}
+        has_strong_signal = False
 
         for ticker, df in data_map.items():
             if df is None or df.empty:
@@ -288,16 +289,29 @@ class DiscordMarketTracker:
             bottom_stage = self.bottom_trackers[ticker].update(df)
             top_stage = self.top_trackers[ticker].update(df)
 
-            report += (
-                f"• **{ticker}**\n"
-                f"   ㄴ 바닥: {bottom_stage}단계 ({MarketBottomTracker.STAGE_NAMES.get(bottom_stage)})\n"
-                f"   ㄴ 천장: {top_stage}단계 ({MarketTopTracker.STAGE_NAMES.get(top_stage)})\n"
-            )
+            bottom_name = MarketBottomTracker.STAGE_NAMES.get(bottom_stage)
+            top_name = MarketTopTracker.STAGE_NAMES.get(top_stage)
+
+            report += f"• **{ticker}**\n"
+            report += f"   ㄴ 바닥: {bottom_stage}단계 ({bottom_name})\n"
+            report += f"   ㄴ 천장: {top_stage}단계 ({top_name})\n"
+
+            # 5단계 강력 추천 멘트 추가
+            if bottom_stage == 5:
+                report += "   **🔥 강력 매수 추천!** (최종 매수 신호 발생)\n"
+                has_strong_signal = True
+            if top_stage == 5:
+                report += "   **🔻 강력 매도 추천!** (최종 매도 신호 발생)\n"
+                has_strong_signal = True
+
+        # 전체 요약
+        if has_strong_signal:
+            report += "\n⚠️ **강력 신호 종목이 있습니다. 주의 깊게 확인하세요!**"
 
         self._send_discord(report)
         self._save_state()
         logging.info("시장 단계 업데이트 완료")
-
+        
 
 if __name__ == "__main__":
     try:
