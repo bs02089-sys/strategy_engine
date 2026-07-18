@@ -40,8 +40,6 @@ _DISCORD_CONTENT_LIMIT = 4096
 # I/O
 # ════════════════════════════════════════════
 
-CONFIG_PATH = "portfolio_config_garch.json"  
-
 def load_portfolio() -> dict:
     try:
         with open(CONFIG_PATH, "r", encoding="utf-8") as f:
@@ -61,7 +59,13 @@ def save_portfolio(data: dict) -> None:
 # ═══════════════════════════════════════════════════════════
 
 # Function to log Sigma updates to CSV
-def log_sigma_update(ticker: str, sigma: float):
+def log_sigma_update(ticker: str, sigma: float, today: date) -> None:
+    """
+    NOTE: `today` must be passed in explicitly (NY-timezone date computed by
+    the caller) instead of calling datetime.now() here — GitHub Actions runs
+    in UTC, so a local datetime.now() could log a different calendar date
+    than the one stored in LAST_SIGMA_UPDATE.
+    """
     file_path = "sigma_history.csv"
     file_exists = os.path.isfile(file_path)
     
@@ -69,7 +73,38 @@ def log_sigma_update(ticker: str, sigma: float):
         writer = csv.writer(f)
         if not file_exists:
             writer.writerow(['Date', 'Ticker', 'Sigma'])
-        writer.writerow([datetime.now().strftime("%Y-%m-%d"), ticker, sigma])
+        writer.writerow([today.strftime("%Y-%m-%d"), ticker, sigma])
+
+
+def _fetch_closes_for_lookback(ticker: str, lookback_days: int, max_retries: int = 3):
+    """
+    Shared history fetcher used by both recompute_sigma_for_ticker() and
+    get_realtime_sigma(). Requests enough CALENDAR-day buffer to guarantee
+    at least `lookback_days` TRADING days come back (yfinance `period` is
+    calendar days, not trading days — a flat +30d buffer is not enough once
+    lookback_days gets large, e.g. 252), and retries on transient failures
+    or insufficient data.
+    """
+    buffer_days = max(30, int(lookback_days * 0.6) + 30)
+    period_days = lookback_days + buffer_days
+
+    last_err = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            stock = yf.Ticker(ticker)
+            hist = stock.history(period=f"{period_days}d", interval="1d", auto_adjust=False)
+            if hist.empty:
+                raise ValueError("Data empty.")
+            closes = hist['Close'].dropna()
+            if len(closes) < lookback_days:
+                raise ValueError(f"Insufficient data points ({len(closes)}/{lookback_days}).")
+            return closes
+        except Exception as e:
+            last_err = e
+            if attempt < max_retries:
+                time.sleep(2.0)
+    raise RuntimeError(f"❌ {ticker} price history fetch failed after {max_retries} attempts") from last_err
+
 
 def recompute_sigma_for_ticker(ticker: str, pos: dict, today: date) -> float:
     """
@@ -80,17 +115,17 @@ def recompute_sigma_for_ticker(ticker: str, pos: dict, today: date) -> float:
     vol_method = str(pos.get("VOL_METHOD", "EWMA")).upper()
     ewma_lambda = float(pos.get("EWMA_LAMBDA", 0.94))
 
-    stock = yf.Ticker(ticker)
-    hist = stock.history(period=f"{lookback_days + 30}d", interval="1d", auto_adjust=False)
-    closes = hist['Close'].dropna()
-
-    new_sigma = round(_calculate_volatility_from_closes(closes, lookback_days, vol_method, ewma_lambda), 4)
+    closes = _fetch_closes_for_lookback(ticker, lookback_days)
+    sigma, actual_method = _calculate_volatility_from_closes(closes, lookback_days, vol_method, ewma_lambda)
+    new_sigma = round(sigma, 4)
 
     pos["DAILY_SIGMA"] = new_sigma
     pos["LAST_SIGMA_UPDATE"] = today.strftime("%Y-%m-%d")
-    pos["LAST_SIGMA_METHOD"] = vol_method
-    pos["LAST_EWMA_LAMBDA"] = ewma_lambda if vol_method == "EWMA" else None
-    log_sigma_update(ticker, new_sigma)
+    # Store the method ACTUALLY used (matters when GARCH fails and falls
+    # back to EWMA — previously this kept recording "GARCH" even then).
+    pos["LAST_SIGMA_METHOD"] = actual_method
+    pos["LAST_EWMA_LAMBDA"] = ewma_lambda if actual_method == "EWMA" else None
+    log_sigma_update(ticker, new_sigma, today)
     return new_sigma
 
 
@@ -159,8 +194,14 @@ def _calculate_ewma_sigma_from_closes(closes, lookback_days: int, ewma_lambda: f
     if len(recent_returns) < 2:
         raise ValueError("Insufficient log return data for EWMA calculation.")
 
-    variance = float(recent_returns.var(ddof=1))
-    for r in recent_returns:
+    # Seed with only the FIRST return's squared value, then recurse forward.
+    # (Previously seeded with the full-window sample variance, which bakes
+    # "future" data into the very first step of the recursion — a small
+    # lookahead bias. Its effect decays as lambda^n, so it mattered more for
+    # short lookbacks like the 63-day rotation tickers than the 252-day ones.)
+    returns_arr = np.asarray(recent_returns, dtype=float)
+    variance = float(returns_arr[0] ** 2)
+    for r in returns_arr[1:]:
         variance = ewma_lambda * variance + (1 - ewma_lambda) * float(r) ** 2
     return float(np.sqrt(variance))
 
@@ -175,20 +216,23 @@ def _calculate_garch_sigma_from_closes(closes, lookback_days: int) -> float:
     return float(cond_vol / 100)
 
 
-def _calculate_volatility_from_closes(closes, lookback_days: int, vol_method: str, ewma_lambda: float) -> float:
+def _calculate_volatility_from_closes(closes, lookback_days: int, vol_method: str, ewma_lambda: float) -> tuple[float, str]:
+    """
+    Returns (sigma, method_actually_used). Callers should persist the second
+    value instead of assuming vol_method was what ran (GARCH can silently
+    fall back to EWMA on failure).
+    """
     method = vol_method.upper()
-    # --- 수정된 로직 시작 ---
     if method == "GARCH":
         try:
-            return _calculate_garch_sigma_from_closes(closes, lookback_days)
+            return _calculate_garch_sigma_from_closes(closes, lookback_days), "GARCH"
         except Exception as e:
             print(f"⚠️ GARCH failed, falling back to EWMA: {e}")
-            return _calculate_ewma_sigma_from_closes(closes, lookback_days, ewma_lambda)
-    # --- 수정된 로직 끝 ---
+            return _calculate_ewma_sigma_from_closes(closes, lookback_days, ewma_lambda), "EWMA"
     if method == "EWMA":
-        return _calculate_ewma_sigma_from_closes(closes, lookback_days, ewma_lambda)
+        return _calculate_ewma_sigma_from_closes(closes, lookback_days, ewma_lambda), "EWMA"
     if method in {"STD", "HISTORICAL", "SIMPLE"}:
-        return _calculate_sigma_from_closes(closes, lookback_days)
+        return _calculate_sigma_from_closes(closes, lookback_days), method
     raise ValueError(f"Unsupported VOL_METHOD: {vol_method}")
 
 def _calculate_loc_from_sigma(prev_close: float, sigma: float, multiplier: float) -> float:
@@ -238,11 +282,16 @@ def get_prev_close(ticker: str) -> tuple[float | None, str]:
                         
                     print(f"✅ {ticker} yfinance success: ${prev_close:.2f} ({date_str})")
                     return prev_close, date_str
-        
+
+            print(f"   ⚠️ Attempt {attempt}: empty data returned.")
+
         except Exception as e:
             print(f"   ⚠️ Attempt {attempt} failed: {e}")
-            if attempt < 3:
-                time.sleep(2.0)
+
+        # Backoff regardless of whether we hit an exception or just got
+        # empty data back — previously the sleep only ran on exceptions.
+        if attempt < 3:
+            time.sleep(2.0)
 
     # Info fallback
     try:
@@ -263,36 +312,16 @@ def get_prev_close(ticker: str) -> tuple[float | None, str]:
 def get_realtime_sigma(ticker: str, lookback_days: int, vol_method: str = "EWMA", ewma_lambda: float = 0.94) -> float:
     """
     Calculates Sigma using yfinance in real-time.
+    (Fetch/retry logic now shared with recompute_sigma_for_ticker() via
+    _fetch_closes_for_lookback(), instead of duplicating it here.)
     """
     vol_method = vol_method.upper()
     print(f"📊 Calculating real-time Sigma for {ticker} (Lookback: {lookback_days}/{vol_method})...")
-    
-    for attempt in range(1, 4):
-        try:
-            print(f"   → Data collection attempt ({attempt}/3)...")
-            stock = yf.Ticker(ticker)
-            hist = stock.history(period=f"{lookback_days + 30}d", interval="1d", auto_adjust=False)
-            
-            if hist.empty:
-                raise ValueError("Data empty.")
-                
-            closes = hist['Close'].dropna()
-            if len(closes) < lookback_days:
-                raise ValueError(f"Insufficient data points ({len(closes)}).")
-                
-            new_sigma = _calculate_volatility_from_closes(closes, lookback_days, vol_method, ewma_lambda)
-            
-            print(f"✅ {ticker} Sigma calculation success: {new_sigma:.4f}")
-            return new_sigma
-            
-        except Exception as e:
-            print(f"   ⚠️ Attempt {attempt} failed: {e}")
-            if attempt < 3:
-                time.sleep(2.0)
-            else:
-                raise RuntimeError(f"❌ {ticker} Sigma calculation failed after retries") from e
 
-    raise RuntimeError(f"❌ {ticker} Sigma calculation failed (unknown error)")
+    closes = _fetch_closes_for_lookback(ticker, lookback_days)
+    new_sigma, actual_method = _calculate_volatility_from_closes(closes, lookback_days, vol_method, ewma_lambda)
+    print(f"✅ {ticker} Sigma calculation success: {new_sigma:.4f} (method: {actual_method})")
+    return new_sigma
             
 
 def calculate_loc_price(ticker: str, prev_close: float, cfg: dict) -> float:
@@ -473,7 +502,11 @@ def format_position_meta(pos_cfg: dict, today: date) -> str:
     if start_str:
         try:
             start_date = datetime.strptime(start_str, "%Y-%m-%d").date()
-            parts.append(f"D+{max((today - start_date).days, 0)}")
+            # Business days now, to match the unit check_rotation_exit_signal()
+            # actually uses for maturity — previously this showed calendar
+            # days, so the D+N here didn't line up with the rotation D+N
+            # printed elsewhere in the same briefing.
+            parts.append(f"D+{business_days_elapsed(start_date, today)}")
         except ValueError:
             parts.append(f"START_DATE error: {start_str}")
 
@@ -526,15 +559,17 @@ def _send_discord(webhook_url: str, user_id: str, title: str, content: str) -> N
 # ═══════════════════════════════════════════════════════════
 # Monthly Ping
 # ═══════════════════════════════════════════════════════════
-def send_monthly_ping_if_due(cfg: dict, webhook: str, user_id: str) -> None:
-    now = datetime.now()
-    if now.day != 1:
+def send_monthly_ping_if_due(cfg: dict, webhook: str, user_id: str, now_ny: datetime) -> None:
+    # Takes now_ny explicitly instead of calling datetime.now() (which on
+    # GitHub Actions returns UTC) — keeps the "is it the 1st?" check on the
+    # same America/New_York clock the rest of the script uses.
+    if now_ny.day != 1:
         return
-    today_ym = now.strftime("%Y-%m")
+    today_ym = now_ny.strftime("%Y-%m")
     if cfg.get("LAST_MONTHLY_PING") == today_ym:
         return
     
-    msg = f"🔔 **Monthly Ping** | {now.strftime('%Y-%m')}\nOperation system running normally."
+    msg = f"🔔 **Monthly Ping** | {now_ny.strftime('%Y-%m')}\nOperation system running normally."
     _send_discord(webhook, user_id, "🗓️ Monthly Operation Ping", msg)
     
     cfg["LAST_MONTHLY_PING"] = today_ym
@@ -618,7 +653,7 @@ def execute_dual_tactical_trader() -> None:
     )
     
     try:
-        send_monthly_ping_if_due(cfg, webhook, user_id)
+        send_monthly_ping_if_due(cfg, webhook, user_id, now_ny)
     except Exception as e:
         print(f"⚠️ Error sending monthly ping: {e}")
 
