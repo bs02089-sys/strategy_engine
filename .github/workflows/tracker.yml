@@ -1,0 +1,36 @@
+name: Market Stage Tracker
+
+on:
+  schedule:
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: market-stage-tracker
+  cancel-in-progress: false
+
+jobs:
+  run-tracker:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: pip install pandas requests yfinance
+
+      - name: Run Tracker
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
+        run: python MarketStageSystem.py > market_log.txt 2>&1
+
+      - name: Commit and Push
+        run: |
+          git config --global user.name "Market Bot"
+          git config --global user.email "bot@tracker.com"
+          git add -f market_log.txt market_state.json
+          git commit -m "Auto-update logs and stage state" || echo "No changes"
+          git pull --rebase
+          git push
