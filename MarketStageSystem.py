@@ -202,12 +202,17 @@ class MarketTopTracker(MarketStageTracker):
 class DiscordMarketTracker:
     def __init__(self):
         self.config = self._load_config()
-        self.webhook_url = self.config.get("DISCORD_WEBHOOK", "")
-        self.user_id = self.config.get("DISCORD_USER_ID", "")
-        self.tickers: list[str] = self.config.get("TICKERS", ["SOXL", "TSLA", "IONQ"])
+        self.webhook_url: str = self.config.get("DISCORD_WEBHOOK", "")
+        self.user_id: str = self.config.get("DISCORD_USER_ID", "")
+        
+        tickers = self.config.get("TICKERS")
+        if not isinstance(tickers, list) or len(tickers) == 0:
+            raise ValueError("❌ MarketStage_config.json 파일에 'TICKERS' 목록을 추가해주세요.")
+        
+        self.tickers = tickers                 
 
-        self.bottom_trackers: Dict[str, MarketBottomTracker] = {}
-        self.top_trackers: Dict[str, MarketTopTracker] = {}
+        self.bottom_trackers = {}
+        self.top_trackers = {}
         self._load_state()
 
     def _load_config(self) -> dict:
@@ -311,7 +316,7 @@ class DiscordMarketTracker:
         self._send_discord(report)
         self._save_state()
         logging.info("시장 단계 업데이트 완료")
-        
+
 
 if __name__ == "__main__":
     try:
