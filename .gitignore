@@ -42,8 +42,9 @@ config_safe_backup.json
 !requirements.txt
 !README.md
 
-# [추가] GARCH 실험용 소스 및 설정 파일
+# GARCH 실험용 소스 및 설정 파일
 !sigma_DCA_garch_v1.py
+!portfolio_config_DCA_garch.json
 !sigma_history.csv
 
 # GitHub Actions 워크플로우
