@@ -1,29 +1,33 @@
 import os
 import json
+import logging
 import requests
 import pandas as pd
 import yfinance as yf
+from dataclasses import dataclass
+from typing import Dict, Optional, Tuple
 
+# ====================== 설정 ======================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(BASE_DIR, "MarketStage_config.json")
 STATE_PATH = os.path.join(BASE_DIR, "market_state.json")
 
+logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(levelname)s | %(message)s')
 
-# ---------------------------------------------------------------------------
-# 기술적 지표 계산 (RSI, MACD, 볼린저 밴드)
-# 바닥/천장 트래커가 공통으로 사용
-# ---------------------------------------------------------------------------
-def calculate_rsi(close, period=14):
+
+# ====================== 기술적 지표 ======================
+def calculate_rsi(close: pd.Series, period: int = 14) -> pd.Series:
     delta = close.diff()
     gain = delta.where(delta > 0, 0.0)
     loss = -delta.where(delta < 0, 0.0)
     avg_gain = gain.ewm(alpha=1 / period, adjust=False).mean()
     avg_loss = loss.ewm(alpha=1 / period, adjust=False).mean()
-    rs = avg_gain / avg_loss
-    return 100 - (100 / (1 + rs))
+    rs = avg_gain / avg_loss.replace(0, float('nan'))
+    rsi = 100 - (100 / (1 + rs))
+    return rsi
 
 
-def calculate_macd(close, fast=12, slow=26, signal=9):
+def calculate_macd(close: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9) -> Tuple[pd.Series, pd.Series]:
     ema_fast = close.ewm(span=fast, adjust=False).mean()
     ema_slow = close.ewm(span=slow, adjust=False).mean()
     macd_line = ema_fast - ema_slow
@@ -31,7 +35,7 @@ def calculate_macd(close, fast=12, slow=26, signal=9):
     return macd_line, signal_line
 
 
-def calculate_bollinger(close, period=20, num_std=2):
+def calculate_bollinger(close: pd.Series, period: int = 20, num_std: float = 2.0):
     mid = close.rolling(period).mean()
     std = close.rolling(period).std()
     upper = mid + num_std * std
@@ -39,194 +43,203 @@ def calculate_bollinger(close, period=20, num_std=2):
     return upper, mid, lower
 
 
-class MarketBottomTracker:
-    """개별 티커의 바닥 형성 단계(Stage)를 추적하는 엔진"""
+# ====================== 트래커 베이스 ======================
+@dataclass
+class StageInfo:
+    stage: int
+    name: str
+
+
+class MarketStageTracker:
+    """바닥/천장 트래커의 공통 로직"""
+    MIN_ROWS = 60
+
+    def __init__(self, stage: int = 0):
+        self.stage = stage
+
+    def _prepare_df(self, df: pd.DataFrame) -> Optional[pd.DataFrame]:
+        if len(df) < self.MIN_ROWS:
+            return None
+        df = df.copy()
+        df = df.dropna(subset=['close', 'volume'])
+        return df
+
+
+class MarketBottomTracker(MarketStageTracker):
     STAGE_NAMES = {
         0: "초기 상태",
         1: "매도세 소진",
         2: "재테스트",
         3: "트랩",
         4: "추세 전환",
-        5: "🔥 최종 매수 신호(거래량/정배열 확인)"
+        5: "🔥 최종 매수 신호"
     }
 
-    MIN_ROWS = 60  # ma60 계산에 필요한 최소 데이터 수
+    def _is_exhaustion(self, df: pd.DataFrame) -> bool:
+        last5 = df['close'].tail(5)
+        change = last5.iloc[-1] - last5.iloc[0]
+        return bool(change < 0 and last5.nunique() <= 2)
 
-    def __init__(self, stage=0):
-        self.stage = stage
-
-    def _is_exhaustion(self, df):
-        # 최근 5일간 종가가 하락 추세이면서, 종가 종류가 거의 바뀌지 않을 정도로
-        # 매도 압력이 소진된 상태인지 확인 (하락폭/값-종류 모두 '최근 5일' 기준으로 통일)
-        last5_change = df['close'].iloc[-1] - df['close'].iloc[-5]
-        last5_nunique = df['close'].tail(5).nunique()
-        return bool(last5_change < 0 and last5_nunique < 3)
-
-    def _is_retest(self, df):
-        # '오늘'을 제외한 구간의 저점을 기준으로 재접근(재테스트) 여부 확인
+    def _is_retest(self, df: pd.DataFrame) -> bool:
         prior_low = df['close'].iloc[:-1].min()
-        vol_ma20 = df['volume'].shift(1).rolling(20).mean()  # 오늘 거래량은 평균에서 제외
+        vol_ma20 = df['volume'].shift(1).rolling(20).mean()
         is_near_low = df['close'].iloc[-1] <= prior_low * 1.02
-        is_low_volume = df['volume'].iloc[-1] < vol_ma20.iloc[-1]
-        return bool(is_near_low and is_low_volume)
+        is_low_vol = df['volume'].iloc[-1] < vol_ma20.iloc[-1] * 0.8
+        return bool(is_near_low and is_low_vol)
 
-    def _is_trap(self, df):
-        # 트랩이 발생하기 '이전'까지의 저점을 기준점으로 삼음
-        if len(df) < 3:
+    def _is_trap(self, df: pd.DataFrame) -> bool:
+        if len(df) < 5:
             return False
         prev_low = df['close'].iloc[:-2].min()
-        yesterday_broke_low = df['close'].iloc[-2] < prev_low
-        today_recovered = df['close'].iloc[-1] > prev_low
-        return bool(yesterday_broke_low and today_recovered)
+        broke_low_yest = df['close'].iloc[-2] < prev_low
+        recovered_today = df['close'].iloc[-1] > prev_low * 0.995
+        return bool(broke_low_yest and recovered_today)
 
-    def _is_shift(self, df):
-        recent_high = df['close'].rolling(20).max().shift(1)  # 오늘 제외 20일 고점
-        vol_ma20 = df['volume'].shift(1).rolling(20).mean()   # 오늘 거래량 제외
-        is_breakout = df['close'].iloc[-1] > recent_high.iloc[-1]
-        is_high_volume = df['volume'].iloc[-1] > vol_ma20.iloc[-1] * 1.5
-        return bool(is_breakout and is_high_volume)
+    def _is_shift(self, df: pd.DataFrame) -> bool:
+        recent_high = df['close'].rolling(20).max().shift(1)
+        vol_ma20 = df['volume'].shift(1).rolling(20).mean()
+        breakout = df['close'].iloc[-1] > recent_high.iloc[-1] * 1.001
+        high_vol = df['volume'].iloc[-1] > vol_ma20.iloc[-1] * 1.5
+        return bool(breakout and high_vol)
 
-    def _is_buy_signal(self, df):
-        """거래량 및 정배열 조건 검증"""
-        vol_ma20 = df['volume'].shift(1).rolling(20).mean()  # 오늘 거래량은 평균에서 제외
+    def _is_buy_signal(self, df: pd.DataFrame) -> bool:
+        vol_ma20 = df['volume'].shift(1).rolling(20).mean()
         ma5 = df['close'].rolling(5).mean()
         ma20 = df['close'].rolling(20).mean()
         ma60 = df['close'].rolling(60).mean()
 
-        is_high_volume = df['volume'].iloc[-1] > (vol_ma20.iloc[-1] * 2)
-        is_alignment = (ma5.iloc[-1] > ma20.iloc[-1]) and (ma20.iloc[-1] > ma60.iloc[-1])
-        return bool(is_high_volume and is_alignment)
+        high_vol = df['volume'].iloc[-1] > vol_ma20.iloc[-1] * 2
+        alignment = (ma5.iloc[-1] > ma20.iloc[-1]) and (ma20.iloc[-1] > ma60.iloc[-1])
+        return bool(high_vol and alignment)
 
-    def update(self, df):
-        if len(df) < self.MIN_ROWS:
-            return self.stage  # 데이터 부족 시 상태 유지
+    def update(self, df: pd.DataFrame) -> int:
+        clean_df = self._prepare_df(df)
+        if clean_df is None:
+            return self.stage
 
         logic = {0: self._is_exhaustion, 1: self._is_retest, 2: self._is_trap, 3: self._is_shift}
-        if self.stage in logic and logic[self.stage](df):
+        
+        if self.stage in logic and logic[self.stage](clean_df):
             self.stage += 1
-        elif self.stage == 4 and self._is_buy_signal(df):
+        elif self.stage == 4 and self._is_buy_signal(clean_df):
             self.stage = 5
+
         return self.stage
 
 
-class MarketTopTracker:
-    """개별 티커의 천장(고점) 형성 단계(Stage)를 추적하는 엔진
-
-    바닥 트래커와 대칭되는 5단계 구조로, 사용자가 지정한 3가지 기술적
-    지표(RSI 70 재하락, 신고가 후 MACD 데드크로스, 볼린저 상단 재진입)를
-    거래량 패턴(과열/분산/거래량 마름)과 결합해 단계별로 확인한다.
-    """
+class MarketTopTracker(MarketStageTracker):
     STAGE_NAMES = {
         0: "초기 상태",
-        1: "🌡️ 과열(RSI 70 상향 돌파 후 재하락)",
-        2: "📉 다이버전스(신고가 + MACD 데드크로스)",
-        3: "🪤 밴드 트랩(볼린저 상단 돌파 후 재진입)",
-        4: "📊 분산(거래량 분산일 확인)",
-        5: "🔻 최종 매도 신호(거래량/역배열 확인)"
+        1: "🌡️ 과열",
+        2: "📉 다이버전스",
+        3: "🪤 밴드 트랩",
+        4: "📊 분산",
+        5: "🔻 최종 매도 신호"
     }
 
-    MIN_ROWS = 60  # ma60, MACD(26,9) 안정화에 필요한 최소 데이터 수
+    def _is_overheat(self, df: pd.DataFrame) -> bool:
+        rsi = calculate_rsi(df['close']).dropna()
+        if len(rsi) < 6:
+            return False
+        recent = rsi.tail(6)
+        touched_70 = recent.iloc[:-1].max() >= 70
+        below_70_today = recent.iloc[-1] < 70
+        return bool(touched_70 and below_70_today)
 
-    def __init__(self, stage=0):
-        self.stage = stage
+    def _is_dead_cross(self, df: pd.DataFrame) -> bool:
+        recent_high = df['close'].rolling(20).max().shift(1)
+        made_new_high = (df['close'].tail(5) > recent_high.tail(5)).any()
 
-    def _is_overheat(self, df):
-        # 최근 5일(오늘 포함) 내에 RSI가 70 이상을 찍은 적이 있고,
-        # 오늘은 70 아래로 내려온 경우 -> 과열 후 냉각 시작
-        rsi = calculate_rsi(df['close'])
-        recent_rsi = rsi.tail(6)
-        touched_70_before_today = recent_rsi.iloc[:-1].max() >= 70
-        today_below_70 = recent_rsi.iloc[-1] < 70
-        return bool(touched_70_before_today and today_below_70)
+        macd, signal = calculate_macd(df['close'])
+        macd = macd.dropna()
+        signal = signal.dropna()
+        if len(macd) < 2:
+            return False
 
-    def _is_dead_cross(self, df):
-        # 최근 5일 내 신고가를 경신했고, 오늘 MACD선이 시그널선을
-        # 위에서 아래로 교차(데드크로스)하는 경우
-        recent_high_before = df['close'].rolling(20).max().shift(1)
-        made_new_high_recently = bool(
-            (df['close'].tail(5) > recent_high_before.tail(5)).any()
-        )
-        macd_line, signal_line = calculate_macd(df['close'])
-        crossed_down_today = (macd_line.iloc[-2] >= signal_line.iloc[-2]) and \
-                              (macd_line.iloc[-1] < signal_line.iloc[-1])
-        return bool(made_new_high_recently and crossed_down_today)
+        dead_cross = (macd.iloc[-2] >= signal.iloc[-2]) and (macd.iloc[-1] < signal.iloc[-1])
+        return bool(made_new_high and dead_cross)
 
-    def _is_band_trap(self, df):
-        # 최근 5일 내 볼린저 상단을 돌파한 적이 있고, 오늘은 밴드 안으로
-        # 재진입한 경우 -> 상단 돌파가 속임수(가짜 돌파)였을 가능성
+    def _is_band_trap(self, df: pd.DataFrame) -> bool:
         upper, _, _ = calculate_bollinger(df['close'])
-        touched_upper_before_today = bool(
-            (df['close'].tail(6).iloc[:-1] > upper.tail(6).iloc[:-1]).any()
-        )
-        today_back_inside = df['close'].iloc[-1] < upper.iloc[-1]
-        return bool(touched_upper_before_today and today_back_inside)
+        upper = upper.dropna()
+        if len(upper) < 6:
+            return False
 
-    def _is_distribution(self, df):
-        # 분산일(distribution day): 주가는 거의 오르지 못했는데(또는 하락)
-        # 거래량은 평소보다 훨씬 크게 실린 경우 -> 큰손이 조용히 매도 중
-        vol_ma20 = df['volume'].shift(1).rolling(20).mean()  # 오늘 거래량 제외
+        touched_upper = (df['close'].tail(6).iloc[:-1] > upper.tail(6).iloc[:-1]).any()
+        back_inside = df['close'].iloc[-1] < upper.iloc[-1]
+        return bool(touched_upper and back_inside)
+
+    def _is_distribution(self, df: pd.DataFrame) -> bool:
+        vol_ma20 = df['volume'].shift(1).rolling(20).mean()
         price_change = df['close'].pct_change().iloc[-1]
-        is_flat_or_down = price_change <= 0.002
-        is_heavy_volume = df['volume'].iloc[-1] > vol_ma20.iloc[-1] * 1.5
-        return bool(is_flat_or_down and is_heavy_volume)
+        high_vol = df['volume'].iloc[-1] > vol_ma20.iloc[-1] * 1.5
+        flat_or_down = price_change <= 0.002
+        return bool(flat_or_down and high_vol)
 
-    def _is_sell_signal(self, df):
-        """거래량 및 역배열 조건 검증 (바닥의 _is_buy_signal과 대칭)"""
-        vol_ma20 = df['volume'].shift(1).rolling(20).mean()  # 오늘 거래량 제외
+    def _is_sell_signal(self, df: pd.DataFrame) -> bool:
+        vol_ma20 = df['volume'].shift(1).rolling(20).mean()
         ma5 = df['close'].rolling(5).mean()
         ma20 = df['close'].rolling(20).mean()
         ma60 = df['close'].rolling(60).mean()
 
-        price_dropping = df['close'].pct_change().iloc[-1] < 0
-        is_high_volume = df['volume'].iloc[-1] > (vol_ma20.iloc[-1] * 2)
-        is_bearish_alignment = (ma5.iloc[-1] < ma20.iloc[-1]) and (ma20.iloc[-1] < ma60.iloc[-1])
-        return bool(price_dropping and is_high_volume and is_bearish_alignment)
+        dropping = df['close'].pct_change().iloc[-1] < 0
+        high_vol = df['volume'].iloc[-1] > vol_ma20.iloc[-1] * 2
+        bearish_align = (ma5.iloc[-1] < ma20.iloc[-1]) and (ma20.iloc[-1] < ma60.iloc[-1])
+        return bool(dropping and high_vol and bearish_align)
 
-    def update(self, df):
-        if len(df) < self.MIN_ROWS:
-            return self.stage  # 데이터 부족 시 상태 유지
+    def update(self, df: pd.DataFrame) -> int:
+        clean_df = self._prepare_df(df)
+        if clean_df is None:
+            return self.stage
 
         logic = {0: self._is_overheat, 1: self._is_dead_cross, 2: self._is_band_trap, 3: self._is_distribution}
-        if self.stage in logic and logic[self.stage](df):
+        
+        if self.stage in logic and logic[self.stage](clean_df):
             self.stage += 1
-        elif self.stage == 4 and self._is_sell_signal(df):
+        elif self.stage == 4 and self._is_sell_signal(clean_df):
             self.stage = 5
+
         return self.stage
 
 
+# ====================== 메인 트래커 ======================
 class DiscordMarketTracker:
     def __init__(self):
         self.config = self._load_config()
         self.webhook_url = self.config.get("DISCORD_WEBHOOK", "")
         self.user_id = self.config.get("DISCORD_USER_ID", "")
-        self.tickers = self.config.get("TICKERS", ["SOXL", "TSLA", "IONQ"])
+        self.tickers: list[str] = self.config.get("TICKERS", ["SOXL", "TSLA", "IONQ"])
 
-        # 상태를 파일로 저장/로딩 -> 매 실행마다 stage가 0으로 리셋되는 것을 방지
-        # state 포맷: {"SOXL": {"bottom": 2, "top": 0}, ...}
-        saved_state = self._load_state()
-        self.bottom_trackers = {
-            ticker: MarketBottomTracker(stage=saved_state.get(ticker, {}).get("bottom", 0))
-            for ticker in self.tickers
-        }
-        self.top_trackers = {
-            ticker: MarketTopTracker(stage=saved_state.get(ticker, {}).get("top", 0))
-            for ticker in self.tickers
-        }
+        self.bottom_trackers: Dict[str, MarketBottomTracker] = {}
+        self.top_trackers: Dict[str, MarketTopTracker] = {}
+        self._load_state()
 
-    @staticmethod
-    def _load_config():
+    def _load_config(self) -> dict:
         with open(CONFIG_PATH, "r", encoding="utf-8") as f:
             config = json.load(f)
         config["DISCORD_WEBHOOK"] = os.environ.get("DISCORD_WEBHOOK") or config.get("DISCORD_WEBHOOK", "")
         config["DISCORD_USER_ID"] = os.environ.get("DISCORD_USER_ID") or config.get("DISCORD_USER_ID", "")
         return config
 
-    @staticmethod
-    def _load_state():
+    def _load_state(self):
         if os.path.exists(STATE_PATH):
-            with open(STATE_PATH, "r", encoding="utf-8") as f:
-                return json.load(f)
-        return {}
+            try:
+                with open(STATE_PATH, "r", encoding="utf-8") as f:
+                    state = json.load(f)
+                for ticker in self.tickers:
+                    self.bottom_trackers[ticker] = MarketBottomTracker(
+                        state.get(ticker, {}).get("bottom", 0)
+                    )
+                    self.top_trackers[ticker] = MarketTopTracker(
+                        state.get(ticker, {}).get("top", 0)
+                    )
+            except Exception as e:
+                logging.warning(f"상태 로드 실패: {e}")
+        # 초기화
+        for ticker in self.tickers:
+            if ticker not in self.bottom_trackers:
+                self.bottom_trackers[ticker] = MarketBottomTracker()
+                self.top_trackers[ticker] = MarketTopTracker()
 
     def _save_state(self):
         state = {
@@ -236,57 +249,79 @@ class DiscordMarketTracker:
             }
             for ticker in self.tickers
         }
-        with open(STATE_PATH, "w", encoding="utf-8") as f:
-            json.dump(state, f, ensure_ascii=False, indent=2)
+        try:
+            with open(STATE_PATH, "w", encoding="utf-8") as f:
+                json.dump(state, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logging.error(f"상태 저장 실패: {e}")
 
-    def _send_discord(self, message):
+    def _send_discord(self, message: str):
         if not self.webhook_url:
-            print("DISCORD_WEBHOOK이 설정되지 않아 메시지를 전송하지 않습니다.")
+            logging.info("DISCORD_WEBHOOK이 설정되지 않음")
             return
         try:
-            requests.post(self.webhook_url, json={"content": f"<@{self.user_id}> {message}"}, timeout=10)
+            requests.post(
+                self.webhook_url,
+                json={"content": f"<@{self.user_id}> {message}" if self.user_id else message},
+                timeout=10
+            )
         except Exception as e:
-            print(f"전송 오류: {e}")
+            logging.error(f"Discord 전송 실패: {e}")
 
-    def update_all(self, data_map):
-        report_msg = "📊 **[시장 단계 리포트]**\n"
+    def get_data(self, ticker: str) -> Optional[pd.DataFrame]:
+        try:
+            df = yf.download(
+                ticker, 
+                period="6mo", 
+                interval="1d", 
+                progress=False,
+                auto_adjust=True  # 추가: 배당/분할 자동 조정
+            )
+            
+            if df is None or df.empty:
+                return None
+
+            # MultiIndex 처리 (yfinance가 가끔 반환)
+            if isinstance(df.columns, pd.MultiIndex):
+                df = df.droplevel(1, axis=1)
+
+            # 컬럼명을 소문자로 변환
+            df.columns = [col.lower() for col in df.columns]
+
+            return df
+
+        except Exception as e:
+            logging.error(f"{ticker} 데이터 다운로드 실패: {e}")
+            return None
+        
+    def update_all(self):
+        report = "📊 **[시장 단계 리포트]**\n"
+        data_map = {t: self.get_data(t) for t in self.tickers}
+
         for ticker, df in data_map.items():
             if df is None or df.empty:
-                report_msg += f"• **{ticker}**: 데이터 조회 실패\n"
+                report += f"• **{ticker}**: 데이터 조회 실패\n"
                 continue
 
             bottom_stage = self.bottom_trackers[ticker].update(df)
             top_stage = self.top_trackers[ticker].update(df)
-            bottom_name = MarketBottomTracker.STAGE_NAMES.get(bottom_stage, "알 수 없음")
-            top_name = MarketTopTracker.STAGE_NAMES.get(top_stage, "알 수 없음")
 
-            report_msg += (
+            report += (
                 f"• **{ticker}**\n"
-                f"   ㄴ 바닥: {bottom_stage}단계 ({bottom_name})\n"
-                f"   ㄴ 천장: {top_stage}단계 ({top_name})\n"
+                f"   ㄴ 바닥: {bottom_stage}단계 ({MarketBottomTracker.STAGE_NAMES.get(bottom_stage)})\n"
+                f"   ㄴ 천장: {top_stage}단계 ({MarketTopTracker.STAGE_NAMES.get(top_stage)})\n"
             )
-        self._send_discord(report_msg)
+
+        self._send_discord(report)
         self._save_state()
-
-
-def get_data(ticker):
-    try:
-        # 100d(달력일 기준)는 공휴일/주말을 감안하면 거래일 60~70일 정도라
-        # ma60/MACD 계산이 불안정할 수 있어 6mo로 여유를 둠
-        df = yf.download(ticker, period="6mo", interval="1d", progress=False)
-    except Exception as e:
-        print(f"{ticker} 데이터 조회 오류: {e}")
-        return None
-    if df is None or df.empty:
-        return None
-    if isinstance(df.columns, pd.MultiIndex):  # type: ignore
-        df.columns = df.columns.get_level_values(0)  # type: ignore
-    df.columns = df.columns.str.lower()  # type: ignore
-    return df
+        logging.info("시장 단계 업데이트 완료")
 
 
 if __name__ == "__main__":
-    tracker = DiscordMarketTracker()
-    data_map = {t: get_data(t) for t in tracker.tickers}
-    tracker.update_all(data_map)
-    print("시스템 실행 완료.")
+    try:
+        tracker = DiscordMarketTracker()
+        tracker.update_all()
+        print("✅ 시스템 실행 완료")
+    except Exception as e:
+        logging.error(f"치명적 오류: {e}")
+        raise
