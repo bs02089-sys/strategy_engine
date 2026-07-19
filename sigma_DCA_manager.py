@@ -19,7 +19,7 @@ import time
 import numpy as np
 import requests
 import yfinance as yf
-from datetime import datetime, timezone, timedelta, date
+from datetime import datetime, timezone, date
 from zoneinfo import ZoneInfo
 
 
