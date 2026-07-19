@@ -29,11 +29,10 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     getattr(sys.stderr, "reconfigure")(encoding="utf-8")
     
-TARGET_TICKERS         = ["SOXX", "AIPO", "QNDX", "NVDX", "SOXL"]
 CONFIG_PATH            = "portfolio_config.json"
 _DISCORD_TITLE_LIMIT   = 256
 _DISCORD_CONTENT_LIMIT = 4096
-SYSTEM_TAG             = "[STAT]"  # Distinguishes this (non-GARCH) engine's Discord messages from the GARCH variant
+SYSTEM_TAG             = "[STAT]"
 
 
 # ════════════════════════════════════════════
@@ -222,18 +221,6 @@ def _calculate_loc_from_sigma(prev_close: float, sigma: float, multiplier: float
     target_drop_rate = sigma * multiplier
     return round(prev_close * (1 - target_drop_rate), 2)
     
-def get_prev_trading_date(d: date) -> date:
-    """Helper to calculate the previous business day"""
-    wd = d.weekday()  # 0=Mon, ..., 6=Sun
-    if wd == 0:    # Monday -> Friday (3 days prior)
-        return d - timedelta(days=3)
-    elif wd == 6:  # Sunday -> Friday (2 days prior)
-        return d - timedelta(days=2)
-    elif wd == 5:  # Saturday -> Friday (1 day prior)
-        return d - timedelta(days=1)
-    else:          # Tue-Fri -> 1 day prior
-        return d - timedelta(days=1)
-
 def get_prev_close(ticker: str) -> tuple[float | None, str]:
     """
     Reliable previous close lookup using yfinance (with 3 retries)
@@ -562,7 +549,7 @@ def send_monthly_ping_if_due(cfg: dict, webhook: str, user_id: str, now_ny: date
 # ═══════════════════════════════════════════════════════════
 # Briefing Builder
 # ═══════════════════════════════════════════════════════════
-def _build_briefing_lines(now_ny: datetime, cfg: dict, sigma_messages: list[str]) -> list[str]:
+def _build_briefing_lines(now_ny: datetime, cfg: dict) -> list[str]:
     lines = [f"🌙 {SYSTEM_TAG} **U.S. Market LOC Portfolio Briefing** ({now_ny.strftime('%Y-%m-%d %H:%M %Z')})"]
     today_ny = now_ny.date()
     
@@ -631,7 +618,7 @@ def execute_dual_tactical_trader() -> None:
     for msg in sigma_messages:
         print(f"📝 [System Log] {msg}")
 
-    briefing_lines = _build_briefing_lines(now_ny, cfg, sigma_messages)
+    briefing_lines = _build_briefing_lines(now_ny, cfg)
     
     _send_discord(
         webhook_url=webhook, 
