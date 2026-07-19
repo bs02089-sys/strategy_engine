@@ -29,6 +29,7 @@ import sys
 import datetime
 import warnings
 from dataclasses import dataclass
+from io import StringIO
 from typing import Optional
 
 import pandas as pd
@@ -49,17 +50,18 @@ except ImportError:
 
 def fred_series(series_id: str, lookback_days: int = 365 * 5) -> pd.Series:
     """Download series from FRED via csv endpoint."""
-    end   = datetime.date.today()
+    end = datetime.date.today()
     start = end - datetime.timedelta(days=lookback_days)
-    url   = (
+    url = (
         "https://fred.stlouisfed.org/graph/fredgraph.csv"
         f"?id={series_id}&cosd={start}&coed={end}"
     )
-    df = pd.read_csv(url, na_values=".")
+    resp = requests.get(url, timeout=15)
+    resp.raise_for_status()
+    df = pd.read_csv(StringIO(resp.text), na_values=".")
     df.columns = ["date", series_id]
-    df["date"] = pd.to_datetime(df["date"])
-    df = df.dropna().set_index("date")
-    return df[series_id].astype(float)
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    return df.dropna().set_index("date")[series_id].astype(float)
 
 
 def get_error_message(e: Exception, source_name: str) -> str:
@@ -76,19 +78,19 @@ def validate_yf_data(raw_data: Optional[pd.DataFrame], symbols: list) -> pd.Data
     """Validate yfinance input and extract 'Close' series."""
     if raw_data is None or raw_data.empty:
         raise ValueError("yfinance returned no data")
-    
+
     if isinstance(raw_data.columns, pd.MultiIndex):
-        data = raw_data.xs('Close', axis=1, level=0) if "Close" in raw_data.columns.levels[0] else raw_data
+        data = raw_data['Close'] if 'Close' in raw_data.columns.levels[0] else raw_data
     else:
         data = raw_data
 
     if isinstance(data, pd.Series):
         data = data.to_frame()
-        
+
     missing = [s for s in symbols if s not in data.columns]
     if missing:
         raise KeyError(f"Missing symbols: {missing}")
-        
+
     return data[symbols]
 
 
@@ -130,21 +132,19 @@ def signal_yield_curve() -> SignalResult:
 def signal_market_breadth() -> SignalResult:
     """Detects market breadth cracks."""
     score_total, notes = 0, []
-    tickers = {"SPY": "SPY", "NYA": "^NYA", "RSP": "RSP"}
+    symbols = ["SPY", "^NYA", "RSP"]
     try:
-        data = validate_yf_data(yf.download(list(tickers.values()), period="1y", progress=False), list(tickers.values()))
-        spy_dd = (data["SPY"].iloc[-1] / data["SPY"].max() - 1)
-        nya_dd = (data["^NYA"].iloc[-1] / data["^NYA"].max() - 1)
-        
-        if spy_dd > -0.05 and nya_dd < -0.10: 
+        data = validate_yf_data(yf.download(symbols, period="1y", progress=False), symbols)
+        spy_dd = data["SPY"].iloc[-1] / data["SPY"].max() - 1
+        nya_dd = data["^NYA"].iloc[-1] / data["^NYA"].max() - 1
+
+        if spy_dd > -0.05 and nya_dd < -0.10:
             score_total += 1
             notes.append("Market breadth crack detected (+1)")
         else:
             notes.append("Market breadth stable (+0)")
 
-        ratio = data["RSP"] / data["SPY"]
-        ratio_growth = (ratio.iloc[-1] / ratio.iloc[-20] - 1) * 100 
-        
+        ratio_growth = (data["RSP"].iloc[-1] / data["RSP"].iloc[-20] - 1) * 100
         if ratio_growth < -2.0:
             score_total += 1
             notes.append(f"Concentration risk high (RSP/SPY {ratio_growth:.1f}%) (+1)")
@@ -152,8 +152,18 @@ def signal_market_breadth() -> SignalResult:
             notes.append("Market balance maintained (+0)")
     except Exception as e:
         notes.append(get_error_message(e, "Market Breadth"))
-    
+
     return SignalResult("Market Breadth", score_total >= 1, score_total, " | ".join(notes), score_total)
+
+
+def _spread_signal(series: pd.Series, warn: float, caution: float, widen_warn: float, label: str) -> tuple[int, str]:
+    value = series.iloc[-1]
+    widen = value - series.tail(min(63, len(series))).min()
+    if value > warn or widen > widen_warn:
+        return 1, f"{label} spread warning ({value:.2f}%)"
+    if value > caution:
+        return 1, f"{label} spread caution ({value:.2f}%)"
+    return 0, f"{label} stable ({value:.2f}%)"
 
 
 def signal_credit_spread() -> SignalResult:
@@ -161,18 +171,17 @@ def signal_credit_spread() -> SignalResult:
     score_total, notes = 0, []
     try:
         hy = fred_series("BAMLH0A0HYM2", lookback_days=365 * 2)
-        hy_now, hy_widen = hy.iloc[-1], hy.iloc[-1] - hy.tail(63).min()
-        if hy_now > 6.0 or hy_widen > 1.5: score_total += 1; notes.append(f"HY spread warning ({hy_now:.2f}%)")
-        elif hy_now > 4.5 or hy_widen > 0.7: score_total += 1; notes.append(f"HY spread caution ({hy_now:.2f}%)")
-        else: notes.append(f"HY stable ({hy_now:.2f}%)")
+        score, note = _spread_signal(hy, 6.0, 4.5, 1.5, "HY")
+        score_total += score
+        notes.append(note)
 
         ig = fred_series("BAMLC0A0CM", lookback_days=365 * 2)
-        ig_now, ig_widen = ig.iloc[-1], ig.iloc[-1] - ig.tail(63).min()
-        if ig_now > 2.0 or ig_widen > 0.5: score_total += 1; notes.append(f"IG spread warning ({ig_now:.2f}%)")
-        else: notes.append(f"IG stable ({ig_now:.2f}%)")
+        score, note = _spread_signal(ig, 2.0, float('inf'), 0.5, "IG")
+        score_total += score
+        notes.append(note)
     except Exception as e:
         notes.append(get_error_message(e, "Credit Spread"))
-    
+
     return SignalResult("Credit Spread", score_total >= 1, score_total, " | ".join(notes), score_total)
 
 
@@ -197,17 +206,26 @@ def signal_fed_cycle() -> SignalResult:
 def signal_valuation() -> SignalResult:
     """Analyzes Shiller CAPE & EPS."""
     score_total, notes = 0, []
-    # Simplified regex-based scraper
     try:
         cape_url = "https://www.multpl.com/shiller-pe/table/by-month"
-        r = requests.get(cape_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
-        m = re.findall(r"<td>\s*([\d.]+)\s*</td>", r.text)
-        cape = float(m[0])
-        if cape >= 35: score_total += 1; notes.append(f"CAPE {cape} (Critical)")
-        elif cape >= 28: score_total += 1; notes.append(f"CAPE {cape} (Warning)")
-        else: notes.append(f"CAPE {cape} (Normal)")
-    except Exception as e: notes.append("Valuation data error")
-    
+        response = requests.get(cape_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+        response.raise_for_status()
+        m = re.search(r"<td>\s*([\d.]+)\s*</td>", response.text)
+        if not m:
+            raise ValueError("CAPE not found")
+
+        cape = float(m.group(1))
+        if cape >= 35:
+            score_total += 1
+            notes.append(f"CAPE {cape} (Critical)")
+        elif cape >= 28:
+            score_total += 1
+            notes.append(f"CAPE {cape} (Warning)")
+        else:
+            notes.append(f"CAPE {cape} (Normal)")
+    except Exception as e:
+        notes.append(get_error_message(e, "Valuation"))
+
     return SignalResult("Valuation Overheat", score_total >= 1, score_total, " | ".join(notes), score_total)
 
 
@@ -232,13 +250,19 @@ def signal_momentum_breakdown() -> SignalResult:
     try:
         tickers = ["SPY", "XLU", "XLP", "XLV", "XLK", "XLY", "XLI"]
         data = validate_yf_data(yf.download(tickers, period="2y", progress=False), tickers)
-        
         spy = data["SPY"].dropna()
+        if len(spy) < 201:
+            raise ValueError("Insufficient SPY history")
+
         ret_200d = (spy.iloc[-1] / spy.iloc[-201] - 1) * 100
-        if ret_200d < 0: score_total += 1; notes.append(f"SPX 200D momentum negative ({ret_200d:.1f}%)")
-        else: notes.append("SPX momentum healthy")
-    except Exception as e: notes.append("Momentum data error")
-    
+        if ret_200d < 0:
+            score_total += 1
+            notes.append(f"SPX 200D momentum negative ({ret_200d:.1f}%)")
+        else:
+            notes.append("SPX momentum healthy")
+    except Exception as e:
+        notes.append(get_error_message(e, "Momentum"))
+
     return SignalResult("Momentum Strategy", score_total >= 1, score_total, " | ".join(notes), score_total)
 
 
