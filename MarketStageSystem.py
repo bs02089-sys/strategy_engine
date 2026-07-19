@@ -4,8 +4,7 @@ import logging
 import requests
 import pandas as pd
 import yfinance as yf
-from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Optional
 
 # ====================== 설정 ======================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -42,12 +41,6 @@ def calculate_bollinger(close: pd.Series, period: int = 20, num_std: float = 2.0
 
 
 # ====================== 트래커 베이스 ======================
-@dataclass
-class StageInfo:
-    stage: int
-    name: str
-
-
 class MarketStageTracker:
     MIN_ROWS = 60
 
@@ -57,9 +50,7 @@ class MarketStageTracker:
     def _prepare_df(self, df: pd.DataFrame) -> Optional[pd.DataFrame]:
         if len(df) < self.MIN_ROWS:
             return None
-        df = df.copy()
-        df = df.dropna(subset=['close', 'volume'])
-        return df
+        return df[['close', 'volume']].dropna().copy()
 
 
 class MarketBottomTracker(MarketStageTracker):
@@ -223,24 +214,18 @@ class DiscordMarketTracker:
         return config
 
     def _load_state(self):
+        state = {}
         if os.path.exists(STATE_PATH):
             try:
                 with open(STATE_PATH, "r", encoding="utf-8") as f:
                     state = json.load(f)
-                for ticker in self.tickers:
-                    self.bottom_trackers[ticker] = MarketBottomTracker(
-                        state.get(ticker, {}).get("bottom", 0)
-                    )
-                    self.top_trackers[ticker] = MarketTopTracker(
-                        state.get(ticker, {}).get("top", 0)
-                    )
-            except Exception:
-                pass
+            except Exception as exc:
+                logging.warning(f"상태 로드 실패: {exc}")
 
         for ticker in self.tickers:
-            if ticker not in self.bottom_trackers:
-                self.bottom_trackers[ticker] = MarketBottomTracker()
-                self.top_trackers[ticker] = MarketTopTracker()
+            saved = state.get(ticker, {}) if isinstance(state, dict) else {}
+            self.bottom_trackers[ticker] = MarketBottomTracker(saved.get("bottom", 0))
+            self.top_trackers[ticker] = MarketTopTracker(saved.get("top", 0))
 
     def _save_state(self):
         state = {
@@ -262,9 +247,10 @@ class DiscordMarketTracker:
             return
         try:
             content = f"<@{self.user_id}> {message}" if self.user_id else message
-            requests.post(self.webhook_url, json={"content": content}, timeout=10)
-        except Exception as e:
-            logging.error(f"Discord 전송 실패: {e}")
+            resp = requests.post(self.webhook_url, json={"content": content}, timeout=10)
+            resp.raise_for_status()
+        except Exception as exc:
+            logging.error(f"Discord 전송 실패: {exc}")
 
     def get_data(self, ticker: str) -> Optional[pd.DataFrame]:
         try:
@@ -277,18 +263,18 @@ class DiscordMarketTracker:
 
             df.columns = [col.lower() for col in df.columns]
             return df
-        except Exception as e:
-            logging.error(f"{ticker} 데이터 다운로드 실패: {e}")
+        except Exception as exc:
+            logging.error(f"{ticker} 데이터 다운로드 실패: {exc}")
             return None
 
     def update_all(self):
-        report = "📊 **[시장 단계 리포트]**\n"
+        lines = ["📊 **[시장 단계 리포트]**"]
         data_map = {t: self.get_data(t) for t in self.tickers}
         has_strong_signal = False
 
         for ticker, df in data_map.items():
             if df is None or df.empty:
-                report += f"• **{ticker}**: 데이터 조회 실패\n"
+                lines.append(f"• **{ticker}**: 데이터 조회 실패")
                 continue
 
             bottom_stage = self.bottom_trackers[ticker].update(df)
@@ -297,23 +283,21 @@ class DiscordMarketTracker:
             bottom_name = MarketBottomTracker.STAGE_NAMES.get(bottom_stage)
             top_name = MarketTopTracker.STAGE_NAMES.get(top_stage)
 
-            report += f"• **{ticker}**\n"
-            report += f"   ㄴ 바닥: {bottom_stage}단계 ({bottom_name})\n"
-            report += f"   ㄴ 천장: {top_stage}단계 ({top_name})\n"
+            lines.append(f"• **{ticker}**")
+            lines.append(f"   ㄴ 바닥: {bottom_stage}단계 ({bottom_name})")
+            lines.append(f"   ㄴ 천장: {top_stage}단계 ({top_name})")
 
-            # 5단계 강력 추천 멘트 추가
             if bottom_stage == 5:
-                report += "   **🔥 강력 매수 추천!** (최종 매수 신호 발생)\n"
+                lines.append("   **🔥 강력 매수 추천!** (최종 매수 신호 발생)")
                 has_strong_signal = True
             if top_stage == 5:
-                report += "   **🔻 강력 매도 추천!** (최종 매도 신호 발생)\n"
+                lines.append("   **🔻 강력 매도 추천!** (최종 매도 신호 발생)")
                 has_strong_signal = True
 
-        # 전체 요약
         if has_strong_signal:
-            report += "\n⚠️ **강력 신호 종목이 있습니다. 주의 깊게 확인하세요!**"
+            lines.append("⚠️ **강력 신호 종목이 있습니다. 주의 깊게 확인하세요!**")
 
-        self._send_discord(report)
+        self._send_discord("\n".join(lines))
         self._save_state()
         logging.info("시장 단계 업데이트 완료")
 
