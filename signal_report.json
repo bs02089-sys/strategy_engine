@@ -1,5 +1,5 @@
 {
-    "timestamp": "2026-07-17T23:53:02.455900",
+    "timestamp": "2026-07-20T02:06:54.428107",
     "total_score": 2,
     "signals": [
         {
@@ -25,7 +25,7 @@
         {
             "name": "Valuation Overheat",
             "score": 0,
-            "detail": "Valuation data error"
+            "detail": "Valuation data sync error (ValueError)"
         },
         {
             "name": "Leading Indicators",
