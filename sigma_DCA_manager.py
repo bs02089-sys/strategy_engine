@@ -32,7 +32,6 @@ if hasattr(sys.stderr, "reconfigure"):
 CONFIG_PATH            = "portfolio_config.json"
 _DISCORD_TITLE_LIMIT   = 256
 _DISCORD_CONTENT_LIMIT = 4096
-SYSTEM_TAG             = "[STAT]"
 
 
 # ════════════════════════════════════════════
