@@ -487,8 +487,8 @@ def _format_loc_action_line(ticker: str, prev_close: float, cfg: dict) -> str:
     final_loc = calculate_final_loc(base_loc)
 
     if base_loc != final_loc:
-        return f"• 🎯 {SYSTEM_TAG} **[Action] LOC Buy:** ~~${base_loc:.2f}~~ ➡️ **${final_loc:.2f}** (Risk Discount)"
-    return f"• 🎯 {SYSTEM_TAG} **[Action] LOC Buy:** **${final_loc:.2f}**"
+        return f"• 🎯 **[Action] LOC Buy:** ~~${base_loc:.2f}~~ ➡ **${final_loc:.2f}** (Risk Discount)"
+    return f"• 🎯 **[Action] LOC Buy:** **${final_loc:.2f}**"
 
 
 # ═══════════════════════════════════════════════════════════
@@ -539,7 +539,7 @@ def send_monthly_ping_if_due(cfg: dict, webhook: str, user_id: str, now_ny: date
         return
     
     msg = f"🔔 **Monthly Ping** | {now_ny.strftime('%Y-%m')}\nOperation system running normally."
-    _send_discord(webhook, user_id, f"🗓️ {SYSTEM_TAG} Monthly Operation Ping", msg)
+    _send_discord(webhook, user_id, f"📅 Monthly Operation Ping", msg)
     
     cfg["LAST_MONTHLY_PING"] = today_ym
     save_portfolio(cfg)
@@ -549,7 +549,7 @@ def send_monthly_ping_if_due(cfg: dict, webhook: str, user_id: str, now_ny: date
 # Briefing Builder
 # ═══════════════════════════════════════════════════════════
 def _build_briefing_lines(now_ny: datetime, cfg: dict) -> list[str]:
-    lines = [f"🌙 {SYSTEM_TAG} **U.S. Market LOC Portfolio Briefing** ({now_ny.strftime('%Y-%m-%d %H:%M %Z')})"]
+    lines = [f"🌙 **U.S. Market LOC Portfolio Briefing** ({now_ny.strftime('%Y-%m-%d %H:%M %Z')})"]
     today_ny = now_ny.date()
     
     market_score = get_market_score()
@@ -622,7 +622,7 @@ def execute_dual_tactical_trader() -> None:
     _send_discord(
         webhook_url=webhook, 
         user_id=user_id, 
-        title=f"📋 {SYSTEM_TAG} AI & Semi Portfolio LOC Briefing", 
+        title=f"📋 AI & Semi Portfolio LOC Briefing", 
         content="\n".join(briefing_lines)
     )
     
