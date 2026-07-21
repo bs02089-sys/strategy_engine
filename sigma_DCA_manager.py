@@ -609,13 +609,13 @@ def execute_dual_tactical_trader() -> None:
     user_id = os.environ.get("DISCORD_USER_ID") or cfg.get("DISCORD_USER_ID", "")
 
     reset_messages = reset_matured_rotation_positions(cfg, now_ny.date())
-    sigma_messages = reset_messages + refresh_sigma_if_stale(cfg)
-    save_portfolio(cfg) 
+    status_messages = reset_messages + refresh_sigma_if_stale(cfg)
+    save_portfolio(cfg)
 
     # Keep these visible in the GitHub Actions run log even though they no
     # longer appear in the Discord notification content.
-    for msg in sigma_messages:
-        print(f"📝 [System Log] {msg}")
+    for msg in status_messages:
+        print(msg)
 
     briefing_lines = _build_briefing_lines(now_ny, cfg)
     
