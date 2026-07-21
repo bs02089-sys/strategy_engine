@@ -2,7 +2,7 @@ name: Sigma DCA Manager Engine
 
 on:
   schedule:
-    - cron: "15 23 * * 1-5" 
+    - cron: "15 23 * * 1-5"
   workflow_dispatch:
 
 jobs:
@@ -13,7 +13,7 @@ jobs:
     env:
       DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
       DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
-    
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -27,19 +27,23 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install yfinance pandas requests numpy pytz pandas_market_calendars
-      
+
       - name: Run DCA Manager
         run: python sigma_DCA_manager.py > sigma_log.txt 2>&1
-        
+
+      - name: Show log on failure
+        if: failure()
+        run: cat sigma_log.txt
+
       - name: Sync and Notify
         if: always()
         run: |
           git config --global user.name "DCA Bot"
           git config --global user.email "bot@example.com"
-          
+
           [ -f "sigma_log.txt" ] && git add sigma_log.txt
           [ -f "portfolio_config.json" ] && git add portfolio_config.json
           [ -f "sigma_history.csv" ] && git add sigma_history.csv
-          
+
           git commit -m "update: dca-log $(date +'%Y-%m-%d')" || echo "No changes to commit"
           git push
