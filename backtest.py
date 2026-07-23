@@ -3,7 +3,6 @@ loc_dca_comparison.py — LOC 분할매수 비중 비교 (No Rebalancing)
 SOXL 1년 계획 검증용
 """
 
-import json
 import numpy as np
 import pandas as pd
 import yfinance as yf
@@ -12,22 +11,24 @@ import matplotlib.pyplot as plt
 plt.rcParams['font.family'] = 'Malgun Gothic'
 plt.rcParams['axes.unicode_minus'] = False
 
-# ====================== 설정 ======================
-TARGET_TICKERS = ["SOXL"]
-START = "2022-01-01"
-END = "2026-07-22"
+TARGET_TICKERS = ['SOXL']
+START_DATE = '2022-01-01'
+END_DATE = '2026-07-22'
+ALREADY_SOXL_BUYS = 0
+TOTAL_BUYS_PLANNED = 20
+TEST_WEIGHTS = [0.2, 0.3, 0.4, 0.5, 0.6]
+SIGMA_LOOKBACK = 365
+SIGMA_MULTIPLIER = 1.41
+DAYS_PER_YEAR = 365.25
 
-# 당신 상황
-ALREADY_SOXL_BUYS = 0          # 이미 SOXL 1회 진입
-TOTAL_BUYS_PLANNED = 20        # 앞으로 1년 동안 총 매수 회차 계획 
 
-print("🔍 LOC 분할매수 비중 백테스트\n")
+def download_price_data(tickers, start, end):
+    """Load adjusted historical price data for the requested tickers."""
+    return yf.download(tickers, start=start, end=end, auto_adjust=True, group_by='ticker')
 
-# ====================== 데이터 로드 ======================
-data = yf.download(TARGET_TICKERS, start=START, end=END, auto_adjust=True, group_by='ticker')
 
-# ====================== LOC 신호 함수 ======================
-def add_loc_signal(df, multiplier=1.41, lookback=365):
+def add_loc_signal(df, multiplier=SIGMA_MULTIPLIER, lookback=SIGMA_LOOKBACK):
+    """Compute the LOC entry signal for a price series."""
     df = df.copy()
     df['Return'] = df['Close'].pct_change()
     df['Sigma'] = df['Return'].rolling(lookback).std()
@@ -35,100 +36,107 @@ def add_loc_signal(df, multiplier=1.41, lookback=365):
     df['Signal'] = (df['Close'] <= df['LOC']) & df['LOC'].notna()
     return df
 
-# ====================== LOC DCA 시뮬레이션 ======================
-def simulate_loc_dca(soxl_weight=0.3, plot=False):
-    weights = {"SOXL": soxl_weight}
-    
+
+def simulate_loc_dca(df, max_buys, already_buys=0):
+    """Simulate no-rebalancing LOC DCA performance for a single ticker."""
+    df = add_loc_signal(df)
+    df = df.assign(Equity=1.0, Position=0.0)
+
+    position = 0.0
+    remaining_buys = max(0, max_buys - already_buys)
+    add_size = 1.0 / remaining_buys if remaining_buys > 0 else 0.0
+
+    for i in range(1, len(df)):
+        if remaining_buys > 0 and df['Signal'].iat[i] and position < 1.0:
+            position += add_size
+            remaining_buys -= 1
+
+        prev_price = df['Close'].iat[i - 1]
+        price = df['Close'].iat[i]
+        daily_ret = (price / prev_price - 1) * position if position > 0 else 0.0
+
+        df.loc[df.index[i], 'Equity'] = df['Equity'].iat[i - 1] * (1 + daily_ret)
+        df.loc[df.index[i], 'Position'] = position
+
+    return df['Equity'], position
+
+
+def calculate_metrics(equity_series):
+    """Calculate CAGR, MDD and Calmar ratio for an equity curve."""
+    years = (equity_series.index[-1] - equity_series.index[0]).days / DAYS_PER_YEAR
+    total_return = equity_series.iloc[-1] - 1.0
+    cagr = (equity_series.iloc[-1] ** (1 / years) - 1) if years > 0 else 0.0
+    mdd = ((equity_series / equity_series.cummax()) - 1).min()
+    calmar = cagr / abs(mdd) if mdd < 0 else 0.0
+    return {
+        'CAGR': cagr,
+        'MDD': mdd,
+        'Calmar': calmar,
+        'Total_Return': total_return,
+    }
+
+
+def build_portfolio_equity(equity_curves, weights):
+    """Create a weighted portfolio equity curve from individual ticker equity curves."""
+    portfolio = None
+    for ticker, series in equity_curves.items():
+        weighted = series * weights.get(ticker, 0.0)
+        portfolio = weighted if portfolio is None else portfolio.add(weighted, fill_value=0.0)
+    return portfolio
+
+
+def run_backtest(price_data, soxl_weight, plot=False):
+    """Backtest the LOC DCA strategy for the requested SOXL weight."""
+    weights = {ticker: soxl_weight for ticker in TARGET_TICKERS}
     equity_curves = {}
-    results = {}
-    
-    total_buys = 0
-    max_buys = TOTAL_BUYS_PLANNED
-    
+
     for ticker in TARGET_TICKERS:
-        df = add_loc_signal(data[ticker])
-        equity = 1.0
-        position = 0.0
-        buys_in_period = 0
-        already = ALREADY_SOXL_BUYS if ticker == "SOXL" else 0
-        
-        df['Equity'] = 1.0
-        df['Position'] = 0.0
-        
-        for i in range(1, len(df)):
-            price = df['Close'].iloc[i]
-            signal = df['Signal'].iloc[i]
-            
-            # 매수 로직 (이미 진입분 + 앞으로 분할)
-            if buys_in_period + already < max_buys and signal and position < 1.0:
-                add_size = 1.0 / (max_buys - already)
-                position += add_size
-                buys_in_period += 1
-                total_buys += 1
-            
-            # 일일 수익률 (No Rebalancing)
-            if position > 0:
-                daily_ret = (price / df['Close'].iloc[i-1] - 1) * position
-            else:
-                daily_ret = 0
-            
-            equity *= (1 + daily_ret)
-            df.loc[df.index[i], 'Equity'] = equity
-            df.loc[df.index[i], 'Position'] = position
-        
-        total_ret = equity - 1
-        years = (df.index[-1] - df.index[0]).days / 365.25
-        cagr = (equity ** (1 / years) - 1) if years > 0 else 0
-        mdd = ((df['Equity'] / df['Equity'].cummax()) - 1).min()
-        calmar = cagr / abs(mdd) if mdd != 0 else 0
-        
-        results[ticker] = {'CAGR': cagr, 'MDD': mdd, 'Calmar': calmar, 'Final_Position': position}
-        equity_curves[ticker] = df['Equity']
-    
-    # 포트폴리오 (No Rebalancing)
-    portfolio = pd.Series(0.0, index=equity_curves[TARGET_TICKERS[0]].index)
-    for t in TARGET_TICKERS:
-        portfolio = portfolio.add(equity_curves[t] * weights[t], fill_value=0)
-    port_final = portfolio.iloc[-1]
-    port_cagr = (port_final ** (1 / years) - 1)
-    port_mdd = ((portfolio / portfolio.cummax()) - 1).min()
-    port_calmar = port_cagr / abs(port_mdd)
-    
+        series, final_position = simulate_loc_dca(
+            price_data[ticker],
+            max_buys=TOTAL_BUYS_PLANNED,
+            already_buys=ALREADY_SOXL_BUYS if ticker == 'SOXL' else 0,
+        )
+        equity_curves[ticker] = series
+
+    portfolio_equity = build_portfolio_equity(equity_curves, weights)
+    portfolio_metrics = calculate_metrics(portfolio_equity)
+    portfolio_metrics['SOXL_%'] = int(soxl_weight * 100)
+
     if plot:
         plt.figure(figsize=(14, 8))
-        for t in TARGET_TICKERS:
-            plt.plot(equity_curves[t], label=f"{t} ({weights[t]*100:.0f}%)")
-        plt.plot(portfolio, label="Portfolio", linewidth=3, color='red')
-        plt.title(f'LOC DCA 전략 - SOXL {weights["SOXL"]*100:.0f}%')
+        for ticker, series in equity_curves.items():
+            plt.plot(series, label=f'{ticker} ({weights[ticker] * 100:.0f}%)')
+        plt.plot(portfolio_equity, label='Portfolio', linewidth=3, color='red')
+        plt.title(f"LOC DCA 전략 - SOXL {weights['SOXL'] * 100:.0f}%")
         plt.legend()
         plt.grid(True)
         plt.show()
-    
-    return {
-        'SOXL_%': int(weights["SOXL"]*100),
-        'CAGR': port_cagr,
-        'MDD': port_mdd,
-        'Calmar': port_calmar,
-        'Total_Return': port_final - 1
-    }
 
-# ====================== 여러 비중 테스트 ======================
-test_weights = [0.2, 0.3, 0.4, 0.5, 0.6]
-comparison = []
+    return portfolio_metrics
 
-print("비중별 LOC 분할매수 백테스트 시작...\n")
-for w in test_weights:
-    res = simulate_loc_dca(soxl_weight=w)
-    comparison.append(res)
-    print(f"SOXL {res['SOXL_%']:2}% | CAGR {res['CAGR']:6.2%} | MDD {res['MDD']:6.1%} | Calmar {res['Calmar']:.2f}")
 
-# 결과 정리
-comp_df = pd.DataFrame(comparison)
-print("\n" + "="*80)
-print("📊 LOC 분할매수 비중 비교 결과")
-print("="*80)
-print(comp_df.sort_values('Calmar', ascending=False).round(4))
+def main():
+    print('🔍 LOC 분할매수 비중 백테스트\n')
+    price_data = download_price_data(TARGET_TICKERS, START_DATE, END_DATE)
 
-# 최고 성과 비중
-best = comp_df.loc[comp_df['Calmar'].idxmax()]
-print(f"\n🏆 Calmar 기준 최적 비중: SOXL {best['SOXL_%']}%")
+    print('비중별 LOC 분할매수 백테스트 시작...\n')
+    comparison = [run_backtest(price_data, w) for w in TEST_WEIGHTS]
+
+    for result in comparison:
+        print(
+            f"SOXL {result['SOXL_%']:2}% | CAGR {result['CAGR']:6.2%} | "
+            f"MDD {result['MDD']:6.1%} | Calmar {result['Calmar']:.2f}"
+        )
+
+    comp_df = pd.DataFrame(comparison)
+    print('\n' + '=' * 80)
+    print('📊 LOC 분할매수 비중 비교 결과')
+    print('=' * 80)
+    print(comp_df.sort_values('Calmar', ascending=False).round(4))
+
+    best = comp_df.loc[comp_df['Calmar'].idxmax()]
+    print(f"\n🏆 Calmar 기준 최적 비중: SOXL {best['SOXL_%']}%")
+
+
+if __name__ == '__main__':
+    main()
