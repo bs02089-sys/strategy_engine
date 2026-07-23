@@ -358,6 +358,10 @@ def check_macro_and_technical_signals(ticker: str, pos_cfg: dict, current_vix: f
     if current_vix is None:
         return False, False, "VIX data delay (neutral)"
 
+    current_price = 0.0
+    ma20 = 0.0
+    ma60 = 0.0
+
     try:
         stock = yf.Ticker(ticker)
         hist = stock.history(period="120d", interval="1d", auto_adjust=False)
@@ -395,16 +399,12 @@ def check_macro_and_technical_signals(ticker: str, pos_cfg: dict, current_vix: f
 def _get_nyse_holidays(start_date: date, end_date: date) -> np.ndarray | None:
     try:
         import pandas_market_calendars as mcal
-    except ImportError:
-        return None
-
-    try:
         nyse = mcal.get_calendar("NYSE")
         all_holidays = np.array(nyse.holidays(), dtype="datetime64[D]")
         start64 = np.datetime64(start_date)
         end64 = np.datetime64(end_date)
         return all_holidays[(all_holidays >= start64) & (all_holidays <= end64)]
-    except Exception:
+    except (ImportError, Exception):
         return None
 
 
@@ -430,12 +430,11 @@ def check_rotation_exit_signal(pos_cfg: dict, today: date) -> tuple[bool, int, i
 
     try:
         start_date = datetime.strptime(start_str, "%Y-%m-%d").date()
+        exit_days = int(pos_cfg.get("ROTATION_EXIT_DAYS", pos_cfg.get("LOOKBACK_DAYS", 63)))
+        elapsed_bd = business_days_elapsed(start_date, today)
+        return elapsed_bd >= exit_days, elapsed_bd, exit_days
     except ValueError:
         return False, 0, 0
-
-    exit_days = int(pos_cfg.get("ROTATION_EXIT_DAYS", pos_cfg.get("LOOKBACK_DAYS", 63)))
-    elapsed_bd = business_days_elapsed(start_date, today)
-    return elapsed_bd >= exit_days, elapsed_bd, exit_days
 
 
 def reset_matured_rotation_positions(cfg: dict, today: date) -> list[str]:

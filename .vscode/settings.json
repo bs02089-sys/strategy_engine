@@ -1,7 +1,8 @@
 {
     "files.autoSave": "afterDelay",
-    "python.defaultInterpreterPath": "./.venv-linux/bin/python",
+    "python.defaultInterpreterPath": "./.venv/Scripts/python.exe",
     "python.analysis.extraPaths": [
-        "./.venv-linux/lib/python3.14/site-packages"
+        "./.venv-linux/lib/python3.14/site-packages",
+        "//wsl.localhost/Ubuntu/home/bs020/projects/strategy_engine/.venv-linux/lib/python3.14/site-packages"
     ]
 }
