@@ -3,3 +3,4 @@ groq
 python-dotenv
 trafilatura
 googlenewsdecoder
+pandas_market_calendars
