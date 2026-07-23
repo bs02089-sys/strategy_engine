@@ -21,7 +21,7 @@ END = "2026-07-22"
 ALREADY_SOXL_BUYS = 0          # 이미 SOXL 1회 진입
 TOTAL_BUYS_PLANNED = 20        # 앞으로 1년 동안 총 매수 회차 계획 
 
-print("🔍 LOC 분할매수 비중 비교 백테스트\n")
+print("🔍 LOC 분할매수 비중 백테스트\n")
 
 # ====================== 데이터 로드 ======================
 data = yf.download(TARGET_TICKERS, start=START, end=END, auto_adjust=True, group_by='ticker')
@@ -86,7 +86,9 @@ def simulate_loc_dca(soxl_weight=0.3, plot=False):
         equity_curves[ticker] = df['Equity']
     
     # 포트폴리오 (No Rebalancing)
-    portfolio = sum(equity_curves[t] * weights[t] for t in TARGET_TICKERS)
+    portfolio = pd.Series(0.0, index=equity_curves[TARGET_TICKERS[0]].index)
+    for t in TARGET_TICKERS:
+        portfolio = portfolio.add(equity_curves[t] * weights[t], fill_value=0)
     port_final = portfolio.iloc[-1]
     port_cagr = (port_final ** (1 / years) - 1)
     port_mdd = ((portfolio / portfolio.cummax()) - 1).min()
