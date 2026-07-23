@@ -1,11 +1,11 @@
 {
-    "timestamp": "2026-07-21T23:56:27.612823",
+    "timestamp": "2026-07-23T00:00:43.398749",
     "total_score": 2,
     "signals": [
         {
             "name": "Yield Curve Inversion",
             "score": 2,
-            "detail": "Re-steepening in progress (+0.37%p) (+2)"
+            "detail": "Re-steepening in progress (+0.36%p) (+2)"
         },
         {
             "name": "Market Breadth",
