@@ -1,6 +1,6 @@
 """
 loc_dca_comparison.py — LOC 분할매수 비중 비교 (No Rebalancing)
-SOXL + TQQQ 1년 계획 검증용
+SOXL 1년 계획 검증용
 """
 
 import json
@@ -13,13 +13,13 @@ plt.rcParams['font.family'] = 'Malgun Gothic'
 plt.rcParams['axes.unicode_minus'] = False
 
 # ====================== 설정 ======================
-TARGET_TICKERS = ["SOXL", "TQQQ"]
+TARGET_TICKERS = ["SOXL"]
 START = "2022-01-01"
-END = "2026-06-20"
+END = "2026-07-22"
 
 # 당신 상황
-ALREADY_SOXL_BUYS = 1          # 이미 SOXL 1회 진입
-TOTAL_BUYS_PLANNED = 24        # 앞으로 1년 동안 총 매수 회차 계획 (예: 2주에 1회)
+ALREADY_SOXL_BUYS = 0          # 이미 SOXL 1회 진입
+TOTAL_BUYS_PLANNED = 20        # 앞으로 1년 동안 총 매수 회차 계획 
 
 print("🔍 LOC 분할매수 비중 비교 백테스트\n")
 
@@ -27,7 +27,7 @@ print("🔍 LOC 분할매수 비중 비교 백테스트\n")
 data = yf.download(TARGET_TICKERS, start=START, end=END, auto_adjust=True, group_by='ticker')
 
 # ====================== LOC 신호 함수 ======================
-def add_loc_signal(df, multiplier=1.48, lookback=365):
+def add_loc_signal(df, multiplier=1.41, lookback=365):
     df = df.copy()
     df['Return'] = df['Close'].pct_change()
     df['Sigma'] = df['Return'].rolling(lookback).std()
@@ -37,7 +37,7 @@ def add_loc_signal(df, multiplier=1.48, lookback=365):
 
 # ====================== LOC DCA 시뮬레이션 ======================
 def simulate_loc_dca(soxl_weight=0.3, plot=False):
-    weights = {"SOXL": soxl_weight, "TQQQ": 1 - soxl_weight}
+    weights = {"SOXL": soxl_weight}
     
     equity_curves = {}
     results = {}
@@ -97,7 +97,7 @@ def simulate_loc_dca(soxl_weight=0.3, plot=False):
         for t in TARGET_TICKERS:
             plt.plot(equity_curves[t], label=f"{t} ({weights[t]*100:.0f}%)")
         plt.plot(portfolio, label="Portfolio", linewidth=3, color='red')
-        plt.title(f'LOC DCA 전략 - SOXL {weights["SOXL"]*100:.0f}% : TQQQ {weights["TQQQ"]*100:.0f}%')
+        plt.title(f'LOC DCA 전략 - SOXL {weights["SOXL"]*100:.0f}%')
         plt.legend()
         plt.grid(True)
         plt.show()
