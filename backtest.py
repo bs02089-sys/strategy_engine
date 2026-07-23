@@ -91,7 +91,7 @@ def run_backtest(price_data, soxl_weight, plot=False):
     equity_curves = {}
 
     for ticker in TARGET_TICKERS:
-        series, final_position = simulate_loc_dca(
+        series, _ = simulate_loc_dca(
             price_data[ticker],
             max_buys=TOTAL_BUYS_PLANNED,
             already_buys=ALREADY_SOXL_BUYS if ticker == 'SOXL' else 0,
