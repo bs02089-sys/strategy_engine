@@ -43,9 +43,10 @@ def save_portfolio(data: dict) -> None:
 # ====================== Sigma ======================
 def log_sigma_update(ticker: str, sigma: float, today: date) -> None:
     file_path = "sigma_history.csv"
+    file_exists = os.path.isfile(file_path)
     with open(file_path, 'a', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
-        if not os.path.isfile(file_path):
+        if not file_exists:
             writer.writerow(['Date', 'Ticker', 'Sigma'])
         writer.writerow([today.strftime("%Y-%m-%d"), ticker, round(sigma, 4)])
 
@@ -92,7 +93,7 @@ def refresh_sigma_if_stale(cfg: dict) -> List[str]:
     messages = []
     today = datetime.now(ZoneInfo("America/New_York")).date()
     
-    for ticker, pos in cfg.setdefault("POSITIONS", {}).items():
+    for ticker, pos in cfg.get("POSITIONS", {}).items():
         last_update = datetime.strptime(pos.get("LAST_SIGMA_UPDATE", "2000-01-01"), "%Y-%m-%d").date()
         if (today - last_update).days < 90:
             continue
@@ -123,7 +124,7 @@ def get_prev_close(ticker: str) -> Tuple[Optional[float], str]:
         
         if np.isnan(prev_close) or prev_close <= 0:
             raise ValueError("Invalid price")
-            
+
         return prev_close, date_str
 
     except Exception as e:
@@ -132,7 +133,8 @@ def get_prev_close(ticker: str) -> Tuple[Optional[float], str]:
     
 
 def calculate_loc_price(ticker: str, prev_close: float, cfg: dict) -> float:
-    pos = cfg.setdefault("POSITIONS", {}).setdefault(ticker, {})
+    positions = cfg.get("POSITIONS", {})
+    pos = positions.get(ticker, {})
     multiplier = pos.get("ENTRY_MULTIPLIER", 1.41)
     sigma = pos.get("DAILY_SIGMA", 0.03)
     return round(prev_close * (1 - sigma * multiplier), 2)
@@ -148,8 +150,8 @@ def _send_discord(webhook: str, user_id: str, title: str, content: str):
     }
     try:
         requests.post(webhook, json=payload, timeout=10)
-    except:
-        pass
+    except Exception as e:
+        print(f"⚠️ Discord 전송 실패: {e}")
 
 
 # ====================== Main ======================
