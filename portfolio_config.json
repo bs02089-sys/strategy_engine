@@ -2,65 +2,29 @@
     "DISCORD_WEBHOOK": "",
     "DISCORD_USER_ID": "",
     "POSITIONS": {
-        "SOXX": {
-            "LOOKBACK_DAYS": 252,
-            "ENTRY_MULTIPLIER": 1.59,
-            "VOL_METHOD": "EWMA",
-            "EWMA_LAMBDA": 0.94,
-            "DAILY_SIGMA": 0.0475,
-            "LAST_SIGMA_UPDATE": "2026-07-02",
-            "LAST_SIGMA_METHOD": "EWMA",
-            "LAST_EWMA_LAMBDA": 0.94,
-            "START_DATE": "2026-07-02",
-            "INVEST_TYPE": "LONG_YEAR"
-        },
-        "AIPO": {
+        "TQQQ": {
             "LOOKBACK_DAYS": 252,
             "ENTRY_MULTIPLIER": 1.41,
             "VOL_METHOD": "EWMA",
             "EWMA_LAMBDA": 0.94,
-            "DAILY_SIGMA": 0.0293,
-            "LAST_SIGMA_UPDATE": "2026-07-02",
+            "DAILY_SIGMA": 0.0355,
+            "LAST_SIGMA_UPDATE": "2026-07-25",
             "LAST_SIGMA_METHOD": "EWMA",
             "LAST_EWMA_LAMBDA": 0.94,
-            "START_DATE": "2025-07-24",
+            "START_DATE": "2026-07-25",
             "INVEST_TYPE": "LONG_YEAR"
-        },
-        "QNDX": {
-            "LOOKBACK_DAYS": 252,
-            "ENTRY_MULTIPLIER": 1.41,
-            "VOL_METHOD": "EWMA",
-            "EWMA_LAMBDA": 0.94,
-            "DAILY_SIGMA": 0.0163,
-            "LAST_SIGMA_UPDATE": "2026-07-02",
-            "LAST_SIGMA_METHOD": "EWMA",
-            "LAST_EWMA_LAMBDA": 0.94,
-            "START_DATE": "2026-06-23",
-            "INVEST_TYPE": "LONG_YEAR"
-        },
-        "NVDX": {
-            "LOOKBACK_DAYS": 63,
-            "ENTRY_MULTIPLIER": 1.41,
-            "VOL_METHOD": "EWMA",
-            "EWMA_LAMBDA": 0.94,
-            "DAILY_SIGMA": 0.0492,
-            "LAST_SIGMA_UPDATE": "2026-07-02",
-            "LAST_SIGMA_METHOD": "EWMA",
-            "LAST_EWMA_LAMBDA": 0.94,
-            "START_DATE": "2026-07-02",
-            "INVEST_TYPE": "ROTATION_3M"
         },
         "SOXL": {
-            "LOOKBACK_DAYS": 63,
+            "LOOKBACK_DAYS": 252,
             "ENTRY_MULTIPLIER": 1.41,
             "VOL_METHOD": "EWMA",
             "EWMA_LAMBDA": 0.94,
-            "DAILY_SIGMA": 0.1406,
-            "LAST_SIGMA_UPDATE": "2026-07-02",
+            "DAILY_SIGMA": 0.0798,
+            "LAST_SIGMA_UPDATE": "2026-07-25",
             "LAST_SIGMA_METHOD": "EWMA",
             "LAST_EWMA_LAMBDA": 0.94,
-            "START_DATE": "2026-07-02",
-            "INVEST_TYPE": "ROTATION_3M"
+            "START_DATE": "2026-07-25",
+            "INVEST_TYPE": "LONG_YEAR"
         }
     },
     "STRATEGY": {
