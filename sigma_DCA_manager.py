@@ -106,16 +106,30 @@ def refresh_sigma_if_stale(cfg: dict) -> List[str]:
 
 # ====================== LOC Price ======================
 def get_prev_close(ticker: str) -> Tuple[Optional[float], str]:
+    """전일 종가 조회 (더 안정적으로 개선)"""
     try:
-        hist = yf.Ticker(ticker).history(period="10d")
-        if not hist.empty:
-            price = float(hist['Close'].iloc[-1])
-            date_str = hist.index[-1].date().strftime("%m-%d")
-            return price, date_str
-    except:
-        pass
-    return None, "N/A"
+        # 더 긴 기간으로 조회하여 주말/공휴일 대응
+        hist = yf.Ticker(ticker).history(period="15d", interval="1d")
+        if hist.empty:
+            raise ValueError("No data")
 
+        closes = hist['Close'].dropna()
+        if closes.empty:
+            raise ValueError("No valid closes")
+
+        # 가장 최근 종가 사용
+        prev_close = float(closes.iloc[-1])
+        date_str = closes.index[-1].date().strftime("%m-%d")
+        
+        if np.isnan(prev_close) or prev_close <= 0:
+            raise ValueError("Invalid price")
+            
+        return prev_close, date_str
+
+    except Exception as e:
+        print(f"⚠️ {ticker} 가격 조회 실패: {e}")
+        return None, "N/A"
+    
 
 def calculate_loc_price(ticker: str, prev_close: float, cfg: dict) -> float:
     pos = cfg.setdefault("POSITIONS", {}).setdefault(ticker, {})
@@ -159,18 +173,20 @@ def execute_dual_tactical_trader():
 
     for ticker, pos in cfg.get("POSITIONS", {}).items():
         prev_close, date_str = get_prev_close(ticker)
-        if prev_close is None:
+        
+        if prev_close is None or np.isnan(prev_close):
             lines.append(f"\n🔹 **{ticker}** — 가격 조회 실패 ⚠️")
             continue
 
         loc_price = calculate_loc_price(ticker, prev_close, cfg)
         
-        meta = f" | {pos.get('INVEST_TYPE', '')}" if pos.get("INVEST_TYPE") else ""
-        
+        invest_type = pos.get("INVEST_TYPE", "")
+        meta = f" | {invest_type}" if invest_type else ""
+
         lines.append(f"\n🔹 **{ticker}** (전일종가: ${prev_close:.2f} | {date_str}{meta})")
         lines.append(f"• 🎯 **LOC Buy:** **${loc_price:.2f}**")
         lines.append("• 📌 매일 무조건 LOC 지정가 매수")
-
+        
     _send_discord(webhook, user_id, "📋 LOC 매수 브리핑", "\n".join(lines))
 
 
