@@ -1,8 +1,6 @@
 requests
-groq
 python-dotenv
 trafilatura
-googlenewsdecoder
 numpy
 yfinance
 pandas_market_calendars
