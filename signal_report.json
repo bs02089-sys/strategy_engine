@@ -1,11 +1,11 @@
 {
-    "timestamp": "2026-07-24T00:00:49.698832",
+    "timestamp": "2026-07-25T00:03:28.813063",
     "total_score": 2,
     "signals": [
         {
             "name": "Yield Curve Inversion",
             "score": 2,
-            "detail": "Re-steepening in progress (+0.34%p) (+2)"
+            "detail": "Re-steepening in progress (+0.36%p) (+2)"
         },
         {
             "name": "Market Breadth",
@@ -15,7 +15,7 @@
         {
             "name": "Credit Spread",
             "score": 0,
-            "detail": "HY stable (2.68%) | IG stable (0.78%)"
+            "detail": "HY stable (2.77%) | IG stable (0.79%)"
         },
         {
             "name": "Fed Policy Cycle",
