@@ -137,7 +137,7 @@ class MarketBottomTracker(MarketStageTracker):
     def _is_exhaustion(self, df: pd.DataFrame) -> bool:
         last5 = df['close'].tail(5)
         change = last5.iloc[-1] - last5.iloc[0]
-        return bool(change < 0 and last5.nunique() <= 3)
+        return bool(change <= 0 and last5.nunique() <= 4)
 
     def _is_retest(self, df: pd.DataFrame) -> bool:
         prior_low = df['close'].iloc[:-1].min()
@@ -206,9 +206,9 @@ class MarketTopTracker(MarketStageTracker):
         if len(rsi) < 6:
             return False
         recent = rsi.tail(6)
-        touched_70 = recent.iloc[:-1].max() >= 70
-        below_70_today = recent.iloc[-1] < 70
-        return bool(touched_70 and below_70_today)
+        touched_60 = recent.iloc[:-1].max() >= 60
+        below_60_today = recent.iloc[-1] < 60
+        return bool(touched_60 and below_60_today)
 
     def _is_dead_cross(self, df: pd.DataFrame) -> bool:
         recent_high = df['close'].rolling(20).max().shift(1)
