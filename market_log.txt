@@ -1,3 +1,2 @@
-2026-07-26 00:50:40,587 | INFO | Failed to create TzCache, reason: Error creating TzCache folder: '/home/runner/.cache/py-yfinance' reason: [Errno 17] File exists: '/home/runner/.cache/py-yfinance'. TzCache will not be used. Tip: You can direct cache to use a different location with 'set_tz_cache_location(mylocation)'
-2026-07-26 00:50:41,251 | INFO | 시장 단계 업데이트 완료
+2026-07-26 01:02:05,167 | INFO | 시장 단계 업데이트 완료
 ✅ 시스템 실행 완료
