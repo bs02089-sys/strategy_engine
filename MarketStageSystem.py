@@ -42,7 +42,7 @@ def calculate_bollinger_upper(close: pd.Series, period: int = 20, num_std: float
     return mid + num_std * std
 
 
-# ====================== 트래커 클래스 (기존과 동일) ======================
+# ====================== 트래커 베이스 ======================
 class MarketStageTracker:
     MIN_ROWS = 80
 
@@ -70,10 +70,7 @@ class MarketStageTracker:
         ma60 = df['close'].rolling(60).mean().iloc[-1]
         if pd.isna(ma5) or pd.isna(ma20) or pd.isna(ma60):
             return False
-        if bullish:
-            return bool(ma5 > ma20 and ma20 > ma60)
-        else:
-            return bool(ma5 < ma20 and ma20 < ma60)
+        return bool(ma5 > ma20 > ma60) if bullish else bool(ma5 < ma20 < ma60)
 
     def _get_last_date(self, df: pd.DataFrame) -> str:
         last_date = df.index[-1]
@@ -82,20 +79,22 @@ class MarketStageTracker:
         return str(last_date)
 
     def _check_stage5_reset(self, df: pd.DataFrame) -> bool:
+        """Stage 5 진입 후 STAGE5_RESET_DAYS 경과 시 0으로 리셋."""
         if self.stage != 5:
             return False
         if self.stage5_entered_date is None:
             self.stage5_entered_date = self._get_last_date(df)
             return False
 
-        last_date = df.index[-1].date() if isinstance(df.index[-1], pd.Timestamp) else datetime.strptime(str(df.index[-1]), "%Y-%m-%d").date()
+        last_ts = df.index[-1]
+        last_date = last_ts.date() if isinstance(last_ts, pd.Timestamp) else datetime.strptime(str(last_ts), "%Y-%m-%d").date()
         entered = datetime.strptime(self.stage5_entered_date, "%Y-%m-%d").date()
         elapsed = (last_date - entered).days
 
         if elapsed >= STAGE5_RESET_DAYS:
             self.stage = 0
             self.stage5_entered_date = None
-            logging.info(f"🔄 Stage 5 → 0 리셋 ({elapsed}일)")
+            logging.info(f"🔄 Stage 5 → 0 리셋 ({elapsed}일 경과)")
             return True
         return False
 
@@ -121,7 +120,8 @@ class MarketBottomTracker(MarketStageTracker):
         return bool(is_near_low and is_low_vol)
 
     def _is_trap(self, df: pd.DataFrame) -> bool:
-        if len(df) < 5: return False
+        if len(df) < 5:
+            return False
         prev_low = df['close'].iloc[:-2].min()
         broke_low_yest = df['close'].iloc[-2] < prev_low
         recovered_today = df['close'].iloc[-1] > prev_low * 0.99
@@ -142,8 +142,10 @@ class MarketBottomTracker(MarketStageTracker):
 
     def update(self, df: pd.DataFrame) -> int:
         clean_df = self._prepare_df(df)
-        if clean_df is None: return self.stage
-        if self.stage == 5 and self._check_stage5_reset(clean_df): return self.stage
+        if clean_df is None:
+            return self.stage
+        if self.stage == 5 and self._check_stage5_reset(clean_df):
+            return self.stage
 
         logic = {0: self._is_exhaustion, 1: self._is_retest, 2: self._is_trap, 3: self._is_shift}
         if self.stage in logic and logic[self.stage](clean_df):
@@ -161,7 +163,8 @@ class MarketTopTracker(MarketStageTracker):
 
     def _is_overheat(self, df: pd.DataFrame) -> bool:
         rsi = calculate_rsi(df['close']).dropna()
-        if len(rsi) < 6: return False
+        if len(rsi) < 6:
+            return False
         recent = rsi.tail(6)
         return bool(recent.iloc[:-1].max() >= 60 and recent.iloc[-1] < 60)
 
@@ -171,14 +174,17 @@ class MarketTopTracker(MarketStageTracker):
         macd, signal = calculate_macd(df['close'])
         macd = macd.dropna()
         signal = signal.dropna()
-        if len(macd) < 2: return False
+        if len(macd) < 2:
+            return False
         dead_cross = (macd.iloc[-2] >= signal.iloc[-2]) and (macd.iloc[-1] < signal.iloc[-1])
         return bool(made_new_high and dead_cross)
 
     def _is_band_trap(self, df: pd.DataFrame) -> bool:
-        if len(df) < 5: return False
+        if len(df) < 5:
+            return False
         upper = calculate_bollinger_upper(df['close']).dropna()
-        if len(upper) < 6: return False
+        if len(upper) < 6:
+            return False
         touched_upper = (df['close'].tail(6).iloc[:-1] > upper.tail(6).iloc[:-1]).any()
         back_inside = df['close'].iloc[-1] < upper.iloc[-1]
         return bool(touched_upper and back_inside)
@@ -198,8 +204,10 @@ class MarketTopTracker(MarketStageTracker):
 
     def update(self, df: pd.DataFrame) -> int:
         clean_df = self._prepare_df(df)
-        if clean_df is None: return self.stage
-        if self.stage == 5 and self._check_stage5_reset(clean_df): return self.stage
+        if clean_df is None:
+            return self.stage
+        if self.stage == 5 and self._check_stage5_reset(clean_df):
+            return self.stage
 
         logic = {0: self._is_overheat, 1: self._is_dead_cross, 2: self._is_band_trap, 3: self._is_distribution}
         if self.stage in logic and logic[self.stage](clean_df):
@@ -212,13 +220,17 @@ class MarketTopTracker(MarketStageTracker):
         return self.stage
 
 
-# ====================== 메인 클래스 ======================
+# ====================== 메인 트래커 ======================
 class DiscordMarketTracker:
     def __init__(self):
         self.config = self._load_config()
-        self.webhook_url = self.config.get("DISCORD_WEBHOOK", "")
-        self.user_id = self.config.get("DISCORD_USER_ID", "")
-        self.tickers = self.config.get("TICKERS", ["TQQQ", "SOXL"])
+        self.webhook_url: str = self.config.get("DISCORD_WEBHOOK", "")
+        self.user_id: str = self.config.get("DISCORD_USER_ID", "")
+
+        tickers = self.config.get("TICKERS")
+        if not isinstance(tickers, list) or len(tickers) == 0:
+            raise ValueError("❌ MarketStage_config.json 파일에 'TICKERS' 목록을 추가해주세요.")
+        self.tickers = tickers
 
         self.bottom_trackers: Dict[str, MarketBottomTracker] = {}
         self.top_trackers: Dict[str, MarketTopTracker] = {}
@@ -226,7 +238,11 @@ class DiscordMarketTracker:
 
     def _load_config(self) -> dict:
         with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
+            config = json.load(f)
+        # GitHub Actions 시크릿(env var)이 있으면 그걸 우선 사용, 없으면 파일 값 사용
+        config["DISCORD_WEBHOOK"] = os.environ.get("DISCORD_WEBHOOK") or config.get("DISCORD_WEBHOOK", "")
+        config["DISCORD_USER_ID"] = os.environ.get("DISCORD_USER_ID") or config.get("DISCORD_USER_ID", "")
+        return config
 
     def _load_state(self):
         state = {}
@@ -234,102 +250,74 @@ class DiscordMarketTracker:
             try:
                 with open(STATE_PATH, "r", encoding="utf-8") as f:
                     state = json.load(f)
-            except Exception:
-                pass
+            except Exception as exc:
+                logging.warning(f"상태 로드 실패: {exc}")
 
         for ticker in self.tickers:
-            saved = state.get(ticker, {})
-            exh_th = 0.16 if ticker in {"SOXL", "TQQQ"} else 0.10
+            saved = state.get(ticker, {}) if isinstance(state, dict) else {}
+            exh_threshold = 0.16 if ticker in {"SOXL", "TQQQ"} else 0.10
             self.bottom_trackers[ticker] = MarketBottomTracker(
                 stage=saved.get("bottom", 0),
                 stage5_entered_date=saved.get("bottom_stage5_date"),
-                exhaustion_threshold=exh_th
+                exhaustion_threshold=exh_threshold,
             )
             self.top_trackers[ticker] = MarketTopTracker(
                 stage=saved.get("top", 0),
-                stage5_entered_date=saved.get("top_stage5_date")
+                stage5_entered_date=saved.get("top_stage5_date"),
             )
 
     def _save_state(self):
-        state = {ticker: {
-            "bottom": self.bottom_trackers[ticker].stage,
-            "bottom_stage5_date": self.bottom_trackers[ticker].stage5_entered_date,
-            "top": self.top_trackers[ticker].stage,
-            "top_stage5_date": self.top_trackers[ticker].stage5_entered_date,
-        } for ticker in self.tickers}
+        state = {
+            ticker: {
+                "bottom": self.bottom_trackers[ticker].stage,
+                "bottom_stage5_date": self.bottom_trackers[ticker].stage5_entered_date,
+                "top": self.top_trackers[ticker].stage,
+                "top_stage5_date": self.top_trackers[ticker].stage5_entered_date,
+            }
+            for ticker in self.tickers
+        }
         try:
             with open(STATE_PATH, "w", encoding="utf-8") as f:
                 json.dump(state, f, ensure_ascii=False, indent=2)
         except Exception as e:
             logging.error(f"상태 저장 실패: {e}")
 
-    def _send_discord(self, message: str):
-        if not self.webhook_url: return
-        content = f"<@{self.user_id}> {message}" if self.user_id else message
+    def _send_discord(self, message: str) -> bool:
+        if not self.webhook_url:
+            logging.warning("⚠️ DISCORD_WEBHOOK이 비어있습니다 (env var / config 확인 필요)")
+            return False
         try:
-            requests.post(self.webhook_url, json={"content": content}, timeout=10)
-        except Exception:
-            pass
+            content = f"<@{self.user_id}> {message}" if self.user_id else message
+            resp = requests.post(self.webhook_url, json={"content": content}, timeout=10)
+            resp.raise_for_status()
+            logging.info(f"✅ Discord 전송 성공 (status={resp.status_code})")
+            return True
+        except Exception as exc:
+            logging.error(f"Discord 전송 실패: {exc}")
+            return False
 
     def get_data(self, ticker: str) -> Optional[pd.DataFrame]:
         try:
-            raw_df = yf.download(ticker, period="6mo", interval="1d", progress=False, auto_adjust=True)
-            if raw_df is None or (hasattr(raw_df, 'empty') and raw_df.empty):
-                return None
-
-            # yfinance may return a Series for single-row results; ensure a DataFrame
-            if isinstance(raw_df, pd.Series):
-                df = raw_df.to_frame().T
-            elif isinstance(raw_df, pd.DataFrame):
-                df = raw_df.copy()
-            else:
+            df = yf.download(ticker, period="6mo", interval="1d", progress=False, auto_adjust=True)
+            if df is None or df.empty:
                 return None
 
             if isinstance(df.columns, pd.MultiIndex):
-                df = df.xs(ticker, level=1, axis=1)
+                df = df.droplevel(1, axis=1)
 
-            if isinstance(df, pd.Series):
-                df = df.to_frame().T
-            
             df = df.copy()
             df.columns = [str(col).lower() for col in df.columns]
             return df
-        except Exception:
+        except Exception as exc:
+            logging.error(f"{ticker} 데이터 다운로드 실패: {exc}")
             return None
-
-    def get_all_data(self) -> Dict[str, Optional[pd.DataFrame]]:
-        return {ticker: self.get_data(ticker) for ticker in self.tickers}
-
-    def process_trading_strategy(self):
-        """LOC 분할 매수 + Stage 5 몰빵 병행"""
-        for ticker in self.tickers:
-            df = self.get_data(ticker)
-            if df is None or df.empty:
-                continue
-
-            bottom_stage = self.bottom_trackers[ticker].update(df)
-            top_stage = self.top_trackers[ticker].update(df)
-
-            # 1. 기본 LOC 20차 분할 매수 알림 (항상 실행)
-            loc_msg = f"📍 {ticker} LOC 가격 조건 20차 분할 매수 진행 중..."
-            self._send_discord(loc_msg)
-
-            # 2. Stage 5 발생 시 몰빵 추가 실행
-            if bottom_stage == 5:
-                alloc = "50%" if ticker == "TQQQ" else "30%"
-                msg = f"🔥 **{ticker} Stage 5 발생!** → {alloc} 몰빵 매수 + LOC 분할 지속 추천"
-                self._send_discord(msg)
-                logging.info(f"{ticker} Stage 5 몰빵 신호!")
-
-            if top_stage == 5:
-                msg = f"🔻 **{ticker} 천장 Stage 5 발생!** → 매도 또는 관망 추천"
-                self._send_discord(msg)
 
     def update_all(self):
         lines = ["📊 **[시장 단계 리포트]**"]
-        data_map = self.get_all_data() or {t: self.get_data(t) for t in self.tickers}
+        has_strong_signal = False
 
-        for ticker, df in data_map.items():
+        for ticker in self.tickers:
+            df = self.get_data(ticker)
             if df is None or df.empty:
                 lines.append(f"• **{ticker}**: 데이터 조회 실패")
                 continue
@@ -344,6 +332,16 @@ class DiscordMarketTracker:
             lines.append(f"   ㄴ 바닥: {bottom_stage}단계 ({bottom_name})")
             lines.append(f"   ㄴ 천장: {top_stage}단계 ({top_name})")
 
+            if bottom_stage == 5:
+                lines.append("   **🔥 강력 매수 추천!** (최종 매수 신호 발생)")
+                has_strong_signal = True
+            if top_stage == 5:
+                lines.append("   **🔻 강력 매도 추천!** (최종 매도 신호 발생)")
+                has_strong_signal = True
+
+        if has_strong_signal:
+            lines.append("⚠️ **강력 신호 종목이 있습니다. 주의 깊게 확인하세요!**")
+
         self._send_discord("\n".join(lines))
         self._save_state()
         logging.info("시장 단계 업데이트 완료")
@@ -353,7 +351,6 @@ if __name__ == "__main__":
     try:
         tracker = DiscordMarketTracker()
         tracker.update_all()
-        tracker.process_trading_strategy()   # LOC + Stage 5 몰빵 병행
         print("✅ 시스템 실행 완료")
     except Exception as e:
         logging.error(f"치명적 오류: {e}")
