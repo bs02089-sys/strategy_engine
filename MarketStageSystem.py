@@ -137,7 +137,8 @@ class MarketBottomTracker(MarketStageTracker):
     def _is_exhaustion(self, df: pd.DataFrame) -> bool:
         last5 = df['close'].tail(5)
         change = last5.iloc[-1] - last5.iloc[0]
-        return bool(change <= 0 and last5.nunique() <= 4)
+        range_ratio = (last5.max() - last5.min()) / last5.mean()
+        return bool(change <= 0 and range_ratio <= 0.10)
 
     def _is_retest(self, df: pd.DataFrame) -> bool:
         prior_low = df['close'].iloc[:-1].min()
