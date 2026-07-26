@@ -4,6 +4,7 @@ import logging
 import requests
 import pandas as pd
 import yfinance as yf
+from datetime import datetime
 from typing import Optional
 
 # ====================== 설정 ======================
@@ -12,6 +13,8 @@ CONFIG_PATH = os.path.join(BASE_DIR, "MarketStage_config.json")
 STATE_PATH = os.path.join(BASE_DIR, "market_state.json")
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(levelname)s | %(message)s')
+
+STAGE5_RESET_DAYS = 30  # Stage 5 도달 후 자동 리셋 대기 일수
 
 
 # ====================== 기술적 지표 ======================
@@ -33,7 +36,8 @@ def calculate_macd(close: pd.Series, fast: int = 12, slow: int = 26, signal: int
     return macd_line, signal_line
 
 
-def calculate_bollinger(close: pd.Series, period: int = 20, num_std: float = 2.0):
+def calculate_bollinger_upper(close: pd.Series, period: int = 20, num_std: float = 2.0):
+    """상단 볼린저 밴드만 계산 (하단은 _trap 로직에 불필요)"""
     mid = close.rolling(period).mean()
     std = close.rolling(period).std()
     upper = mid + num_std * std
@@ -42,15 +46,82 @@ def calculate_bollinger(close: pd.Series, period: int = 20, num_std: float = 2.0
 
 # ====================== 트래커 베이스 ======================
 class MarketStageTracker:
-    MIN_ROWS = 60
+    MIN_ROWS = 80  # dropna() 후에도 최소 60개(ma60) 확보를 위해 여유 설정
 
-    def __init__(self, stage: int = 0):
+    def __init__(self, stage: int = 0, stage5_entered_date: Optional[str] = None):
         self.stage = stage
+        self.stage5_entered_date = stage5_entered_date
 
     def _prepare_df(self, df: pd.DataFrame) -> Optional[pd.DataFrame]:
-        if len(df) < self.MIN_ROWS:
+        """DataFrame 검증 및 정제: 컬럼 존재 여부 확인 → NaN 제거 → 최소 길이 확인"""
+        required_cols = {'close', 'volume'}
+        if not required_cols.issubset(df.columns):
+            missing = required_cols - set(df.columns)
+            logging.warning(f"필요한 컬럼 누락: {missing}")
             return None
-        return df[['close', 'volume']].dropna().copy()
+
+        clean_df = df[['close', 'volume']].dropna().copy()
+        if len(clean_df) < self.MIN_ROWS:
+            logging.warning(f"데이터 부족: {len(clean_df)}행 (필요: {self.MIN_ROWS}행)")
+            return None
+        return clean_df
+
+    # ──── 공통 헬퍼 메서드 (중복 제거) ────
+
+    def _vol_ma20(self, df: pd.DataFrame) -> pd.Series:
+        """20일 평균 거래량 (shift(1) 적용으로 당일 제외)"""
+        return df['volume'].shift(1).rolling(20).mean()
+
+    def _check_ma_alignment(self, df: pd.DataFrame, bullish: bool = True) -> bool:
+        """
+        이동평균선 정렬 체크
+        - bullish=True  : 5일 > 20일 > 60일 (상승 정배열)
+        - bullish=False : 5일 < 20일 < 60일 (하락 역배열)
+        """
+        ma5 = df['close'].rolling(5).mean().iloc[-1]
+        ma20 = df['close'].rolling(20).mean().iloc[-1]
+        ma60 = df['close'].rolling(60).mean().iloc[-1]
+
+        if pd.isna(ma5) or pd.isna(ma20) or pd.isna(ma60):
+            return False
+
+        if bullish:
+            return bool(ma5 > ma20 and ma20 > ma60)
+        else:
+            return bool(ma5 < ma20 and ma20 < ma60)
+
+    def _get_last_date(self, df: pd.DataFrame) -> str:
+        """DataFrame의 마지막 날짜를 'YYYY-MM-DD' 문자열로 반환"""
+        last_date = df.index[-1]
+        if isinstance(last_date, pd.Timestamp):
+            return last_date.strftime("%Y-%m-%d")
+        return str(last_date)
+
+    # ──── Stage 5 자동 리셋 ────
+
+    def _check_stage5_reset(self, df: pd.DataFrame) -> bool:
+        """Stage 5 진입 후 30일 이상 경과 시 Stage 0으로 리셋"""
+        if self.stage != 5:
+            return False
+
+        # backward compatibility: stage5_entered_date가 없으면 지금 설정
+        if self.stage5_entered_date is None:
+            self.stage5_entered_date = self._get_last_date(df)
+            return False
+
+        last_date = df.index[-1]
+        if isinstance(last_date, pd.Timestamp):
+            last_date = last_date.date()
+
+        entered = datetime.strptime(self.stage5_entered_date, "%Y-%m-%d").date()
+        elapsed = (last_date - entered).days
+
+        if elapsed >= STAGE5_RESET_DAYS:
+            self.stage = 0
+            self.stage5_entered_date = None
+            logging.info(f"🔄 Stage 5 → 0 리셋 완료 (경과일: {elapsed}일)")
+            return True
+        return False
 
 
 class MarketBottomTracker(MarketStageTracker):
@@ -70,7 +141,7 @@ class MarketBottomTracker(MarketStageTracker):
 
     def _is_retest(self, df: pd.DataFrame) -> bool:
         prior_low = df['close'].iloc[:-1].min()
-        vol_ma20 = df['volume'].shift(1).rolling(20).mean()
+        vol_ma20 = self._vol_ma20(df)
         is_near_low = df['close'].iloc[-1] <= prior_low * 1.045
         is_low_vol = df['volume'].iloc[-1] < vol_ma20.iloc[-1] * 0.85
         return bool(is_near_low and is_low_vol)
@@ -85,19 +156,15 @@ class MarketBottomTracker(MarketStageTracker):
 
     def _is_shift(self, df: pd.DataFrame) -> bool:
         recent_high = df['close'].rolling(20).max().shift(1)
-        vol_ma20 = df['volume'].shift(1).rolling(20).mean()
+        vol_ma20 = self._vol_ma20(df)
         breakout = df['close'].iloc[-1] > recent_high.iloc[-1] * 1.005
         high_vol = df['volume'].iloc[-1] > vol_ma20.iloc[-1] * 1.4
         return bool(breakout and high_vol)
 
     def _is_buy_signal(self, df: pd.DataFrame) -> bool:
-        vol_ma20 = df['volume'].shift(1).rolling(20).mean()
-        ma5 = df['close'].rolling(5).mean()
-        ma20 = df['close'].rolling(20).mean()
-        ma60 = df['close'].rolling(60).mean()
-
+        vol_ma20 = self._vol_ma20(df)
         high_vol = df['volume'].iloc[-1] > vol_ma20.iloc[-1] * 1.75
-        alignment = (ma5.iloc[-1] > ma20.iloc[-1]) and (ma20.iloc[-1] > ma60.iloc[-1])
+        alignment = self._check_ma_alignment(df, bullish=True)
         return bool(high_vol and alignment)
 
     def update(self, df: pd.DataFrame) -> int:
@@ -105,12 +172,21 @@ class MarketBottomTracker(MarketStageTracker):
         if clean_df is None:
             return self.stage
 
+        # Stage 5 리셋 체크 (30일 경과 시 0으로)
+        if self.stage == 5:
+            self._check_stage5_reset(clean_df)
+            if self.stage == 0:
+                return self.stage
+
         logic = {0: self._is_exhaustion, 1: self._is_retest, 2: self._is_trap, 3: self._is_shift}
-        
+
         if self.stage in logic and logic[self.stage](clean_df):
             self.stage += 1
+            if self.stage == 5:
+                self.stage5_entered_date = self._get_last_date(clean_df)
         elif self.stage == 4 and self._is_buy_signal(clean_df):
             self.stage = 5
+            self.stage5_entered_date = self._get_last_date(clean_df)
 
         return self.stage
 
@@ -148,7 +224,7 @@ class MarketTopTracker(MarketStageTracker):
         return bool(made_new_high and dead_cross)
 
     def _is_band_trap(self, df: pd.DataFrame) -> bool:
-        upper = calculate_bollinger(df['close']).dropna()
+        upper = calculate_bollinger_upper(df['close']).dropna()
         if len(upper) < 6:
             return False
 
@@ -157,21 +233,17 @@ class MarketTopTracker(MarketStageTracker):
         return bool(touched_upper and back_inside)
 
     def _is_distribution(self, df: pd.DataFrame) -> bool:
-        vol_ma20 = df['volume'].shift(1).rolling(20).mean()
+        vol_ma20 = self._vol_ma20(df)
         price_change = df['close'].pct_change().iloc[-1]
         high_vol = df['volume'].iloc[-1] > vol_ma20.iloc[-1] * 1.4
         flat_or_down = price_change <= 0.003
         return bool(flat_or_down and high_vol)
 
     def _is_sell_signal(self, df: pd.DataFrame) -> bool:
-        vol_ma20 = df['volume'].shift(1).rolling(20).mean()
-        ma5 = df['close'].rolling(5).mean()
-        ma20 = df['close'].rolling(20).mean()
-        ma60 = df['close'].rolling(60).mean()
-
         dropping = df['close'].pct_change().iloc[-1] < -0.001
+        vol_ma20 = self._vol_ma20(df)
         high_vol = df['volume'].iloc[-1] > vol_ma20.iloc[-1] * 1.75
-        bearish_align = (ma5.iloc[-1] < ma20.iloc[-1]) and (ma20.iloc[-1] < ma60.iloc[-1])
+        bearish_align = self._check_ma_alignment(df, bullish=False)
         return bool(dropping and high_vol and bearish_align)
 
     def update(self, df: pd.DataFrame) -> int:
@@ -179,12 +251,21 @@ class MarketTopTracker(MarketStageTracker):
         if clean_df is None:
             return self.stage
 
+        # Stage 5 리셋 체크 (30일 경과 시 0으로)
+        if self.stage == 5:
+            self._check_stage5_reset(clean_df)
+            if self.stage == 0:
+                return self.stage
+
         logic = {0: self._is_overheat, 1: self._is_dead_cross, 2: self._is_band_trap, 3: self._is_distribution}
-        
+
         if self.stage in logic and logic[self.stage](clean_df):
             self.stage += 1
+            if self.stage == 5:
+                self.stage5_entered_date = self._get_last_date(clean_df)
         elif self.stage == 4 and self._is_sell_signal(clean_df):
             self.stage = 5
+            self.stage5_entered_date = self._get_last_date(clean_df)
 
         return self.stage
 
@@ -195,12 +276,12 @@ class DiscordMarketTracker:
         self.config = self._load_config()
         self.webhook_url: str = self.config.get("DISCORD_WEBHOOK", "")
         self.user_id: str = self.config.get("DISCORD_USER_ID", "")
-        
+
         tickers = self.config.get("TICKERS")
         if not isinstance(tickers, list) or len(tickers) == 0:
             raise ValueError("❌ MarketStage_config.json 파일에 'TICKERS' 목록을 추가해주세요.")
-        
-        self.tickers = tickers                 
+
+        self.tickers = tickers
 
         self.bottom_trackers = {}
         self.top_trackers = {}
@@ -224,14 +305,22 @@ class DiscordMarketTracker:
 
         for ticker in self.tickers:
             saved = state.get(ticker, {}) if isinstance(state, dict) else {}
-            self.bottom_trackers[ticker] = MarketBottomTracker(saved.get("bottom", 0))
-            self.top_trackers[ticker] = MarketTopTracker(saved.get("top", 0))
+            self.bottom_trackers[ticker] = MarketBottomTracker(
+                stage=saved.get("bottom", 0),
+                stage5_entered_date=saved.get("bottom_stage5_date")
+            )
+            self.top_trackers[ticker] = MarketTopTracker(
+                stage=saved.get("top", 0),
+                stage5_entered_date=saved.get("top_stage5_date")
+            )
 
     def _save_state(self):
         state = {
             ticker: {
                 "bottom": self.bottom_trackers[ticker].stage,
+                "bottom_stage5_date": self.bottom_trackers[ticker].stage5_entered_date,
                 "top": self.top_trackers[ticker].stage,
+                "top_stage5_date": self.top_trackers[ticker].stage5_entered_date,
             }
             for ticker in self.tickers
         }
@@ -253,6 +342,7 @@ class DiscordMarketTracker:
             logging.error(f"Discord 전송 실패: {exc}")
 
     def get_data(self, ticker: str) -> Optional[pd.DataFrame]:
+        """개별 티커 데이터 다운로드 (fallback용)"""
         try:
             df = yf.download(ticker, period="6mo", interval="1d", progress=False, auto_adjust=True)
             if df is None or df.empty:
@@ -267,9 +357,40 @@ class DiscordMarketTracker:
             logging.error(f"{ticker} 데이터 다운로드 실패: {exc}")
             return None
 
+    def get_all_data(self) -> dict:
+        """모든 티커 데이터를 한 번의 API 호출로 배치 다운로드"""
+        try:
+            df = yf.download(self.tickers, period="6mo", interval="1d", progress=False, auto_adjust=True)
+            if df is None or df.empty:
+                return {}
+
+            data_map = {}
+            if isinstance(df.columns, pd.MultiIndex):
+                # 다중 티커: columns = (OHLCV 레벨0, Ticker 레벨1)
+                unique_tickers = df.columns.get_level_values(1).unique()
+                for ticker in unique_tickers:
+                    if ticker in self.tickers:
+                        ticker_df = df.xs(ticker, level=1, axis=1).copy()
+                        ticker_df.columns = [col.lower() for col in ticker_df.columns]
+                        data_map[ticker] = ticker_df
+            else:
+                # 단일 티커
+                ticker = self.tickers[0]
+                df.columns = [col.lower() for col in df.columns]
+                data_map[ticker] = df
+            return data_map
+        except Exception as exc:
+            logging.warning(f"배치 다운로드 실패, 개별 다운로드로 대체: {exc}")
+            return {}
+
     def update_all(self):
         lines = ["📊 **[시장 단계 리포트]**"]
-        data_map = {t: self.get_data(t) for t in self.tickers}
+
+        # 배치 다운로드 시도 → 실패 시 개별 다운로드 fallback
+        data_map = self.get_all_data()
+        if not data_map:
+            data_map = {t: self.get_data(t) for t in self.tickers}
+
         has_strong_signal = False
 
         for ticker, df in data_map.items():
