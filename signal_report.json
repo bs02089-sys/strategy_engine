@@ -1,6 +1,6 @@
 {
-    "timestamp": "2026-07-26T00:40:00.135607",
-    "total_score": 4,
+    "timestamp": "2026-07-26T09:47:59.215961",
+    "total_score": 5,
     "signals": [
         {
             "name": "Yield Curve Inversion",
@@ -34,8 +34,8 @@
         },
         {
             "name": "Momentum Strategy",
-            "score": 0,
-            "detail": "SPX momentum healthy (11.2%) (+0) | Growth sectors lead (+nan% gap) (+0)"
+            "score": 1,
+            "detail": "SPX momentum healthy (10.9%) (+0) | Defensive sectors outperform growth (+6.8% gap) (+1)"
         }
     ]
 }

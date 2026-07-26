@@ -37,6 +37,13 @@ import requests
 
 warnings.filterwarnings("ignore")
 
+# ─────────────────────────────────────────────
+# Constants
+# ─────────────────────────────────────────────
+
+FRED_LOOKBACK_2Y = 365 * 2   # 2년 lookback
+FRED_LOOKBACK_8Y = 365 * 8   # 8년 lookback (Fed cycle)
+
 try:
     import yfinance as yf
 except ImportError:
@@ -79,8 +86,9 @@ def validate_yf_data(raw_data: Optional[pd.DataFrame], symbols: list) -> pd.Data
     if raw_data is None or raw_data.empty:
         raise ValueError("yfinance returned no data")
 
-    if isinstance(raw_data.columns, pd.MultiIndex):
-        data = raw_data['Close'] if 'Close' in raw_data.columns.levels[0] else raw_data
+    cols = raw_data.columns
+    if isinstance(cols, pd.MultiIndex):
+        data = raw_data['Close'] if 'Close' in cols.levels[0] else raw_data
     else:
         data = raw_data
 
@@ -100,7 +108,6 @@ class SignalResult:
     triggered: bool
     score: int          # 0=Normal, 1=Caution, 2=Warning
     detail: str
-    raw_value: Optional[float] = None
 
 
 # ─────────────────────────────────────────────
@@ -111,7 +118,7 @@ def signal_yield_curve() -> SignalResult:
     """Detects yield curve inversion (T10Y2Y)."""
     score_total, notes = 0, []
     try:
-        s = fred_series("T10Y2Y", lookback_days=365 * 2)
+        s = fred_series("T10Y2Y", lookback_days=FRED_LOOKBACK_2Y)
         current, min_2y = s.iloc[-1], s.min()
         was_inverted = min_2y < 0
         
@@ -126,7 +133,7 @@ def signal_yield_curve() -> SignalResult:
     except Exception as e:
         notes.append(get_error_message(e, "Yield Curve"))
     
-    return SignalResult("Yield Curve Inversion", score_total >= 1, score_total, " | ".join(notes), score_total)
+    return SignalResult("Yield Curve Inversion", score_total >= 1, score_total, " | ".join(notes))
 
 
 def signal_market_breadth() -> SignalResult:
@@ -135,8 +142,9 @@ def signal_market_breadth() -> SignalResult:
     symbols = ["SPY", "^NYA", "RSP"]
     try:
         data = validate_yf_data(yf.download(symbols, period="1y", progress=False), symbols)
-        spy_dd = data["SPY"].iloc[-1] / data["SPY"].max() - 1
-        nya_dd = data["^NYA"].iloc[-1] / data["^NYA"].max() - 1
+        spy, nya, rsp = data["SPY"], data["^NYA"], data["RSP"]
+        spy_dd = spy.iloc[-1] / spy.max() - 1
+        nya_dd = nya.iloc[-1] / nya.max() - 1
 
         if spy_dd > -0.05 and nya_dd < -0.10:
             score_total += 1
@@ -144,7 +152,7 @@ def signal_market_breadth() -> SignalResult:
         else:
             notes.append("Market breadth stable (+0)")
 
-        ratio_growth = (data["RSP"].iloc[-1] / data["RSP"].iloc[-20] - 1) * 100
+        ratio_growth = (rsp.iloc[-1] / rsp.iloc[-20] - 1) * 100
         if ratio_growth < -2.0:
             score_total += 1
             notes.append(f"Concentration risk high (RSP/SPY {ratio_growth:.1f}%) (+1)")
@@ -153,7 +161,7 @@ def signal_market_breadth() -> SignalResult:
     except Exception as e:
         notes.append(get_error_message(e, "Market Breadth"))
 
-    return SignalResult("Market Breadth", score_total >= 1, score_total, " | ".join(notes), score_total)
+    return SignalResult("Market Breadth", score_total >= 1, score_total, " | ".join(notes))
 
 
 def _spread_signal(series: pd.Series, warn: float, caution: float, widen_warn: float, label: str) -> tuple[int, str]:
@@ -170,27 +178,28 @@ def signal_credit_spread() -> SignalResult:
     """Detects credit spread widening (HY & IG)."""
     score_total, notes = 0, []
     try:
-        hy = fred_series("BAMLH0A0HYM2", lookback_days=365 * 2)
+        hy = fred_series("BAMLH0A0HYM2", lookback_days=FRED_LOOKBACK_2Y)
         score, note = _spread_signal(hy, 6.0, 4.5, 1.5, "HY")
         score_total += score
         notes.append(note)
 
-        ig = fred_series("BAMLC0A0CM", lookback_days=365 * 2)
+        ig = fred_series("BAMLC0A0CM", lookback_days=FRED_LOOKBACK_2Y)
+        # IG: caution=inf → warning(widen) 조건으로만 점수 부여, 별도 caution 구간 없음
         score, note = _spread_signal(ig, 2.0, float('inf'), 0.5, "IG")
         score_total += score
         notes.append(note)
     except Exception as e:
         notes.append(get_error_message(e, "Credit Spread"))
 
-    return SignalResult("Credit Spread", score_total >= 1, score_total, " | ".join(notes), score_total)
+    return SignalResult("Credit Spread", score_total >= 1, score_total, " | ".join(notes))
 
 
 def signal_fed_cycle() -> SignalResult:
     """Analyzes Fed rate cycle."""
     score_total, notes = 0, []
     try:
-        s = fred_series("FEDFUNDS", lookback_days=365 * 8).resample("ME").last().dropna()
-        peak_date, first_cut_date = s.idxmax(), next((s.index[i] for i in range(1, len(s)) if s.iloc[i] < s.iloc[i-1]), None)
+        s = fred_series("FEDFUNDS", lookback_days=FRED_LOOKBACK_8Y).resample("ME").last().dropna()
+        first_cut_date = next((s.index[i] for i in range(1, len(s)) if s.iloc[i] < s.iloc[i-1]), None)
         if first_cut_date:
             months = (s.index[-1].to_period("M") - first_cut_date.to_period("M")).n
             if months <= 12: score_total = 2; notes.append(f"High risk zone: {months} months since first cut")
@@ -200,7 +209,7 @@ def signal_fed_cycle() -> SignalResult:
     except Exception as e:
         notes.append(get_error_message(e, "Fed Cycle"))
     
-    return SignalResult("Fed Policy Cycle", score_total >= 1, score_total, " | ".join(notes), score_total)
+    return SignalResult("Fed Policy Cycle", score_total >= 1, score_total, " | ".join(notes))
 
 
 def signal_valuation() -> SignalResult:
@@ -210,7 +219,7 @@ def signal_valuation() -> SignalResult:
         cape_url = "https://www.multpl.com/shiller-pe/table/by-month"
         response = requests.get(cape_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
         response.raise_for_status()
-        # <meta name="description"> 태그에서 현재 Shiller PE Ratio 값 추출 (더 안정적)
+        # 페이지 내 "Current Shiller PE Ratio is X.XX" 텍스트에서 CAPE 값 추출 (meta description에 포함)
         m = re.search(r'Current Shiller PE Ratio is ([\d.]+)', response.text)
         if not m:
             raise ValueError("CAPE not found")
@@ -227,21 +236,21 @@ def signal_valuation() -> SignalResult:
     except Exception as e:
         notes.append(get_error_message(e, "Valuation"))
 
-    return SignalResult("Valuation Overheat", score_total >= 1, score_total, " | ".join(notes), score_total)
+    return SignalResult("Valuation Overheat", score_total >= 1, score_total, " | ".join(notes))
 
 
 def signal_leading_indicators() -> SignalResult:
     """LEI & Sahm Rule. (max 2점)"""
     score_total, notes = 0, []
     try:
-        lei = fred_series("USSLIND", lookback_days=365 * 2)
+        lei = fred_series("USSLIND", lookback_days=FRED_LOOKBACK_2Y)
         if lei.iloc[-1] < 0:
             score_total += 1
             notes.append("LEI contraction (+1)")
         else:
             notes.append("LEI stable (+0)")
 
-        sahm = fred_series("SAHMREALTIME", lookback_days=365 * 2)
+        sahm = fred_series("SAHMREALTIME", lookback_days=FRED_LOOKBACK_2Y)
         if sahm.iloc[-1] >= 0.5:
             score_total += 1
             notes.append(f"Sahm Rule triggered ({sahm.iloc[-1]:.2f}%p) (+1)")
@@ -252,7 +261,7 @@ def signal_leading_indicators() -> SignalResult:
     except Exception as e:
         notes.append("LEI/Sahm data error")
 
-    return SignalResult("Leading Indicators", score_total >= 1, score_total, " | ".join(notes), score_total)
+    return SignalResult("Leading Indicators", score_total >= 1, score_total, " | ".join(notes))
 
 
 def signal_momentum_breakdown() -> SignalResult:
@@ -287,7 +296,7 @@ def signal_momentum_breakdown() -> SignalResult:
     except Exception as e:
         notes.append(get_error_message(e, "Momentum"))
 
-    return SignalResult("Momentum Strategy", score_total >= 1, score_total, " | ".join(notes), score_total)
+    return SignalResult("Momentum Strategy", score_total >= 1, score_total, " | ".join(notes))
 
 
 # ─────────────────────────────────────────────
@@ -297,7 +306,8 @@ def signal_momentum_breakdown() -> SignalResult:
 def print_report(results: list):
     print(f"\n{'='*72}\n Summary Report: Bear Market Early Warning System\n Generated: {datetime.datetime.now():%Y-%m-%d %H:%M:%S}\n{'='*72}")
     for r in results:
-        print(f"{r.name:<30} | {'Triggered' if r.triggered else 'Stable'}")
+        status = 'Triggered' if r.triggered else 'Stable'
+        print(f"{r.name:<30} | {r.score}/2 | {status}")
     
     total = sum(r.score for r in results)
     print(f"\nTotal Risk Score: {total} / 14")
