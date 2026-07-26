@@ -1,5 +1,5 @@
 {
     "DISCORD_WEBHOOK": "",
     "DISCORD_USER_ID": "",
-    "TICKERS": ["TQQQ", "SOXL", "TSLA", "IONQ"]
+    "TICKERS": ["TQQQ", "SOXL"]
 }
