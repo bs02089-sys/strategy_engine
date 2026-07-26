@@ -43,6 +43,7 @@ warnings.filterwarnings("ignore")
 
 FRED_LOOKBACK_2Y = 365 * 2   # 2년 lookback
 FRED_LOOKBACK_8Y = 365 * 8   # 8년 lookback (Fed cycle)
+CAPE_CACHE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cape_cache.json")
 
 try:
     import yfinance as yf
@@ -212,9 +213,35 @@ def signal_fed_cycle() -> SignalResult:
     return SignalResult("Fed Policy Cycle", score_total >= 1, score_total, " | ".join(notes))
 
 
+def _save_cape_cache(cape: float) -> None:
+    """성공적으로 조회된 CAPE 값을 캐시 파일에 저장"""
+    try:
+        data = {"cape": cape, "date": datetime.datetime.now().strftime("%Y-%m-%d"), "source": "multpl.com"}
+        with open(CAPE_CACHE_PATH, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass  # 캐시 저장 실패는 치명적이지 않음
+
+
+def _load_cape_cache() -> Optional[float]:
+    """이전에 캐시된 CAPE 값 로드. 없으면 None 반환."""
+    try:
+        if os.path.exists(CAPE_CACHE_PATH):
+            with open(CAPE_CACHE_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return float(data["cape"])
+    except Exception:
+        pass
+    return None
+
+
 def signal_valuation() -> SignalResult:
     """Analyzes Shiller CAPE & EPS. (max 2점)"""
     score_total, notes = 0, []
+    cape = None
+    from_cache = False
+
+    # 1차 시도: multpl.com 실시간 조회
     try:
         cape_url = "https://www.multpl.com/shiller-pe/table/by-month"
         response = requests.get(cape_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
@@ -225,16 +252,32 @@ def signal_valuation() -> SignalResult:
             raise ValueError("CAPE not found")
 
         cape = float(m.group(1))
-        if cape >= 35:
-            score_total += 2
-            notes.append(f"CAPE {cape} (Critical) (+2)")
-        elif cape >= 28:
-            score_total += 1
-            notes.append(f"CAPE {cape} (Warning) (+1)")
+        _save_cape_cache(cape)  # 성공 시 캐시 저장
+    except Exception:
+        pass
+
+    # 2차: 실시간 실패 → 캐시 사용
+    if cape is None:
+        cached = _load_cape_cache()
+        if cached is not None:
+            cape = cached
+            from_cache = True
         else:
-            notes.append(f"CAPE {cape} (Normal) (+0)")
-    except Exception as e:
-        notes.append(get_error_message(e, "Valuation"))
+            notes.append(get_error_message(Exception("No data from multpl.com or cache"), "Valuation"))
+            return SignalResult("Valuation Overheat", False, 0, " | ".join(notes))
+
+    # CAPE 값 평가
+    source_tag = " (cached)" if from_cache else ""
+    if cape >= 35:
+        score_total += 2
+        notes.append(f"CAPE {cape} (Critical){source_tag} (+2)")
+    elif cape >= 28:
+        score_total += 1
+        notes.append(f"CAPE {cape} (Warning){source_tag} (+1)")
+    else:
+        notes.append(f"CAPE {cape} (Normal){source_tag} (+0)")
+    if from_cache:
+        notes.append("⚠️ 실시간 조회 실패, 캐시 데이터 사용")
 
     return SignalResult("Valuation Overheat", score_total >= 1, score_total, " | ".join(notes))
 
