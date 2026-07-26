@@ -2,7 +2,7 @@ name: Sigma DCA Manager Engine
 
 on:
   schedule:
-    - cron: "15 23 * * 1-5"
+    - cron: "24 23 * * 1-5"
   workflow_dispatch:
 
 jobs:
