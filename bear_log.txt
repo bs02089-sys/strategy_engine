@@ -1,15 +1,15 @@
 
 ========================================================================
  Summary Report: Bear Market Early Warning System
- Generated: 2026-07-25 00:03:28
+ Generated: 2026-07-26 00:40:00
 ========================================================================
 Yield Curve Inversion          | Triggered
 Market Breadth                 | Stable
 Credit Spread                  | Stable
 Fed Policy Cycle               | Stable
-Valuation Overheat             | Stable
+Valuation Overheat             | Triggered
 Leading Indicators             | Stable
 Momentum Strategy              | Stable
 
-Total Risk Score: 2 / 14
+Total Risk Score: 4 / 14
 ========================================================================
