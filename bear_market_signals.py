@@ -204,25 +204,26 @@ def signal_fed_cycle() -> SignalResult:
 
 
 def signal_valuation() -> SignalResult:
-    """Analyzes Shiller CAPE & EPS."""
+    """Analyzes Shiller CAPE & EPS. (max 2점)"""
     score_total, notes = 0, []
     try:
         cape_url = "https://www.multpl.com/shiller-pe/table/by-month"
         response = requests.get(cape_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
         response.raise_for_status()
-        m = re.search(r"<td>\s*([\d.]+)\s*</td>", response.text)
+        # <meta name="description"> 태그에서 현재 Shiller PE Ratio 값 추출 (더 안정적)
+        m = re.search(r'Current Shiller PE Ratio is ([\d.]+)', response.text)
         if not m:
             raise ValueError("CAPE not found")
 
         cape = float(m.group(1))
         if cape >= 35:
-            score_total += 1
-            notes.append(f"CAPE {cape} (Critical)")
+            score_total += 2
+            notes.append(f"CAPE {cape} (Critical) (+2)")
         elif cape >= 28:
             score_total += 1
-            notes.append(f"CAPE {cape} (Warning)")
+            notes.append(f"CAPE {cape} (Warning) (+1)")
         else:
-            notes.append(f"CAPE {cape} (Normal)")
+            notes.append(f"CAPE {cape} (Normal) (+0)")
     except Exception as e:
         notes.append(get_error_message(e, "Valuation"))
 
@@ -230,22 +231,32 @@ def signal_valuation() -> SignalResult:
 
 
 def signal_leading_indicators() -> SignalResult:
-    """LEI & Sahm Rule."""
+    """LEI & Sahm Rule. (max 2점)"""
     score_total, notes = 0, []
     try:
         lei = fred_series("USSLIND", lookback_days=365 * 2)
-        if lei.iloc[-1] < 0: score_total += 1; notes.append("LEI contraction")
-        
+        if lei.iloc[-1] < 0:
+            score_total += 1
+            notes.append("LEI contraction (+1)")
+        else:
+            notes.append("LEI stable (+0)")
+
         sahm = fred_series("SAHMREALTIME", lookback_days=365 * 2)
-        if sahm.iloc[-1] >= 0.5: score_total += 2; notes.append("Sahm Rule recession signal")
-        elif sahm.iloc[-1] >= 0.3: score_total += 1; notes.append("Sahm Rule caution")
-    except Exception as e: notes.append("LEI/Sahm data error")
-    
+        if sahm.iloc[-1] >= 0.5:
+            score_total += 1
+            notes.append(f"Sahm Rule triggered ({sahm.iloc[-1]:.2f}%p) (+1)")
+        elif sahm.iloc[-1] >= 0.3:
+            notes.append(f"Sahm Rule elevated ({sahm.iloc[-1]:.2f}%p) (+0)")
+        else:
+            notes.append(f"Sahm Rule normal ({sahm.iloc[-1]:.2f}%p) (+0)")
+    except Exception as e:
+        notes.append("LEI/Sahm data error")
+
     return SignalResult("Leading Indicators", score_total >= 1, score_total, " | ".join(notes), score_total)
 
 
 def signal_momentum_breakdown() -> SignalResult:
-    """Momentum & Sector Rotation."""
+    """Momentum & Sector Rotation. (max 2점)"""
     score_total, notes = 0, []
     try:
         tickers = ["SPY", "XLU", "XLP", "XLV", "XLK", "XLY", "XLI"]
@@ -257,9 +268,22 @@ def signal_momentum_breakdown() -> SignalResult:
         ret_200d = (spy.iloc[-1] / spy.iloc[-201] - 1) * 100
         if ret_200d < 0:
             score_total += 1
-            notes.append(f"SPX 200D momentum negative ({ret_200d:.1f}%)")
+            notes.append(f"SPX 200D momentum negative ({ret_200d:.1f}%) (+1)")
         else:
-            notes.append("SPX momentum healthy")
+            notes.append(f"SPX momentum healthy ({ret_200d:.1f}%) (+0)")
+
+        # 섹터 로테이션: 방어주 vs 성장주 1개월 수익률 비교
+        defensive = ["XLU", "XLP", "XLV"]
+        growth = ["XLK", "XLY"]
+
+        def_ret = (data[defensive].iloc[-1] / data[defensive].iloc[-22] - 1).mean() * 100
+        grw_ret = (data[growth].iloc[-1] / data[growth].iloc[-22] - 1).mean() * 100
+
+        if def_ret > grw_ret:
+            score_total += 1
+            notes.append(f"Defensive sectors outperform growth ({def_ret - grw_ret:+.1f}% gap) (+1)")
+        else:
+            notes.append(f"Growth sectors lead ({grw_ret - def_ret:+.1f}% gap) (+0)")
     except Exception as e:
         notes.append(get_error_message(e, "Momentum"))
 

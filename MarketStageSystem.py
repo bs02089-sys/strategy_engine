@@ -365,9 +365,10 @@ class DiscordMarketTracker:
                 return {}
 
             data_map = {}
-            if isinstance(df.columns, pd.MultiIndex):
+            cols = df.columns
+            if isinstance(cols, pd.MultiIndex):
                 # 다중 티커: columns = (OHLCV 레벨0, Ticker 레벨1)
-                unique_tickers = df.columns.get_level_values(1).unique()
+                unique_tickers = cols.get_level_values(1).unique()
                 for ticker in unique_tickers:
                     if ticker in self.tickers:
                         ticker_df = df.xs(ticker, level=1, axis=1).copy()

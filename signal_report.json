@@ -1,6 +1,6 @@
 {
-    "timestamp": "2026-07-25T00:03:28.813063",
-    "total_score": 2,
+    "timestamp": "2026-07-26T09:23:26.415117",
+    "total_score": 5,
     "signals": [
         {
             "name": "Yield Curve Inversion",
@@ -24,18 +24,18 @@
         },
         {
             "name": "Valuation Overheat",
-            "score": 0,
-            "detail": "Valuation data sync error (ValueError)"
+            "score": 2,
+            "detail": "CAPE 40.46 (Critical) (+2)"
         },
         {
             "name": "Leading Indicators",
             "score": 0,
-            "detail": ""
+            "detail": "LEI stable (+0) | Sahm Rule normal (0.07%p) (+0)"
         },
         {
             "name": "Momentum Strategy",
-            "score": 0,
-            "detail": "SPX momentum healthy"
+            "score": 1,
+            "detail": "SPX momentum healthy (10.9%) (+0) | Defensive sectors outperform growth (+6.8% gap) (+1)"
         }
     ]
 }
