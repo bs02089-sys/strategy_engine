@@ -2,13 +2,7 @@
     "DISCORD_WEBHOOK": "",
     "DISCORD_USER_ID": "",
     "TICKERS": {
-        "SOXX": {},
-        "AIPO": {},
-        "QNDX": {},
-        "NVDX": {},
         "SOXL": { "ALL_IN_PERCENT": 30 },
-        "TSLA": {},
-        "IONQ": {},
         "TQQQ": { "ALL_IN_PERCENT": 50 }
     }
 }
