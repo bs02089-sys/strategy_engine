@@ -134,11 +134,16 @@ class MarketBottomTracker(MarketStageTracker):
         5: "🔥 최종 매수 신호"
     }
 
+    def __init__(self, stage: int = 0, stage5_entered_date: Optional[str] = None,
+                 exhaustion_threshold: float = 0.10):
+        super().__init__(stage, stage5_entered_date)
+        self.exhaustion_threshold = exhaustion_threshold
+
     def _is_exhaustion(self, df: pd.DataFrame) -> bool:
         last5 = df['close'].tail(5)
         change = last5.iloc[-1] - last5.iloc[0]
         range_ratio = (last5.max() - last5.min()) / last5.mean()
-        return bool(change <= 0 and range_ratio <= 0.10)
+        return bool(change <= 0 and range_ratio <= self.exhaustion_threshold)
 
     def _is_retest(self, df: pd.DataFrame) -> bool:
         prior_low = df['close'].iloc[:-1].min()
@@ -306,9 +311,12 @@ class DiscordMarketTracker:
 
         for ticker in self.tickers:
             saved = state.get(ticker, {}) if isinstance(state, dict) else {}
+            # 레버리지/고변동 종목은 Exhaustion 임계값 상향 (5일 변동폭 16% 이하)
+            exh_th = 0.16 if ticker in {"SOXL", "SOXX"} else 0.10
             self.bottom_trackers[ticker] = MarketBottomTracker(
                 stage=saved.get("bottom", 0),
-                stage5_entered_date=saved.get("bottom_stage5_date")
+                stage5_entered_date=saved.get("bottom_stage5_date"),
+                exhaustion_threshold=exh_th
             )
             self.top_trackers[ticker] = MarketTopTracker(
                 stage=saved.get("top", 0),
