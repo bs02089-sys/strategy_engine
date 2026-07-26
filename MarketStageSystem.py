@@ -348,6 +348,9 @@ class DiscordMarketTracker:
             if df is None or df.empty:
                 return None
 
+            if isinstance(df, pd.Series):
+                df = df.to_frame()
+
             if isinstance(df.columns, pd.MultiIndex):
                 df = df.droplevel(1, axis=1)
 
@@ -363,6 +366,9 @@ class DiscordMarketTracker:
             df = yf.download(self.tickers, period="6mo", interval="1d", progress=False, auto_adjust=True)
             if df is None or df.empty:
                 return {}
+
+            if isinstance(df, pd.Series):
+                df = df.to_frame()
 
             data_map = {}
             cols = df.columns
