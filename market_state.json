@@ -1,18 +1,26 @@
 {
   "TQQQ": {
     "bottom": 0,
-    "top": 0
+    "bottom_stage5_date": null,
+    "top": 0,
+    "top_stage5_date": null
   },
   "SOXL": {
     "bottom": 0,
-    "top": 0
+    "bottom_stage5_date": null,
+    "top": 0,
+    "top_stage5_date": null
   },
   "TSLA": {
     "bottom": 0,
-    "top": 0
+    "bottom_stage5_date": null,
+    "top": 0,
+    "top_stage5_date": null
   },
   "IONQ": {
     "bottom": 0,
-    "top": 0
+    "bottom_stage5_date": null,
+    "top": 0,
+    "top_stage5_date": null
   }
 }
