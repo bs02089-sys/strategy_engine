@@ -26,6 +26,8 @@ import json
 import os
 import re
 import sys
+import shutil
+import tempfile
 import datetime
 import warnings
 from dataclasses import dataclass
@@ -196,17 +198,36 @@ def signal_credit_spread() -> SignalResult:
 
 
 def signal_fed_cycle() -> SignalResult:
-    """Analyzes Fed rate cycle."""
+    """Analyzes Fed rate cycle.
+
+    Uses the MOST RECENT rate cut (iterates backward through the series)
+    rather than the FIRST cut in the lookback window.  This correctly
+    handles multiple easing cycles (cut → hike → cut again): instead
+    of measuring from the first cut of 2024, it measures from the most
+    recent cut, so the risk score reflects the CURRENT easing cycle.
+    """
     score_total, notes = 0, []
     try:
         s = fred_series("FEDFUNDS", lookback_days=FRED_LOOKBACK_8Y).resample("ME").last().dropna()
-        first_cut_date = next((s.index[i] for i in range(1, len(s)) if s.iloc[i] < s.iloc[i-1]), None)
-        if first_cut_date:
-            months = (s.index[-1].to_period("M") - first_cut_date.to_period("M")).n
-            if months <= 12: score_total = 2; notes.append(f"High risk zone: {months} months since first cut")
-            elif months <= 24: score_total = 1; notes.append(f"Residual risk: {months} months since first cut")
-            else: notes.append("Safe period")
-        else: notes.append("Awaiting rate cut")
+        # Iterate BACKWARD to find the MOST RECENT rate cut (start of the
+        # current easing cycle), not the first cut in the entire window.
+        recent_cut_date = None
+        for i in range(len(s) - 1, 0, -1):
+            if s.iloc[i] < s.iloc[i - 1]:
+                recent_cut_date = s.index[i]
+                break
+        if recent_cut_date:
+            months = (s.index[-1].to_period("M") - recent_cut_date.to_period("M")).n
+            if months <= 12:
+                score_total = 2
+                notes.append(f"High risk zone: {months}m since most recent cut ({recent_cut_date.strftime('%Y-%m')})")
+            elif months <= 24:
+                score_total = 1
+                notes.append(f"Residual risk: {months}m since most recent cut ({recent_cut_date.strftime('%Y-%m')})")
+            else:
+                notes.append(f"Safe period ({months}m since most recent cut)")
+        else:
+            notes.append("Awaiting rate cut")
     except Exception as e:
         notes.append(get_error_message(e, "Fed Cycle"))
     
@@ -214,11 +235,16 @@ def signal_fed_cycle() -> SignalResult:
 
 
 def _save_cape_cache(cape: float) -> None:
-    """성공적으로 조회된 CAPE 값을 캐시 파일에 저장"""
+    """성공적으로 조회된 CAPE 값을 캐시 파일에 원자적(atomic)으로 저장"""
     try:
         data = {"cape": cape, "date": datetime.datetime.now().strftime("%Y-%m-%d"), "source": "multpl.com"}
-        with open(CAPE_CACHE_PATH, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+        # Atomic write via tempfile + move — prevents corrupt cache on crash
+        with tempfile.NamedTemporaryFile(
+            "w", delete=False, suffix=".json", encoding="utf-8"
+        ) as tmp:
+            json.dump(data, tmp, ensure_ascii=False, indent=2)
+            tmp_path = tmp.name
+        shutil.move(tmp_path, CAPE_CACHE_PATH)
     except Exception:
         pass  # 캐시 저장 실패는 치명적이지 않음
 
@@ -363,8 +389,14 @@ def save_report_to_json(results: list, filename="signal_report.json"):
         "total_score": sum(r.score for r in results),
         "signals": [{"name": r.name, "score": r.score, "detail": r.detail} for r in results]
     }
-    with open(os.path.join(os.path.dirname(__file__), filename), "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=4)
+    # Atomic write — prevents corrupt signal_report.json on crash
+    report_path = os.path.join(os.path.dirname(__file__), filename)
+    with tempfile.NamedTemporaryFile(
+        "w", delete=False, suffix=".json", encoding="utf-8"
+    ) as tmp:
+        json.dump(data, tmp, ensure_ascii=False, indent=4)
+        tmp_path = tmp.name
+    shutil.move(tmp_path, report_path)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,8 @@
 import os
 import json
 import logging
+import shutil
+import tempfile
 import requests
 import pandas as pd
 import yfinance as yf
@@ -287,8 +289,14 @@ class DiscordMarketTracker:
             for ticker in self.tickers
         }
         try:
-            with open(STATE_PATH, "w", encoding="utf-8") as f:
-                json.dump(state, f, ensure_ascii=False, indent=2)
+            # Atomic write: write to temp file first, then move into place.
+            # Prevents corrupt JSON if the script crashes mid-write.
+            with tempfile.NamedTemporaryFile(
+                "w", delete=False, suffix=".json", encoding="utf-8"
+            ) as tmp:
+                json.dump(state, tmp, ensure_ascii=False, indent=2)
+                tmp_path = tmp.name
+            shutil.move(tmp_path, STATE_PATH)
         except Exception as e:
             logging.error(f"상태 저장 실패: {e}")
 

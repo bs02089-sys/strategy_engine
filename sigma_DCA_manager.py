@@ -582,45 +582,47 @@ def get_current_vix() -> float | None:
 def check_macro_and_technical_signals(ticker: str, pos_cfg: dict, current_vix: float | None) -> tuple[bool, bool, str]:
     """
     Evaluates Buy/Sell signals based on investment type, price trends, and VIX.
+
+    Infrastructure/DCA assets (LONG_YEAR etc.) use VIX only — no yfinance
+    call is made for them, saving one API round-trip per ticker per run.
+    Rotation/End-of-Cycle assets (ROTATION_3M, END_DEC) additionally fetch
+    120d price data for MA-based trend confirmation.
     """
     if current_vix is None:
         return False, False, "VIX data delay (neutral)"
 
-    current_price = 0.0
-    ma20 = 0.0
-    ma60 = 0.0
+    invest_type = str(pos_cfg.get("INVEST_TYPE", "")).upper()
 
+    # ── Infrastructure / DCA assets (LONG_YEAR, etc.) ───────────────
+    # VIX-only logic: no price data needed.
+    if invest_type not in {"ROTATION_3M", "END_DEC"}:
+        buy_signal = bool(current_vix < 23)
+        sell_signal = bool(current_vix > 28)
+        reason = "AI infra cycle valid" if buy_signal else "Global macro risk"
+        return buy_signal, sell_signal, reason
+
+    # ── Rotation / End-of-Cycle assets ──────────────────────────────
+    # Need price trend (MA20, MA60) on top of VIX.
     try:
         stock = yf.Ticker(ticker)
         hist = stock.history(period="120d", interval="1d", auto_adjust=False)
-        
+
         if hist.empty:
             return False, False, "Price data delay (neutral)"
 
         closes = hist['Close'].dropna()
         if len(closes) < 60:
             return False, False, f"Insufficient 60-day data ({len(closes)})"
-            
+
         current_price = float(closes.iloc[-1])
         ma20 = float(closes.rolling(window=20).mean().iloc[-1])
         ma60 = float(closes.rolling(window=60).mean().iloc[-1])
     except Exception as e:
         return False, False, f"API delay ({e})"
 
-    invest_type = str(pos_cfg.get("INVEST_TYPE", "")).upper()
-
-    # 1. Rotation/End-of-Cycle Assets -> Only enter when in a steady uptrend
-    if invest_type in {"ROTATION_3M", "END_DEC"}:
-        buy_signal = bool(current_price > ma20 and current_price > ma60 and current_vix < 20)
-        sell_signal = bool(current_price < ma60 or current_vix > 25)
-        reason = f"Uptrend (VIX: {current_vix:.1f})" if buy_signal else "Mixed trend or risk management"
-    
-    # 2. Infrastructure/DCA Assets -> Enter unless VIX indicates panic
-    else:
-        buy_signal = bool(current_vix < 23)
-        sell_signal = bool(current_vix > 28)
-        reason = "AI infra cycle valid" if buy_signal else "Global macro risk"
-
+    buy_signal = bool(current_price > ma20 and current_price > ma60 and current_vix < 20)
+    sell_signal = bool(current_price < ma60 or current_vix > 25)
+    reason = f"Uptrend (VIX: {current_vix:.1f})" if buy_signal else "Mixed trend or risk management"
     return buy_signal, sell_signal, reason
 
 
