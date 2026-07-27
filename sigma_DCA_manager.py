@@ -229,6 +229,19 @@ def _calculate_loc_from_sigma(prev_close: float, sigma: float, multiplier: float
     target_drop_rate = sigma * multiplier
     return round(prev_close * (1 - target_drop_rate), 2)
     
+def _most_recent_trading_day(today: date) -> date:
+    """Returns the most recent trading day before or on `today`, accounting
+    for weekends only.  Does NOT account for NYSE holidays — that's fine for
+    staleness detection because a single holiday would only make the expected
+    date off by one day and the retry/fallback still converges on the right
+    data; consecutive multi-day holiday closures (Christmas+New Year's)
+    would trigger an extra retry but still fall through correctly."""
+    candidate = today
+    while candidate.weekday() >= 5:  # 5=Sat, 6=Sun
+        candidate -= timedelta(days=1)
+    return candidate
+
+
 def get_prev_close(ticker: str) -> tuple[float | None, str]:
     """
     Reliable FINAL-close lookup using yfinance (with 3 retries).
@@ -253,17 +266,51 @@ def get_prev_close(ticker: str) -> tuple[float | None, str]:
     ) + timedelta(minutes=NY_CLOSE_SETTLE_BUFFER_MINUTES)
     today_session_settled = now_ny >= market_close_settled_at
 
+    # Expected latest trading day the data should reach (at minimum).
+    # If today's session is settled, the latest data should be today
+    # (or the most recent trading day if today is a weekend/holiday);
+    # otherwise it should be the most recent trading day that's already
+    # in the books (yesterday or last Friday).
+    #
+    # NOTE: _most_recent_trading_day() is applied to BOTH branches so
+    # that a weekend run (where today_session_settled may be True even
+    # though no market session actually existed today) doesn't set
+    # expected_latest_date to a non-trading-day date and trigger a
+    # false-positive staleness retry.
+    expected_latest_date = _most_recent_trading_day(
+        today_ny if today_session_settled else today_ny - timedelta(days=1)
+    )
+
     for attempt in range(1, 4):
         try:
             print(f"   → Trying yfinance history ({attempt}/3)...")
             stock = yf.Ticker(ticker)
-            hist = stock.history(period="15d", interval="1d", auto_adjust=False, rounding=True)
-            
+            # NOTE: rounding=True is intentionally omitted.  yfinance's
+            # internal cache uses URL+params as the key; the presence vs
+            # absence of `rounding` creates a DIFFERENT cache entry from
+            # the `auto_adjust=False` call made by
+            # check_macro_and_technical_signals(), which avoids a scenario
+            # where the preceding 120d fetch pollutes the cache for this
+            # 1mo fetch and returns stale/lagged data.
+            hist = stock.history(period="1mo", interval="1d", auto_adjust=False)
+
             if not hist.empty:
                 close_series = hist['Close'].dropna()
                 if not close_series.empty:
                     last_idx = close_series.index[-1]
                     last_date = last_idx.date() if isinstance(last_idx, pd.Timestamp) else last_idx
+
+                    # ── Staleness guard ──────────────────────────────────
+                    # If the last row yfinance returned is OLDER than the
+                    # expected latest trading day (e.g. returned 07-23 when
+                    # 07-24 should be available), it's stale cached data.
+                    # Retry with a longer backoff to let the cache expire.
+                    if last_date < expected_latest_date:
+                        print(f"   ⚠️ Stale data: last_date={last_date}, expected ≥{expected_latest_date}. Retrying...")
+                        if attempt < 3:
+                            time.sleep(5.0)
+                        continue
+                    # ─────────────────────────────────────────────────────
 
                     # DIAGNOSTIC: print what yfinance actually returned for the
                     # last few sessions, plus the settle-check inputs, so a
@@ -291,7 +338,7 @@ def get_prev_close(ticker: str) -> tuple[float | None, str]:
                     else:
                         prev_close = float(close_series.iloc[-1])
                         date_str = last_date.strftime("%m-%d")
-                        
+
                     print(f"✅ {ticker} yfinance success: ${prev_close:.2f} ({date_str})")
                     return prev_close, date_str
 
@@ -300,8 +347,10 @@ def get_prev_close(ticker: str) -> tuple[float | None, str]:
         except Exception as e:
             print(f"   ⚠️ Attempt {attempt} failed: {e}")
 
-        # Backoff regardless of whether we hit an exception or just got
-        # empty data back — previously the sleep only ran on exceptions.
+        # Standard backoff (used when the data IS returned but empty, or
+        # an exception occurred — the staleness guard above used a longer
+        # backoff and a ``continue``, so we only reach this point for
+        # exceptions / truly empty responses).
         if attempt < 3:
             time.sleep(2.0)
 
