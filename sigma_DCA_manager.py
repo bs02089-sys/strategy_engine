@@ -278,6 +278,78 @@ def get_prev_close(ticker: str) -> tuple[float | None, str]:
     return None, "N/A"
 
 
+def get_period_high(ticker: str, lookback_days: int = 252, max_retries: int = 3) -> tuple[float | None, str | None]:
+    """
+    Fetches the previous high (전고점) over the lookback window, using the
+    High column (true intraday high) rather than Close — 전고점 in
+    Korean retail-investor usage typically means the highest price ever
+    touched, not just the highest closing price. Same calendar-day
+    buffering approach as _fetch_closes_for_lookback() so yfinance's
+    calendar-day `period` still yields enough trading days.
+    """
+    buffer_days = max(30, int(lookback_days * 0.6) + 30)
+    period_days = lookback_days + buffer_days
+
+    last_err = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            stock = yf.Ticker(ticker)
+            hist = stock.history(period=f"{period_days}d", interval="1d", auto_adjust=False)
+            if hist.empty:
+                raise ValueError("Data empty.")
+            highs = hist['High'].dropna()
+            if highs.empty:
+                raise ValueError("No high price data.")
+            recent_highs = highs[-lookback_days:] if len(highs) >= lookback_days else highs
+            peak_idx = recent_highs.idxmax()
+            peak_price = float(recent_highs.loc[peak_idx])
+            if isinstance(peak_idx, (datetime, date)):
+                peak_date_str = peak_idx.strftime("%Y-%m-%d")
+            else:
+                try:
+                    peak_date_str = datetime.fromisoformat(str(peak_idx)).strftime("%Y-%m-%d")
+                except (TypeError, ValueError):
+                    peak_date_str = str(peak_idx)
+            return peak_price, peak_date_str
+        except Exception as e:
+            last_err = e
+            if attempt < max_retries:
+                time.sleep(2.0)
+    print(f"   ⚠️ {ticker} previous-high fetch failed after {max_retries} attempts: {last_err}")
+    return None, None
+
+
+def calculate_drawdown_and_recovery(prev_close: float, peak_price: float) -> tuple[float, float]:
+    """
+    Returns (drawdown_pct, recovery_needed_pct), both rounded to 2 decimals.
+      - drawdown_pct: % decline of the current price from the previous high
+        (전고점 대비 하락률). 0 or negative.
+      - recovery_needed_pct: % gain required from the current price to get
+        back up to the previous high (전고점 대비 상승 여력/필요 상승률).
+        0 or positive.
+    """
+    drawdown_pct = round((prev_close - peak_price) / peak_price * 100, 2)
+    recovery_needed_pct = round((peak_price - prev_close) / prev_close * 100, 2)
+    return drawdown_pct, recovery_needed_pct
+
+
+def format_drawdown_line(ticker: str, prev_close: float, lookback_days: int) -> str | None:
+    """
+    Builds the Discord line showing decline-from-high and required-rise-to-
+    high, both to 2 decimal places. Returns None if the previous high could
+    not be fetched (briefing continues without this line for that ticker).
+    """
+    peak_price, peak_date_str = get_period_high(ticker, lookback_days)
+    if peak_price is None:
+        return None
+
+    drawdown_pct, recovery_needed_pct = calculate_drawdown_and_recovery(prev_close, peak_price)
+    return (
+        f"• 📈 **전고점 대비:** ${peak_price:.2f} ({peak_date_str}) 기준 "
+        f"하락률 **{drawdown_pct:.2f}%** / 회복 필요 상승률 **{recovery_needed_pct:.2f}%**"
+    )
+
+
 def get_realtime_sigma(ticker: str, lookback_days: int, vol_method: str = "EWMA", ewma_lambda: float = 0.94) -> float:
     """
     Calculates Sigma using yfinance in real-time.
@@ -631,6 +703,12 @@ def _build_briefing_lines(now_ny: datetime, cfg: dict) -> list[str]:
 
         position_meta = format_position_meta(pos_cfg, today_ny)
         lines.append(f"\n🔹 **{ticker}** (Close: ${prev_close:.2f} | {last_date_str}{position_meta})")
+
+        lookback_days = int(pos_cfg.get("LOOKBACK_DAYS", 252))
+        drawdown_line = format_drawdown_line(ticker, prev_close, lookback_days)
+        if drawdown_line:
+            lines.append(drawdown_line)
+
         lines.append(f"• **Signals:** Buy[{buy_sig}] / Sell[{sell_sig}] | {reason}")
 
         rotation_due, elapsed_bd, exit_days = check_rotation_exit_signal(pos_cfg, today_ny)
