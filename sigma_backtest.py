@@ -11,9 +11,11 @@ Supports two modes:
   2. Sweep     : run over a range of multipliers and report optimal values
 
 Usage:
-  python3 sigma_backtest.py              # normal single run
-  python3 sigma_backtest.py --sweep       # single-period multiplier sweep
-  python3 sigma_backtest.py --multi-sweep # multi-period cross-validation
+  python3 sigma_backtest.py                          # normal single run
+  python3 sigma_backtest.py --sweep                   # single-period multiplier sweep
+  python3 sigma_backtest.py --multi-sweep              # multi-period cross-validation
+  python3 sigma_backtest.py --portfolio-sweep           # TQQQ/SOXL weight optimization
+  python3 sigma_backtest.py --multi-portfolio-sweep     # multi-period weight validation
 """
 
 import sys
@@ -52,18 +54,20 @@ SWEEP_STOP  = 3.0
 SWEEP_STEP  = 0.1
 
 
-def load_entry_multiplier() -> float:
-    """Read ENTRY_MULTIPLIER from portfolio_config.json (single source of truth)."""
+def load_entry_multiplier(ticker: str = None) -> float:
+    """Read ENTRY_MULTIPLIER from portfolio_config.json for a given ticker.
+    If ticker is None, uses the global TICKER, then falls back to first position."""
+    target = ticker if ticker else TICKER
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
         cfg = json.load(f)
     positions = cfg.get("POSITIONS", {})
-    if TICKER in positions and "ENTRY_MULTIPLIER" in positions[TICKER]:
-        return float(positions[TICKER]["ENTRY_MULTIPLIER"])
+    if target in positions and "ENTRY_MULTIPLIER" in positions[target]:
+        return float(positions[target]["ENTRY_MULTIPLIER"])
     # Try first available position
     for pos in positions.values():
         if "ENTRY_MULTIPLIER" in pos:
             return float(pos["ENTRY_MULTIPLIER"])
-    raise KeyError(f"ENTRY_MULTIPLIER not found in {CONFIG_PATH} for {TICKER} or any position")
+    raise KeyError(f"ENTRY_MULTIPLIER not found in {CONFIG_PATH} for {target}")
 
 
 ENTRY_MULTIPLIER = load_entry_multiplier()
@@ -99,16 +103,22 @@ def fetch_data(ticker: str, end_date: date = None) -> pd.DataFrame:
 # ══════════════════════════════════════════════
 
 def run_backtest(df: pd.DataFrame, entry_multiplier: float = ENTRY_MULTIPLIER,
-                 verbose: bool = False) -> dict:
+                 verbose: bool = False,
+                 initial_cash: float = None, buy_amount: float = None) -> dict:
     """
     Walk forward through df.  Returns a flat result dict with all metrics.
     If verbose=True, prints buy events to stdout.
     """
+    if initial_cash is None:
+        initial_cash = float(INITIAL_CASH)
+    if buy_amount is None:
+        buy_amount = float(BUY_AMOUNT)
+
     closes    = df['Close'].values
     lows      = df['Low'].values
     dates_idx = df.index
 
-    cash         = float(INITIAL_CASH)
+    cash         = float(initial_cash)
     shares       = 0.0
     buys         = 0
     trade_log    = []
@@ -129,19 +139,19 @@ def run_backtest(df: pd.DataFrame, entry_multiplier: float = ENTRY_MULTIPLIER,
         triggered = today_low <= loc_price
 
         buy_price = min(today_close, loc_price) if triggered else None
-        buy_amount = 0.0
+        buy_amt = 0.0
         buy_shares = 0.0
 
-        if triggered and cash >= BUY_AMOUNT and buys < MAX_BUYS:
-            buy_shares = BUY_AMOUNT / buy_price
-            buy_amount = BUY_AMOUNT
-            cash  -= buy_amount
+        if triggered and cash >= buy_amount and buys < MAX_BUYS:
+            buy_shares = buy_amount / buy_price
+            buy_amt = buy_amount
+            cash  -= buy_amt
             shares += buy_shares
             buys += 1
 
             trade_log.append({
                 'date': today_date, 'price': round(buy_price, 2),
-                'shares': round(buy_shares, 4), 'amount': round(buy_amount, 2),
+                'shares': round(buy_shares, 4), 'amount': round(buy_amt, 2),
                 'sigma': round(sigma, 4), 'loc': round(loc_price, 2),
                 'cash_remaining': round(cash, 2),
             })
@@ -177,7 +187,7 @@ def run_backtest(df: pd.DataFrame, entry_multiplier: float = ENTRY_MULTIPLIER,
     win_rate = wins / len(trade_log) * 100 if trade_log else 0.0
 
     final_val = float(daily_values[-1]['value'])
-    total_ret = (final_val - INITIAL_CASH) / INITIAL_CASH * 100
+    total_ret = (final_val - initial_cash) / initial_cash * 100
 
     return {
         'multiplier':      entry_multiplier,
@@ -458,14 +468,384 @@ def run_multi_period_sweep():
 
 
 # ══════════════════════════════════════════════
+# Portfolio Weight Sweep (TQQQ + SOXL allocation)
+# ══════════════════════════════════════════════
+
+def _run_portfolio_sweep_core(dfs: dict, mults: dict, total_capital: float,
+                               label: str = "", verbose: bool = True) -> list:
+    """Core portfolio sweep logic. Returns list of result dicts for each weight."""
+    weights = np.arange(0.1, 1.0, 0.1)  # 10% → 90%
+    results = []
+
+    for tqqq_w in weights:
+        soxl_w = round(1.0 - tqqq_w, 1)
+        tqqq_w = round(tqqq_w, 1)
+
+        cap_tqqq = total_capital * tqqq_w
+        cap_soxl = total_capital * soxl_w
+        buy_tqqq = cap_tqqq / MAX_BUYS
+        buy_soxl = cap_soxl / MAX_BUYS
+
+        r_tqqq = run_backtest(dfs['TQQQ'], entry_multiplier=mults['TQQQ'],
+                              initial_cash=cap_tqqq, buy_amount=buy_tqqq)
+        r_soxl = run_backtest(dfs['SOXL'], entry_multiplier=mults['SOXL'],
+                              initial_cash=cap_soxl, buy_amount=buy_soxl)
+
+        dv_tqqq = {d['date'].date(): d['value'] for d in r_tqqq['daily_values']}
+        dv_soxl = {d['date'].date(): d['value'] for d in r_soxl['daily_values']}
+        all_dates = sorted(set(dv_tqqq.keys()) & set(dv_soxl.keys()))
+        if not all_dates:
+            continue
+
+        combined_values = [dv_tqqq[d] + dv_soxl[d] for d in all_dates]
+        portfolio_return = (combined_values[-1] - total_capital) / total_capital * 100
+
+        cv_arr = np.array(combined_values)
+        daily_ret = cv_arr[1:] / cv_arr[:-1] - 1
+        sharpe = float(np.sqrt(252) * daily_ret.mean() / daily_ret.std()) if daily_ret.std() > 0 else 0.0
+
+        peak = np.maximum.accumulate(cv_arr)
+        dd = (cv_arr - peak) / peak
+        mdd = float(dd.min() * 100)
+
+        results.append({
+            'tqqq_pct': tqqq_w * 100,
+            'soxl_pct': soxl_w * 100,
+            'total_return': round(portfolio_return, 2),
+            'sharpe': round(sharpe, 2),
+            'mdd': round(mdd, 2),
+            'final_value': round(combined_values[-1], 2),
+            'r_tqqq': r_tqqq,
+            'r_soxl': r_soxl,
+        })
+
+        if verbose:
+            print(f"  TQQQ {tqqq_w*100:>3.0f}% / SOXL {soxl_w*100:>3.0f}%"
+                  f" | Return {portfolio_return:>+7.2f}% | Sharpe {sharpe:>5.2f}"
+                  f" | MDD {mdd:>6.2f}% | Fills {r_tqqq['total_buys']}/{r_soxl['total_buys']}")
+
+    return results
+
+
+def run_portfolio_sweep():
+    """Sweep over TQQQ/SOXL weights for the current 1-year period."""
+    tickers = ["TQQQ", "SOXL"]
+    mults = {t: load_entry_multiplier(t) for t in tickers}
+
+    print(f"\n📊 Portfolio Weight Optimization — TQQQ + SOXL")
+    print(f"   Total capital: ${INITIAL_CASH:,}")
+    print(f"   Multipliers : TQQQ × {mults['TQQQ']}  |  SOXL × {mults['SOXL']}")
+    print("=" * 130)
+
+    dfs = {t: fetch_data(t) for t in tickers}
+    results = _run_portfolio_sweep_core(dfs, mults, float(INITIAL_CASH), label="Current")
+
+    if not results:
+        return
+
+    print("═" * 130)
+    best_return = max(results, key=lambda r: r['total_return'])
+    best_sharpe = max(results, key=lambda r: r['sharpe'])
+    best_mdd    = min(results, key=lambda r: r['mdd'])
+
+    print(f"\n  🏆 Optimal Allocations:")
+    print(f"     Max Return : TQQQ {best_return['tqqq_pct']:.0f}% / SOXL {best_return['soxl_pct']:.0f}%"
+          f"  → {best_return['total_return']:+.2f}% (Sharpe {best_return['sharpe']})")
+    print(f"     Max Sharpe : TQQQ {best_sharpe['tqqq_pct']:.0f}% / SOXL {best_sharpe['soxl_pct']:.0f}%"
+          f"  → Sharpe {best_sharpe['sharpe']:.2f} (Return {best_sharpe['total_return']:+.2f}%)")
+    print(f"     Min MDD    : TQQQ {best_mdd['tqqq_pct']:.0f}% / SOXL {best_mdd['soxl_pct']:.0f}%"
+          f"  → MDD {best_mdd['mdd']:.2f}%")
+
+    best = best_sharpe
+    b_tqqq = best['r_tqqq']
+    b_soxl = best['r_soxl']
+    print(f"\n  📋 Best Sharpe Details: TQQQ ${INITIAL_CASH*best['tqqq_pct']/100:,.0f}"
+          f" / SOXL ${INITIAL_CASH*best['soxl_pct']/100:,.0f}"
+          f" → {best['total_return']:+.2f}% | Sharpe {best['sharpe']}"
+          f" | TQQQ {b_tqqq['total_buys']}buys {b_tqqq['win_rate']:.0f}%win"
+          f" | SOXL {b_soxl['total_buys']}buys {b_soxl['win_rate']:.0f}%win")
+
+    print("\n" + "═" * 130)
+    print("  ✅ Portfolio Sweep Complete")
+    print("═" * 130)
+
+
+# ══════════════════════════════════════════════
+# Multi-Period Portfolio Sweep (Generalization Test)
+# ══════════════════════════════════════════════
+
+def run_multi_period_portfolio_sweep():
+    """
+    Run portfolio weight sweep across multiple historical 1-year periods
+    to test whether the optimal TQQQ/SOXL allocation generalizes.
+    """
+    today = date.today()
+    periods = [
+        (today - timedelta(days=365), today, "🔥 Strong Bull"),
+        (today - timedelta(days=730), today - timedelta(days=365), "📈 Bull"),
+        (today - timedelta(days=1095), today - timedelta(days=730), "📊 Recovery"),
+        (today - timedelta(days=1460), today - timedelta(days=1095), "📉 Bear Bottom"),
+        (today - timedelta(days=1825), today - timedelta(days=1460), "💥 Bear Crash"),
+    ]
+
+    tickers = ["TQQQ", "SOXL"]
+    mults = {t: load_entry_multiplier(t) for t in tickers}
+
+    print(f"\n🌍 Multi-Period Portfolio Weight Generalization Test")
+    print(f"   Multipliers : TQQQ × {mults['TQQQ']}  |  SOXL × {mults['SOXL']}")
+    print(f"   Testing {len(periods)} market regimes × 9 allocation ratios")
+    print("=" * 185)
+
+    all_optimals = {}   # period_label -> {'by_return': ..., 'by_sharpe': ..., 'all_results': [...]}
+
+    for start_dt, end_dt, label in periods:
+        print(f"\n📅 {label}  ({start_dt} → {end_dt})")
+        print("─" * 130)
+
+        dfs = {t: fetch_data(t, end_date=end_dt) for t in tickers}
+        # Trim to backtest window
+        for t in tickers:
+            dfs[t] = dfs[t][dfs[t].index.date <= end_dt]
+
+        results = _run_portfolio_sweep_core(dfs, mults, float(INITIAL_CASH),
+                                            label=label, verbose=True)
+
+        if not results:
+            continue
+
+        best_return = max(results, key=lambda r: r['total_return'])
+        best_sharpe = max(results, key=lambda r: r['sharpe'])
+        print(f"   🏆 Best Return : TQQQ {best_return['tqqq_pct']:.0f}%"
+              f" → {best_return['total_return']:+.2f}%")
+        print(f"   🏆 Best Sharpe : TQQQ {best_sharpe['tqqq_pct']:.0f}%"
+              f" → Sharpe {best_sharpe['sharpe']:.2f}")
+
+        all_optimals[label] = {
+            'by_return': best_return,
+            'by_sharpe': best_sharpe,
+            'all_results': results,
+        }
+
+    # ── Cross-period analysis ──────────────────────────────────────
+    if not all_optimals:
+        print("\n⚠️  No valid periods to analyze.")
+        return
+
+    print("\n" + "═" * 185)
+    print("  🏆 Cross-Period Optimal Allocation Comparison")
+    print("─" * 185)
+    print(f"  {'Period':<20} {'Best Ret TQQQ':>14} {'Best Ret %':>12}"
+          f" {'Best Sh TQQQ':>14} {'Best Sh Sharpe':>15}")
+    print(f"  {'─'*20} {'─'*14} {'─'*12} {'─'*14} {'─'*15}")
+
+    allocation_votes_return = {}
+    allocation_votes_sharpe = {}
+
+    for label in all_optimals:
+        br = all_optimals[label]['by_return']
+        bs = all_optimals[label]['by_sharpe']
+        print(f"  {label:<20} {br['tqqq_pct']:>13.0f}% {br['total_return']:>+11.2f}%"
+              f" {bs['tqqq_pct']:>13.0f}% {bs['sharpe']:>14.2f}")
+
+        key_r = f"TQQQ {br['tqqq_pct']:.0f}%"
+        key_s = f"TQQQ {bs['tqqq_pct']:.0f}%"
+        allocation_votes_return[key_r] = allocation_votes_return.get(key_r, 0) + 1
+        allocation_votes_sharpe[key_s] = allocation_votes_sharpe.get(key_s, 0) + 1
+
+    # ── Find consensus ────────────────────────────────────────────
+    print("─" * 185)
+    consensus_ret = max(allocation_votes_return, key=allocation_votes_return.get)
+    consensus_sh = max(allocation_votes_sharpe, key=allocation_votes_sharpe.get)
+
+    print(f"\n  🗳️  Consensus by Max Return  : {consensus_ret}"
+          f" ({allocation_votes_return[consensus_ret]}/{len(all_optimals)} periods)")
+    print(f"  🗳️  Consensus by Max Sharpe  : {consensus_sh}"
+          f" ({allocation_votes_sharpe[consensus_sh]}/{len(all_optimals)} periods)")
+
+    # Average return of current best (10/90) across all periods
+    print(f"\n  📌 TQQQ 10% / SOXL 90% performance per period:")
+    ref_returns = []
+    ref_sharpes = []
+    for label, opt in all_optimals.items():
+        # Find the 10/90 result from all_results
+        ref = next((r for r in opt['all_results'] if abs(r['tqqq_pct'] - 10) < 0.5), None)
+        if ref:
+            ref_returns.append(ref['total_return'])
+            ref_sharpes.append(ref['sharpe'])
+            print(f"     {label:<20} → {ref['total_return']:+.2f}%  (Sharpe {ref['sharpe']})")
+        else:
+            print(f"     {label:<20} → 10/90 not tested")
+
+    if ref_returns:
+        avg_ret = np.mean(ref_returns)
+        avg_sh = np.mean(ref_sharpes)
+        print(f"     {'─'*20} ────────────")
+        print(f"     {'Average':<20} → {avg_ret:+.2f}%  (Sharpe {avg_sh:.2f})")
+
+    print("\n" + "═" * 185)
+    print("  ✅ Multi-Period Portfolio Sweep Complete")
+    print("═" * 185)
+
+
+# ══════════════════════════════════════════════
+# Portfolio Detail Run (from config allocation)
+# ══════════════════════════════════════════════
+
+def load_allocation_pct(ticker: str) -> float:
+    """Read ALLOCATION_PCT from portfolio_config.json for a given ticker."""
+    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+        cfg = json.load(f)
+    positions = cfg.get("POSITIONS", {})
+    if ticker in positions and "ALLOCATION_PCT" in positions[ticker]:
+        return float(positions[ticker]["ALLOCATION_PCT"])
+    raise KeyError(f"ALLOCATION_PCT not found in {CONFIG_PATH} for {ticker}")
+
+
+def print_portfolio_report(r_portfolio: dict):
+    """Print a detailed portfolio report with combined and per-ticker results."""
+    R = r_portfolio
+    tqqq = R['r_tqqq']
+    soxl = R['r_soxl']
+    total = float(INITIAL_CASH)
+
+    print("\n")
+    print("═" * 72)
+    print("  📊 Portfolio DCA Backtest Report — TQQQ + SOXL")
+    print("═" * 72)
+    print(f"  Allocation : TQQQ {R['tqqq_pct']:.0f}%  /  SOXL {R['soxl_pct']:.0f}%")
+    print(f"  Capital    : ${total:,.0f}  (TQQQ ${total*R['tqqq_pct']/100:,.0f} / SOXL ${total*R['soxl_pct']/100:,.0f})")
+    print(f"  Multiplier : TQQQ × {tqqq['multiplier']}  |  SOXL × {soxl['multiplier']}")
+    print(f"  Period     : {R['period_start']}  →  {R['period_end']}")
+    print("─" * 72)
+
+    # Combined performance
+    print(f"\n  📈 Portfolio Performance")
+    print(f"     Total Return      : {R['total_return']:+.2f}%")
+    print(f"     Final Value       : ${R['final_value']:,.2f}")
+    print(f"     Sharpe Ratio      : {R['sharpe']}")
+    print(f"     Max Drawdown      : {R['mdd']:.2f}%")
+
+    # Per-ticker comparison
+    print(f"\n  📋 Per-Ticker Comparison")
+    print(f"  {'Ticker':<8} {'Capital':>10} {'Return':>10} {'Fill':>5} {'AvgBuy':>8}"
+          f" {'WinRate':>8} {'CashRem':>10}")
+    print(f"  {'─'*8} {'─'*10} {'─'*10} {'─'*5} {'─'*8} {'─'*8} {'─'*10}")
+    for label, r in [('TQQQ', tqqq), ('SOXL', soxl)]:
+        print(f"  {label:<8} ${total*R[f'{label.lower()}_pct']/100:>7,.0f}"
+              f" {r['total_return']:>+9.2f}% {r['total_buys']:>3d}"
+              f" ${r['avg_buy_price']:>6.2f} {r['win_rate']:>6.1f}%"
+              f" ${r['remaining_cash']:>7,.0f}")
+
+    # Monthly combined breakdown
+    combined_dv = R['combined_daily_values']
+    if combined_dv:
+        monthly = {}
+        for d in combined_dv:
+            mk = d['date'].strftime('%Y-%m')
+            monthly.setdefault(mk, []).append(d['value'])
+        print(f"\n  📅 Monthly Portfolio Value")
+        print(f"  {'Month':<8} {'Start':>10} {'End':>10} {'Return':>8}")
+        print(f"  {'─'*8} {'─'*10} {'─'*10} {'─'*8}")
+        for m in sorted(monthly):
+            vals = monthly[m]
+            s, e = vals[0], vals[-1]
+            print(f"  {m:<8} ${s:>7,.0f} ${e:>7,.0f} {(e-s)/s*100:>+7.2f}%")
+
+    # Buy logs
+    for label, r in [('TQQQ', tqqq), ('SOXL', soxl)]:
+        if r['trade_log']:
+            print(f"\n  📝 {label} Buy Log")
+            print(f"  {'Date':<14} {'Price':>8} {'Shares':>10} {'Amount':>9} {'Sigma':>8}")
+            print(f"  {'─'*14} {'─'*8} {'─'*10} {'─'*9} {'─'*8}")
+            for t in r['trade_log']:
+                print(f"  {t['date'].strftime('%Y-%m-%d'):<14}"
+                      f" ${t['price']:>6.2f} {t['shares']:>10.2f}"
+                      f" ${t['amount']:>7,.0f} {t['sigma']:>8.4f}")
+
+    print("\n" + "═" * 72)
+    print("  ✅ Portfolio Run Complete")
+    print("═" * 72)
+
+
+def run_portfolio_detail():
+    """Run a single portfolio backtest with the allocation from portfolio_config.json."""
+    tickers = ["TQQQ", "SOXL"]
+    mults = {t: load_entry_multiplier(t) for t in tickers}
+    alloc = {t: load_allocation_pct(t) for t in tickers}
+
+    total_alloc = sum(alloc.values())
+    tqqq_pct = alloc['TQQQ'] / total_alloc * 100
+    soxl_pct = alloc['SOXL'] / total_alloc * 100
+
+    total_capital = float(INITIAL_CASH)
+    cap_tqqq = total_capital * tqqq_pct / 100
+    cap_soxl = total_capital * soxl_pct / 100
+
+    dfs = {t: fetch_data(t) for t in tickers}
+
+    r_tqqq = run_backtest(dfs['TQQQ'], entry_multiplier=mults['TQQQ'],
+                          initial_cash=cap_tqqq, buy_amount=cap_tqqq / MAX_BUYS,
+                          verbose=True)
+    r_soxl = run_backtest(dfs['SOXL'], entry_multiplier=mults['SOXL'],
+                          initial_cash=cap_soxl, buy_amount=cap_soxl / MAX_BUYS,
+                          verbose=True)
+
+    # Combine daily values
+    dv_tqqq = {d['date'].date(): d['value'] for d in r_tqqq['daily_values']}
+    dv_soxl = {d['date'].date(): d['value'] for d in r_soxl['daily_values']}
+    all_dates = sorted(set(dv_tqqq.keys()) & set(dv_soxl.keys()))
+
+    if not all_dates:
+        print("⚠️  No overlapping trading days between tickers.")
+        return
+
+    combined_values = [dv_tqqq[d] + dv_soxl[d] for d in all_dates]
+    combined_dv = [{'date': pd.Timestamp(d), 'value': round(cv, 2)}
+                   for d, cv in zip(all_dates, combined_values)]
+
+    portfolio_return = (combined_values[-1] - total_capital) / total_capital * 100
+    cv_arr = np.array(combined_values)
+    daily_ret = cv_arr[1:] / cv_arr[:-1] - 1
+    sharpe = float(np.sqrt(252) * daily_ret.mean() / daily_ret.std()) if daily_ret.std() > 0 else 0.0
+    peak = np.maximum.accumulate(cv_arr)
+    dd = (cv_arr - peak) / peak
+    mdd = float(dd.min() * 100)
+
+    portfolio_result = {
+        'tqqq_pct': round(tqqq_pct, 1),
+        'soxl_pct': round(soxl_pct, 1),
+        'total_return': round(portfolio_return, 2),
+        'sharpe': round(sharpe, 2),
+        'mdd': round(mdd, 2),
+        'final_value': round(combined_values[-1], 2),
+        'period_start': all_dates[0],
+        'period_end': all_dates[-1],
+        'combined_daily_values': combined_dv,
+        'r_tqqq': r_tqqq,
+        'r_soxl': r_soxl,
+    }
+
+    print_portfolio_report(portfolio_result)
+
+
+# ══════════════════════════════════════════════
 # Main
 # ══════════════════════════════════════════════
 
 if __name__ == "__main__":
-    sweep_mode     = "--sweep" in sys.argv
-    multi_sweep    = "--multi-sweep" in sys.argv
+    sweep_mode      = "--sweep" in sys.argv
+    multi_sweep     = "--multi-sweep" in sys.argv
+    portfolio_sweep = "--portfolio-sweep" in sys.argv
+    multi_portfolio = "--multi-portfolio-sweep" in sys.argv
+    portfolio_run   = "--portfolio-run" in sys.argv
 
-    if multi_sweep:
+    if portfolio_run:
+        run_portfolio_detail()
+    elif multi_portfolio:
+        run_multi_period_portfolio_sweep()
+    elif portfolio_sweep:
+        run_portfolio_sweep()
+    elif multi_sweep:
         run_multi_period_sweep()
     elif sweep_mode:
         df = fetch_data(TICKER)
