@@ -6,20 +6,16 @@
 
 Reuses sigma_DCA_manager.py's sigma-calculation & LOC logic.
 
-Strategy (LONG_YEAR / INFRASTRUCTURE type):
-  1. Daily sigma calculated via EWMA (λ=0.94) over 252-trading-day window
-  2. LOC target price = previous_close * (1 − sigma × 1.41)
-  3. When next day's LOW ≤ LOC target → limit order fills
-  4. Standing order resets each day at the new LOC target
+Supports two modes:
+  1. Normal    : single backtest with ENTRY_MULTIPLIER from config
+  2. Sweep     : run over a range of multipliers and report optimal values
 
-Parameters:
-  Asset : SOXL (100%)
-  Capital: $50,000
-  Period : Recent 1 trading year (~252 sessions)
-  Buy size: $2,500 / trigger (up to 20 fills)
+Usage:
+  python3 sigma_backtest.py              # normal single run
+  python3 sigma_backtest.py --sweep       # single-period multiplier sweep
+  python3 sigma_backtest.py --multi-sweep # multi-period cross-validation
 """
 
-import json
 import sys
 import os
 import numpy as np
@@ -27,38 +23,41 @@ import pandas as pd
 import yfinance as yf
 from datetime import date, timedelta
 
-# ── Reuse sigma_DCA_manager's core math ──────────────────────────────
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from sigma_DCA_manager import (
     _calculate_volatility_from_closes,
     _calculate_loc_from_sigma,
 )
 
-
-# ═══════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════
 # Configuration
-# ═══════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════
 
-INITIAL_CASH      = 50_000       # $50,000
+INITIAL_CASH      = 50_000
 TICKER            = "SOXL"
-LOOKBACK_DAYS     = 252          # Matching portfolio_config.json
-ENTRY_MULTIPLIER  = 1.41         # Matching portfolio_config.json
+LOOKBACK_DAYS     = 252
+ENTRY_MULTIPLIER  = 1.1           # optimal across 5 market regimes (multi-period sweep)
 VOL_METHOD        = "EWMA"
 EWMA_LAMBDA       = 0.94
-BUY_AMOUNT        = 2_500        # Dollars deployed per LOC fill
-MAX_BUYS          = 20           # 20 × $2,500 = $50,000 total
-BACKTEST_DAYS     = 252          # ~1 trading year
-FETCH_BUFFER_DAYS = 60           # Extra calendar days beyond lookback
+BUY_AMOUNT        = 2_500
+MAX_BUYS          = 20
+BACKTEST_DAYS     = 252
+FETCH_BUFFER_DAYS = 60
+
+# Sweep range
+SWEEP_START = 0.6
+SWEEP_STOP  = 3.0
+SWEEP_STEP  = 0.1
 
 
-# ═══════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════
 # Data Fetching
-# ═══════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════
 
-def fetch_data(ticker: str) -> pd.DataFrame:
-    """Download OHLCV data, returns a DataFrame with 'Close' and 'Low'."""
-    end_date = date.today()
-    # Need LOOKBACK_DAYS trading days before backtest start, with calendar buffer
+def fetch_data(ticker: str, end_date: date = None) -> pd.DataFrame:
+    """Download OHLCV data for backtest ending on end_date (default: today)."""
+    if end_date is None:
+        end_date = date.today()
     total_calendar = BACKTEST_DAYS + LOOKBACK_DAYS + FETCH_BUFFER_DAYS
     start_date = end_date - timedelta(days=total_calendar)
 
@@ -69,23 +68,22 @@ def fetch_data(ticker: str) -> pd.DataFrame:
     if hist.empty:
         raise RuntimeError(f"{ticker} returned no data.")
 
-    # Build clean dataframe
     df = hist[['Close', 'Low']].copy()
     df.columns = ['Close', 'Low']
     df = df.dropna(subset=['Close', 'Low'])
-
     print(f"   → {len(df)} trading days loaded.")
     return df
 
 
-# ═══════════════════════════════════════════════════════════════════
-# Backtest Engine
-# ═══════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════
+# Backtest Engine (parameterized by multiplier)
+# ══════════════════════════════════════════════
 
-def run_backtest(df: pd.DataFrame) -> dict:
+def run_backtest(df: pd.DataFrame, entry_multiplier: float = ENTRY_MULTIPLIER,
+                 verbose: bool = False) -> dict:
     """
-    Walk forward through df, one day at a time.
-    Returns a result dict with trade_log, portfolio_curve, and stats.
+    Walk forward through df.  Returns a flat result dict with all metrics.
+    If verbose=True, prints buy events to stdout.
     """
     closes    = df['Close'].values
     lows      = df['Low'].values
@@ -96,9 +94,7 @@ def run_backtest(df: pd.DataFrame) -> dict:
     buys         = 0
     trade_log    = []
     daily_values = []
-
-    # Start index: first day where we have LOOKBACK_DAYS of prior data
-    start_idx = LOOKBACK_DAYS
+    start_idx    = LOOKBACK_DAYS
 
     for i in range(start_idx, len(df)):
         prev_close  = float(closes[i - 1])
@@ -106,17 +102,13 @@ def run_backtest(df: pd.DataFrame) -> dict:
         today_close = float(closes[i])
         today_date  = dates_idx[i]
 
-        # ── Calculate sigma using only prior data (no lookahead) ──
         lookback_window = pd.Series(closes[i - LOOKBACK_DAYS : i])
-        sigma, method = _calculate_volatility_from_closes(
+        sigma, _ = _calculate_volatility_from_closes(
             lookback_window, LOOKBACK_DAYS, VOL_METHOD, EWMA_LAMBDA
         )
-
-        # ── LOC target price ──
-        loc_price = _calculate_loc_from_sigma(prev_close, sigma, ENTRY_MULTIPLIER)
-
-        # ── Check if LOC triggered ──
+        loc_price = _calculate_loc_from_sigma(prev_close, sigma, entry_multiplier)
         triggered = today_low <= loc_price
+
         buy_price = min(today_close, loc_price) if triggered else None
         buy_amount = 0.0
         buy_shares = 0.0
@@ -129,182 +121,343 @@ def run_backtest(df: pd.DataFrame) -> dict:
             buys += 1
 
             trade_log.append({
-                'date':    today_date,
-                'type':    'BUY',
-                'price':   round(buy_price, 2),
-                'shares':  round(buy_shares, 4),
-                'amount':  round(buy_amount, 2),
-                'sigma':   round(sigma, 4),
-                'loc':     round(loc_price, 2),
+                'date': today_date, 'price': round(buy_price, 2),
+                'shares': round(buy_shares, 4), 'amount': round(buy_amount, 2),
+                'sigma': round(sigma, 4), 'loc': round(loc_price, 2),
                 'cash_remaining': round(cash, 2),
             })
+            if verbose:
+                print(f"  📌 {today_date.date()} | LOC ${loc_price:.2f} hit"
+                      f" | Bought {buy_shares:.2f} sh @ ${buy_price:.2f}"
+                      f" | Sigma {sigma:.4f}")
 
-            print(
-                f"  📌 {today_date.date()}"
-                f" | LOC ${loc_price:.2f} hit"
-                f" | Bought {buy_shares:.2f} sh @ ${buy_price:.2f}"
-                f" | Sigma {sigma:.4f}"
-            )
-
-        # ── Daily portfolio value ──
         portfolio_value = cash + shares * today_close
         daily_values.append({
-            'date':   today_date,
-            'close':  today_close,
-            'loc':    loc_price,
-            'sigma':  sigma,
-            'cash':   cash,
-            'shares': shares,
-            'value':  round(portfolio_value, 2),
-            'triggered': triggered,
+            'date': today_date, 'close': today_close,
+            'value': round(portfolio_value, 2),
         })
 
-    # Build results
-    result = {
-        'df':          df,
-        'trade_log':   trade_log,
-        'daily_values': daily_values,
-        'final_cash':  cash,
-        'final_shares': shares,
-        'total_buys':  buys,
+    # ── Compute metrics ──────────────────────────────────────────
+    dv_array   = np.array([d['value'] for d in daily_values])
+    daily_ret  = dv_array[1:] / dv_array[:-1] - 1
+    sharpe     = float(np.sqrt(252) * daily_ret.mean() / daily_ret.std()) if daily_ret.std() > 0 else 0.0
+
+    peak   = np.maximum.accumulate(dv_array)
+    dd     = (dv_array - peak) / peak
+    mdd    = float(dd.min() * 100)
+
+    asset_start = float(daily_values[0]['close'])
+    asset_end   = float(daily_values[-1]['close'])
+    buy_hold_ret = (asset_end - asset_start) / asset_start * 100
+
+    total_invested = sum(t['amount'] for t in trade_log)
+    avg_buy_price  = np.mean([t['price'] for t in trade_log]) if trade_log else 0
+    final_price    = float(daily_values[-1]['close'])
+
+    wins = sum(1 for t in trade_log if final_price > t['price']) if trade_log else 0
+    win_rate = wins / len(trade_log) * 100 if trade_log else 0.0
+
+    final_val = float(daily_values[-1]['value'])
+    total_ret = (final_val - INITIAL_CASH) / INITIAL_CASH * 100
+
+    return {
+        'multiplier':      entry_multiplier,
+        'total_return':    round(total_ret, 2),
+        'final_value':     round(final_val, 2),
+        'sharpe':          round(sharpe, 2),
+        'mdd':             round(mdd, 2),
+        'buy_hold_ret':    round(buy_hold_ret, 2),
+        'total_buys':      buys,
+        'total_invested':  round(total_invested, 2),
+        'avg_buy_price':   round(avg_buy_price, 2),
+        'win_rate':        round(win_rate, 1),
+        'final_price':     round(final_price, 2),
+        'remaining_cash':  round(cash, 2),
+        'final_shares':    round(shares, 4),
+        'period_start':    daily_values[0]['date'],
+        'period_end':      daily_values[-1]['date'],
+        'trade_log':       trade_log,
+        'daily_values':    daily_values,
     }
-    return result
 
 
-# ═══════════════════════════════════════════════════════════════════
-# Reporting
-# ═══════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════
+# Single-run Reporting
+# ══════════════════════════════════════════════
 
-def print_report(result: dict):
-    dv = result['daily_values']
-    trades = result['trade_log']
-
-    if not dv:
-        print("\n❌ No trading days in simulation.")
-        return
-
-    start_val = float(INITIAL_CASH)
-    end_val   = dv[-1]['value']
-
-    # Portfolio returns
-    total_return  = (end_val - start_val) / start_val * 100
-    period_start  = dv[0]['date']
-    period_end    = dv[-1]['date']
-
-    # Daily return series for Sharpe
-    prices = np.array([d['value'] for d in dv])
-    daily_returns = prices[1:] / prices[:-1] - 1
-    sharpe_ratio  = float(np.sqrt(252) * daily_returns.mean() / daily_returns.std()) \
-                    if daily_returns.std() > 0 else 0.0
-
-    # Max drawdown
-    peak   = np.maximum.accumulate(prices)
-    dd     = (prices - peak) / peak
-    mdd_pct = float(dd.min() * 100)
-
-    # Price return of the asset itself (buy & hold)
-    asset_start = dv[0]['close']
-    asset_end   = dv[-1]['close']
-    asset_return = (asset_end - asset_start) / asset_start * 100
-
-    # Buy stats
-    total_invested = sum(t['amount'] for t in trades)
-    avg_buy_price  = np.mean([t['price'] for t in trades]) if trades else 0
-    final_price    = dv[-1]['close']
-
-    # Win rate: how many trades are in profit at the end
-    if trades:
-        wins = sum(1 for t in trades if final_price > t['price'])
-        win_rate = wins / len(trades) * 100
-    else:
-        win_rate = 0.0
-
-    # ─────────────────────────────────────────────
-    # Print Report
-    # ─────────────────────────────────────────────
+def print_report(r: dict):
     print("\n")
     print("═" * 62)
     print("  📊 Sigma DCA Backtest Report")
     print("═" * 62)
     print(f"  Ticker    : {TICKER}")
-    print(f"  Strategy  : EWMA Sigma (λ={EWMA_LAMBDA}) × {ENTRY_MULTIPLIER} LOC")
+    print(f"  Strategy  : EWMA (λ={EWMA_LAMBDA}) × {r['multiplier']} LOC")
     print(f"  Capital   : ${INITIAL_CASH:,}")
-    print(f"  Period    : {period_start.date() if hasattr(period_start,'date') else period_start}"
-          f"  →  {period_end.date() if hasattr(period_end,'date') else period_end}")
+    print(f"  Period    : {r['period_start'].date()}  →  {r['period_end'].date()}")
     print(f"  Buy size  : ${BUY_AMOUNT:,} / trigger (max {MAX_BUYS}×)")
     print("─" * 62)
 
     print(f"\n  📈 Performance")
-    print(f"     Final Portfolio  : ${end_val:,.2f}")
-    print(f"     Total Return     : {total_return:+.2f}%")
-    print(f"     Buy & Hold (SOXL): {asset_return:+.2f}%")
-    print(f"     Alpha vs B&H     : {total_return - asset_return:+.2f}%")
-    print(f"     Sharpe Ratio     : {sharpe_ratio:.2f}")
-    print(f"     Max Drawdown     : {mdd_pct:.2f}%")
+    print(f"     Final Portfolio  : ${r['final_value']:,.2f}")
+    print(f"     Total Return     : {r['total_return']:+.2f}%")
+    print(f"     Buy & Hold (SOXL): {r['buy_hold_ret']:+.2f}%")
+    print(f"     Alpha vs B&H     : {r['total_return'] - r['buy_hold_ret']:+.2f}%")
+    print(f"     Sharpe Ratio     : {r['sharpe']}")
+    print(f"     Max Drawdown     : {r['mdd']:.2f}%")
 
     print(f"\n  📋 DCA Activity")
-    print(f"     Total LOC Fills  : {result['total_buys']}")
-    print(f"     Total Invested   : ${total_invested:,.2f}")
-    print(f"     Avg Buy Price    : ${avg_buy_price:.2f}")
-    print(f"     Current Price    : ${final_price:.2f}")
-    print(f"     Win Rate         : {win_rate:.1f}%")
-    print(f"     Remaining Cash   : ${result['final_cash']:,.2f}")
+    print(f"     Total LOC Fills  : {r['total_buys']}")
+    print(f"     Total Invested   : ${r['total_invested']:,.2f}")
+    print(f"     Avg Buy Price    : ${r['avg_buy_price']:.2f}")
+    print(f"     Current Price    : ${r['final_price']:.2f}")
+    print(f"     Win Rate         : {r['win_rate']:.1f}%")
+    print(f"     Remaining Cash   : ${r['remaining_cash']:,.2f}")
+    if r['final_shares'] > 0:
+        unrealized = (r['final_price'] - r['avg_buy_price']) * r['final_shares']
+        print(f"     Shares Held      : {r['final_shares']:.4f}")
+        print(f"     Unrealized P&L   : ${unrealized:+,.2f}")
 
-    # Shares & P&L
-    if result['final_shares'] > 0:
-        unrealized_pnl = (final_price - avg_buy_price) * result['final_shares']
-        print(f"     Shares Held      : {result['final_shares']:.4f}")
-        print(f"     Unrealized P&L   : ${unrealized_pnl:+,.2f}")
-
-    # ── Detailed trade log ──────────────────────
-    if trades:
+    if r['trade_log']:
         print(f"\n  📝 Trade Log")
         print(f"  {'Date':<14} {'Price':>8} {'Shares':>10} {'Amount':>9} {'Sigma':>8}")
         print(f"  {'─'*14} {'─'*8} {'─'*10} {'─'*9} {'─'*8}")
-        for t in trades:
-            d = t['date']
-            d_str = d.strftime('%Y-%m-%d') if hasattr(d, 'strftime') else str(d)
-            print(
-                f"  {d_str:<14} ${t['price']:>6.2f} {t['shares']:>10.2f} ${t['amount']:>7,.0f} {t['sigma']:>8.4f}"
-            )
+        for t in r['trade_log']:
+            print(f"  {t['date'].strftime('%Y-%m-%d'):<14}"
+                  f" ${t['price']:>6.2f} {t['shares']:>10.2f}"
+                  f" ${t['amount']:>7,.0f} {t['sigma']:>8.4f}")
 
-
-
-    # ── Monthly breakdown ──────────────────────
-    monthly_vals = {}
-    for d in dv:
-        dt = d['date']
-        month_key = dt.strftime('%Y-%m') if hasattr(dt, 'strftime') else str(dt)[:7]
-        monthly_vals.setdefault(month_key, []).append(d['value'])
-    if len(monthly_vals) > 1:
+    # Monthly breakdown
+    monthly = {}
+    for d in r['daily_values']:
+        mk = d['date'].strftime('%Y-%m')
+        monthly.setdefault(mk, []).append(d['value'])
+    if len(monthly) > 1:
         print(f"\n  📅 Monthly Portfolio Value")
         print(f"  {'Month':<8} {'Start':>10} {'End':>10} {'Return':>8}")
         print(f"  {'─'*8} {'─'*10} {'─'*10} {'─'*8}")
-        months_sorted = sorted(monthly_vals.keys())
-        for m in months_sorted:
-            vals = monthly_vals[m]
-            m_start = vals[0]
-            m_end   = vals[-1]
-            m_ret   = (m_end - m_start) / m_start * 100
-            print(f"  {m:<8} ${m_start:>7,.0f} ${m_end:>7,.0f} {m_ret:>+7.2f}%")
+        for m in sorted(monthly):
+            vals = monthly[m]
+            s, e = vals[0], vals[-1]
+            print(f"  {m:<8} ${s:>7,.0f} ${e:>7,.0f} {(e-s)/s*100:>+7.2f}%")
 
     print("\n" + "═" * 62)
     print("  ✅ Backtest Complete")
     print("═" * 62)
 
 
-# ═══════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════
+# Multiplier Sweep
+# ══════════════════════════════════════════════
+
+def run_multiplier_sweep(df: pd.DataFrame):
+    """Run backtest for each multiplier in [SWEEP_START .. SWEEP_STOP]."""
+    multipliers = np.arange(SWEEP_START, SWEEP_STOP + 1e-9, SWEEP_STEP)
+    results = []
+
+    print(f"\n🧪 Multiplier Sensitivity Sweep")
+    print(f"   Range : {SWEEP_START} → {SWEEP_STOP} (step {SWEEP_STEP})")
+    print(f"   Tests : {len(multipliers)}")
+    print("─" * 106)
+    header = (f"  {'Mult':>5} | {'Return':>8} | {'Final $':>10} | {'Sharpe':>7}"
+              f" | {'MDD':>7} | {'Buys':>5} | {'Avg$':>7} | {'WinRate':>7} | {'Cash':>8}")
+    print(header)
+    print("  " + "─" * 100)
+
+    for mult in multipliers:
+        r = run_backtest(df, entry_multiplier=round(mult, 1), verbose=False)
+        results.append(r)
+        print(f"  {mult:>5.1f} | {r['total_return']:>+7.2f}%"
+              f" | ${r['final_value']:>8,.0f} | {r['sharpe']:>7.2f}"
+              f" | {r['mdd']:>6.2f}% | {r['total_buys']:>3d}"
+              f" | ${r['avg_buy_price']:>6.2f} | {r['win_rate']:>5.1f}%"
+              f" | ${r['remaining_cash']:>7,.0f}")
+
+    # ── Find optimum by several metrics ────────────────────────────
+    print("─" * 106)
+
+    best_return   = max(results, key=lambda r: r['total_return'])
+    best_sharpe   = max(results, key=lambda r: r['sharpe'])
+    best_mdd      = min(results, key=lambda r: r['mdd'])   # least negative
+    best_winrate  = max(results, key=lambda r: r['win_rate'])
+    best_alpha    = max(results, key=lambda r: r['total_return'] - r['buy_hold_ret'])
+
+    print(f"\n  🏆 Optimum by metric:")
+    print(f"     Max Return     : multiplier={best_return['multiplier']:.1f}"
+          f"  → {best_return['total_return']:+.2f}%  (Sharpe {best_return['sharpe']})")
+    print(f"     Max Sharpe     : multiplier={best_sharpe['multiplier']:.1f}"
+          f"  → {best_sharpe['sharpe']:.2f}  (Return {best_sharpe['total_return']:+.2f}%)")
+    print(f"     Min Drawdown   : multiplier={best_mdd['multiplier']:.1f}"
+          f"  → {best_mdd['mdd']:.2f}%")
+    print(f"     Max Win Rate   : multiplier={best_winrate['multiplier']:.1f}"
+          f"  → {best_winrate['win_rate']:.1f}%")
+    print(f"     Max Alpha      : multiplier={best_alpha['multiplier']:.1f}"
+          f"  → {best_alpha['total_return'] - best_alpha['buy_hold_ret']:+.2f}%")
+
+    # ── Current 1.41 baseline for comparison ───────────────────────
+    baseline = next((r for r in results if abs(r['multiplier'] - 1.41) < 0.05), None)
+    if baseline:
+        print(f"\n  📌 Current baseline (mult=1.41):")
+        print(f"     Return {baseline['total_return']:+.2f}%"
+              f" | Sharpe {baseline['sharpe']:.2f}"
+              f" | MDD {baseline['mdd']:.2f}%"
+              f" | WinRate {baseline['win_rate']:.1f}%")
+    print("\n" + "═" * 62)
+    print("  ✅ Sweep Complete")
+    print("═" * 62)
+
+    return results
+
+
+# ══════════════════════════════════════════════
+# Multi-Period Sweep (Generalization Test)
+# ══════════════════════════════════════════════
+
+def run_multi_period_sweep():
+    """
+    Run multiplier sweep across multiple historical 1-year periods to test
+    whether a single multiplier generalizes across market regimes.
+    """
+    today = date.today()
+    periods = [
+        (today - timedelta(days=365), today, "🔥 Current (Strong Bull)"),
+        (today - timedelta(days=730), today - timedelta(days=365), "📈 Bull"),
+        (today - timedelta(days=1095), today - timedelta(days=730), "📊 Recovery"),
+        (today - timedelta(days=1460), today - timedelta(days=1095), "📉 Bear Bottom"),
+        (today - timedelta(days=1825), today - timedelta(days=1460), "💥 Bear Crash"),
+    ]
+
+    multipliers = np.arange(SWEEP_START, SWEEP_STOP + 1e-9, SWEEP_STEP)
+
+    print(f"\n🌍 Multi-Period Multiplier Generalization Test")
+    print(f"   Testing {len(periods)} market regimes × {len(multipliers)} multipliers")
+    print("=" * 120)
+
+    all_results = {}  # period_label -> {multiplier -> result}
+
+    for start_dt, end_dt, label in periods:
+        print(f"\n📅 Period: {label}  ({start_dt} → {end_dt})")
+        print("─" * 120)
+
+        df = fetch_data(TICKER, end_date=end_dt)
+        # Trim to only cover the intended backtest window (compare by date
+        # to avoid timezone-aware vs timezone-naive dtype mismatch)
+        df = df[df.index.date <= end_dt]
+
+        period_results = []
+        for mult in multipliers:
+            mult_rounded = round(mult, 1)
+            r = run_backtest(df, entry_multiplier=mult_rounded, verbose=False)
+            period_results.append(r)
+
+        all_results[label] = {r['multiplier']: r for r in period_results}
+
+        # Print summary for this period
+        best_by_return = max(period_results, key=lambda r: r['total_return'])
+        best_by_sharpe = max(period_results, key=lambda r: r['sharpe'])
+
+        # Also show baseline 0.9, 1.41, 1.618
+        for ref_mult in [0.9, 1.41, 1.618]:
+            ref = next((r for r in period_results if abs(r['multiplier'] - ref_mult) < 0.05), None)
+            if ref:
+                print(f"   mult={ref_mult:5.2f} → Return {ref['total_return']:>+7.2f}%"
+                      f" | Sharpe {ref['sharpe']:>5.2f} | MDD {ref['mdd']:>6.2f}%"
+                      f" | Buys {ref['total_buys']:>2d} | Win {ref['win_rate']:>5.1f}%")
+
+        print(f"   🏆 Best Return   : mult={best_by_return['multiplier']:.1f}"
+              f" → {best_by_return['total_return']:+.2f}% (Sharpe {best_by_return['sharpe']})")
+        print(f"   🏆 Best Sharpe   : mult={best_by_sharpe['multiplier']:.1f}"
+              f" → {best_by_sharpe['sharpe']:.2f} (Return {best_by_sharpe['total_return']:+.2f}%)")
+
+    # ── Cross-period ranking ───────────────────────────────────────
+    print("\n" + "═" * 120)
+    print("  🏆 Cross-Period Consistency Ranking")
+    print("  (lower rank = more consistent across all periods)")
+    print("─" * 120)
+
+    # For each multiplier, calculate its average rank across all periods
+    mult_rankings = {}
+    for mult_raw in multipliers:
+        mult = round(float(mult_raw), 1)
+        ranks = []
+        for label in all_results:
+            period_results = list(all_results[label].values())
+            # Rank by return (1 = best)
+            sorted_by_return = sorted(period_results, key=lambda r: -r['total_return'])
+            rank = next(i + 1 for i, r in enumerate(sorted_by_return)
+                        if abs(r['multiplier'] - mult) < 0.05)
+            ranks.append(rank)
+
+        avg_rank = np.mean(ranks)
+        std_rank = np.std(ranks)
+        mult_rankings[mult] = (avg_rank, std_rank)
+
+    # Show top 10 most consistent multipliers
+    print(f"  {'Rank':<6} {'Mult':>6} {'AvgRank':>8} {'StdRank':>8} {'Period1':>8} {'Period2':>8} {'Period3':>8} {'Period4':>8} {'Period5':>8}")
+    print(f"  {'─'*6} {'─'*6} {'─'*8} {'─'*8} {'─'*8} {'─'*8} {'─'*8} {'─'*8} {'─'*8}")
+
+    sorted_mults = sorted(mult_rankings.items(), key=lambda x: x[1][0])
+    for rank_idx, (mult, (avg_rank, std_rank)) in enumerate(sorted_mults[:12], 1):
+        # Get return for each period
+        returns = []
+        for label in all_results:
+            r = all_results[label][mult]
+            returns.append(f"{r['total_return']:>+7.2f}%")
+        print(f"  {rank_idx:<6} {mult:>5.1f}  {avg_rank:>7.2f}  {std_rank:>7.2f}  "
+              + "  ".join(returns))
+
+    # ── Find the overall best ──────────────────────────────────────
+    # Best by average rank
+    best_consistent = sorted_mults[0]
+    print(f"\n  🥇 Most Consistent Multiplier: {best_consistent[0]:.1f}"
+          f" (avg rank {best_consistent[1][0]:.2f}, std {best_consistent[1][1]:.2f})")
+
+    # Best average return across periods
+    mult_avg_returns = {}
+    for mult_raw in multipliers:
+        mult = round(float(mult_raw), 1)
+        rets = [all_results[label][mult]['total_return'] for label in all_results]
+        if rets:
+            mult_avg_returns[mult] = np.mean(rets)
+    best_avg_return = max(mult_avg_returns.items(), key=lambda x: x[1])
+    print(f"  🥇 Best Avg Return  : multiplier={best_avg_return[0]:.1f}"
+          f" → avg {best_avg_return[1]:+.2f}% across all periods")
+
+    # Best by Sharpe consistency
+    mult_avg_sharpe = {}
+    for mult_raw in multipliers:
+        mult = round(float(mult_raw), 1)
+        shs = [all_results[label][mult]['sharpe'] for label in all_results]
+        if shs:
+            mult_avg_sharpe[mult] = np.mean(shs)
+    best_avg_sharpe = max(mult_avg_sharpe.items(), key=lambda x: x[1])
+    print(f"  🥇 Best Avg Sharpe   : multiplier={best_avg_sharpe[0]:.1f}"
+          f" → avg Sharpe {best_avg_sharpe[1]:.2f}")
+
+    print("\n" + "═" * 120)
+    print("  ✅ Multi-Period Sweep Complete")
+    print("═" * 120)
+
+
+# ══════════════════════════════════════════════
 # Main
-# ═══════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════
 
 if __name__ == "__main__":
-    print(f"\n🚀 Sigma DCA Backtest")
-    print(f"   Asset  : {TICKER} (100%)")
-    print(f"   Capital: ${INITIAL_CASH:,}")
-    print(f"   Period : Recent {BACKTEST_DAYS} trading days (~1 year)")
-    print(f"   Method : {VOL_METHOD} λ={EWMA_LAMBDA} × {ENTRY_MULTIPLIER}")
-    print("─" * 62)
+    sweep_mode     = "--sweep" in sys.argv
+    multi_sweep    = "--multi-sweep" in sys.argv
 
-    df = fetch_data(TICKER)
-    result = run_backtest(df)
-    print_report(result)
+    if multi_sweep:
+        run_multi_period_sweep()
+    elif sweep_mode:
+        df = fetch_data(TICKER)
+        run_multiplier_sweep(df)
+    else:
+        df = fetch_data(TICKER)
+        print(f"\n🚀 Sigma DCA Backtest")
+        print(f"   Asset  : {TICKER} (100%)")
+        print(f"   Capital: ${INITIAL_CASH:,}")
+        print(f"   Period : Recent {BACKTEST_DAYS} trading days (~1 year)")
+        print(f"   Method : {VOL_METHOD} λ={EWMA_LAMBDA} × {ENTRY_MULTIPLIER}")
+        print("─" * 62)
+        r = run_backtest(df, entry_multiplier=ENTRY_MULTIPLIER, verbose=True)
+        print_report(r)

@@ -4,7 +4,7 @@
     "POSITIONS": {
         "TQQQ": {
             "LOOKBACK_DAYS": 252,
-            "ENTRY_MULTIPLIER": 1.41,
+            "ENTRY_MULTIPLIER": 1.1,
             "VOL_METHOD": "EWMA",
             "EWMA_LAMBDA": 0.94,
             "DAILY_SIGMA": 0.0355,
@@ -16,7 +16,7 @@
         },
         "SOXL": {
             "LOOKBACK_DAYS": 252,
-            "ENTRY_MULTIPLIER": 1.41,
+            "ENTRY_MULTIPLIER": 1.1,
             "VOL_METHOD": "EWMA",
             "EWMA_LAMBDA": 0.94,
             "DAILY_SIGMA": 0.0798,

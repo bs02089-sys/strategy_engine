@@ -144,7 +144,7 @@ def refresh_sigma_if_stale(cfg: dict) -> list[str]:
         vol_method = str(pos.get("VOL_METHOD", "EWMA")).upper()
         ewma_lambda = float(pos.get("EWMA_LAMBDA", 0.94))
         pos["LOOKBACK_DAYS"] = lookback_days
-        pos.setdefault("ENTRY_MULTIPLIER", 1.41)
+        pos.setdefault("ENTRY_MULTIPLIER", 1.1)
         pos["VOL_METHOD"] = vol_method
         pos["EWMA_LAMBDA"] = ewma_lambda
         
@@ -463,7 +463,7 @@ def calculate_loc_price(ticker: str, prev_close: float, cfg: dict) -> float:
     Calculate LOC target price.
     """
     pos_cfg = cfg.setdefault("POSITIONS", {}).setdefault(ticker, {})
-    multiplier = pos_cfg.get("ENTRY_MULTIPLIER", 1.41)
+    multiplier = pos_cfg.get("ENTRY_MULTIPLIER", 1.1)
     sigma = pos_cfg.get("DAILY_SIGMA")
     lookback_days = int(pos_cfg.get("LOOKBACK_DAYS", 252))
     vol_method = str(pos_cfg.get("VOL_METHOD", "EWMA")).upper()
