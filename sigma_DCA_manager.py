@@ -17,6 +17,7 @@ import shutil
 import tempfile
 import time
 import numpy as np
+import pandas as pd
 import requests
 import yfinance as yf
 from datetime import datetime, timezone, date, time as dtime, timedelta
@@ -336,7 +337,10 @@ def get_period_high(ticker: str, lookback_days: int = 252, max_retries: int = 3)
             recent_highs = highs[-lookback_days:] if len(highs) >= lookback_days else highs
             peak_idx = recent_highs.idxmax()
             peak_price = float(recent_highs.loc[peak_idx])
-            peak_date_str = peak_idx.date().strftime("%Y-%m-%d") if hasattr(peak_idx, "date") else str(peak_idx)
+            try:
+                peak_date_str = pd.Timestamp(peak_idx).strftime("%Y-%m-%d")
+            except Exception:
+                peak_date_str = str(peak_idx)
             return peak_price, peak_date_str
         except Exception as e:
             last_err = e
