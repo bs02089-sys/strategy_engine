@@ -563,46 +563,29 @@ def _format_all_in_line(ticker: str) -> str | None:
 
 
 # ==============================================================================
-# Macro/Technical Signal Engine
+# Trend Signal Engine (VIX-free)
 # ==============================================================================
 
-def get_current_vix() -> float | None:
-    try:
-        vix_hist = yf.Ticker("^VIX").history(period="5d", interval="1d")
-        if vix_hist.empty:
-            return None
-        vix_closes = vix_hist['Close'].dropna()
-        if vix_closes.empty:
-            return None
-        return float(vix_closes.iloc[-1])
-    except Exception:
-        return None
-
-
-def check_macro_and_technical_signals(ticker: str, pos_cfg: dict, current_vix: float | None) -> tuple[bool, bool, str]:
+def check_macro_and_technical_signals(ticker: str, pos_cfg: dict) -> tuple[bool, bool, str]:
     """
-    Evaluates Buy/Sell signals based on investment type, price trends, and VIX.
+    Evaluates Buy/Sell signals based on investment type and price trends.
 
-    Infrastructure/DCA assets (LONG_YEAR etc.) use VIX only — no yfinance
-    call is made for them, saving one API round-trip per ticker per run.
-    Rotation/End-of-Cycle assets (ROTATION_3M, END_DEC) additionally fetch
-    120d price data for MA-based trend confirmation.
+    Infrastructure/DCA assets (LONG_YEAR etc.): always return active buy
+    signal — the mechanical LOC strategy runs unconditionally, with only
+    the sigma-based LOC target determining entry.
+
+    Rotation/End-of-Cycle assets (ROTATION_3M, END_DEC): fetch 120d price
+    data for MA-based trend confirmation (MA20/MA60 crossover).
     """
-    if current_vix is None:
-        return False, False, "VIX data delay (neutral)"
-
     invest_type = str(pos_cfg.get("INVEST_TYPE", "")).upper()
 
     # ── Infrastructure / DCA assets (LONG_YEAR, etc.) ───────────────
-    # VIX-only logic: no price data needed.
+    # Pure LOC mechanical strategy — no macro overlay needed.
     if invest_type not in {"ROTATION_3M", "END_DEC"}:
-        buy_signal = bool(current_vix < 23)
-        sell_signal = bool(current_vix > 28)
-        reason = "AI infra cycle valid" if buy_signal else "Global macro risk"
-        return buy_signal, sell_signal, reason
+        return True, False, "LOC mechanical strategy active"
 
     # ── Rotation / End-of-Cycle assets ──────────────────────────────
-    # Need price trend (MA20, MA60) on top of VIX.
+    # Price trend (MA20, MA60) determines signal.
     try:
         stock = yf.Ticker(ticker)
         hist = stock.history(period="120d", interval="1d", auto_adjust=False)
@@ -620,9 +603,9 @@ def check_macro_and_technical_signals(ticker: str, pos_cfg: dict, current_vix: f
     except Exception as e:
         return False, False, f"API delay ({e})"
 
-    buy_signal = bool(current_price > ma20 and current_price > ma60 and current_vix < 20)
-    sell_signal = bool(current_price < ma60 or current_vix > 25)
-    reason = f"Uptrend (VIX: {current_vix:.1f})" if buy_signal else "Mixed trend or risk management"
+    buy_signal = bool(current_price > ma20 and current_price > ma60)
+    sell_signal = bool(current_price < ma60)
+    reason = "MA uptrend (price > MA20 > MA60)" if buy_signal else "MA downtrend or mixed"
     return buy_signal, sell_signal, reason
 
 
@@ -786,10 +769,9 @@ def _build_briefing_lines(now_ny: datetime, cfg: dict) -> list[str]:
     lines.append("─" * 40)
 
     positions = cfg.get("POSITIONS", {})
-    current_vix = get_current_vix()
 
     for ticker, pos_cfg in positions.items():
-        buy_sig, sell_sig, reason = check_macro_and_technical_signals(ticker, pos_cfg, current_vix)
+        buy_sig, sell_sig, reason = check_macro_and_technical_signals(ticker, pos_cfg)
         
         prev_close, last_date_str = get_prev_close(ticker)
         if prev_close is None:
@@ -811,17 +793,9 @@ def _build_briefing_lines(now_ny: datetime, cfg: dict) -> list[str]:
             lines.append(f"• 🔴 **[D+{exit_days} Rotation Maturity] Period expired — Review for sell! (Elapsed: {elapsed_bd} days)**")
 
         if sell_sig is True:
-            invest_type = str(pos_cfg.get("INVEST_TYPE", "")).upper()
-            if invest_type in {"ROTATION_3M", "END_DEC"}:
-                lines.append("• 🚨 **[Warning] Risk area — Check LOC criteria conservatively**")
-                lines.append(_format_loc_action_line(ticker, prev_close, cfg))
-            else:
-                lines.append("• 🚨 **[Warning] Risk area — Review LOC execution probability**")
-                lines.append(_format_loc_action_line(ticker, prev_close, cfg))
-        elif buy_sig is True:
+            lines.append("• 🚨 **[Warning] Risk area — Check LOC criteria conservatively**")
             lines.append(_format_loc_action_line(ticker, prev_close, cfg))
         else:
-            lines.append("• 🟡 **[Note] Neutral area — No active buy signal, but mechanical LOC order remains valid**")
             lines.append(_format_loc_action_line(ticker, prev_close, cfg))
 
         all_in_line = _format_all_in_line(ticker)
