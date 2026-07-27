@@ -438,7 +438,7 @@ def format_drawdown_line(ticker: str, prev_close: float, lookback_days: int) -> 
 
     drawdown_pct, recovery_needed_pct = calculate_drawdown_and_recovery(prev_close, peak_price)
     return (
-        f"• 📈 **전고점 대비:** ${peak_price:.2f} ({peak_date_str}) 기준 "
+        f"• 📈 **전고점:** ${peak_price:.2f} ({peak_date_str}) 기준 "
         f"하락률 **{drawdown_pct:.2f}%** / 회복 필요 상승률 **{recovery_needed_pct:.2f}%**"
     )
 
