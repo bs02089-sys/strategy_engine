@@ -12,7 +12,8 @@
             "LAST_SIGMA_METHOD": "EWMA",
             "LAST_EWMA_LAMBDA": 0.94,
             "START_DATE": "2026-07-25",
-            "INVEST_TYPE": "LONG_YEAR"
+            "INVEST_TYPE": "LONG_YEAR",
+            "ALLOCATION_PCT": 10
         },
         "SOXL": {
             "LOOKBACK_DAYS": 252,
@@ -24,7 +25,8 @@
             "LAST_SIGMA_METHOD": "EWMA",
             "LAST_EWMA_LAMBDA": 0.94,
             "START_DATE": "2026-07-25",
-            "INVEST_TYPE": "LONG_YEAR"
+            "INVEST_TYPE": "LONG_YEAR",
+            "ALLOCATION_PCT": 90
         }
     },
     "STRATEGY": {
