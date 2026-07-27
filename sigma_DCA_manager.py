@@ -19,7 +19,7 @@ import time
 import numpy as np
 import requests
 import yfinance as yf
-from datetime import datetime, timezone, date
+from datetime import datetime, timezone, date, time as dtime, timedelta
 from zoneinfo import ZoneInfo
 
 
@@ -32,6 +32,14 @@ if hasattr(sys.stderr, "reconfigure"):
 CONFIG_PATH            = "portfolio_config.json"
 _DISCORD_TITLE_LIMIT   = 256
 _DISCORD_CONTENT_LIMIT = 4096
+
+# Regular NYSE close is 16:00 America/New_York. A short settle buffer is
+# added on top so the daily bar yfinance reports for "today" isn't treated
+# as final while it's still catching up right at the closing bell — without
+# this, a run at e.g. 16:02 could grab a not-yet-fully-settled print.
+NY_MARKET_CLOSE_HOUR            = 16
+NY_MARKET_CLOSE_MINUTE          = 0
+NY_CLOSE_SETTLE_BUFFER_MINUTES  = 15
 
 
 # ════════════════════════════════════════════
@@ -222,12 +230,28 @@ def _calculate_loc_from_sigma(prev_close: float, sigma: float, multiplier: float
     
 def get_prev_close(ticker: str) -> tuple[float | None, str]:
     """
-    Reliable previous close lookup using yfinance (with 3 retries)
+    Reliable FINAL-close lookup using yfinance (with 3 retries).
+
+    Always resolves to the official close of the most recently COMPLETED
+    trading session — never a still-live/forming intraday print:
+      - If today's session has already closed (past NY market close +
+        settle buffer), use today's now-final close.
+      - Otherwise (market still open, or hasn't opened yet today), use the
+        last prior session's already-final close.
+    This makes the result deterministic based on market state rather than
+    on what wall-clock hour happens to be it's run at.
     """
     print(f"🔍 Starting price lookup for {ticker}...")
     now_ny = datetime.now(ZoneInfo("America/New_York"))
     today_ny = now_ny.date()
-    
+
+    market_close_settled_at = datetime.combine(
+        today_ny,
+        dtime(NY_MARKET_CLOSE_HOUR, NY_MARKET_CLOSE_MINUTE),
+        tzinfo=ZoneInfo("America/New_York"),
+    ) + timedelta(minutes=NY_CLOSE_SETTLE_BUFFER_MINUTES)
+    today_session_settled = now_ny >= market_close_settled_at
+
     for attempt in range(1, 4):
         try:
             print(f"   → Trying yfinance history ({attempt}/3)...")
@@ -239,9 +263,11 @@ def get_prev_close(ticker: str) -> tuple[float | None, str]:
                 if not close_series.empty:
                     last_idx = close_series.index[-1]
                     last_date = last_idx.date() if hasattr(last_idx, "date") else last_idx
-                    
-                    # Logic: If during trading hours, use index -2, otherwise index -1
-                    if last_date == today_ny and now_ny.hour < 16 and len(close_series) >= 2:
+
+                    # If the most recent bar is today's AND today's session
+                    # hasn't finished settling yet, that bar isn't final —
+                    # fall back to the prior (already-final) session's close.
+                    if last_date == today_ny and not today_session_settled and len(close_series) >= 2:
                         prev_close = float(close_series.iloc[-2])
                         prev_date = close_series.index[-2].date()
                         date_str = prev_date.strftime("%m-%d")
@@ -262,14 +288,21 @@ def get_prev_close(ticker: str) -> tuple[float | None, str]:
         if attempt < 3:
             time.sleep(2.0)
 
-    # Info fallback
+    # Info fallback — "previousClose"/"regularMarketPreviousClose" are
+    # official final closes, so they're tried first. "currentPrice" and
+    # "regularMarketPrice" can be a still-live intraday quote, so they're
+    # only used as a last resort when history and the close fields all
+    # failed, and are flagged as such in the log.
     try:
         print(f"   → Trying yfinance info fallback...")
         info = yf.Ticker(ticker).info
         for key in ["previousClose", "regularMarketPreviousClose", "currentPrice", "regularMarketPrice"]:
             price = _safe_float(info.get(key))
             if price is not None and not np.isnan(price):
-                print(f"✅ {ticker} info success: ${price:.2f} (key: {key})")
+                if key in {"currentPrice", "regularMarketPrice"}:
+                    print(f"⚠️ {ticker} info fallback used a possibly-live quote (key: {key}): ${price:.2f}")
+                else:
+                    print(f"✅ {ticker} info success: ${price:.2f} (key: {key})")
                 return price, "N/A"
     except Exception as e:
         print(f"   ⚠️ Info fallback failed: {e}")
@@ -303,13 +336,7 @@ def get_period_high(ticker: str, lookback_days: int = 252, max_retries: int = 3)
             recent_highs = highs[-lookback_days:] if len(highs) >= lookback_days else highs
             peak_idx = recent_highs.idxmax()
             peak_price = float(recent_highs.loc[peak_idx])
-            if isinstance(peak_idx, (datetime, date)):
-                peak_date_str = peak_idx.strftime("%Y-%m-%d")
-            else:
-                try:
-                    peak_date_str = datetime.fromisoformat(str(peak_idx)).strftime("%Y-%m-%d")
-                except (TypeError, ValueError):
-                    peak_date_str = str(peak_idx)
+            peak_date_str = peak_idx.date().strftime("%Y-%m-%d") if hasattr(peak_idx, "date") else str(peak_idx)
             return peak_price, peak_date_str
         except Exception as e:
             last_err = e
