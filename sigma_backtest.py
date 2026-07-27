@@ -33,10 +33,12 @@ from sigma_DCA_manager import (
 # Configuration
 # ══════════════════════════════════════════════
 
+import json
+
+CONFIG_PATH       = "portfolio_config.json"
 INITIAL_CASH      = 50_000
 TICKER            = "SOXL"
 LOOKBACK_DAYS     = 252
-ENTRY_MULTIPLIER  = 1.1           # optimal across 5 market regimes (multi-period sweep)
 VOL_METHOD        = "EWMA"
 EWMA_LAMBDA       = 0.94
 BUY_AMOUNT        = 2_500
@@ -48,6 +50,23 @@ FETCH_BUFFER_DAYS = 60
 SWEEP_START = 0.6
 SWEEP_STOP  = 3.0
 SWEEP_STEP  = 0.1
+
+
+def load_entry_multiplier() -> float:
+    """Read ENTRY_MULTIPLIER from portfolio_config.json (single source of truth)."""
+    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+        cfg = json.load(f)
+    positions = cfg.get("POSITIONS", {})
+    if TICKER in positions and "ENTRY_MULTIPLIER" in positions[TICKER]:
+        return float(positions[TICKER]["ENTRY_MULTIPLIER"])
+    # Try first available position
+    for pos in positions.values():
+        if "ENTRY_MULTIPLIER" in pos:
+            return float(pos["ENTRY_MULTIPLIER"])
+    raise KeyError(f"ENTRY_MULTIPLIER not found in {CONFIG_PATH} for {TICKER} or any position")
+
+
+ENTRY_MULTIPLIER = load_entry_multiplier()
 
 
 # ══════════════════════════════════════════════
