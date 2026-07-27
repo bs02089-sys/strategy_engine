@@ -264,22 +264,6 @@ def get_prev_close(ticker: str) -> tuple[float | None, str]:
                     last_idx = close_series.index[-1]
                     last_date = last_idx.date() if hasattr(last_idx, "date") else last_idx
 
-                    # DIAGNOSTIC: print what yfinance actually returned for the
-                    # last few sessions, plus the settle-check inputs, so a
-                    # yfinance data-lag issue (stale last row) can be told apart
-                    # from a bug in the settle-buffer comparison itself.
-                    tail = close_series.tail(5)
-                    tail_str = ", ".join(
-                        f"{idx.date() if hasattr(idx, 'date') else idx}={val:.2f}"
-                        for idx, val in tail.items()
-                    )
-                    print(f"   🩺 [debug] {ticker} raw last rows: {tail_str}")
-                    print(
-                        f"   🩺 [debug] now_ny={now_ny.isoformat()} today_ny={today_ny} "
-                        f"last_date={last_date} settle_deadline={market_close_settled_at.isoformat()} "
-                        f"today_session_settled={today_session_settled}"
-                    )
-
                     # If the most recent bar is today's AND today's session
                     # hasn't finished settling yet, that bar isn't final —
                     # fall back to the prior (already-final) session's close.
