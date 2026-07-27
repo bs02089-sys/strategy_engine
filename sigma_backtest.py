@@ -293,10 +293,10 @@ def run_multiplier_sweep(df: pd.DataFrame):
     print(f"     Max Alpha      : multiplier={best_alpha['multiplier']:.1f}"
           f"  → {best_alpha['total_return'] - best_alpha['buy_hold_ret']:+.2f}%")
 
-    # ── Current 1.41 baseline for comparison ───────────────────────
+    # ── Show old 1.41 baseline for historical reference ───────────
     baseline = next((r for r in results if abs(r['multiplier'] - 1.41) < 0.05), None)
     if baseline:
-        print(f"\n  📌 Current baseline (mult=1.41):")
+        print(f"\n  📌 Previous baseline (mult=1.41, for reference):")
         print(f"     Return {baseline['total_return']:+.2f}%"
               f" | Sharpe {baseline['sharpe']:.2f}"
               f" | MDD {baseline['mdd']:.2f}%"
