@@ -1,11 +1,11 @@
 {
-    "timestamp": "2026-07-28T00:02:14.648161",
+    "timestamp": "2026-07-28T23:58:04.586654",
     "total_score": 7,
     "signals": [
         {
             "name": "Yield Curve Inversion",
             "score": 2,
-            "detail": "Re-steepening in progress (+0.34%p) (+2)"
+            "detail": "Re-steepening in progress (+0.35%p) (+2)"
         },
         {
             "name": "Market Breadth",
@@ -15,7 +15,7 @@
         {
             "name": "Credit Spread",
             "score": 0,
-            "detail": "HY stable (2.79%) | IG stable (0.80%)"
+            "detail": "HY stable (2.81%) | IG stable (0.81%)"
         },
         {
             "name": "Fed Policy Cycle",
@@ -25,7 +25,7 @@
         {
             "name": "Valuation Overheat",
             "score": 2,
-            "detail": "CAPE 40.47 (Critical) (+2)"
+            "detail": "CAPE 40.57 (Critical) (+2)"
         },
         {
             "name": "Leading Indicators",
@@ -35,7 +35,7 @@
         {
             "name": "Momentum Strategy",
             "score": 1,
-            "detail": "SPX momentum healthy (11.0%) (+0) | Defensive sectors outperform growth (+6.9% gap) (+1)"
+            "detail": "SPX momentum healthy (11.0%) (+0) | Defensive sectors outperform growth (+5.5% gap) (+1)"
         }
     ]
 }
