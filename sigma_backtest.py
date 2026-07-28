@@ -54,7 +54,7 @@ SWEEP_STOP  = 3.0
 SWEEP_STEP  = 0.1
 
 
-def load_entry_multiplier(ticker: str = None) -> float:
+def load_entry_multiplier(ticker: str | None = None) -> float:
     """Read ENTRY_MULTIPLIER from portfolio_config.json for a given ticker.
     If ticker is None, uses the global TICKER, then falls back to first position."""
     target = ticker if ticker else TICKER
@@ -77,7 +77,7 @@ ENTRY_MULTIPLIER = load_entry_multiplier()
 # Data Fetching
 # ══════════════════════════════════════════════
 
-def fetch_data(ticker: str, end_date: date = None) -> pd.DataFrame:
+def fetch_data(ticker: str, end_date: date | None = None) -> pd.DataFrame:
     """Download OHLCV data for backtest ending on end_date (default: today)."""
     if end_date is None:
         end_date = date.today()
@@ -91,9 +91,9 @@ def fetch_data(ticker: str, end_date: date = None) -> pd.DataFrame:
     if hist.empty:
         raise RuntimeError(f"{ticker} returned no data.")
 
-    df = hist[['Close', 'Low']].copy()
+    df: pd.DataFrame = hist[['Close', 'Low']].copy()  # type: ignore[assignment]
     df.columns = ['Close', 'Low']
-    df = df.dropna(subset=['Close', 'Low'])
+    df = df.dropna(subset=['Close', 'Low'])  # type: ignore[call-overload]
     print(f"   → {len(df)} trading days loaded.")
     return df
 
@@ -104,7 +104,7 @@ def fetch_data(ticker: str, end_date: date = None) -> pd.DataFrame:
 
 def run_backtest(df: pd.DataFrame, entry_multiplier: float = ENTRY_MULTIPLIER,
                  verbose: bool = False,
-                 initial_cash: float = None, buy_amount: float = None) -> dict:
+                 initial_cash: float | None = None, buy_amount: float | None = None) -> dict:
     """
     Walk forward through df.  Returns a flat result dict with all metrics.
     If verbose=True, prints buy events to stdout.
@@ -129,7 +129,7 @@ def run_backtest(df: pd.DataFrame, entry_multiplier: float = ENTRY_MULTIPLIER,
         prev_close  = float(closes[i - 1])
         today_low   = float(lows[i])
         today_close = float(closes[i])
-        today_date  = dates_idx[i]
+        today_date: pd.Timestamp = dates_idx[i]  # type: ignore[assignment]
 
         lookback_window = pd.Series(closes[i - LOOKBACK_DAYS : i])
         sigma, _ = _calculate_volatility_from_closes(
@@ -138,11 +138,11 @@ def run_backtest(df: pd.DataFrame, entry_multiplier: float = ENTRY_MULTIPLIER,
         loc_price = _calculate_loc_from_sigma(prev_close, sigma, entry_multiplier)
         triggered = today_low <= loc_price
 
-        buy_price = min(today_close, loc_price) if triggered else None
+        buy_price: float | None = min(today_close, loc_price) if triggered else None
         buy_amt = 0.0
         buy_shares = 0.0
 
-        if triggered and cash >= buy_amount and buys < MAX_BUYS:
+        if triggered and cash >= buy_amount and buys < MAX_BUYS and buy_price is not None:
             buy_shares = buy_amount / buy_price
             buy_amt = buy_amount
             cash  -= buy_amt
@@ -169,7 +169,9 @@ def run_backtest(df: pd.DataFrame, entry_multiplier: float = ENTRY_MULTIPLIER,
     # ── Compute metrics ──────────────────────────────────────────
     dv_array   = np.array([d['value'] for d in daily_values])
     daily_ret  = dv_array[1:] / dv_array[:-1] - 1
-    sharpe     = float(np.sqrt(252) * daily_ret.mean() / daily_ret.std()) if daily_ret.std() > 0 else 0.0
+    ret_mean = float(daily_ret.mean())
+    ret_std = float(daily_ret.std())
+    sharpe     = float(np.sqrt(252) * ret_mean / ret_std) if ret_std > 0 else 0.0
 
     peak   = np.maximum.accumulate(dv_array)
     dd     = (dv_array - peak) / peak
@@ -222,7 +224,9 @@ def print_report(r: dict):
     print(f"  Ticker    : {TICKER}")
     print(f"  Strategy  : EWMA (λ={EWMA_LAMBDA}) × {r['multiplier']} LOC")
     print(f"  Capital   : ${INITIAL_CASH:,}")
-    print(f"  Period    : {r['period_start'].date()}  →  {r['period_end'].date()}")
+    p_start: pd.Timestamp = r['period_start']
+    p_end: pd.Timestamp = r['period_end']
+    print(f"  Period    : {p_start.date()}  →  {p_end.date()}")
     print(f"  Buy size  : ${BUY_AMOUNT:,} / trigger (max {MAX_BUYS}×)")
     print("─" * 62)
 
@@ -370,12 +374,12 @@ def run_multi_period_sweep():
         df = fetch_data(TICKER, end_date=end_dt)
         # Trim to only cover the intended backtest window (compare by date
         # to avoid timezone-aware vs timezone-naive dtype mismatch)
-        df = df[df.index.date <= end_dt]
+        df = df[df.index.date <= end_dt]  # type: ignore[operator]
 
         period_results = []
         for mult in multipliers:
             mult_rounded = round(mult, 1)
-            r = run_backtest(df, entry_multiplier=mult_rounded, verbose=False)
+            r = run_backtest(df, entry_multiplier=mult_rounded, verbose=False)  # type: ignore[arg-type]
             period_results.append(r)
 
         all_results[label] = {r['multiplier']: r for r in period_results}
@@ -447,7 +451,7 @@ def run_multi_period_sweep():
         rets = [all_results[label][mult]['total_return'] for label in all_results]
         if rets:
             mult_avg_returns[mult] = np.mean(rets)
-    best_avg_return = max(mult_avg_returns.items(), key=lambda x: x[1])
+    best_avg_return: tuple[float, float] = max(mult_avg_returns.items(), key=lambda x: x[1])  # type: ignore[arg-type]
     print(f"  🥇 Best Avg Return  : multiplier={best_avg_return[0]:.1f}"
           f" → avg {best_avg_return[1]:+.2f}% across all periods")
 
@@ -458,7 +462,7 @@ def run_multi_period_sweep():
         shs = [all_results[label][mult]['sharpe'] for label in all_results]
         if shs:
             mult_avg_sharpe[mult] = np.mean(shs)
-    best_avg_sharpe = max(mult_avg_sharpe.items(), key=lambda x: x[1])
+    best_avg_sharpe: tuple[float, float] = max(mult_avg_sharpe.items(), key=lambda x: x[1])  # type: ignore[arg-type]
     print(f"  🥇 Best Avg Sharpe   : multiplier={best_avg_sharpe[0]:.1f}"
           f" → avg Sharpe {best_avg_sharpe[1]:.2f}")
 
@@ -605,7 +609,7 @@ def run_multi_period_portfolio_sweep():
         dfs = {t: fetch_data(t, end_date=end_dt) for t in tickers}
         # Trim to backtest window
         for t in tickers:
-            dfs[t] = dfs[t][dfs[t].index.date <= end_dt]
+            dfs[t] = dfs[t][dfs[t].index.date <= end_dt]  # type: ignore[operator]
 
         results = _run_portfolio_sweep_core(dfs, mults, float(INITIAL_CASH),
                                             label=label, verbose=True)
@@ -654,8 +658,8 @@ def run_multi_period_portfolio_sweep():
 
     # ── Find consensus ────────────────────────────────────────────
     print("─" * 185)
-    consensus_ret = max(allocation_votes_return, key=allocation_votes_return.get)
-    consensus_sh = max(allocation_votes_sharpe, key=allocation_votes_sharpe.get)
+    consensus_ret = max(allocation_votes_return, key=allocation_votes_return.get)  # type: ignore[arg-type]
+    consensus_sh = max(allocation_votes_sharpe, key=allocation_votes_sharpe.get)  # type: ignore[arg-type]
 
     print(f"\n  🗳️  Consensus by Max Return  : {consensus_ret}"
           f" ({allocation_votes_return[consensus_ret]}/{len(all_optimals)} periods)")

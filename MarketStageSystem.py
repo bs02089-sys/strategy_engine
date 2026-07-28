@@ -26,8 +26,10 @@ def calculate_rsi(close: pd.Series, period: int = 14) -> pd.Series:
     loss = -delta.where(delta < 0, 0.0)
     avg_gain = gain.ewm(alpha=1 / period, adjust=False).mean()
     avg_loss = loss.ewm(alpha=1 / period, adjust=False).mean()
-    rs = avg_gain / avg_loss.replace(0, float('nan'))
-    return 100 - (100 / (1 + rs))
+    avg_loss_clean = avg_loss.replace(0, float('nan'))
+    rs = avg_gain / avg_loss_clean
+    result: pd.Series = 100 - (100 / (1 + rs))  # type: ignore[assignment]
+    return result
 
 
 def calculate_macd(close: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9):
@@ -57,19 +59,20 @@ class MarketStageTracker:
         if not required_cols.issubset(df.columns):
             logging.warning(f"필요한 컬럼 누락: {required_cols - set(df.columns)}")
             return None
-        clean_df = df[['close', 'volume']].dropna().copy()
+        clean_df: pd.DataFrame = df[['close', 'volume']].dropna().copy()  # type: ignore[assignment]
         if len(clean_df) < self.MIN_ROWS:
             logging.warning(f"데이터 부족: {len(clean_df)}행")
             return None
         return clean_df
 
     def _vol_ma20(self, df: pd.DataFrame) -> pd.Series:
-        return df['volume'].shift(1).rolling(20).mean()
+        result: pd.Series = df['volume'].shift(1).rolling(20).mean()  # type: ignore[assignment]
+        return result
 
     def _check_ma_alignment(self, df: pd.DataFrame, bullish: bool = True) -> bool:
-        ma5 = df['close'].rolling(5).mean().iloc[-1]
-        ma20 = df['close'].rolling(20).mean().iloc[-1]
-        ma60 = df['close'].rolling(60).mean().iloc[-1]
+        ma5: float = df['close'].rolling(5).mean().iloc[-1]  # type: ignore[arg-type]
+        ma20: float = df['close'].rolling(20).mean().iloc[-1]  # type: ignore[arg-type]
+        ma60: float = df['close'].rolling(60).mean().iloc[-1]  # type: ignore[arg-type]
         if pd.isna(ma5) or pd.isna(ma20) or pd.isna(ma60):
             return False
         return bool(ma5 > ma20 > ma60) if bullish else bool(ma5 < ma20 < ma60)
@@ -164,7 +167,7 @@ class MarketTopTracker(MarketStageTracker):
     STAGE_NAMES = {0: "초기 상태", 1: "🌡️ 과열", 2: "📉 다이버전스", 3: "🪤 밴드 트랩", 4: "📊 분산", 5: "🔻 최종 매도 신호"}
 
     def _is_overheat(self, df: pd.DataFrame) -> bool:
-        rsi = calculate_rsi(df['close']).dropna()
+        rsi = calculate_rsi(df['close']).dropna()  # type: ignore[arg-type]
         if len(rsi) < 6:
             return False
         recent = rsi.tail(6)
@@ -173,7 +176,7 @@ class MarketTopTracker(MarketStageTracker):
     def _is_dead_cross(self, df: pd.DataFrame) -> bool:
         recent_high = df['close'].rolling(20).max().shift(1)
         made_new_high = (df['close'].tail(5) > recent_high.tail(5)).any()
-        macd, signal = calculate_macd(df['close'])
+        macd, signal = calculate_macd(df['close'])  # type: ignore[arg-type]
         macd = macd.dropna()
         signal = signal.dropna()
         if len(macd) < 2:
@@ -184,7 +187,7 @@ class MarketTopTracker(MarketStageTracker):
     def _is_band_trap(self, df: pd.DataFrame) -> bool:
         if len(df) < 5:
             return False
-        upper = calculate_bollinger_upper(df['close']).dropna()
+        upper = calculate_bollinger_upper(df['close']).dropna()  # type: ignore[arg-type]
         if len(upper) < 6:
             return False
         touched_upper = (df['close'].tail(6).iloc[:-1] > upper.tail(6).iloc[:-1]).any()

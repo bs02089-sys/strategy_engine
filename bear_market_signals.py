@@ -71,7 +71,8 @@ def fred_series(series_id: str, lookback_days: int = 365 * 5) -> pd.Series:
     df = pd.read_csv(StringIO(resp.text), na_values=".")
     df.columns = ["date", series_id]
     df["date"] = pd.to_datetime(df["date"], errors="coerce")
-    return df.dropna().set_index("date")[series_id].astype(float)
+    result: pd.Series = df.dropna().set_index("date")[series_id].astype(float)  # type: ignore[assignment]
+    return result
 
 
 def get_error_message(e: Exception, source_name: str) -> str:
@@ -98,11 +99,12 @@ def validate_yf_data(raw_data: Optional[pd.DataFrame], symbols: list) -> pd.Data
     if isinstance(data, pd.Series):
         data = data.to_frame()
 
+    assert isinstance(data, pd.DataFrame)  # narrow type for pyright
     missing = [s for s in symbols if s not in data.columns]
     if missing:
         raise KeyError(f"Missing symbols: {missing}")
 
-    return data[symbols]
+    return data[list(symbols)]  # type: ignore[return-type]
 
 
 @dataclass

@@ -297,7 +297,10 @@ def get_prev_close(ticker: str) -> tuple[float | None, str]:
                 close_series = hist['Close'].dropna()
                 if not close_series.empty:
                     last_idx = close_series.index[-1]
-                    last_date = last_idx.date() if isinstance(last_idx, pd.Timestamp) else last_idx
+                    if isinstance(last_idx, pd.Timestamp):
+                        last_date: date = last_idx.date()
+                    else:
+                        last_date = pd.Timestamp(last_idx).date()  # type: ignore[arg-type]
 
                     # ── Staleness guard ──────────────────────────────────
                     # If the last row yfinance returned is OLDER than the
@@ -332,7 +335,8 @@ def get_prev_close(ticker: str) -> tuple[float | None, str]:
                     # fall back to the prior (already-final) session's close.
                     if last_date == today_ny and not today_session_settled and len(close_series) >= 2:
                         prev_close = float(close_series.iloc[-2])
-                        prev_date = close_series.index[-2].date()
+                        prev_idx = close_series.index[-2]
+                        prev_date = prev_idx.date() if isinstance(prev_idx, pd.Timestamp) else pd.Timestamp(prev_idx).date()  # type: ignore[arg-type]
                         date_str = prev_date.strftime("%m-%d")
                     else:
                         prev_close = float(close_series.iloc[-1])
@@ -398,7 +402,7 @@ def get_period_high(ticker: str, lookback_days: int = 252, max_retries: int = 3)
             highs = hist['High'].dropna()
             if highs.empty:
                 raise ValueError("No high price data.")
-            recent_highs = highs[-lookback_days:] if len(highs) >= lookback_days else highs
+            recent_highs: pd.Series = highs[-lookback_days:] if len(highs) >= lookback_days else highs  # type: ignore[no-redef]
             peak_idx = recent_highs.idxmax()
             peak_price = float(recent_highs.loc[peak_idx])
             peak_date_str = peak_idx.date().strftime("%Y-%m-%d") if isinstance(peak_idx, pd.Timestamp) else str(peak_idx)
@@ -599,8 +603,10 @@ def check_macro_and_technical_signals(ticker: str, pos_cfg: dict) -> tuple[bool,
             return False, False, f"Insufficient 60-day data ({len(closes)})"
 
         current_price = float(closes.iloc[-1])
-        ma20 = float(closes.rolling(window=20).mean().iloc[-1])
-        ma60 = float(closes.rolling(window=60).mean().iloc[-1])
+        close_ma20: pd.Series = closes.rolling(window=20).mean()  # type: ignore[assignment]
+        close_ma60: pd.Series = closes.rolling(window=60).mean()  # type: ignore[assignment]
+        ma20 = float(close_ma20.iloc[-1])
+        ma60 = float(close_ma60.iloc[-1])
     except Exception as e:
         return False, False, f"API delay ({e})"
 
