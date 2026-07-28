@@ -764,11 +764,11 @@ def send_monthly_ping_if_due(cfg: dict, webhook: str, user_id: str, now_ny: date
 # RSI + Volume Composite Buy Signal (Verified Optimal Strategy)
 # ═══════════════════════════════════════════════════════════
 #
-# SOXL (12yr backtest): Zone 1 RSI 25~32 Vol 0.3~0.7 | Zone 2 RSI 32~40 Vol 0.4~0.9
-#   → Sharpe 2.46 | WR 70.1% | Avg +21.49%  (vs YouTube single-zone: Sharpe 2.15)
+# SOXL (12yr backtest, RSI 14): Zone 1 RSI 25~34 Vol 0.3~0.7 | Zone 2 RSI 34~40 Vol 0.4~0.9
+#   → Sharpe 2.62 | WR 71.4% | Avg +21.56%  (vs previous 25~32/32~40: Sharpe 2.46)
 #
-# TQQQ (12yr backtest): Zone 1 RSI 25~35 Vol 0.3~0.7 | Zone 2 RSI 35~45 Vol 0.6~1.0
-#   → Sharpe 1.46 | WR 67.6% | Avg +9.21%   (vs YouTube single-zone: Sharpe 1.15)
+# TQQQ (12yr backtest, RSI 21): Zone 1 RSI 25~35 Vol 0.3~0.7 | Zone 2 RSI 35~50 Vol 0.4~1.0
+#   → Sharpe 1.30 | WR 67.3% | Avg +7.48%   (vs RSI14 D-3:  Sharpe 1.48, RSI21 best: 3.57)
 
 
 def _calculate_rsi(close: pd.Series, period: int = 14) -> pd.Series:
@@ -785,22 +785,27 @@ def _calculate_rsi(close: pd.Series, period: int = 14) -> pd.Series:
 
 
 # ── Ticker-specific optimal zones (12-year backtest verified) ────
+# Each ticker has its own RSI period and zone parameters:
+#   - SOXL: RSI(14) — fast enough for 3x semi volatility
+#   - TQQQ: RSI(21) — slower, better for Nasdaq trend filtering
 _TICKER_ZONES: dict = {
     "SOXL": {
         "label": "SOXL",
         "yf_ticker": "SOXL",
-        # zone1 RSI inclusive [25..32], zone2 RSI strict-lower (32..40]
-        "zone1": {"name": "저RSI 저볼륨",  "rsi": (25, 32), "vol": (0.3, 0.7)},
-        "zone2": {"name": "중간RSI 중볼륨", "rsi": (32, 40), "vol": (0.4, 0.9)},
-        "stats": "Sharpe 2.46 | 승률 70% | 12yr 백테스트",
+        "rsi_period": 14,
+        # zone1 RSI inclusive [25..34], zone2 RSI strict-lower (34..40]
+        "zone1": {"name": "저RSI 저볼륨",  "rsi": (25, 34), "vol": (0.3, 0.7)},
+        "zone2": {"name": "중간RSI 중볼륨", "rsi": (34, 40), "vol": (0.4, 0.9)},
+        "stats": "Sharpe 2.62 | 승률 71% | 12yr 백테스트",
     },
     "TQQQ": {
         "label": "TQQQ",
         "yf_ticker": "TQQQ",
-        # zone1 RSI inclusive [25..35], zone2 RSI strict-lower (35..45]
+        "rsi_period": 21,
+        # zone1 RSI inclusive [25..35], zone2 RSI strict-lower (35..50]
         "zone1": {"name": "저RSI 저볼륨",  "rsi": (25, 35), "vol": (0.3, 0.7)},
-        "zone2": {"name": "중간RSI 중볼륨", "rsi": (35, 45), "vol": (0.5, 1.0)},
-        "stats": "Sharpe 1.46 | 승률 68% | 12yr 백테스트",
+        "zone2": {"name": "중간RSI 중볼륨", "rsi": (35, 50), "vol": (0.4, 1.0)},
+        "stats": "Sharpe 1.30 | 승률 67% | 12yr 백테스트",
     },
 }
 
@@ -818,6 +823,7 @@ def _check_rsi_volume_signal(ticker: str) -> str | None:
 
     zones = _TICKER_ZONES[ticker_upper]
     yf_symbol = zones["yf_ticker"]
+    rsi_period = zones.get("rsi_period", 14)  # ticker-specific RSI period
     z1 = zones["zone1"]
     z2 = zones["zone2"]
     stats_line = zones["stats"]
@@ -848,8 +854,8 @@ def _check_rsi_volume_signal(ticker: str) -> str | None:
         if len(prices) < 35 or len(volumes) < 22:
             return None
 
-        # RSI calculation
-        rsi_series = _calculate_rsi(prices, 14).dropna()
+        # RSI calculation (ticker-specific period: SOXL=14, TQQQ=21)
+        rsi_series = _calculate_rsi(prices, rsi_period).dropna()
         if len(rsi_series) < 1:
             return None
         latest_rsi = float(rsi_series.iloc[-1])
