@@ -1,11 +1,11 @@
 🔍 Starting price lookup for TQQQ...
    → Trying yfinance history (1/3)...
    🩺 [debug] TQQQ raw last rows: 2026-07-21=71.37, 2026-07-22=70.28, 2026-07-23=66.30, 2026-07-24=64.00, 2026-07-27=63.40
-   🩺 [debug] now_ny=2026-07-27T23:00:07.116232-04:00 today_ny=2026-07-27 last_date=2026-07-27 settle_deadline=2026-07-27T16:15:00-04:00 today_session_settled=True
+   🩺 [debug] now_ny=2026-07-28T08:38:14.904278-04:00 today_ny=2026-07-28 last_date=2026-07-27 settle_deadline=2026-07-28T16:15:00-04:00 today_session_settled=False
 ✅ TQQQ yfinance success: $63.40 (07-27)
 🔍 Starting price lookup for SOXL...
    → Trying yfinance history (1/3)...
    🩺 [debug] SOXL raw last rows: 2026-07-21=158.54, 2026-07-22=160.99, 2026-07-23=157.50, 2026-07-24=136.81, 2026-07-27=128.15
-   🩺 [debug] now_ny=2026-07-27T23:00:08.186626-04:00 today_ny=2026-07-27 last_date=2026-07-27 settle_deadline=2026-07-27T16:15:00-04:00 today_session_settled=True
+   🩺 [debug] now_ny=2026-07-28T08:38:15.985207-04:00 today_ny=2026-07-28 last_date=2026-07-27 settle_deadline=2026-07-28T16:15:00-04:00 today_session_settled=False
 ✅ SOXL yfinance success: $128.15 (07-27)
 ✅ Discord briefing sent successfully.
