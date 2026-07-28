@@ -496,12 +496,8 @@ def get_market_score(filepath="signal_report.json"):
 
 
 def calculate_final_loc(base_price: float) -> float:
-    """Adjusts LOC price based on risk score."""
-    score = get_market_score()
-    if score >= 10: discount = 0.95
-    elif score >= 6: discount = 0.98
-    else: discount = 1.0
-    return base_price * discount
+    """Returns base LOC price without risk discount (disabled by user request)."""
+    return base_price
 
 
 # ═══════════════════════════════════════════════════════════
