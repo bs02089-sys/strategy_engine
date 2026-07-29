@@ -506,9 +506,9 @@ def check_peak_sell_signal(closes: pd.Series, highs: pd.Series,
     if condition_ath:
         result['reasons'].append(f"전고점 {ath_pct:.0f}% 도달")
     if condition_rally:
-        result['reasons'].append(f"20일 +{rally_20d*100:.0f}% 급등")
+        result['reasons'].append(f"20일 +{result['rally_20d']:.0f}% 급등")
     if condition_sigma:
-        result['reasons'].append(f"변동성 {sigma_ratio:.1f}배 급등")
+        result['reasons'].append(f"변동성 {result['sigma_ratio']:.1f}배 급등")
 
     result['signal'] = condition_ath and condition_rally and condition_sigma
 
