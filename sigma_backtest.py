@@ -29,6 +29,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from sigma_DCA_manager import (
     _calculate_volatility_from_closes,
     _calculate_loc_from_sigma,
+    check_peak_sell_signal_with_cooldown,
+    _SELL_ATH_RATIO as MGR_ATH_RATIO,
+    _SELL_RALLY_THRESHOLD as MGR_RALLY_THRESHOLD,
+    _SELL_SIGMA_RATIO as MGR_SIGMA_RATIO,
 )
 
 # ══════════════════════════════════════════════
@@ -47,6 +51,14 @@ BUY_AMOUNT        = 2_500
 MAX_BUYS          = 20
 BACKTEST_DAYS     = 252
 FETCH_BUFFER_DAYS = 60
+
+# Peak sell signal parameters (imported from sigma_DCA_manager — single source of truth)
+SELL_ATH_RATIO       = MGR_ATH_RATIO       # 전고점 threshold
+SELL_RALLY_THRESHOLD = MGR_RALLY_THRESHOLD # 20일 상승률 threshold
+SELL_SIGMA_RATIO     = MGR_SIGMA_RATIO     # 시그마 비율 threshold
+
+# Sell execution
+SELL_PCT             = 0.50    # 청산 비율 50%
 
 # Sweep range
 SWEEP_START = 0.6
@@ -78,7 +90,8 @@ ENTRY_MULTIPLIER = load_entry_multiplier()
 # ══════════════════════════════════════════════
 
 def fetch_data(ticker: str, end_date: date | None = None) -> pd.DataFrame:
-    """Download OHLCV data for backtest ending on end_date (default: today)."""
+    """Download OHLCV data for backtest ending on end_date (default: today).
+    Now includes 'High' column for peak sell signal analysis."""
     if end_date is None:
         end_date = date.today()
     total_calendar = BACKTEST_DAYS + LOOKBACK_DAYS + FETCH_BUFFER_DAYS
@@ -91,15 +104,15 @@ def fetch_data(ticker: str, end_date: date | None = None) -> pd.DataFrame:
     if hist.empty:
         raise RuntimeError(f"{ticker} returned no data.")
 
-    df: pd.DataFrame = hist[['Close', 'Low']].copy()  # type: ignore[assignment]
-    df.columns = ['Close', 'Low']
-    df = df.dropna(subset=['Close', 'Low'])  # type: ignore[call-overload]
+    df: pd.DataFrame = hist[['Close', 'Low', 'High']].copy()  # type: ignore[assignment]
+    df.columns = ['Close', 'Low', 'High']
+    df = df.dropna(subset=['Close', 'Low', 'High'])  # type: ignore[call-overload]
     print(f"   → {len(df)} trading days loaded.")
     return df
 
 
 # ══════════════════════════════════════════════
-# Backtest Engine (parameterized by multiplier)
+# Backtest Engine — DCA Only (original, uses Close & Low)
 # ══════════════════════════════════════════════
 
 def run_backtest(df: pd.DataFrame, entry_multiplier: float = ENTRY_MULTIPLIER,
@@ -213,6 +226,184 @@ def run_backtest(df: pd.DataFrame, entry_multiplier: float = ENTRY_MULTIPLIER,
 
 
 # ══════════════════════════════════════════════
+# Backtest Engine — DCA + 전고점 50% 청산
+# ══════════════════════════════════════════════
+
+def run_backtest_with_sell(df: pd.DataFrame, entry_multiplier: float = ENTRY_MULTIPLIER,
+                           sell_ath_ratio: float = SELL_ATH_RATIO,
+                           sell_rally_threshold: float = SELL_RALLY_THRESHOLD,
+                           sell_sigma_ratio: float = SELL_SIGMA_RATIO,
+                           sell_pct: float = SELL_PCT,
+                           verbose: bool = False,
+                           initial_cash: float | None = None,
+                           buy_amount: float | None = None) -> dict:
+    """
+    Walk forward through df, performing both DCA buys (Sigma LOC) AND
+    peak sell signals (전고점 근접 50% 청산).
+
+    Returns a result dict with extra sell-related metrics and a combined
+    trade_log including sells.
+    """
+    if initial_cash is None:
+        initial_cash = float(INITIAL_CASH)
+    if buy_amount is None:
+        buy_amount = float(BUY_AMOUNT)
+
+    closes    = df['Close'].values
+    lows      = df['Low'].values
+    highs     = df['High'].values
+    dates_idx = df.index
+
+    # ── State ──────────────────────────────────────────────────────
+    cash         = float(initial_cash)
+    shares       = 0.0    buys        = 0
+    sells        = 0
+    total_sold   = 0.0  # total USD sold
+    buy_log      = []
+    sell_log     = []
+    daily_values = []
+    start_idx    = LOOKBACK_DAYS
+    last_sell_idx = None  # cooldown tracker
+
+    for i in range(start_idx, len(df)):
+        prev_close  = float(closes[i - 1])
+        today_low   = float(lows[i])
+        today_high  = float(highs[i])
+        today_close = float(closes[i])
+        today_date: pd.Timestamp = dates_idx[i]  # type: ignore[assignment]
+
+        # ── Update rolling ATH ───────────────────────────────────────
+        if today_high > rolling_ath_val:
+            rolling_ath_val = today_high
+
+        # ── DCA Buy Logic (unchanged from original) ──────────────────
+        lookback_window = pd.Series(closes[i - LOOKBACK_DAYS : i])
+        sigma, _ = _calculate_volatility_from_closes(
+            lookback_window, LOOKBACK_DAYS, VOL_METHOD, EWMA_LAMBDA
+        )
+        loc_price = _calculate_loc_from_sigma(prev_close, sigma, entry_multiplier)
+        triggered = today_low <= loc_price
+
+        buy_price: float | None = min(today_close, loc_price) if triggered else None
+        buy_amt = 0.0
+        buy_shares = 0.0
+
+        if triggered and cash >= buy_amount and buys < MAX_BUYS and buy_price is not None:
+            buy_shares = buy_amount / buy_price
+            buy_amt = buy_amount
+            cash  -= buy_amt
+            shares += buy_shares
+            buys += 1
+
+            buy_log.append({
+                'date': today_date, 'price': round(buy_price, 2),
+                'shares': round(buy_shares, 4), 'amount': round(buy_amt, 2),
+                'sigma': round(sigma, 4), 'loc': round(loc_price, 2),
+                'cash_remaining': round(cash, 2),
+                'type': 'BUY',
+            })
+
+        # ── Peak Sell Signal Logic (with cooldown) ──────────────────
+        if i >= start_idx + 21:
+            lookback_closes = pd.Series(closes[i - 252 : i]) if i >= 252 else pd.Series(closes[:i])
+            lookback_highs  = pd.Series(highs[i - 252 : i]) if i >= 252 else pd.Series(highs[:i])
+
+            if len(lookback_closes) >= 21 and len(lookback_highs) >= 1:
+                if shares > 0.01:
+                    signal = check_peak_sell_signal_with_cooldown(
+                        lookback_closes, lookback_highs,
+                        last_sell_idx=last_sell_idx,
+                        current_idx=i
+                    )
+
+                    if signal['signal']:
+                        sell_shares = shares * sell_pct
+                        sell_amt = sell_shares * today_close
+                        shares -= sell_shares
+                        cash += sell_amt
+                        total_sold += sell_amt
+                        sells += 1
+                        last_sell_idx = i
+
+                        sell_log.append({
+                            'date': today_date,
+                            'price': round(today_close, 2),
+                            'shares': round(sell_shares, 4),
+                            'amount': round(sell_amt, 2),
+                            'cash_after': round(cash, 2),
+                            'ath_pct': signal['ath_pct'],
+                            'rally_20d': signal['rally_20d'],
+                            'sigma_ratio': signal['sigma_ratio'],
+                            'reasons': ', '.join(signal['reasons']),
+                            'type': 'SELL',
+                            'cooldown': signal.get('cooldown', False),
+                            'cooldown_remaining': signal.get('cooldown_remaining', 0),
+                        })
+
+        # ── Portfolio valuation ──────────────────────────────────────
+        portfolio_value = cash + shares * today_close
+        daily_values.append({
+            'date': today_date, 'close': today_close,
+            'value': round(portfolio_value, 2),
+        })
+
+    # ── Combine trade log (chronological) ───────────────────────────
+    # Simply concatenate and sort by date (avoids tz-aware/naive comparison issues)
+    all_events = list(buy_log) + list(sell_log)
+    trade_log = sorted(all_events, key=lambda e: e['date'])
+
+    # ── Compute metrics ──────────────────────────────────────────
+    dv_array   = np.array([d['value'] for d in daily_values])
+    daily_ret  = dv_array[1:] / dv_array[:-1] - 1
+    ret_mean = float(daily_ret.mean())
+    ret_std = float(daily_ret.std())
+    sharpe     = float(np.sqrt(252) * ret_mean / ret_std) if ret_std > 0 else 0.0
+
+    peak   = np.maximum.accumulate(dv_array)
+    dd     = (dv_array - peak) / peak
+    mdd    = float(dd.min() * 100)
+
+    asset_start = float(daily_values[0]['close'])
+    asset_end   = float(daily_values[-1]['close'])
+    buy_hold_ret = (asset_end - asset_start) / asset_start * 100
+
+    total_invested = sum(t['amount'] for t in buy_log)
+    avg_buy_price  = np.mean([t['price'] for t in buy_log]) if buy_log else 0
+    final_price    = float(daily_values[-1]['close'])
+
+    # Win rate: compare final_price to avg_buy_price for remaining shares
+    wins = sum(1 for t in buy_log if final_price > t['price']) if buy_log else 0
+    win_rate = wins / len(buy_log) * 100 if buy_log else 0.0
+
+    final_val = float(daily_values[-1]['value'])
+    total_ret = (final_val - initial_cash) / initial_cash * 100
+
+    return {
+        'multiplier':        entry_multiplier,
+        'total_return':      round(total_ret, 2),
+        'final_value':       round(final_val, 2),
+        'sharpe':            round(sharpe, 2),
+        'mdd':               round(mdd, 2),
+        'buy_hold_ret':      round(buy_hold_ret, 2),
+        'total_buys':        buys,
+        'total_sells':       sells,
+        'total_sold_amount': round(total_sold, 2),
+        'total_invested':    round(total_invested, 2),
+        'avg_buy_price':     round(avg_buy_price, 2),
+        'win_rate':          round(win_rate, 1),
+        'final_price':       round(final_price, 2),
+        'remaining_cash':    round(cash, 2),
+        'final_shares':      round(shares, 4),
+        'period_start':      daily_values[0]['date'],
+        'period_end':        daily_values[-1]['date'],
+        'buy_log':           buy_log,
+        'sell_log':          sell_log,
+        'trade_log':         trade_log,
+        'daily_values':      daily_values,
+    }
+
+
+# ══════════════════════════════════════════════
 # Single-run Reporting
 # ══════════════════════════════════════════════
 
@@ -250,14 +441,25 @@ def print_report(r: dict):
         print(f"     Shares Held      : {r['final_shares']:.4f}")
         print(f"     Unrealized P&L   : ${unrealized:+,.2f}")
 
+    if 'total_sells' in r:
+        print(f"\n  📋 Peak Sell Activity")
+        print(f"     Total Sells      : {r['total_sells']}")
+        print(f"     Total Sold ($)   : ${r.get('total_sold_amount', 0):,.2f}")
+
     if r['trade_log']:
-        print(f"\n  📝 Trade Log")
-        print(f"  {'Date':<14} {'Price':>8} {'Shares':>10} {'Amount':>9} {'Sigma':>8}")
-        print(f"  {'─'*14} {'─'*8} {'─'*10} {'─'*9} {'─'*8}")
+        print(f"\n  📝 Combined Trade Log")
+        print(f"  {'Date':<14} {'Type':<6} {'Price':>8} {'Shares':>10} {'Amount':>9}")
+        print(f"  {'─'*14} {'─'*6} {'─'*8} {'─'*10} {'─'*9}")
         for t in r['trade_log']:
+            ttype = t.get('type', 'BUY')
             print(f"  {t['date'].strftime('%Y-%m-%d'):<14}"
-                  f" ${t['price']:>6.2f} {t['shares']:>10.2f}"
-                  f" ${t['amount']:>7,.0f} {t['sigma']:>8.4f}")
+                  f" {ttype:<6}"
+                  f" ${t['price']:>6.2f} {abs(t['shares']):>10.2f}"
+                  f" ${t['amount']:>7,.0f}")
+            if ttype == 'SELL':
+                reasons = t.get('reasons', '')
+                if reasons:
+                    print(f"  {'':14} {'↳':>6} {reasons}")
 
     # Monthly breakdown
     monthly = {}
@@ -276,6 +478,81 @@ def print_report(r: dict):
     print("\n" + "═" * 62)
     print("  ✅ Backtest Complete")
     print("═" * 62)
+
+
+# ══════════════════════════════════════════════
+# Comparison Report — DCA vs DCA+PeakSell
+# ══════════════════════════════════════════════
+
+def print_comparison_report(r_dca: dict, r_sell: dict):
+    """Print side-by-side comparison of DCA-only vs DCA+PeakSell."""
+    print("\n")
+    print("═" * 80)
+    print("  📊 DCA vs DCA+전고점50%청산 — 성능 비교")
+    print("═" * 80)
+    print(f"  Ticker    : {TICKER}")
+    print(f"  Capital   : ${INITIAL_CASH:,}")
+    print(f"  Multiplier: ×{r_dca['multiplier']} LOC")
+    print(f"  Sell Trig : ATH≥{SELL_ATH_RATIO*100:.0f}% + 20일≥{SELL_RALLY_THRESHOLD*100:.0f}% + Sigma≥{SELL_SIGMA_RATIO:.1f}x | 청산 {SELL_PCT*100:.0f}%")
+    p_start: pd.Timestamp = r_dca['period_start']
+    p_end: pd.Timestamp = r_dca['period_end']
+    print(f"  Period    : {p_start.date()}  →  {p_end.date()}")
+    print("─" * 80)
+
+    # ── Key Metrics Table ───────────────────────────────────────────
+    metrics = [
+        ("Total Return",      f"{r_dca['total_return']:+.2f}%", f"{r_sell['total_return']:+.2f}%",
+         r_sell['total_return'] - r_dca['total_return']),
+        ("Final Value",       f"${r_dca['final_value']:,.2f}", f"${r_sell['final_value']:,.2f}",
+         r_sell['final_value'] - r_dca['final_value']),
+        ("Sharpe Ratio",      f"{r_dca['sharpe']}", f"{r_sell['sharpe']}",
+         r_sell['sharpe'] - r_dca['sharpe']),
+        ("Max Drawdown",      f"{r_dca['mdd']:.2f}%", f"{r_sell['mdd']:.2f}%",
+         -(r_sell['mdd'] - r_dca['mdd'])),  # positive = improvement
+        ("Buy & Hold",        f"{r_dca['buy_hold_ret']:+.2f}%", f"{r_sell['buy_hold_ret']:+.2f}%",
+         0),
+        ("Alpha vs B&H",      f"{r_dca['total_return'] - r_dca['buy_hold_ret']:+.2f}%",
+         f"{r_sell['total_return'] - r_sell['buy_hold_ret']:+.2f}%",
+         (r_sell['total_return'] - r_sell['buy_hold_ret']) - (r_dca['total_return'] - r_dca['buy_hold_ret'])),
+    ]
+
+    print(f"  {'Metric':<20} {'DCA Only':>14} {'DCA+Sell':>14} {'Diff':>10}")
+    print(f"  {'─'*20} {'─'*14} {'─'*14} {'─'*10}")
+    for name, dca_val, sell_val, diff in metrics:
+        diff_str = f"{diff:+.2f}" if isinstance(diff, (int, float)) else ""
+        # Color indicator
+        arrow = ""
+        if isinstance(diff, (int, float)) and abs(diff) > 0.01:
+            if diff > 0 and name not in ("Buy & Hold",):
+                arrow = " 🟢"
+            elif diff < 0 and name not in ("Buy & Hold",):
+                arrow = " 🔴"
+        print(f"  {name:<20} {dca_val:>14} {sell_val:>14} {diff_str:>8}{arrow}")
+
+    # ── Activity ────────────────────────────────────────────────────
+    print(f"\n  {'Activity':<20} {'DCA Only':>14} {'DCA+Sell':>14}")
+    print(f"  {'─'*20} {'─'*14} {'─'*14}")
+    print(f"  {'Total Buys':<20} {r_dca['total_buys']:>14} {r_sell['total_buys']:>14}")
+    print(f"  {'Total Sells (50%)':<20} {'0':>14} {r_sell.get('total_sells', 0):>14}")
+    print(f"  {'Total Invested':<20} ${r_dca['total_invested']:>11,.2f} ${r_sell['total_invested']:>11,.2f}")
+
+    # ── Sell Events Details ─────────────────────────────────────────
+    if r_sell.get('sell_log'):
+        print(f"\n  📝 Sell Events Details")
+        print(f"  {'Date':<14} {'Price':>8} {'Sold $':>10} {'ATH%':>7} {'20dR%':>7} {'SigRx':>7} {'Reasons'}")
+        print(f"  {'─'*14} {'─'*8} {'─'*10} {'─'*7} {'─'*7} {'─'*7} {'─'*20}")
+        for s in r_sell['sell_log']:
+            print(f"  {s['date'].strftime('%Y-%m-%d'):<14}"
+                  f" ${s['price']:>6.2f}"
+                  f" ${s['amount']:>8,.0f}"
+                  f" {s['ath_pct']:>5.0f}%"
+                  f" {s['rally_20d']:>5.0f}%"
+                  f" {s['sigma_ratio']:>5.1f}x"
+                  f" {s['reasons']}")
+
+    print("\n" + "═" * 80)
+    print("  ✅ Comparison Complete")
+    print("═" * 80)
 
 
 # ══════════════════════════════════════════════
@@ -842,7 +1119,7 @@ if __name__ == "__main__":
     portfolio_sweep = "--portfolio-sweep" in sys.argv
     multi_portfolio = "--multi-portfolio-sweep" in sys.argv
     portfolio_run   = "--portfolio-run" in sys.argv
-
+    sell_mode       = "--sell" in sys.argv
     if portfolio_run:
         run_portfolio_detail()
     elif multi_portfolio:
@@ -854,6 +1131,26 @@ if __name__ == "__main__":
     elif sweep_mode:
         df = fetch_data(TICKER)
         run_multiplier_sweep(df)
+    elif sell_mode:
+        df = fetch_data(TICKER)
+        print(f"\n🚀 Sigma DCA + 전고점50%청산 Backtest")
+        print(f"   Asset    : {TICKER}")
+        print(f"   Capital  : ${INITIAL_CASH:,}")
+        print(f"   Period   : Recent {BACKTEST_DAYS} trading days (~1 year)")
+        print(f"   Method   : {VOL_METHOD} λ={EWMA_LAMBDA} × {ENTRY_MULTIPLIER} LOC")
+        print(f"   Sell Trig: ATH≥{SELL_ATH_RATIO*100:.0f}% + 20일≥{SELL_RALLY_THRESHOLD*100:.0f}% + Sigma≥{SELL_SIGMA_RATIO:.1f}x")
+        print(f"   Sell Amt : {SELL_PCT*100:.0f}% 청산")
+        print("─" * 80)
+
+        # Run both backtests
+        print("\n📋 [1/2] DCA Only 백테스트 실행중...")
+        r_dca = run_backtest(df, entry_multiplier=ENTRY_MULTIPLIER, verbose=True)
+
+        print("\n📋 [2/2] DCA+전고점50%청산 백테스트 실행중...")
+        r_sell = run_backtest_with_sell(df, entry_multiplier=ENTRY_MULTIPLIER, verbose=True)
+
+        # Comparison report
+        print_comparison_report(r_dca, r_sell)
     else:
         df = fetch_data(TICKER)
         print(f"\n🚀 Sigma DCA Backtest")

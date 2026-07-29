@@ -380,6 +380,168 @@ def get_prev_close(ticker: str) -> tuple[float | None, str]:
     return None, "N/A"
 
 
+# ═══════════════════════════════════════════════════════════
+# Peak Sell Signal Engine — 전고점 근접 50% 청산 Signal
+# ═══════════════════════════════════════════════════════════
+# Triggers:
+#   1) Current price > Rolling All-Time High × ATH_RATIO
+#   2) 20-day return > RALLY_THRESHOLD (급등 확인)
+#   3) Short-term sigma (20d) / Long-term sigma (252d) > SIGMA_RATIO
+#   When ALL 3 conditions met → SELL SIGNAL (50% position trim recommended)
+
+_SELL_ATH_RATIO       = 0.90   # 전고점 90% 이상 (원래 85%에서 상향 — 더 엄격하게)
+_SELL_RALLY_THRESHOLD = 0.40   # 20일 상승률 40% 이상 (원래 30%에서 상향 — 큰 상승만 포착)
+_SELL_SIGMA_RATIO     = 0.0    # 시그마 조건 비활성화 (SOXL 3x 레버리지 특성상
+                                #    시그마 비율은 고점에서 0.7~1.0x, 폭락장에서 1.3~1.4x.
+                                #    즉 시그마 급등 = 폭락 신호, 고점 신호가 아님.
+                                #    0.0으로 설정해 조건을 항상 통과시킴)
+_SELL_SHORT_LOOKBACK  = 20
+_SELL_LONG_LOOKBACK   = 252
+
+
+def get_rolling_ath(highs: pd.Series) -> pd.Series:
+    """
+    Returns expanding (rolling all-time) high series from the High prices.
+    First value = first high, monotonically non-decreasing.
+    """
+    return highs.expanding().max()
+
+
+def get_20day_return(closes: pd.Series) -> float | None:
+    """
+    Returns the (close[-1] / close[-21] - 1) return over ~20 trading days.
+    Uses shift(20) so the lookback is strictly prior to today; returns None
+    if insufficient data.
+    """
+    if len(closes) < 21:
+        return None
+    prev = float(closes.iloc[-21])
+    curr = float(closes.iloc[-1])
+    if prev <= 0:
+        return None
+    return (curr - prev) / prev
+
+
+def get_sigma_spike_ratio(closes: pd.Series,
+                          short_lookback: int = 20,
+                          long_lookback: int = 252,
+                          vol_method: str = "EWMA",
+                          ewma_lambda: float = 0.94) -> float | None:
+    """
+    Returns short_sigma / long_sigma.  A ratio > 1.0 means short-term
+    volatility is elevated relative to the long-term baseline.  Returns None
+    if either sigma can't be computed (not enough data).
+    """
+    if len(closes) < long_lookback:
+        return None
+    try:
+        short_sigma, _ = _calculate_volatility_from_closes(
+            closes, short_lookback, vol_method, ewma_lambda
+        )
+        long_sigma, _ = _calculate_volatility_from_closes(
+            closes, long_lookback, vol_method, ewma_lambda
+        )
+    except Exception:
+        return None
+    if long_sigma <= 0:
+        return None
+    return float(short_sigma / long_sigma)
+
+
+def check_peak_sell_signal(closes: pd.Series, highs: pd.Series,
+                           lookback_days: int = 252) -> dict:
+    """
+    Evaluates the 3-condition peak sell signal for an asset.
+
+    Returns a dict:
+      signal: bool       — True when ALL 3 conditions are met
+      ath_price: float   — current rolling ATH
+      ath_pct: float     — current price / ATH (as %)
+      rally_20d: float   — 20-day return
+      sigma_ratio: float — short/long sigma ratio
+      reasons: list[str] — human-readable conditions met
+    """
+    result: dict = {
+        'signal': False,
+        'ath_price': 0.0,
+        'ath_pct': 0.0,
+        'rally_20d': 0.0,
+        'sigma_ratio': 0.0,
+        'reasons': [],
+        'conditions': {'ath_ok': False, 'rally_ok': False, 'sigma_ok': False},
+    }
+
+    if len(closes) < max(lookback_days, 21) or len(highs) < 1:
+        return result
+
+    current_price = float(closes.iloc[-1])
+
+    # ── Condition 1: 전고점 85% 이상 ─────────────────────────────────
+    # Rolling ATH from High column (not Close — 전고점 = highest touched)
+    rolling_ath = get_rolling_ath(highs)
+    ath_price = float(rolling_ath.iloc[-1])
+    ath_pct = (current_price / ath_price * 100) if ath_price > 0 else 0.0
+    condition_ath = bool(ath_pct >= _SELL_ATH_RATIO * 100)
+
+    result['ath_price'] = round(ath_price, 2)
+    result['ath_pct'] = round(ath_pct, 1)
+
+    # ── Condition 2: 20일 상승률 30% 이상 ────────────────────────────
+    rally_20d = get_20day_return(closes)
+    condition_rally = bool(rally_20d is not None and rally_20d >= _SELL_RALLY_THRESHOLD)
+    result['rally_20d'] = round(rally_20d * 100, 1) if rally_20d is not None else 0.0
+
+    # ── Condition 3: 시그마 급등 (단기/장기 비율 1.5배) ────────────
+    sigma_ratio = get_sigma_spike_ratio(
+        closes, _SELL_SHORT_LOOKBACK, _SELL_LONG_LOOKBACK
+    )
+    condition_sigma = bool(sigma_ratio is not None and sigma_ratio >= _SELL_SIGMA_RATIO)
+    result['sigma_ratio'] = round(sigma_ratio, 2) if sigma_ratio is not None else 0.0
+
+    # ── Assemble result ─────────────────────────────────────────────
+    result['conditions']['ath_ok'] = condition_ath
+    result['conditions']['rally_ok'] = condition_rally
+    result['conditions']['sigma_ok'] = condition_sigma
+
+    if condition_ath:
+        result['reasons'].append(f"전고점 {ath_pct:.0f}% 도달")
+    if condition_rally:
+        result['reasons'].append(f"20일 +{rally_20d*100:.0f}% 급등")
+    if condition_sigma:
+        result['reasons'].append(f"변동성 {sigma_ratio:.1f}배 급등")
+
+    result['signal'] = condition_ath and condition_rally and condition_sigma
+
+    return result
+
+
+_COOLDOWN_DAYS = 60  # 매도 후 60거래일(약 3개월) 동안 재매도 금지
+
+
+def check_peak_sell_signal_with_cooldown(closes: pd.Series, highs: pd.Series,
+                                          last_sell_idx: int | None = None,
+                                          current_idx: int = 0) -> dict:
+    """
+    Same as check_peak_sell_signal() but with a cooldown guard:
+    - If `last_sell_idx` is not None and the distance from `current_idx`
+      to `last_sell_idx` is less than `_COOLDOWN_DAYS`, the signal is
+      suppressed (returns signal=False + cooldown_active=True).
+    """
+    base = check_peak_sell_signal(closes, highs)
+
+    if last_sell_idx is not None:
+        days_since_last_sell = current_idx - last_sell_idx
+        if days_since_last_sell < _COOLDOWN_DAYS:
+            base['signal'] = False
+            base['cooldown'] = True
+            base['cooldown_remaining'] = _COOLDOWN_DAYS - days_since_last_sell
+    else:
+        base['cooldown'] = False
+        base['cooldown_remaining'] = 0
+
+    return base
+
+
 def get_period_high(ticker: str, lookback_days: int = 252, max_retries: int = 3) -> tuple[float | None, str | None]:
     """
     Fetches the previous high (전고점) over the lookback window, using the
