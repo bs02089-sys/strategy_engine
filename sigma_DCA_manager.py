@@ -816,7 +816,7 @@ def check_ath_dca_signals(cfg: dict) -> list[str]:
                 target_price = round(rolling_ath_val * (1 - threshold), 2)
 
                 messages.append(
-                    f"🚨 **{ticker} ATH DCA {split_num}차 매수 신호!** 🔥\n"
+                    f"🚨 **{ticker} ATH {split_num}차 DCA 매수 신호!** 🔥\n"
                     f"   • ATH: \\${rolling_ath_val:.2f}\n"
                     f"   • 현재 DD: {current_dd_pct:.1f}% (임계: -{threshold*100:.0f}%)\n"
                     f"   • 현재가: \\${current_price:.2f}\n"
@@ -826,7 +826,7 @@ def check_ath_dca_signals(cfg: dict) -> list[str]:
 
             elif gap_pct < 5.0:
                 messages.append(
-                    f"📡 **{ticker} ATH DCA 임박!**\n"
+                    f"📡 **{ticker} ATH {split_num}차 DCA 임박!**\n"
                     f"   • ATH: \\${rolling_ath_val:.2f}\n"
                     f"   • 현재 DD: {current_dd_pct:.1f}% (목표: -{threshold*100:.0f}%)\n"
                     f"   • 추가 {gap_pct:.1f}%p 하락 시 트리거"
@@ -870,7 +870,7 @@ def check_ath_dca_signals(cfg: dict) -> list[str]:
                     # Still recovering toward new ATH
                     recovery_pct = (rolling_ath_val / cycle_ath_f - 1) * 100
                     messages.append(
-                        f"✅ **{ticker} ATH DCA {total_splits}차 전체 완료 (재진입 대기)**\n"
+                        f"✅ **{ticker} ATH {total_splits}차 DCA 전체 완료 (재진입 대기)**\n"
                         f"   • 현재 ATH: \\${rolling_ath_val:.2f}\n"
                         f"   • 재진입 조건: 신규 ATH > \\${cycle_ath_f:.2f}\n"
                         f"   • 회복 진행률: {recovery_pct:+.1f}%"
@@ -881,7 +881,7 @@ def check_ath_dca_signals(cfg: dict) -> list[str]:
                 pos["ATH_DCA_CYCLE_ATH"] = round(rolling_ath_val, 2)
                 changed = True
                 messages.append(
-                    f"✅ **{ticker} ATH DCA {total_splits}차 모두 완료!**\n"
+                    f"✅ **{ticker} ATH {total_splits}차 DCA 모두 완료!**\n"
                     f"   • 사이클 ATH 기록: \\${rolling_ath_val:.2f}\n"
                     f"   • 신규 ATH 갱신 시 재진입 대기"
                 )
@@ -896,7 +896,7 @@ def check_ath_dca_signals(cfg: dict) -> list[str]:
         if not used:
             next_gap = (triggers[1] - current_dd) * 100
             messages.append(
-                f"📡 **{ticker} ATH DCA 임박!**\n"
+                f"📡 **{ticker} ATH 1차 DCA 임박!**\n"
                 f"   • ATH: \\${rolling_ath_val:.2f}\n"
                 f"   • 현재 DD: {current_dd_pct:.1f}%\n"
                 f"   • 1차(-{triggers[1]*100:.0f}%) 까지: {next_gap:+.1f}%p"
@@ -905,7 +905,7 @@ def check_ath_dca_signals(cfg: dict) -> list[str]:
             nxt = remaining[0]
             next_gap = (triggers[nxt] - current_dd) * 100
             messages.append(
-                f"📊 **{ticker} ATH DCA 완료**\n"
+                f"📊 **{ticker} ATH {nxt}차 DCA 완료**\n"
                 f"   • ATH: \\${rolling_ath_val:.2f}\n"
                 f"   • 실행: {len(used)}/{total_splits}차 ✅\n"
                 f"   • 다음({nxt}차): 추가 {next_gap:+.1f}%p 하락 시"
