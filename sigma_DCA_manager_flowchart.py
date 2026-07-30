@@ -149,10 +149,10 @@
 │  │  │  check_rotation_exit_signal(pos_cfg, today)                      │ │ │
 │  │  │  └─ 만료 시 "🔴 D+XX Rotation Maturity" 경고                     │ │ │
 │  │  ├──────────────────────────────────────────────────────────────────┤ │ │
-│  │  │  [4-f] All-In 신호 (Stage 5)                                     │ │ │
-│  │  │  _format_all_in_line(ticker)                                     │ │ │
+│  │  │  [4-f] (제거됨 — Stage 5는 ATH DCA 3차 트리거로 통합)           │ │ │
+│  │  │  → check_ath_dca_signals() 내부의 STAGE5 타입 트리거로 처리      │ │ │
 │  │  │  ├─ get_bottom_stage() → market_state.json (Stage 0~5)           │ │ │
-│  │  │  └─ Stage 5 시 "🔥 Stage 5 All-In → XX% 일괄 매수"              │ │ │
+│  │  │  └─ Stage 5 시 "🚨 3차 DCA 매수 신호! [Stage 5 Bottom Confirmed]"│ │ │
 │  │  ├──────────────────────────────────────────────────────────────────┤ │ │
 │  │  │  [4-g] RSI + 거래량 복합 신호                                    │ │ │
 │  │  │  _check_rsi_volume_signal(ticker)                                │ │ │
@@ -269,7 +269,7 @@ sigma_DCA_manager.py (직접 실행)
 │   │           └── _fetch_closes_for_lookback()
 │   ├── _format_all_in_line()                  ← market_state.json
 │   │   ├── get_bottom_stage()
-│   │   └── get_all_in_percent()               ← MarketStage_config.json
+│   │   └── Stage 5 → ATH DCA 3차 트리거로 통합          ← portfolio_config.json
 │   │
 │   └── _check_rsi_volume_signal()             ← yfinance API
 │       ├── _calculate_rsi()     (SOXL: 14일 / TQQQ: 21일)
@@ -335,9 +335,8 @@ check_peak_sell_signal_with_cooldown()
    │       → TRIGGER/SPLITS/STRATEGY 변경 시 자동 감지 → 분할 상태 초기화
  └── LAST_MONTHLY_PING
 
- MarketStage_config.json  (읽기 전용, MarketStageSystem.py 소유)
- └── TICKERS → SOXL / TQQQ
-     └── ALL_IN_PERCENT
+ portfolio_config.json  (읽기 전용, MarketStageSystem.py가 공유)
+ └── POSITIONS → SOXL / TQQQ (키 목록을 ticker로 사용)
 
  market_state.json  (읽기 전용, MarketStageSystem.py가 작성)
  └── SOXL / TQQQ
@@ -580,7 +579,7 @@ jobs:
 ├── 📄 bear_market_signals.py            약세장 신호 분석
 │
 ├── 📄 portfolio_config.json             ★ 포트폴리오 설정 (핵심 설정 파일)
-├── 📄 MarketStage_config.json           시장 단계 설정
+├── 📄 (MarketStage_config.json — 제거됨, portfolio_config.json으로 통합)
 ├── 📄 market_state.json                 시장 상태 저장 (자동 생성)
 ├── 📄 signal_report.json                신호 리포트 (자동 생성)
 ├── 📄 sigma_history.csv                 Sigma 변경 이력 (자동 생성)

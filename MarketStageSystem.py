@@ -9,10 +9,10 @@ import yfinance as yf
 from datetime import datetime
 from typing import Optional, Dict
 
+from sigma_DCA_manager import load_portfolio, resolve_discord_config
+
 # ====================== 설정 ======================
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CONFIG_PATH = os.path.join(BASE_DIR, "MarketStage_config.json")
-STATE_PATH = os.path.join(BASE_DIR, "market_state.json")
+STATE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "market_state.json")
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(levelname)s | %(message)s')
 
@@ -228,36 +228,19 @@ class MarketTopTracker(MarketStageTracker):
 # ====================== 메인 트래커 ======================
 class DiscordMarketTracker:
     def __init__(self):
-        self.config = self._load_config()
-        self.webhook_url: str = self.config.get("DISCORD_WEBHOOK", "")
-        self.user_id: str = self.config.get("DISCORD_USER_ID", "")
+        self.config = load_portfolio()
+        self.webhook_url, self.user_id = resolve_discord_config(self.config)
 
-        tickers_cfg = self.config.get("TICKERS")
-        if isinstance(tickers_cfg, dict) and len(tickers_cfg) > 0:
-            # New format: {"TICKER": {"ALL_IN_PERCENT": 50, ...}, ...}
-            # The per-ticker settings (e.g. ALL_IN_PERCENT) aren't used by this
-            # script itself — they're read by sigma_DCA_manager.py, which
-            # treats MarketStage_config.json as the single source of truth for
-            # "which tickers to watch + what to do when stage 5 hits."
-            self.tickers = list(tickers_cfg.keys())
-        elif isinstance(tickers_cfg, list) and len(tickers_cfg) > 0:
-            # Old format: ["TICKER", ...] — still accepted so existing config
-            # files keep working without a forced migration.
-            self.tickers = tickers_cfg
+        # Read ticker list from portfolio_config.json → POSITIONS keys
+        positions = self.config.get("POSITIONS", {})
+        if isinstance(positions, dict) and len(positions) > 0:
+            self.tickers = list(positions.keys())
         else:
-            raise ValueError("❌ MarketStage_config.json 파일에 'TICKERS' 목록을 추가해주세요.")
+            raise ValueError("❌ portfolio_config.json에 'POSITIONS' 설정이 없습니다.")
 
         self.bottom_trackers: Dict[str, MarketBottomTracker] = {}
         self.top_trackers: Dict[str, MarketTopTracker] = {}
         self._load_state()
-
-    def _load_config(self) -> dict:
-        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-            config = json.load(f)
-        # GitHub Actions 시크릿(env var)이 있으면 그걸 우선 사용, 없으면 파일 값 사용
-        config["DISCORD_WEBHOOK"] = os.environ.get("DISCORD_WEBHOOK") or config.get("DISCORD_WEBHOOK", "")
-        config["DISCORD_USER_ID"] = os.environ.get("DISCORD_USER_ID") or config.get("DISCORD_USER_ID", "")
-        return config
 
     def _load_state(self):
         state = {}

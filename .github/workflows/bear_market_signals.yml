@@ -31,7 +31,6 @@ jobs:
           # 존재하는 파일만 골라서 커밋
           [ -f "bear_log.txt" ] && git add bear_log.txt
           [ -f "signal_report.json" ] && git add signal_report.json
-          [ -f "bear_config.json" ] && git add bear_config.json
           git commit -m "update: signals $(date +'%Y-%m-%d')" || echo "No changes to commit"
           git push
           

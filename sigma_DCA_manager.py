@@ -61,6 +61,18 @@ def save_portfolio(data: dict) -> None:
     shutil.move(temp_path, CONFIG_PATH)
 
 
+def resolve_discord_config(cfg: dict) -> tuple[str, str]:
+    """Resolve Discord webhook URL and user ID from config with env var override.
+
+    Environment variables (GitHub Actions secrets) take precedence over
+    file-based values so credentials can be kept out of version control.
+    Shared by both sigma_DCA_manager.py and MarketStageSystem.py.
+    """
+    webhook = os.environ.get("DISCORD_WEBHOOK") or cfg.get("DISCORD_WEBHOOK", "")
+    user_id = os.environ.get("DISCORD_USER_ID") or cfg.get("DISCORD_USER_ID", "")
+    return webhook, user_id
+
+
 # ═══════════════════════════════════════════════════════════
 # Sigma Auto-Update — By LOOKBACK_DAYS
 # ═══════════════════════════════════════════════════════════
@@ -702,6 +714,18 @@ def _parse_ath_trigger(raw) -> float | None:
     return None
 
 
+def _is_stage5_trigger(raw) -> bool:
+    """Check if a trigger value is the special 'STAGE5' keyword,
+    meaning the trigger fires when MarketStageSystem reports bottom
+    stage 5 for the ticker — the market bottom confirmation becomes
+    the buy signal for this split."""
+    if raw is None:
+        return False
+    if isinstance(raw, str):
+        return raw.strip().upper() == "STAGE5"
+    return False
+
+
 def _compute_ath_dca_config_fingerprint(ath_dca: dict) -> str:
     """
     Create a deterministic fingerprint of ATH_DCA parameters to detect
@@ -724,14 +748,24 @@ def check_ath_dca_signals(cfg: dict) -> list[str]:
     Evaluate ATH drawdown DCA triggers for every position that has
     ATH_DCA.ENABLED == true.
 
+    Supports two trigger types:
+      - "PCT": Percentage-based (e.g. "-60%") — fires when ATH drawdown
+        meets or exceeds the configured threshold.
+      - "STAGE5": Market-stage based — fires when MarketStageSystem
+        reports bottom stage 5 for the ticker, confirming the market
+        bottom. This serves as the final split trigger in the ATH DCA
+        3-split emergency mode.
+
     For each ticker:
       1. Compute rolling All-Time High from 1 year of Close data.
       2. Calculate current drawdown % from that ATH.
-      3. For every TRIGGER_N threshold, if the drawdown meets or
-         exceeds it AND that split hasn't been marked as used yet,
-         emit a BUY ALERT and persist the split number.
-      4. Also emit "imminent" warnings when drawdown is within
-         5 percentage points of a trigger.
+      3. For every TRIGGER_N, evaluate the trigger type:
+         - PCT: check drawdown vs threshold
+         - STAGE5: check get_bottom_stage(ticker) == 5
+      4. If trigger fires AND split not yet used → emit BUY ALERT
+         and persist the split number.
+      5. For PCT triggers only: emit "imminent" warning when
+         drawdown is within 5 percentage points.
 
     State is persisted via pos["ATH_DCA_USED_SPLITS"] (caller must
     save the config after this function returns).
@@ -768,12 +802,16 @@ def check_ath_dca_signals(cfg: dict) -> list[str]:
             # First run with this config — record fingerprint
             pos["ATH_DCA_CONFIG_FINGERPRINT"] = current_fp
 
-        # Parse triggers (handles "-30%", -30, "-30")
-        triggers: dict[int, float] = {}
+        # Parse triggers: supports both percentage ("-30%") and STAGE5 keyword
+        triggers: dict[int, tuple[str, float]] = {}
         for i in range(1, total_splits + 1):
-            val = _parse_ath_trigger(ath_dca.get(f"TRIGGER_{i}"))
-            if val is not None and 0 < val < 1:
-                triggers[i] = val
+            raw = ath_dca.get(f"TRIGGER_{i}")
+            if _is_stage5_trigger(raw):
+                triggers[i] = ("STAGE5", 0.0)
+            else:
+                val = _parse_ath_trigger(raw)
+                if val is not None and 0 < val < 1:
+                    triggers[i] = ("PCT", val)
 
         if not triggers:
             continue
@@ -803,34 +841,57 @@ def check_ath_dca_signals(cfg: dict) -> list[str]:
 
         # Evaluate each trigger in order
         for split_num in sorted(triggers):
-            threshold = triggers[split_num]
+            trigger_type, threshold = triggers[split_num]
             if split_num in used:
                 continue
 
-            gap_pct = (threshold - current_dd) * 100
+            if trigger_type == "STAGE5":
+                # ── Stage 5 Bottom Trigger ────────────────────────
+                # Fires when MarketStageSystem confirms bottom stage 5.
+                # This integrates the former standalone _format_all_in_line()
+                # into the ATH DCA split system as the final split trigger.
+                if get_bottom_stage(ticker) == 5:
+                    used.append(split_num)
+                    changed = True
+                    triggered_this_run = True
+                    # Use the actual current drawdown as the effective threshold
+                    effective_threshold = current_dd
+                    target_price = round(rolling_ath_val * (1 - effective_threshold), 2)
+                    messages.append(
+                        f"🚨 **{ticker} ATH {split_num}차 DCA 매수 신호! 🔥🔥 [Stage 5 Bottom Confirmed]**\n"
+                        f"   • ATH: \\${rolling_ath_val:.2f}\n"
+                        f"   • 현재 DD: {current_dd_pct:.1f}%\n"
+                        f"   • **시장 바닥(Stage 5) 감지 → 마지막 분할 매수 실행!**\n"
+                        f"   • 현재가: \\${current_price:.2f}\n"
+                        f"   • 목표가: \\${target_price:.2f} (이하)\n"
+                        f"   • **매수 실행 권장!** (잔여: {total_splits - len(used)}/{total_splits}차)"
+                    )
+            else:
+                # ── Percentage-based Trigger ──────────────────────
+                gap_pct = (threshold - current_dd) * 100
 
-            if current_dd >= threshold:
-                used.append(split_num)
-                changed = True
-                triggered_this_run = True
-                target_price = round(rolling_ath_val * (1 - threshold), 2)
+                if current_dd >= threshold:
+                    used.append(split_num)
+                    changed = True
+                    triggered_this_run = True
+                    target_price = round(rolling_ath_val * (1 - threshold), 2)
 
-                messages.append(
-                    f"🚨 **{ticker} ATH {split_num}차 DCA 매수 신호!** 🔥\n"
-                    f"   • ATH: \\${rolling_ath_val:.2f}\n"
-                    f"   • 현재 DD: {current_dd_pct:.1f}% (임계: -{threshold*100:.0f}%)\n"
-                    f"   • 현재가: \\${current_price:.2f}\n"
-                    f"   • 목표가: \\${target_price:.2f} (이하)\n"
-                    f"   • **매수 실행 권장!** (잔여: {total_splits - len(used)}/{total_splits}차)"
-                )
+                    messages.append(
+                        f"🚨 **{ticker} ATH {split_num}차 DCA 매수 신호!** 🔥\n"
+                        f"   • ATH: \\${rolling_ath_val:.2f}\n"
+                        f"   • 현재 DD: {current_dd_pct:.1f}% (임계: -{threshold*100:.0f}%)\n"
+                        f"   • 현재가: \\${current_price:.2f}\n"
+                        f"   • 목표가: \\${target_price:.2f} (이하)\n"
+                        f"   • **매수 실행 권장!** (잔여: {total_splits - len(used)}/{total_splits}차)"
+                    )
 
-            elif gap_pct < 5.0:
-                messages.append(
-                    f"📡 **{ticker} ATH {split_num}차 DCA 임박!**\n"
-                    f"   • ATH: \\${rolling_ath_val:.2f}\n"
-                    f"   • 현재 DD: {current_dd_pct:.1f}% (목표: -{threshold*100:.0f}%)\n"
-                    f"   • 추가 {gap_pct:.1f}%p 하락 시 트리거"
-                )
+                elif gap_pct < 5.0:
+                    messages.append(
+                        f"📡 **{ticker} ATH {split_num}차 DCA 임박!**\n"
+                        f"   • ATH: \\${rolling_ath_val:.2f}\n"
+                        f"   • 현재 DD: {current_dd_pct:.1f}% (목표: -{threshold*100:.0f}%)\n"
+                        f"   • 추가 {gap_pct:.1f}%p 하락 시 트리거"
+                    )
 
         # Persist state if changed
         if changed:
@@ -894,34 +955,56 @@ def check_ath_dca_signals(cfg: dict) -> list[str]:
             continue  # skip duplicate status line
 
         if not used:
-            next_gap = (triggers[1] - current_dd) * 100
-            messages.append(
-                f"📡 **{ticker} ATH 1차 DCA 임박!**\n"
-                f"   • ATH: \\${rolling_ath_val:.2f}\n"
-                f"   • 현재 DD: {current_dd_pct:.1f}%\n"
-                f"   • 1차(-{triggers[1]*100:.0f}%) 까지: {next_gap:+.1f}%p"
-            )
+            first_type, first_threshold = triggers[1]
+            if first_type == "PCT":
+                next_gap = (first_threshold - current_dd) * 100
+                messages.append(
+                    f"📡 **{ticker} ATH 1차 DCA 임박!**\n"
+                    f"   • ATH: \\${rolling_ath_val:.2f}\n"
+                    f"   • 현재 DD: {current_dd_pct:.1f}%\n"
+                    f"   • 1차(-{first_threshold*100:.0f}%) 까지: {next_gap:+.1f}%p"
+                )
+            else:  # STAGE5 — no percentage gap to show
+                messages.append(
+                    f"📡 **{ticker} ATH 1차 DCA 임박!**\n"
+                    f"   • ATH: \\${rolling_ath_val:.2f}\n"
+                    f"   • 현재 DD: {current_dd_pct:.1f}%\n"
+                    f"   • 1차(Stage 5 바닥 감지 시) 대기 중"
+                )
         elif remaining:
             nxt = remaining[0]
-            next_gap = (triggers[nxt] - current_dd) * 100
-            messages.append(
-                f"📊 **{ticker} ATH {nxt}차 DCA 완료**\n"
-                f"   • ATH: \\${rolling_ath_val:.2f}\n"
-                f"   • 실행: {len(used)}/{total_splits}차 ✅\n"
-                f"   • 다음({nxt}차): 추가 {next_gap:+.1f}%p 하락 시"
-            )
+            nxt_type, nxt_threshold = triggers[nxt]
+            if nxt_type == "PCT":
+                next_gap = (nxt_threshold - current_dd) * 100
+                messages.append(
+                    f"📊 **{ticker} ATH {nxt}차 DCA 완료**\n"
+                    f"   • ATH: \\${rolling_ath_val:.2f}\n"
+                    f"   • 실행: {len(used)}/{total_splits}차 ✅\n"
+                    f"   • 다음({nxt}차): 추가 {next_gap:+.1f}%p 하락 시"
+                )
+            else:  # STAGE5
+                messages.append(
+                    f"📊 **{ticker} ATH {nxt}차 DCA 완료**\n"
+                    f"   • ATH: \\${rolling_ath_val:.2f}\n"
+                    f"   • 실행: {len(used)}/{total_splits}차 ✅\n"
+                    f"   • 다음({nxt}차): Stage 5 바닥 감지 시 트리거"
+                )
 
     return messages
 
 
 # ═══════════════════════════════════════════════════════════
-# MarketStageSystem Integration — All-In Trigger on Bottom Stage 5
+# MarketStageSystem Integration — Stage 5 → ATH DCA 3차 Trigger
 # ═══════════════════════════════════════════════════════════
 # Same loose, file-based coupling pattern as get_market_score() above:
 # MarketStageSystem.py owns market_state.json and writes to it independently
 # on its own schedule; this script only ever reads it. No import dependency
 # between the two codebases, so either can be changed/redeployed without
 # touching the other.
+#
+# get_bottom_stage() is consumed by check_ath_dca_signals() when a
+# TRIGGER_N is set to "STAGE5" — Stage 5 (market bottom confirmation)
+# becomes the trigger for the corresponding ATH DCA split.
 
 def get_bottom_stage(ticker: str, filepath: str = "market_state.json") -> int:
     """
@@ -938,43 +1021,6 @@ def get_bottom_stage(ticker: str, filepath: str = "market_state.json") -> int:
         return int(data.get(ticker, {}).get("bottom", 0))
     except Exception:
         return 0
-
-
-def get_all_in_percent(ticker: str, filepath: str = "MarketStage_config.json") -> float | None:
-    """
-    Reads this ticker's ALL_IN_PERCENT from MarketStageSystem's own config
-    file (MarketStage_config.json → TICKERS → <ticker> → ALL_IN_PERCENT).
-    MarketStage_config.json is the single source of truth for "which tickers
-    trigger an all-in and at what %" — portfolio_config.json is not touched
-    for this setting. Returns None if the file, ticker, or key is missing.
-    """
-    if not os.path.exists(filepath):
-        return None
-    try:
-        with open(filepath, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        tickers_cfg = data.get("TICKERS", {})
-        if not isinstance(tickers_cfg, dict):
-            return None
-        return tickers_cfg.get(ticker, {}).get("ALL_IN_PERCENT")
-    except Exception:
-        return None
-
-
-def _format_all_in_line(ticker: str) -> str | None:
-    """
-    Builds the all-in action line when MarketStageSystem.py reports bottom
-    stage 5 for this ticker. Returns None (nothing appended to the briefing)
-    when stage != 5.
-    """
-    if get_bottom_stage(ticker) != 5:
-        return None
-    pct = get_all_in_percent(ticker)
-    if pct is None:
-        return (f"• 🔥 **[Stage 5] {ticker} bottom signal confirmed — "
-                f"no ALL_IN_PERCENT configured in MarketStage_config.json**")
-    return (f"• 🔥 **[Stage 5 All-In] {ticker} bottom signal confirmed → "
-            f"{pct}% lump-sum buy recommended (alongside ongoing LOC DCA)**")
 
 
 # ==============================================================================
@@ -1486,11 +1532,7 @@ def _build_briefing_lines(now_ny: datetime, cfg: dict) -> list[str]:
             lines.append("• 🔴 **[LOC Paused] — ATH DCA crash mode active**")
             lines.append(f"• 🎯 **[Action] LOC Buy:** **SUSPENDED** (ATH_DCA mode)")
 
-        all_in_line = _format_all_in_line(ticker)
-        if all_in_line:
-            lines.append(all_in_line)
-
-    # ── ATH Drawdown DCA Monitor ────────────────────────────────────
+    # ── ATH Drawdown DCA Monitor (includes Stage 5 All-In as split trigger) ──
     ath_dca_lines = check_ath_dca_signals(cfg)
     if ath_dca_lines:
         lines.append("")
@@ -1515,8 +1557,7 @@ def execute_dual_tactical_trader() -> None:
     now_ny = datetime.now(ZoneInfo("America/New_York"))
     
     cfg = load_portfolio()
-    webhook = os.environ.get("DISCORD_WEBHOOK") or cfg.get("DISCORD_WEBHOOK", "")
-    user_id = os.environ.get("DISCORD_USER_ID") or cfg.get("DISCORD_USER_ID", "")
+    webhook, user_id = resolve_discord_config(cfg)
 
     reset_messages = reset_matured_rotation_positions(cfg, now_ny.date())
     status_messages = reset_messages + refresh_sigma_if_stale(cfg)

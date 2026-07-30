@@ -29,6 +29,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from sigma_DCA_manager import (
     _calculate_volatility_from_closes,
     _calculate_loc_from_sigma,
+    _calculate_rsi,
+    _parse_ath_trigger,
+    _is_stage5_trigger,
     check_peak_sell_signal_with_cooldown,
     _SELL_ATH_RATIO as MGR_ATH_RATIO,
     _SELL_RALLY_THRESHOLD as MGR_RALLY_THRESHOLD,
@@ -85,14 +88,32 @@ def load_entry_multiplier(ticker: str | None = None) -> float:
 ENTRY_MULTIPLIER = load_entry_multiplier()
 
 
+def load_ath_dca_config(ticker: str) -> dict:
+    """Read ATH_DCA config (splits, triggers, strategy) from portfolio_config.json."""
+    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+        cfg = json.load(f)
+    positions = cfg.get("POSITIONS", {})
+    if ticker in positions and "ATH_DCA" in positions[ticker]:
+        ath = positions[ticker]["ATH_DCA"]
+        if not isinstance(ath, dict) or not ath.get("ENABLED", False):
+            raise KeyError(f"ATH_DCA not enabled for {ticker}")
+        return ath
+    raise KeyError(f"ATH_DCA config not found for {ticker}")
+
+
 # ══════════════════════════════════════════════
 # Data Fetching
 # ══════════════════════════════════════════════
 
-def fetch_data(ticker: str, end_date: date | None = None) -> pd.DataFrame:
+def fetch_data(ticker: str, end_date: date | None = None,
+               include_volume: bool = False) -> pd.DataFrame:
     """Download OHLCV data for backtest ending on end_date (default: today).
-    Uses auto_adjust=True (분할/배당 조정) and returns only Close/Low for
-    consistency with the standard ATH methodology."""
+    Uses auto_adjust=True (분할/배당 조정).
+
+    By default returns only Close/Low for consistency with the standard
+    ATH methodology.  When ``include_volume=True`` (needed for ATH DCA
+    Stage 5 proxy), Volume is also returned.
+    """
     if end_date is None:
         end_date = date.today()
     total_calendar = BACKTEST_DAYS + LOOKBACK_DAYS + FETCH_BUFFER_DAYS
@@ -105,9 +126,14 @@ def fetch_data(ticker: str, end_date: date | None = None) -> pd.DataFrame:
     if hist.empty:
         raise RuntimeError(f"{ticker} returned no data.")
 
-    df: pd.DataFrame = hist[['Close', 'Low']].copy()  # type: ignore[assignment]
-    df.columns = ['Close', 'Low']
-    df = df.dropna(subset=['Close', 'Low'])  # type: ignore[call-overload]
+    if include_volume:
+        df: pd.DataFrame = hist[['Close', 'Low', 'Volume']].copy()
+        df.columns = ['Close', 'Low', 'Volume']
+        df = df.dropna(subset=['Close', 'Low', 'Volume'])
+    else:
+        df = hist[['Close', 'Low']].copy()
+        df.columns = ['Close', 'Low']
+        df = df.dropna(subset=['Close', 'Low'])
     print(f"   → {len(df)} trading days loaded.")
     return df
 
@@ -401,6 +427,368 @@ def run_backtest_with_sell(df: pd.DataFrame, entry_multiplier: float = ENTRY_MUL
         'trade_log':         trade_log,
         'daily_values':      daily_values,
     }
+
+
+# ══════════════════════════════════════════════
+# ATH DCA Backtest — 듀얼 모드 (LOC + ATH_DCA + Stage 5)
+# ══════════════════════════════════════════════
+
+def _is_backtest_stage5(prices: pd.Series, volumes: pd.Series) -> bool:
+    """
+    Simplified Stage 5 (market bottom) proxy for backtesting.
+
+    Approximates MarketStageSystem's bottom detection with:
+      1. RSI(14) < 35 (oversold territory)
+      2. Price within 5%% of 60-day low
+      3. Volume contraction < 85%% of 20-day MA (optional — skipped
+         when volume data is unavailable, e.g. fetch_data() returns
+         only Close/Low)
+
+    When conditions 1+2 (and 3 if available) align, it suggests the
+    market has found a bottom — triggers the 3rd ATH DCA split.
+    """
+    if len(prices) < 60:
+        return False
+
+    rsi = _calculate_rsi(prices, 14).dropna()
+    if rsi.empty:
+        return False
+    latest_rsi = float(rsi.iloc[-1])
+
+    low_60 = float(prices.tail(60).min())
+    current = float(prices.iloc[-1])
+    near_low = current <= low_60 * 1.05
+
+    # Volume contraction — graceful fallback when volume unavailable
+    has_volume = len(volumes) > 20 and float(volumes.tail(20).mean()) > 0
+    if has_volume:
+        vol_ma20 = float(volumes.tail(20).mean())
+        current_vol = float(volumes.iloc[-1])
+        low_vol = current_vol < vol_ma20 * 0.85
+    else:
+        low_vol = True  # skip volume check when data unavailable
+
+    return near_low and latest_rsi < 35 and low_vol
+
+
+def run_backtest_ath_dca(
+    df: pd.DataFrame,
+    entry_multiplier: float = ENTRY_MULTIPLIER,
+    ticker: str = TICKER,
+    ath_dca_config: dict | None = None,
+    verbose: bool = False,
+    initial_cash: float | None = None,
+    loc_buy_amount: float | None = None,
+) -> dict:
+    """
+    Walk-forward backtest of the dual-mode (LOC ↔ ATH_DCA) system.
+
+    Simulates:
+      - 📗 **LOC mode** (normal): Sigma-based LOC DCA buys (same as
+        run_backtest()) while ATH drawdown is below TRIGGER_1.
+      - 🚨 **ATH_DCA mode** (crash): Activated when ATH drawdown hits
+        TRIGGER_1. LOC buys stop; 3 equal splits are deployed:
+         * 1차: at TRIGGER_1 (mode switch point)
+         * 2차: at TRIGGER_2 (deeper ATH drawdown)
+         * 3차: at Stage 5 proxy (_is_backtest_stage5) or if TRIGGER_3
+           is a PCT trigger, at that drawdown threshold.
+
+    Returns a result dict with all metrics PLUS mode-transition logs.
+    """
+    if ath_dca_config is None:
+        ath_dca_config = load_ath_dca_config(ticker)
+    if initial_cash is None:
+        initial_cash = float(INITIAL_CASH)
+    if loc_buy_amount is None:
+        loc_buy_amount = float(BUY_AMOUNT)
+
+    # Parse ATH DCA triggers
+    total_splits = int(ath_dca_config.get("SPLITS", 3))
+    triggers: dict[int, tuple[str, float]] = {}
+    for i in range(1, total_splits + 1):
+        raw = ath_dca_config.get(f"TRIGGER_{i}")
+        if _is_stage5_trigger(raw):
+            triggers[i] = ("STAGE5", 0.0)
+        else:
+            val = _parse_ath_trigger(raw)
+            if val is not None and 0 < val < 1:
+                triggers[i] = ("PCT", val)
+
+    # Equal split of total capital for ATH DCA
+    ath_split_amount = initial_cash / total_splits
+
+    closes = df['Close'].to_numpy(dtype=float)
+    lows = df['Low'].to_numpy(dtype=float)
+    volumes_arr = df.get('Volume')
+    if volumes_arr is not None:
+        volumes_arr = volumes_arr.to_numpy(dtype=float)
+    dates_idx = df.index
+
+    # ── State ──────────────────────────────────────────────────────
+    cash = float(initial_cash)
+    shares = 0.0
+    dca_buys = 0
+    ath_buys = 0
+    strategy_mode = "LOC"  # starts in normal mode
+    used_splits: list[int] = []
+    rolling_ath = 0.0
+    trade_log = []
+    daily_values = []
+    mode_log = []  # track mode transitions
+    start_idx = LOOKBACK_DAYS
+    stage5_triggered_at: str | None = None  # track when Stage 5 fired
+
+    for i in range(start_idx, len(df)):
+        prev_close = float(closes[i - 1])
+        today_low = float(lows[i])
+        today_close = float(closes[i])
+        today_date: pd.Timestamp = dates_idx[i]
+
+        # ── Update rolling ATH ─────────────────────────────────────
+        if today_close > rolling_ath:
+            rolling_ath = today_close
+
+        current_dd = ((rolling_ath - today_close) / rolling_ath) if rolling_ath > 0 else 0.0
+
+        # ── Mode switch check (LOC → ATH_DCA) ────────────────────────
+        if strategy_mode == "LOC":
+            # Check TRIGGER_1 for mode switch
+            if 1 in triggers and triggers[1][0] == "PCT":
+                t1_threshold = triggers[1][1]
+                if current_dd >= t1_threshold:
+                    strategy_mode = "ATH_DCA"
+                    mode_log.append({
+                        'date': today_date,
+                        'mode': 'ATH_DCA',
+                        'reason': f"ATH DD {current_dd*100:.1f}% >= T1 ({t1_threshold*100:.0f}%)",
+                        'dd_pct': round(current_dd * 100, 1),
+                    })
+                    if verbose:
+                        print(f"  🔄 {today_date.date()} | LOC → ATH_DCA (DD={current_dd*100:.1f}%)")
+
+        # ── In ATH_DCA mode: evaluate split triggers ────────────────
+        if strategy_mode == "ATH_DCA":
+            for split_num in sorted(triggers):
+                if split_num in used_splits:
+                    continue
+
+                trigger_type, threshold = triggers[split_num]
+                triggered = False
+                trigger_label = ""
+
+                if trigger_type == "PCT":
+                    if current_dd >= threshold:
+                        triggered = True
+                        trigger_label = f"ATH DD {current_dd*100:.1f}% >= -{threshold*100:.0f}%"
+                else:  # STAGE5
+                    # Build price series for Stage 5 proxy
+                    price_slice = df['Close'].iloc[:i + 1]
+                    vol_slice = (df['Volume'].iloc[:i + 1]
+                                 if 'Volume' in df.columns and volumes_arr is not None
+                                 else pd.Series(dtype=float))
+                    if _is_backtest_stage5(price_slice, vol_slice):
+                        triggered = True
+                        trigger_label = "Stage 5 proxy (RSI<35 + price near 60d low + vol contraction)"
+
+                if triggered:
+                    # Deploy this split
+                    split_amount = ath_split_amount
+                    buy_price = today_close
+                    buy_shares = min(split_amount / buy_price, cash / buy_price) if buy_price > 0 else 0
+                    actual_amt = buy_shares * buy_price
+
+                    cash -= actual_amt
+                    shares += buy_shares
+                    ath_buys += 1
+                    used_splits.append(split_num)
+
+                    trade_log.append({
+                        'date': today_date,
+                        'type': f'ATH_{split_num}차',
+                        'price': round(buy_price, 2),
+                        'shares': round(buy_shares, 4),
+                        'amount': round(actual_amt, 2),
+                        'dd_pct': round(current_dd * 100, 1),
+                        'trigger': trigger_label,
+                        'cash_after': round(cash, 2),
+                        'mode': 'ATH_DCA',
+                    })
+
+                    if trigger_type == "STAGE5":
+                        stage5_triggered_at = today_date.strftime("%Y-%m-%d")
+
+                    if verbose:
+                        print(f"  🚨 {today_date.date()} | ATH {split_num}차 filled @ ${buy_price:.2f}"
+                              f" | {trigger_label}")
+
+        # ── LOC mode: normal DCA buy (only when NOT in ATH_DCA mode) ─
+        if strategy_mode == "LOC":
+            lookback_window = pd.Series(closes[i - LOOKBACK_DAYS: i])
+            sigma, _ = _calculate_volatility_from_closes(
+                lookback_window, LOOKBACK_DAYS, VOL_METHOD, EWMA_LAMBDA
+            )
+            loc_price = _calculate_loc_from_sigma(prev_close, sigma, entry_multiplier)
+            triggered = today_low <= loc_price
+
+            buy_price = min(today_close, loc_price) if triggered else None
+
+            if triggered and cash >= loc_buy_amount and dca_buys < MAX_BUYS and buy_price is not None:
+                buy_shares = loc_buy_amount / buy_price
+                cash -= loc_buy_amount
+                shares += buy_shares
+                dca_buys += 1
+
+                trade_log.append({
+                    'date': today_date,
+                    'type': 'LOC',
+                    'price': round(buy_price, 2),
+                    'shares': round(buy_shares, 4),
+                    'amount': round(loc_buy_amount, 2),
+                    'sigma': round(sigma, 4),
+                    'loc': round(loc_price, 2),
+                    'cash_after': round(cash, 2),
+                    'mode': 'LOC',
+                })
+
+                if verbose:
+                    print(f"  📌 {today_date.date()} | LOC filled @ ${buy_price:.2f}"
+                          f" (σ={sigma:.4f}, loc=${loc_price:.2f})")
+
+        # ── Record portfolio value ─────────────────────────────────
+        portfolio_value = cash + shares * today_close
+        daily_values.append({
+            'date': today_date,
+            'close': today_close,
+            'value': round(portfolio_value, 2),
+            'mode': strategy_mode,
+        })
+
+    # ── Compute metrics ──────────────────────────────────────────
+    dv_array = np.array([d['value'] for d in daily_values])
+    if len(dv_array) > 1:
+        daily_ret = dv_array[1:] / dv_array[:-1] - 1
+    else:
+        daily_ret = np.array([0.0])
+    ret_mean = float(daily_ret.mean())
+    ret_std = float(daily_ret.std())
+    sharpe = float(np.sqrt(252) * ret_mean / ret_std) if ret_std > 0 else 0.0
+
+    peak = np.maximum.accumulate(dv_array)
+    dd = (dv_array - peak) / peak
+    mdd = float(dd.min() * 100)
+
+    asset_start = float(daily_values[0]['close'])
+    asset_end = float(daily_values[-1]['close'])
+    buy_hold_ret = (asset_end - asset_start) / asset_start * 100
+
+    total_invested = sum(t['amount'] for t in trade_log)
+    final_price = float(daily_values[-1]['close'])
+
+    # Win rate: percentage of buys where final price > buy price
+    wins = sum(1 for t in trade_log if final_price > t['price']) if trade_log else 0
+    win_rate = wins / len(trade_log) * 100 if trade_log else 0.0
+
+    final_val = float(daily_values[-1]['value'])
+    total_ret = (final_val - initial_cash) / initial_cash * 100
+
+    return {
+        'multiplier': entry_multiplier,
+        'ticker': ticker,
+        'total_return': round(total_ret, 2),
+        'final_value': round(final_val, 2),
+        'sharpe': round(sharpe, 2),
+        'mdd': round(mdd, 2),
+        'buy_hold_ret': round(buy_hold_ret, 2),
+        'total_buys': dca_buys + ath_buys,
+        'dca_buys': dca_buys,
+        'ath_buys': ath_buys,
+        'total_invested': round(total_invested, 2),
+        'win_rate': round(win_rate, 1),
+        'final_price': round(final_price, 2),
+        'remaining_cash': round(cash, 2),
+        'final_shares': round(shares, 4),
+        'period_start': daily_values[0]['date'],
+        'period_end': daily_values[-1]['date'],
+        'strategy_mode': strategy_mode,
+        'used_splits': used_splits,
+        'stage5_triggered_at': stage5_triggered_at,
+        'mode_log': mode_log,
+        'trade_log': trade_log,
+        'daily_values': daily_values,
+    }
+
+
+def print_ath_dca_report(r: dict):
+    """Print a detailed report for the ATH DCA dual-mode backtest."""
+    p_start: pd.Timestamp = r['period_start']
+    p_end: pd.Timestamp = r['period_end']
+
+    print("\n")
+    print("═" * 72)
+    print("  🚀 ATH DCA 듀얼 모드 백테스트 리포트")
+    print("═" * 72)
+    print(f"  Ticker    : {r['ticker']}")
+    print(f"  Capital   : ${INITIAL_CASH:,}")
+    print(f"  Period    : {p_start.date()}  →  {p_end.date()}")
+    print(f"  Buy size  : ${BUY_AMOUNT:,} (LOC) / ${INITIAL_CASH/3:,.0f} (ATH split)")
+    print("─" * 72)
+
+    print(f"\n  📈 Performance")
+    print(f"     Final Portfolio     : ${r['final_value']:,.2f}")
+    print(f"     Total Return        : {r['total_return']:+.2f}%")
+    print(f"     Buy & Hold          : {r['buy_hold_ret']:+.2f}%")
+    print(f"     Alpha vs B&H        : {r['total_return'] - r['buy_hold_ret']:+.2f}%")
+    print(f"     Sharpe Ratio        : {r['sharpe']}")
+    print(f"     Max Drawdown        : {r['mdd']:.2f}%")
+
+    print(f"\n  📋 Activity")
+    print(f"     LOC fills           : {r['dca_buys']}")
+    print(f"     ATH DCA fills       : {r['ath_buys']}")
+    print(f"     Total invested      : ${r['total_invested']:,.2f}")
+    print(f"     Remaining cash      : ${r['remaining_cash']:,.2f}")
+    print(f"     Win rate            : {r['win_rate']:.1f}%")
+
+    print(f"\n  📋 ATH DCA Status")
+    print(f"     Final mode          : {r['strategy_mode']}")
+    print(f"     Used splits         : {r['used_splits']}")
+    print(f"     Stage 5 triggered   : {r['stage5_triggered_at'] or 'No'}")
+
+    if r['mode_log']:
+        print(f"\n  🔄 Mode Transitions")
+        for m in r['mode_log']:
+            print(f"     {m['date'].strftime('%Y-%m-%d')}"
+                  f" → {m['mode']} ({m['reason']})")
+
+    if r['trade_log']:
+        print(f"\n  📝 Trade Log")
+        print(f"  {'Date':<14} {'Type':<10} {'Price':>8} {'Shares':>10} {'Amount':>9} {'Detail':<30}")
+        print(f"  {'─'*14} {'─'*10} {'─'*8} {'─'*10} {'─'*9} {'─'*30}")
+        for t in r['trade_log']:
+            detail = t.get('trigger', '') or f"σ={t.get('sigma', 0):.4f}"
+            print(f"  {t['date'].strftime('%Y-%m-%d'):<14}"
+                  f" {t['type']:<10}"
+                  f" ${t['price']:>6.2f}"
+                  f" {t['shares']:>10.2f}"
+                  f" ${t['amount']:>7,.0f}"
+                  f" {detail:<30}")
+
+    # Monthly breakdown
+    monthly = {}
+    for d in r['daily_values']:
+        mk = d['date'].strftime('%Y-%m')
+        monthly.setdefault(mk, []).append(d['value'])
+    if len(monthly) > 1:
+        print(f"\n  📅 Monthly Portfolio Value")
+        print(f"  {'Month':<8} {'Start':>10} {'End':>10} {'Return':>8}")
+        print(f"  {'─'*8} {'─'*10} {'─'*10} {'─'*8}")
+        for m in sorted(monthly):
+            vals = monthly[m]
+            s, e = vals[0], vals[-1]
+            print(f"  {m:<8} ${s:>7,.0f} ${e:>7,.0f} {(e-s)/s*100:>+7.2f}%")
+
+    print("\n" + "═" * 72)
+    print("  ✅ ATH DCA Backtest Complete")
+    print("═" * 72)
 
 
 # ══════════════════════════════════════════════
@@ -1120,7 +1508,24 @@ if __name__ == "__main__":
     multi_portfolio = "--multi-portfolio-sweep" in sys.argv
     portfolio_run   = "--portfolio-run" in sys.argv
     sell_mode       = "--sell" in sys.argv
-    if portfolio_run:
+    ath_dca_mode    = "--ath-dca" in sys.argv
+    if ath_dca_mode:
+        tickers = ["TQQQ", "SOXL"]
+        print(f"\n🚀 ATH DCA 듀얼 모드 백테스트")
+        print(f"   Capital: ${INITIAL_CASH:,}")
+        print(f"   Period : Recent {BACKTEST_DAYS} trading days (~1 year)")
+        print("─" * 72)
+        for tkr in tickers:
+            mult = load_entry_multiplier(tkr)
+            ath_cfg = load_ath_dca_config(tkr)
+            print(f"\n📊 {tkr} — entry_mult={mult}, ATH_DCA: {ath_cfg.get('SPLITS', 3)}splits")
+            df = fetch_data(tkr)
+            r = run_backtest_ath_dca(
+                df, entry_multiplier=mult, ticker=tkr,
+                ath_dca_config=ath_cfg, verbose=True
+            )
+            print_ath_dca_report(r)
+    elif portfolio_run:
         run_portfolio_detail()
     elif multi_portfolio:
         run_multi_period_portfolio_sweep()

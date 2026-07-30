@@ -27,9 +27,9 @@
 2. Sigma 기반 LOC 매수 목표가 산출
 3. RSI+거래량 복합 매수 신호 평가 (12년 백테스트 검증)
 4. 전고점 근접 50% 청산 신호 감지
-5. ATH 하락분할 DCA 트리거 모니터링
-6. 로테이션 포지션 만기 관리
-7. 시장 바닥 단계 올인 신호 감지
+5. 듀얼 모드 (LOC 일반 / ATH DCA 비상) 자동 전환
+6. ATH 하락분할 DCA 트리거 모니터링 (3차 분할, STAGE5 바닥 통합)
+7. 로테이션 포지션 만기 관리
 8. 종합 브리핑을 **Discord**로 전송
 
 ---
@@ -70,9 +70,13 @@
 | **ROTATION_3M** | MA20/MA60 추세 기반 매수/매도 신호 + 만기 초기화 |
 | **END_DEC** | MA20/MA60 추세 기반 매수/매도 신호 |
 
-### 6️⃣ Market Stage System 연동
-- MarketStageSystem.py가 감지한 **바닥 단계(Stage 5)** 시 일괄 매수 메시지 출력
-- 파일 기반 느슨한 결합 구조 — 독립적 배포 가능
+### 6️⃣ 듀얼 모드 전환 + ATH 하락분할 DCA (비상 모드)
+- **LOC 모드** (📗): 평상시 Sigma 기반 LOC 20분할 매수
+- **ATH DCA 모드** (🚨): ATH 하락률이 TRIGGER_1 도달 시 자동 전환 → 3차 분할 매수
+  - 1차/2차: ATH 대비 설정된 % 하락 시 (TQQQ: -35%/-50%, SOXL: -60%/-70%)
+  - **3차: MarketStageSystem의 Stage 5 바닥 감지 시 발동**
+- MarketStageSystem.py가 `market_state.json`에 기록한 바닥 단계를 ATH DCA 3차 트리거로 활용
+- 전 사이클(3차) 완료 후 신규 ATH 갱신 시 자동 초기화 및 재진입
 
 ### 7️⃣ Discord 브리핑
 - 매일 정해진 시간에 Discord Webhook으로 종합 브리핑 전송
@@ -130,7 +134,7 @@
 | **MarketStageSystem.py** | 독립적인 시장 단계 시스템 — 바닥 단계 감지 |
 | **bear_market_signals.py** | 약세장 신호 분석 시스템 |
 | **portfolio_config.json** | 📌 **포트폴리오 설정** — 포지션, Sigma, DCA 파라미터 |
-| **MarketStage_config.json** | 시장 단계 시스템 설정 |
+| ~~MarketStage_config.json~~ | (제거됨 — portfolio_config.json으로 통합) |
 | **sigma_history.csv** | Sigma 갱신 이력 (자동 생성) |
 | **market_state.json** | 시장 단계 상태 정보 (자동 생성) |
 | **signal_report.json** | 시장 리스크 점수 (자동 생성) |
@@ -168,7 +172,10 @@ pandas_market_calendars  # NYSE 휴장일 계산
 
 ---
 
-## ⚙️ 설정 파일
+## ⚙️ 설정 파일 (단일 파일)
+
+> **`portfolio_config.json`** 하나만 있으면 됩니다.
+> `MarketStage_config.json`은 제거되어 `portfolio_config.json`으로 통합되었습니다.
 
 ### `portfolio_config.json`
 
@@ -331,10 +338,10 @@ python3 sigma_DCA_manager_flowchart.py
 
 ## 🔗 연동 시스템
 
-### MarketStageSystem.py (독립 실행)
-- 시장 바닥 단계(0~5)를 감지하여 `market_state.json`에 기록
-- 5단계(바닥) 감지 시 일괄 매수 권장 메시지 표시
-- sigma_DCA_manager와 **파일 기반 느슨한 결합** — 독립적 배포/수정 가능
+### MarketStageSystem.py (portfolio_config.json 공유)
+- `portfolio_config.json`의 `POSITIONS` 키에서 티커 목록을 읽어 시장 바닥 단계(0~5) 감지
+- `sigma_DCA_manager`와 **설정 파일 공유** (`resolve_discord_config()` 공유)
+- 감지된 바닥 단계(Stage 5)는 `market_state.json`에 기록 → **ATH DCA 3차 트리거로 사용**
 
 ### bear_market_signals.py (독립 실행)
 - 약세장 신호를 분석하여 `signal_report.json`에 리스크 점수 기록
