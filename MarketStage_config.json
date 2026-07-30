@@ -1,8 +1,0 @@
-{
-    "DISCORD_WEBHOOK": "",
-    "DISCORD_USER_ID": "",
-    "TICKERS": {
-        "SOXL": { "ALL_IN_PERCENT": 30 },
-        "TQQQ": { "ALL_IN_PERCENT": 50 }
-    }
-}

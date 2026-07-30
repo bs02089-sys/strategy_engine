@@ -1024,7 +1024,14 @@ def get_bottom_stage(ticker: str, filepath: str = "market_state.json") -> int:
 
 
 # ==============================================================================
-# Trend Signal Engine (VIX-free)
+# Trend Signal Engine
+#
+# MA 기반 추세 신호로 ROTATION_3M/END_DEC 자산의 매수/매도
+# 타이밍을 결정합니다. VIX(공포지수)는 사용하지 않습니다.
+# (VIX는 bear_market_signals.py에서 별도 처리)
+#
+# 모든 함수는 execute_dual_tactical_trader()에서 사용 중이므로
+# 삭제하지 마십시오.
 # ==============================================================================
 
 def check_macro_and_technical_signals(ticker: str, pos_cfg: dict) -> tuple[bool, bool, str]:
