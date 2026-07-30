@@ -697,6 +697,23 @@ def _parse_ath_trigger(raw) -> float | None:
     return None
 
 
+def _compute_ath_dca_config_fingerprint(ath_dca: dict) -> str:
+    """
+    Create a deterministic fingerprint of ATH_DCA parameters to detect
+    config changes. If SPLITS, any TRIGGER_N, or STRATEGY changes, the
+    fingerprint changes and `check_ath_dca_signals()` auto-resets used
+    splits so the new parameters take effect immediately.
+    """
+    if not ath_dca:
+        return ""
+    trigger_keys = sorted(k for k in ath_dca if k.startswith("TRIGGER_"))
+    parts = [str(ath_dca.get("SPLITS", 3))]
+    for k in trigger_keys:
+        parts.append(str(ath_dca[k]))
+    parts.append(str(ath_dca.get("STRATEGY", "")))
+    return "|".join(parts)
+
+
 def check_ath_dca_signals(cfg: dict) -> list[str]:
     """
     Evaluate ATH drawdown DCA triggers for every position that has
@@ -726,6 +743,25 @@ def check_ath_dca_signals(cfg: dict) -> list[str]:
         used: list[int] = pos.get("ATH_DCA_USED_SPLITS", [])
         if not isinstance(used, list):
             used = []
+
+        # ── Config change detection ──────────────────────────────────
+        # If TRIGGER values, SPLITS count, or STRATEGY has changed,
+        # auto-reset used splits so new parameters take effect.
+        current_fp = _compute_ath_dca_config_fingerprint(ath_dca)
+        stored_fp = pos.get("ATH_DCA_CONFIG_FINGERPRINT")
+        if stored_fp is not None and current_fp != stored_fp:
+            pos["ATH_DCA_USED_SPLITS"] = []
+            pos.pop("ATH_DCA_CYCLE_ATH", None)
+            pos["ATH_DCA_CONFIG_FINGERPRINT"] = current_fp
+            used = []
+            messages.append(
+                f"🔄 **{ticker} ATH DCA 설정 변경 감지 → 분할 상태 초기화됨**\n"
+                f"   • 기존: {stored_fp}\n"
+                f"   • 변경: {current_fp}"
+            )
+        elif stored_fp is None:
+            # First run with this config — record fingerprint
+            pos["ATH_DCA_CONFIG_FINGERPRINT"] = current_fp
 
         # Parse triggers (handles "-30%", -30, "-30")
         triggers: dict[int, float] = {}
@@ -1304,6 +1340,90 @@ def _check_rsi_volume_signal(ticker: str) -> str | None:
 # ═══════════════════════════════════════════════════════════
 # Briefing Builder
 # ═══════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════
+# Dual-Mode Strategy Orchestrator — LOC ↔ ATH_DCA
+# ═══════════════════════════════════════════════════════════
+# Mode definitions:
+#   "LOC"     — Normal mode: 20-split Sigma-based LOC buying
+#   "ATH_DCA" — Crash mode:  3-split ATH drawdown DCA buying
+#
+# Transition logic:
+#   LOC → ATH_DCA: ATH drawdown >= TRIGGER_1 (crash detected)
+#   ATH_DCA → LOC: Manual only (set STRATEGY_MODE="LOC" to resume)
+
+def _evaluate_strategy_mode(ticker: str, pos: dict) -> str:
+    """
+    Evaluate whether a position's STRATEGY_MODE should switch.
+    Returns the new mode ("LOC" or "ATH_DCA") without writing it.
+    The caller is responsible for persisting the change.
+
+    LOC → ATH_DCA transition:
+      1. ATH_DCA.ENABLED must be true
+      2. Current ATH drawdown >= TRIGGER_1 threshold
+
+    ATH_DCA → LOC transition:
+      Manual only — set STRATEGY_MODE back to "LOC" in portfolio_config.json
+      to resume normal LOC buying after ATH DCA cycle is complete.
+    """
+    current_mode = str(pos.get("STRATEGY_MODE", "LOC")).upper()
+    ath_dca = pos.get("ATH_DCA", {})
+
+    # If ATH DCA is not enabled, always stay in LOC mode
+    if not ath_dca.get("ENABLED", False):
+        return "LOC"
+
+    trigger_1_raw = _parse_ath_trigger(ath_dca.get("TRIGGER_1"))
+
+    if current_mode == "LOC":
+        # Check if we should switch to ATH_DCA mode
+        if trigger_1_raw is None:
+            return "LOC"
+        try:
+            stock = yf.Ticker(ticker)
+            hist = stock.history(period="1y", interval="1d", auto_adjust=True)
+            if hist.empty:
+                return "LOC"
+            closes = hist["Close"].dropna()
+            if len(closes) < 20:
+                return "LOC"
+            current_price = float(closes.iloc[-1])
+            rolling_ath = float(closes.expanding().max().iloc[-1])
+            if rolling_ath <= 0:
+                return "LOC"
+            current_dd = (rolling_ath - current_price) / rolling_ath
+        except Exception as exc:
+            print(f"  ⚠️ {ticker} mode eval failed: {exc}")
+            return "LOC"
+
+        if current_dd >= trigger_1_raw:
+            print(f"🔄 {ticker}: LOC → ATH_DCA mode switch (DD={current_dd*100:.1f}% >= T1={trigger_1_raw*100:.0f}%)")
+            return "ATH_DCA"
+        return "LOC"
+
+    else:  # current_mode == "ATH_DCA"
+        # Once in crash mode, stay until user manually reverts STRATEGY_MODE to LOC
+        return "ATH_DCA"
+
+
+def _evaluate_all_strategy_modes(cfg: dict) -> list[str]:
+    """
+    Evaluate strategy mode for every position and persist changes.
+    Returns a list of mode-switch notification messages.
+    """
+    messages = []
+    positions = cfg.get("POSITIONS", {})
+    for ticker, pos in positions.items():
+        new_mode = _evaluate_strategy_mode(ticker, pos)
+        current_mode = str(pos.get("STRATEGY_MODE", "LOC")).upper()
+        if new_mode != current_mode:
+            pos["STRATEGY_MODE"] = new_mode
+            messages.append(
+                f"🔄 **{ticker}: {current_mode} → {new_mode} 모드 전환**"
+            )
+        # Ensure field exists even if no change
+    return messages
+
+
 def _build_briefing_lines(now_ny: datetime, cfg: dict) -> list[str]:
     lines = [f"🌙 **U.S. Market LOC Portfolio Briefing** ({now_ny.strftime('%Y-%m-%d %H:%M %Z')})"]
     today_ny = now_ny.date()
@@ -1315,6 +1435,7 @@ def _build_briefing_lines(now_ny: datetime, cfg: dict) -> list[str]:
     positions = cfg.get("POSITIONS", {})
 
     for ticker, pos_cfg in positions.items():
+        strategy_mode = str(pos_cfg.get("STRATEGY_MODE", "LOC")).upper()
         buy_sig, sell_sig, reason = check_macro_and_technical_signals(ticker, pos_cfg)
         
         prev_close, last_date_str = get_prev_close(ticker)
@@ -1330,27 +1451,37 @@ def _build_briefing_lines(now_ny: datetime, cfg: dict) -> list[str]:
         if drawdown_line:
             lines.append(drawdown_line)
 
+        # Mode indicator
+        mode_icon = "📗" if strategy_mode == "LOC" else "🚨"
+        mode_label = "Normal (LOC)" if strategy_mode == "LOC" else "CRASH (ATH DCA)"
+        lines.append(f"• **Mode:** {mode_icon} {mode_label}")
+
         lines.append(f"• **Signals:** Buy[{buy_sig}] / Sell[{sell_sig}] | {reason}")
 
         rotation_due, elapsed_bd, exit_days = check_rotation_exit_signal(pos_cfg, today_ny)
         if rotation_due:
             lines.append(f"• 🔴 **[D+{exit_days} Rotation Maturity] Period expired — Review for sell! (Elapsed: {elapsed_bd} days)**")
 
-        if sell_sig is True:
-            lines.append("• 🚨 **[Warning] Risk area — Check LOC criteria conservatively**")
-            lines.append(_format_loc_action_line(ticker, prev_close, cfg))
+        if strategy_mode == "LOC":
+            # Normal mode: show LOC action line
+            if sell_sig is True:
+                lines.append("• 🚨 **[Warning] Risk area — Check LOC criteria conservatively**")
+                lines.append(_format_loc_action_line(ticker, prev_close, cfg))
+            else:
+                lines.append(_format_loc_action_line(ticker, prev_close, cfg))
+
+            # RSI+Volume composite buy signal (LOC mode only)
+            rsi_vol_line = _check_rsi_volume_signal(ticker)
+            if rsi_vol_line:
+                lines.append(rsi_vol_line)
         else:
-            lines.append(_format_loc_action_line(ticker, prev_close, cfg))
+            # ATH_DCA (crash) mode: LOC paused, show notice
+            lines.append("• 🔴 **[LOC Paused] — ATH DCA crash mode active**")
+            lines.append(f"• 🎯 **[Action] LOC Buy:** **SUSPENDED** (ATH_DCA mode)")
 
         all_in_line = _format_all_in_line(ticker)
         if all_in_line:
             lines.append(all_in_line)
-
-        # RSI+Volume composite buy signal (verified 12yr optimal strategy)
-        # Currently supported: SOXL, TQQQ
-        rsi_vol_line = _check_rsi_volume_signal(ticker)
-        if rsi_vol_line:
-            lines.append(rsi_vol_line)
 
     # ── ATH Drawdown DCA Monitor ────────────────────────────────────
     ath_dca_lines = check_ath_dca_signals(cfg)
@@ -1373,7 +1504,7 @@ def _build_briefing_lines(now_ny: datetime, cfg: dict) -> list[str]:
 # Execution Loop
 # ═══════════════════════════════════════════════════════════
 def execute_dual_tactical_trader() -> None:
-    """Run integrated macro signal & LOC automation"""
+    """Run integrated macro signal & LOC automation (dual-mode)"""
     now_ny = datetime.now(ZoneInfo("America/New_York"))
     
     cfg = load_portfolio()
@@ -1383,6 +1514,10 @@ def execute_dual_tactical_trader() -> None:
     reset_messages = reset_matured_rotation_positions(cfg, now_ny.date())
     status_messages = reset_messages + refresh_sigma_if_stale(cfg)
 
+    # ── Dual-mode: evaluate and switch strategy modes ────────────────
+    mode_messages = _evaluate_all_strategy_modes(cfg)
+    status_messages.extend(mode_messages)
+
     # Keep these visible in the GitHub Actions run log even though they no
     # longer appear in the Discord notification content.
     for msg in status_messages:
@@ -1391,7 +1526,7 @@ def execute_dual_tactical_trader() -> None:
     # Build briefing (also runs ATH DCA monitor which may update config)
     briefing_lines = _build_briefing_lines(now_ny, cfg)
 
-    # Persist ALL config changes (sigma updates, rotation resets, ATH DCA state)
+    # Persist ALL config changes (sigma updates, rotation resets, ATH DCA state, mode switches)
     save_portfolio(cfg)
 
     _send_discord(

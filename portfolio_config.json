@@ -14,20 +14,16 @@
             "START_DATE": "2026-07-25",
             "INVEST_TYPE": "LONG_YEAR",
             "ALLOCATION_PCT": 10,
+            "STRATEGY_MODE": "LOC",
             "ATH_DCA": {
                 "ENABLED": true,
                 "SPLITS": 3,
-                "TRIGGER_1": "-10%",
-                "TRIGGER_2": "-25%",
-                "TRIGGER_3": "-30%",
-                "STRATEGY": "v2 multi-cycle"
+                "TRIGGER_1": "-35%",
+                "TRIGGER_2": "-50%",
+                "TRIGGER_3": "-65%",
+                "STRATEGY": "v2 crash-mode"
             },
-            "ATH_DCA_USED_SPLITS": [
-                1,
-                2,
-                3
-            ],
-            "ATH_DCA_CYCLE_ATH": 87.02
+            "ATH_DCA_USED_SPLITS": []
         },
         "SOXL": {
             "LOOKBACK_DAYS": 252,
@@ -41,20 +37,16 @@
             "START_DATE": "2026-07-25",
             "INVEST_TYPE": "LONG_YEAR",
             "ALLOCATION_PCT": 90,
+            "STRATEGY_MODE": "LOC",
             "ATH_DCA": {
                 "ENABLED": true,
                 "SPLITS": 3,
-                "TRIGGER_1": "-15%",
-                "TRIGGER_2": "-20%",
-                "TRIGGER_3": "-60%",
-                "STRATEGY": "v2 multi-cycle"
+                "TRIGGER_1": "-60%",
+                "TRIGGER_2": "-70%",
+                "TRIGGER_3": "-80%",
+                "STRATEGY": "v2 crash-mode"
             },
-            "ATH_DCA_USED_SPLITS": [
-                1,
-                2,
-                3
-            ],
-            "ATH_DCA_CYCLE_ATH": 300.77
+            "ATH_DCA_USED_SPLITS": []
         }
     },
     "STRATEGY": {
