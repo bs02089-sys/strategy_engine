@@ -826,7 +826,7 @@ def check_ath_dca_signals(cfg: dict) -> list[str]:
 
             elif gap_pct < 5.0:
                 messages.append(
-                    f"📡 **{ticker} ATH DCA {split_num}차 임박!**\n"
+                    f"📡 **{ticker} ATH DCA 임박!**\n"
                     f"   • ATH: \\${rolling_ath_val:.2f}\n"
                     f"   • 현재 DD: {current_dd_pct:.1f}% (목표: -{threshold*100:.0f}%)\n"
                     f"   • 추가 {gap_pct:.1f}%p 하락 시 트리거"
@@ -896,7 +896,7 @@ def check_ath_dca_signals(cfg: dict) -> list[str]:
         if not used:
             next_gap = (triggers[1] - current_dd) * 100
             messages.append(
-                f"📊 **{ticker} ATH DCA 대기중**\n"
+                f"📡 **{ticker} ATH DCA 임박!**\n"
                 f"   • ATH: \\${rolling_ath_val:.2f}\n"
                 f"   • 현재 DD: {current_dd_pct:.1f}%\n"
                 f"   • 1차(-{triggers[1]*100:.0f}%) 까지: {next_gap:+.1f}%p"
@@ -905,7 +905,7 @@ def check_ath_dca_signals(cfg: dict) -> list[str]:
             nxt = remaining[0]
             next_gap = (triggers[nxt] - current_dd) * 100
             messages.append(
-                f"📊 **{ticker} ATH DCA 진행중**\n"
+                f"📊 **{ticker} ATH DCA 완료**\n"
                 f"   • ATH: \\${rolling_ath_val:.2f}\n"
                 f"   • 실행: {len(used)}/{total_splits}차 ✅\n"
                 f"   • 다음({nxt}차): 추가 {next_gap:+.1f}%p 하락 시"
