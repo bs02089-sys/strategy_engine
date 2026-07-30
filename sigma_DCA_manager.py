@@ -663,6 +663,215 @@ def calculate_final_loc(base_price: float) -> float:
 
 
 # ═══════════════════════════════════════════════════════════
+# ATH Drawdown DCA — Universal Buy-Split Monitor
+# ═══════════════════════════════════════════════════════════
+# Designed as a config-driven, lifecycle-aware strategy that
+# deploys N equal splits as price drops from its All-Time High
+# by configured percentages.  State is persisted in the config
+# so that a used split is never re-triggered.
+#
+# Config schema (per-position):
+#   "ATH_DCA": {
+#       "ENABLED": true,
+#       "SPLITS": 3,
+#       "TRIGGER_1": "-30%",
+#       "TRIGGER_2": "-40%",
+#       "TRIGGER_3": "-55%",
+#       "STRATEGY": "ATH drawdown DCA"
+#   }
+#   "ATH_DCA_USED_SPLITS": [1, 2]   ← auto-managed
+
+def _parse_ath_trigger(raw) -> float | None:
+    """Parse a trigger value that may be "-30%", -30, or "-30". Returns the
+    positive fraction (e.g. 0.30 for -30%), or None on failure."""
+    if raw is None:
+        return None
+    try:
+        if isinstance(raw, str):
+            s = raw.strip().replace("%", "")
+            return abs(float(s)) / 100.0
+        if isinstance(raw, (int, float)):
+            return abs(float(raw)) / 100.0
+    except (ValueError, TypeError):
+        return None
+    return None
+
+
+def check_ath_dca_signals(cfg: dict) -> list[str]:
+    """
+    Evaluate ATH drawdown DCA triggers for every position that has
+    ATH_DCA.ENABLED == true.
+
+    For each ticker:
+      1. Compute rolling All-Time High from 1 year of Close data.
+      2. Calculate current drawdown % from that ATH.
+      3. For every TRIGGER_N threshold, if the drawdown meets or
+         exceeds it AND that split hasn't been marked as used yet,
+         emit a BUY ALERT and persist the split number.
+      4. Also emit "imminent" warnings when drawdown is within
+         5 percentage points of a trigger.
+
+    State is persisted via pos["ATH_DCA_USED_SPLITS"] (caller must
+    save the config after this function returns).
+    """
+    messages = []
+    positions = cfg.get("POSITIONS", {})
+
+    for ticker, pos in positions.items():
+        ath_dca = pos.get("ATH_DCA", {})
+        if not ath_dca.get("ENABLED", False):
+            continue
+
+        total_splits = int(ath_dca.get("SPLITS", 3))
+        used: list[int] = pos.get("ATH_DCA_USED_SPLITS", [])
+        if not isinstance(used, list):
+            used = []
+
+        # Parse triggers (handles "-30%", -30, "-30")
+        triggers: dict[int, float] = {}
+        for i in range(1, total_splits + 1):
+            val = _parse_ath_trigger(ath_dca.get(f"TRIGGER_{i}"))
+            if val is not None and 0 < val < 1:
+                triggers[i] = val
+
+        if not triggers:
+            continue
+
+        # Fetch price history & ATH
+        try:
+            stock = yf.Ticker(ticker)
+            hist = stock.history(period="1y", interval="1d", auto_adjust=True)
+            if hist.empty:
+                continue
+            closes = hist["Close"].dropna()
+            if len(closes) < 20:
+                continue
+            current_price = float(closes.iloc[-1])
+            rolling_ath_val = float(closes.expanding().max().iloc[-1])
+        except Exception as exc:
+            messages.append(f"  ⚠️ {ticker} ATH_DCA data fetch failed: {exc}")
+            continue
+
+        if rolling_ath_val <= 0:
+            continue
+
+        current_dd = (rolling_ath_val - current_price) / rolling_ath_val
+        current_dd_pct = current_dd * 100
+        changed = False
+        triggered_this_run = False
+
+        # Evaluate each trigger in order
+        for split_num in sorted(triggers):
+            threshold = triggers[split_num]
+            if split_num in used:
+                continue
+
+            gap_pct = (threshold - current_dd) * 100
+
+            if current_dd >= threshold:
+                used.append(split_num)
+                changed = True
+                triggered_this_run = True
+                target_price = round(rolling_ath_val * (1 - threshold), 2)
+
+                messages.append(
+                    f"🚨 **{ticker} ATH DCA {split_num}차 매수 신호!** 🔥\n"
+                    f"   • ATH: \\${rolling_ath_val:.2f}\n"
+                    f"   • 현재 DD: {current_dd_pct:.1f}% (임계: -{threshold*100:.0f}%)\n"
+                    f"   • 현재가: \\${current_price:.2f}\n"
+                    f"   • 목표가: \\${target_price:.2f} (이하)\n"
+                    f"   • **매수 실행 권장!** (잔여: {total_splits - len(used)}/{total_splits}차)"
+                )
+
+            elif gap_pct < 5.0:
+                messages.append(
+                    f"📡 **{ticker} ATH DCA {split_num}차 임박!**\n"
+                    f"   • 현재 DD: {current_dd_pct:.1f}% (목표: -{threshold*100:.0f}%)\n"
+                    f"   • 추가 {gap_pct:.1f}%p 하락 시 트리거"
+                )
+
+        # Persist state if changed
+        if changed:
+            pos["ATH_DCA_USED_SPLITS"] = sorted(used)
+
+        # ── ATH Reset / Re-entry detection ─────────────────────────
+        # If all splits have been used, check whether a NEW all-time
+        # high has been established since the cycle completed.  When
+        # the current ATH exceeds the ATH recorded at cycle-end by
+        # at least 1 %, reset ATH_DCA_USED_SPLITS so a fresh drawdown
+        # cycle can begin.
+        all_used = len(used) >= total_splits
+        if all_used:
+            cycle_ath = pos.get("ATH_DCA_CYCLE_ATH", None)
+            if cycle_ath is not None:
+                # ATH at cycle-end was recorded; check if price has
+                # surpassed it by >= 1%
+                try:
+                    cycle_ath_f = float(cycle_ath)
+                except (TypeError, ValueError):
+                    cycle_ath_f = 0.0
+
+                if cycle_ath_f > 0 and rolling_ath_val > cycle_ath_f * 1.01:
+                    # New ATH confirmed — reset for next cycle
+                    pos["ATH_DCA_USED_SPLITS"] = []
+                    pos.pop("ATH_DCA_CYCLE_ATH", None)
+                    changed = True
+                    messages.append(
+                        f"🔄 **{ticker} ATH DCA 재진입 준비 완료!**\n"
+                        f"   • 신규 ATH: \\${rolling_ath_val:.2f} (이전: \\${cycle_ath_f:.2f})\n"
+                        f"   • 새로운 하락 사이클 대기 중"
+                    )
+                    # After reset, the code below will show "대기중" status
+                    # so we skip the else branch
+                    all_used = False
+                elif cycle_ath_f > 0:
+                    # Still recovering toward new ATH
+                    recovery_pct = (rolling_ath_val / cycle_ath_f - 1) * 100
+                    messages.append(
+                        f"✅ **{ticker} ATH DCA {total_splits}차 전체 완료 (재진입 대기)**\n"
+                        f"   • 현재 ATH: \\${rolling_ath_val:.2f}\n"
+                        f"   • 재진입 조건: 신규 ATH > \\${cycle_ath_f:.2f}\n"
+                        f"   • 회복 진행률: {recovery_pct:+.1f}%"
+                    )
+                    continue  # skip remaining status lines
+            else:
+                # First time reaching all-used — record the current ATH
+                pos["ATH_DCA_CYCLE_ATH"] = round(rolling_ath_val, 2)
+                changed = True
+                messages.append(
+                    f"✅ **{ticker} ATH DCA {total_splits}차 모두 완료!**\n"
+                    f"   • 사이클 ATH 기록: \\${rolling_ath_val:.2f}\n"
+                    f"   • 신규 ATH 갱신 시 재진입 대기"
+                )
+                continue  # skip remaining status lines
+
+        # Status line (skip if a trigger just fired this run to avoid
+        # redundancy — the trigger alert already explains the state)
+        remaining = [s for s in triggers if s not in used]
+        if triggered_this_run:
+            continue  # skip duplicate status line
+
+        if not used:
+            next_gap = (triggers[1] - current_dd) * 100
+            messages.append(
+                f"📊 **{ticker} ATH DCA 대기중**\n"
+                f"   • ATH: \\${rolling_ath_val:.2f}\n"
+                f"   • 현재 DD: {current_dd_pct:.1f}%\n"
+                f"   • 1차(-{triggers[1]*100:.0f}%) 까지: {next_gap:+.1f}%p"
+            )
+        elif remaining:
+            nxt = remaining[0]
+            next_gap = (triggers[nxt] - current_dd) * 100
+            messages.append(
+                f"📊 **{ticker} ATH DCA 진행중**\n"
+                f"   • 실행: {len(used)}/{total_splits}차 ✅\n"
+                f"   • 다음({nxt}차): 추가 {next_gap:+.1f}%p 하락 시"
+            )
+
+    return messages
+
+
+# ═══════════════════════════════════════════════════════════
 # MarketStageSystem Integration — All-In Trigger on Bottom Stage 5
 # ═══════════════════════════════════════════════════════════
 # Same loose, file-based coupling pattern as get_market_score() above:
@@ -1143,6 +1352,15 @@ def _build_briefing_lines(now_ny: datetime, cfg: dict) -> list[str]:
         if rsi_vol_line:
             lines.append(rsi_vol_line)
 
+    # ── ATH Drawdown DCA Monitor ────────────────────────────────────
+    ath_dca_lines = check_ath_dca_signals(cfg)
+    if ath_dca_lines:
+        lines.append("")
+        lines.append("─" * 40)
+        lines.append("📉 **ATH Drawdown DCA Monitor**")
+        for line in ath_dca_lines:
+            lines.append(line)
+
     # NOTE: sigma_messages (recompute/rotation-reset/error notices) are
     # intentionally NOT appended to the Discord content anymore — they're
     # printed to the console (see execute_dual_tactical_trader) so they still
@@ -1164,15 +1382,18 @@ def execute_dual_tactical_trader() -> None:
 
     reset_messages = reset_matured_rotation_positions(cfg, now_ny.date())
     status_messages = reset_messages + refresh_sigma_if_stale(cfg)
-    save_portfolio(cfg)
 
     # Keep these visible in the GitHub Actions run log even though they no
     # longer appear in the Discord notification content.
     for msg in status_messages:
         print(msg)
 
+    # Build briefing (also runs ATH DCA monitor which may update config)
     briefing_lines = _build_briefing_lines(now_ny, cfg)
-    
+
+    # Persist ALL config changes (sigma updates, rotation resets, ATH DCA state)
+    save_portfolio(cfg)
+
     _send_discord(
         webhook_url=webhook, 
         user_id=user_id, 

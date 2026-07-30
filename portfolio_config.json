@@ -13,7 +13,21 @@
             "LAST_EWMA_LAMBDA": 0.94,
             "START_DATE": "2026-07-25",
             "INVEST_TYPE": "LONG_YEAR",
-            "ALLOCATION_PCT": 10
+            "ALLOCATION_PCT": 10,
+            "ATH_DCA": {
+                "ENABLED": true,
+                "SPLITS": 3,
+                "TRIGGER_1": "-10%",
+                "TRIGGER_2": "-25%",
+                "TRIGGER_3": "-30%",
+                "STRATEGY": "v2 multi-cycle"
+            },
+            "ATH_DCA_USED_SPLITS": [
+                1,
+                2,
+                3
+            ],
+            "ATH_DCA_CYCLE_ATH": 87.02
         },
         "SOXL": {
             "LOOKBACK_DAYS": 252,
@@ -26,7 +40,21 @@
             "LAST_EWMA_LAMBDA": 0.94,
             "START_DATE": "2026-07-25",
             "INVEST_TYPE": "LONG_YEAR",
-            "ALLOCATION_PCT": 90
+            "ALLOCATION_PCT": 90,
+            "ATH_DCA": {
+                "ENABLED": true,
+                "SPLITS": 3,
+                "TRIGGER_1": "-15%",
+                "TRIGGER_2": "-20%",
+                "TRIGGER_3": "-60%",
+                "STRATEGY": "v2 multi-cycle"
+            },
+            "ATH_DCA_USED_SPLITS": [
+                1,
+                2,
+                3
+            ],
+            "ATH_DCA_CYCLE_ATH": 300.77
         }
     },
     "STRATEGY": {
