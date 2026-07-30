@@ -1,11 +1,13 @@
+🔄 SOXL: LOC → ATH_DCA mode switch (DD=69.4% >= T1=60%)
+🔄 **SOXL: LOC → ATH_DCA 모드 전환**
 🔍 Starting price lookup for TQQQ...
    → Trying yfinance history (1/3)...
    🩺 [debug] TQQQ raw last rows: 2026-07-23=66.30, 2026-07-24=64.00, 2026-07-27=63.40, 2026-07-28=61.56, 2026-07-29=57.75
-   🩺 [debug] now_ny=2026-07-29T20:15:35.000373-04:00 today_ny=2026-07-29 last_date=2026-07-29 settle_deadline=2026-07-29T16:15:00-04:00 today_session_settled=True
+   🩺 [debug] now_ny=2026-07-30T05:04:26.060877-04:00 today_ny=2026-07-30 last_date=2026-07-29 settle_deadline=2026-07-30T16:15:00-04:00 today_session_settled=False
 ✅ TQQQ yfinance success: $57.75 (07-29)
 🔍 Starting price lookup for SOXL...
    → Trying yfinance history (1/3)...
    🩺 [debug] SOXL raw last rows: 2026-07-23=157.50, 2026-07-24=136.81, 2026-07-27=128.15, 2026-07-28=109.54, 2026-07-29=91.99
-   🩺 [debug] now_ny=2026-07-29T20:15:35.930799-04:00 today_ny=2026-07-29 last_date=2026-07-29 settle_deadline=2026-07-29T16:15:00-04:00 today_session_settled=True
+   🩺 [debug] now_ny=2026-07-30T05:04:26.579720-04:00 today_ny=2026-07-30 last_date=2026-07-29 settle_deadline=2026-07-30T16:15:00-04:00 today_session_settled=False
 ✅ SOXL yfinance success: $91.99 (07-29)
 ✅ Discord briefing sent successfully.
