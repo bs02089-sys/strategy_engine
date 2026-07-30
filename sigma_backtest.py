@@ -127,8 +127,8 @@ def run_backtest(df: pd.DataFrame, entry_multiplier: float = ENTRY_MULTIPLIER,
     if buy_amount is None:
         buy_amount = float(BUY_AMOUNT)
 
-    closes    = df['Close'].values
-    lows      = df['Low'].values
+    closes    = df['Close'].to_numpy(dtype=float)
+    lows      = df['Low'].to_numpy(dtype=float)
     dates_idx = df.index
 
     cash         = float(initial_cash)
@@ -249,14 +249,15 @@ def run_backtest_with_sell(df: pd.DataFrame, entry_multiplier: float = ENTRY_MUL
     if buy_amount is None:
         buy_amount = float(BUY_AMOUNT)
 
-    closes    = df['Close'].values
-    lows      = df['Low'].values
-    highs     = df['High'].values
+    closes    = df['Close'].to_numpy(dtype=float)
+    lows      = df['Low'].to_numpy(dtype=float)
+    highs     = df['High'].to_numpy(dtype=float)
     dates_idx = df.index
 
     # ── State ──────────────────────────────────────────────────────
     cash         = float(initial_cash)
-    shares       = 0.0    buys        = 0
+    shares       = 0.0
+    buys         = 0
     sells        = 0
     total_sold   = 0.0  # total USD sold
     buy_log      = []
