@@ -1535,9 +1535,8 @@ def _build_briefing_lines(now_ny: datetime, cfg: dict) -> list[str]:
             if rsi_vol_line:
                 lines.append(rsi_vol_line)
         else:
-            # ATH_DCA (crash) mode: LOC paused, show notice
-            lines.append("• 🔴 **[LOC Paused] — ATH DCA crash mode active**")
-            lines.append(f"• 🎯 **[Action] LOC Buy:** **SUSPENDED** (ATH_DCA mode)")
+            # ATH_DCA (crash) mode: show LOC price for reference
+            lines.append(_format_loc_action_line(ticker, prev_close, cfg))
 
     # ── ATH Drawdown DCA Monitor (includes Stage 5 All-In as split trigger) ──
     ath_dca_lines = check_ath_dca_signals(cfg)
