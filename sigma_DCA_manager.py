@@ -474,7 +474,7 @@ def check_peak_sell_signal(closes: pd.Series, ath_prices: pd.Series,
         'conditions': {'ath_ok': False, 'rally_ok': False, 'sigma_ok': False},
     }
 
-    if len(closes) < max(lookback_days, 21) or len(highs) < 1:
+    if len(closes) < max(lookback_days, 21) or len(ath_prices) < 1:
         return result
 
     current_price = float(closes.iloc[-1])
