@@ -91,7 +91,8 @@ ENTRY_MULTIPLIER = load_entry_multiplier()
 
 def fetch_data(ticker: str, end_date: date | None = None) -> pd.DataFrame:
     """Download OHLCV data for backtest ending on end_date (default: today).
-    Now includes 'High' column for peak sell signal analysis."""
+    Uses auto_adjust=True (분할/배당 조정) and returns only Close/Low for
+    consistency with the standard ATH methodology."""
     if end_date is None:
         end_date = date.today()
     total_calendar = BACKTEST_DAYS + LOOKBACK_DAYS + FETCH_BUFFER_DAYS
@@ -100,13 +101,13 @@ def fetch_data(ticker: str, end_date: date | None = None) -> pd.DataFrame:
     print(f"📥 Downloading {ticker} ({start_date} → {end_date})...")
     stock = yf.Ticker(ticker)
     hist = stock.history(start=start_date, end=end_date, interval="1d",
-                         auto_adjust=False)
+                         auto_adjust=True)
     if hist.empty:
         raise RuntimeError(f"{ticker} returned no data.")
 
-    df: pd.DataFrame = hist[['Close', 'Low', 'High']].copy()  # type: ignore[assignment]
-    df.columns = ['Close', 'Low', 'High']
-    df = df.dropna(subset=['Close', 'Low', 'High'])  # type: ignore[call-overload]
+    df: pd.DataFrame = hist[['Close', 'Low']].copy()  # type: ignore[assignment]
+    df.columns = ['Close', 'Low']
+    df = df.dropna(subset=['Close', 'Low'])  # type: ignore[call-overload]
     print(f"   → {len(df)} trading days loaded.")
     return df
 
@@ -251,31 +252,30 @@ def run_backtest_with_sell(df: pd.DataFrame, entry_multiplier: float = ENTRY_MUL
 
     closes    = df['Close'].to_numpy(dtype=float)
     lows      = df['Low'].to_numpy(dtype=float)
-    highs     = df['High'].to_numpy(dtype=float)
     dates_idx = df.index
 
     # ── State ──────────────────────────────────────────────────────
-    cash         = float(initial_cash)
-    shares       = 0.0
-    buys         = 0
-    sells        = 0
-    total_sold   = 0.0  # total USD sold
-    buy_log      = []
-    sell_log     = []
-    daily_values = []
-    start_idx    = LOOKBACK_DAYS
-    last_sell_idx = None  # cooldown tracker
+    cash           = float(initial_cash)
+    shares         = 0.0
+    buys           = 0
+    sells          = 0
+    total_sold     = 0.0  # total USD sold
+    buy_log        = []
+    sell_log       = []
+    daily_values   = []
+    start_idx      = LOOKBACK_DAYS
+    last_sell_idx  = None  # cooldown tracker
+    rolling_ath_val = 0.0  # rolling ATH (Close 기준, auto_adjust=True)
 
     for i in range(start_idx, len(df)):
         prev_close  = float(closes[i - 1])
         today_low   = float(lows[i])
-        today_high  = float(highs[i])
         today_close = float(closes[i])
         today_date: pd.Timestamp = dates_idx[i]  # type: ignore[assignment]
 
-        # ── Update rolling ATH ───────────────────────────────────────
-        if today_high > rolling_ath_val:
-            rolling_ath_val = today_high
+        # ── Update rolling ATH (Close 기준, auto_adjust=True) ─────────
+        if today_close > rolling_ath_val:
+            rolling_ath_val = today_close
 
         # ── DCA Buy Logic (unchanged from original) ──────────────────
         lookback_window = pd.Series(closes[i - LOOKBACK_DAYS : i])
@@ -307,12 +307,11 @@ def run_backtest_with_sell(df: pd.DataFrame, entry_multiplier: float = ENTRY_MUL
         # ── Peak Sell Signal Logic (with cooldown) ──────────────────
         if i >= start_idx + 21:
             lookback_closes = pd.Series(closes[i - 252 : i]) if i >= 252 else pd.Series(closes[:i])
-            lookback_highs  = pd.Series(highs[i - 252 : i]) if i >= 252 else pd.Series(highs[:i])
 
-            if len(lookback_closes) >= 21 and len(lookback_highs) >= 1:
+            if len(lookback_closes) >= 21:
                 if shares > 0.01:
                     signal = check_peak_sell_signal_with_cooldown(
-                        lookback_closes, lookback_highs,
+                        lookback_closes, lookback_closes,  # closes만 사용 (ATH 통일)
                         last_sell_idx=last_sell_idx,
                         current_idx=i
                     )

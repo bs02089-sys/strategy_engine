@@ -399,12 +399,12 @@ _SELL_SHORT_LOOKBACK  = 20
 _SELL_LONG_LOOKBACK   = 252
 
 
-def get_rolling_ath(highs: pd.Series) -> pd.Series:
+def get_rolling_ath(prices: pd.Series) -> pd.Series:
     """
-    Returns expanding (rolling all-time) high series from the High prices.
-    First value = first high, monotonically non-decreasing.
+    Returns expanding (rolling all-time) high series from the price series.
+    First value = first price, monotonically non-decreasing.
     """
-    return highs.expanding().max()
+    return prices.expanding().max()
 
 
 def get_20day_return(closes: pd.Series) -> float | None:
@@ -448,10 +448,13 @@ def get_sigma_spike_ratio(closes: pd.Series,
     return float(short_sigma / long_sigma)
 
 
-def check_peak_sell_signal(closes: pd.Series, highs: pd.Series,
+def check_peak_sell_signal(closes: pd.Series, ath_prices: pd.Series,
                            lookback_days: int = 252) -> dict:
     """
     Evaluates the 3-condition peak sell signal for an asset.
+
+    ATH is computed from `ath_prices` (auto_adjust=True, Close-based per
+    standard financial analyst methodology).
 
     Returns a dict:
       signal: bool       — True when ALL 3 conditions are met
@@ -477,8 +480,8 @@ def check_peak_sell_signal(closes: pd.Series, highs: pd.Series,
     current_price = float(closes.iloc[-1])
 
     # ── Condition 1: 전고점 85% 이상 ─────────────────────────────────
-    # Rolling ATH from High column (not Close — 전고점 = highest touched)
-    rolling_ath = get_rolling_ath(highs)
+    # Rolling ATH from ath_prices (Close 기준, auto_adjust=True)
+    rolling_ath = get_rolling_ath(ath_prices)
     ath_price = float(rolling_ath.iloc[-1])
     ath_pct = (current_price / ath_price * 100) if ath_price > 0 else 0.0
     condition_ath = bool(ath_pct >= _SELL_ATH_RATIO * 100)
@@ -518,7 +521,7 @@ def check_peak_sell_signal(closes: pd.Series, highs: pd.Series,
 _COOLDOWN_DAYS = 60  # 매도 후 60거래일(약 3개월) 동안 재매도 금지
 
 
-def check_peak_sell_signal_with_cooldown(closes: pd.Series, highs: pd.Series,
+def check_peak_sell_signal_with_cooldown(closes: pd.Series, ath_prices: pd.Series,
                                           last_sell_idx: int | None = None,
                                           current_idx: int = 0) -> dict:
     """
@@ -527,7 +530,7 @@ def check_peak_sell_signal_with_cooldown(closes: pd.Series, highs: pd.Series,
       to `last_sell_idx` is less than `_COOLDOWN_DAYS`, the signal is
       suppressed (returns signal=False + cooldown_active=True).
     """
-    base = check_peak_sell_signal(closes, highs)
+    base = check_peak_sell_signal(closes, ath_prices)
 
     if last_sell_idx is not None:
         days_since_last_sell = current_idx - last_sell_idx
@@ -542,14 +545,16 @@ def check_peak_sell_signal_with_cooldown(closes: pd.Series, highs: pd.Series,
     return base
 
 
-def get_period_high(ticker: str, lookback_days: int = 252, max_retries: int = 3) -> tuple[float | None, str | None]:
+def get_period_ath(ticker: str, lookback_days: int = 252, max_retries: int = 3) -> tuple[float | None, str | None]:
     """
-    Fetches the previous high (전고점) over the lookback window, using the
-    High column (true intraday high) rather than Close — 전고점 in
-    Korean retail-investor usage typically means the highest price ever
-    touched, not just the highest closing price. Same calendar-day
-    buffering approach as _fetch_closes_for_lookback() so yfinance's
-    calendar-day `period` still yields enough trading days.
+    Fetches the trading-period high (전고점) over the lookback window.
+
+    Uses the same standard methodology financial analysts use:
+      - Close prices (종가 기준)
+      - auto_adjust=True (주식분할/배당 조정 → 과거 데이터와 연속성 유지)
+
+    Same calendar-day buffering approach as _fetch_closes_for_lookback() so
+    yfinance's calendar-day `period` still yields enough trading days.
     """
     buffer_days = max(30, int(lookback_days * 0.6) + 30)
     period_days = lookback_days + buffer_days
@@ -558,15 +563,15 @@ def get_period_high(ticker: str, lookback_days: int = 252, max_retries: int = 3)
     for attempt in range(1, max_retries + 1):
         try:
             stock = yf.Ticker(ticker)
-            hist = stock.history(period=f"{period_days}d", interval="1d", auto_adjust=False)
+            hist = stock.history(period=f"{period_days}d", interval="1d", auto_adjust=True)
             if hist.empty:
                 raise ValueError("Data empty.")
-            highs = hist['High'].dropna()
-            if highs.empty:
-                raise ValueError("No high price data.")
-            recent_highs: pd.Series = highs[-lookback_days:] if len(highs) >= lookback_days else highs  # type: ignore[no-redef]
-            peak_idx = recent_highs.idxmax()
-            peak_price = float(recent_highs.loc[peak_idx])
+            closes = hist['Close'].dropna()
+            if closes.empty:
+                raise ValueError("No close price data.")
+            recent_closes: pd.Series = closes[-lookback_days:] if len(closes) >= lookback_days else closes  # type: ignore[no-redef]
+            peak_idx = recent_closes.idxmax()
+            peak_price = float(recent_closes.loc[peak_idx])
             peak_date_str = peak_idx.date().strftime("%Y-%m-%d") if isinstance(peak_idx, pd.Timestamp) else str(peak_idx)
             return peak_price, peak_date_str
         except Exception as e:
@@ -597,7 +602,7 @@ def format_drawdown_line(ticker: str, prev_close: float, lookback_days: int) -> 
     high, both to 2 decimal places. Returns None if the previous high could
     not be fetched (briefing continues without this line for that ticker).
     """
-    peak_price, peak_date_str = get_period_high(ticker, lookback_days)
+    peak_price, peak_date_str = get_period_ath(ticker, lookback_days)
     if peak_price is None:
         return None
 

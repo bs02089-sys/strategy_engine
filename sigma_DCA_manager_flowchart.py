@@ -135,7 +135,7 @@
 │  │  ├──────────────────────────────────────────────────────────────────┤ │ │
 │  │  │  [4-c] 전고점 대비 하락률                                         │ │ │
 │  │  │  format_drawdown_line(ticker, prev_close, lookback_days)         │ │ │
-│  │  │  ├─ get_period_high() → N일 최고가 (High 기준)                    │ │ │
+│  │  │  ├─ get_period_ath() → N일 최고가 (Close 기준, 표준 방법론)                    │ │ │
 │  │  │  └─ calculate_drawdown_and_recovery()                             │ │ │
 │  │  │     → "전고점 $XX 기준 하락률 -XX% / 회복필요 XX%"               │ │ │
 │  │  ├──────────────────────────────────────────────────────────────────┤ │ │
@@ -165,7 +165,7 @@
 │  │  ├──────────────────────────────────────────────────────────────────┤ │ │
 │  │  │  [4-h] 전고점 근접 50% 청산 신호 ⭐ (브리핑 내 별도 평가)         │ │ │
 │  │  │  (브리핑 빌더에 직접 포함 — format_drawdown_line에서 처리)        │ │ │
-│  │  │  ├─ get_period_high() → 전고점 (High 기준, LOOKBACK_DAYS)        │ │ │
+│  │  │  ├─ get_period_ath() → 전고점 (Close 기준, LOOKBACK_DAYS)        │ │ │
 │  │  │  └─ calculate_drawdown_and_recovery() → 하락률/회복률 표시        │ │ │
 │  │  └──────────────────────────────────────────────────────────────────┘ │ │
 │  └────────────────────────────────────────────────────────────────────────┘ │
@@ -259,7 +259,7 @@ sigma_DCA_manager.py (직접 실행)
 │   ├── format_position_meta()
 │   │   └── business_days_elapsed()
 │   ├── format_drawdown_line()                 ⭐ 전고점 하락률
-│   │   ├── get_period_high()                  ← yfinance API
+│   │   ├── get_period_ath()                   ← yfinance API
 │   │   └── calculate_drawdown_and_recovery()
 │   ├── check_rotation_exit_signal()
 │   ├── _format_loc_action_line()
@@ -290,11 +290,11 @@ sigma_DCA_manager.py (직접 실행)
 
 
 [전고점 청산 신호 엔진 (브리핑 내 간접 참조)]
-get_period_high()                              ← yfinance API
+get_period_ath()                               ← yfinance API
   └── _fetch_closes_for_lookback()             (retry 로직 공유)
 
 format_drawdown_line()
-  ├── get_period_high()
+  ├── get_period_ath()
   └── calculate_drawdown_and_recovery()
       → "전고점 $XX 기준 하락률 XX% / 회복필요 XX%"
 
@@ -353,7 +353,7 @@ check_peak_sell_signal_with_cooldown()
  yfinance API (외부 데이터)
  ├── 1mo 데이터 → get_prev_close() (전일 종가)
  ├── 120d 데이터 → check_macro_and_technical_signals() (MA20/MA60)
- ├── 252d+ 데이터 → get_period_high() / get_realtime_sigma() / recompute_sigma()
+ ├── 252d+ 데이터 → get_period_ath() / get_realtime_sigma() / recompute_sigma()
  ├── 1y 데이터 → check_ath_dca_signals() (ATH 하락률)
  └── 6mo 데이터 → _check_rsi_volume_signal() (RSI + Volume)
 
@@ -403,7 +403,7 @@ check_peak_sell_signal_with_cooldown()
 ╠══════════════════════════════════════════════════════════════════════╣
 ║                                                                      ║
 ║   조건 1: 현재가 > 전고점(ATH) × 90%                                 ║
-║     → get_rolling_ath(highs) — High 기준 (intraday high)            ║
+║     → get_rolling_ath(prices) — Close 기준 (표준 방법론)          ║
 ║     → ATH 비율 = 현재가 / ATH * 100                                 ║
 ║                                                                      ║
 ║   조건 2: 20일 상승률 40% 이상                                       ║
