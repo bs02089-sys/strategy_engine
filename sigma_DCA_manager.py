@@ -1809,7 +1809,7 @@ def _build_briefing_lines(now_ny: datetime, cfg: dict) -> list[str]:
         # Mode indicator (+ recovery re-entry reason if it just fired —
         # already popped at the top of the loop, never reaches config)
         mode_icon = "📗" if strategy_mode == "LOC" else "🚨"
-        mode_label = "Normal (LOC)" if strategy_mode == "LOC" else "CRASH (ATH DCA)"
+        mode_label = "일반 모드 (LOC)" if strategy_mode == "LOC" else "비상 모드 (ATH DCA)"
         mode_line = f"• **Mode:** {mode_icon} {mode_label}"
         if recovery_reason:
             mode_line += f" | 🔄 **비상 모드 종료** ({recovery_reason})"
