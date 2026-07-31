@@ -803,6 +803,7 @@ def check_ath_dca_signals(cfg: dict,
             pos["ATH_DCA_USED_SPLITS"] = []
             pos.pop("ATH_DCA_CYCLE_ATH", None)
             pos["ATH_DCA_IMMINENT_SENT"] = {}
+            pos.pop("ATH_DCA_ENTERED_ON", None)  # fresh cycle — restart recovery clock
             pos["ATH_DCA_CONFIG_FINGERPRINT"] = current_fp
             used = []
             messages.append(
@@ -952,6 +953,7 @@ def check_ath_dca_signals(cfg: dict,
                     pos["ATH_DCA_USED_SPLITS"] = []
                     pos.pop("ATH_DCA_CYCLE_ATH", None)
                     pos["ATH_DCA_IMMINENT_SENT"] = {}  # clear stale dedup state
+                    pos.pop("ATH_DCA_ENTERED_ON", None)  # new cycle — restart recovery clock
                     changed = True
                     messages.append(
                         f"🔄 **{ticker} ATH DCA 재진입 준비 완료!**\n"
@@ -1442,22 +1444,176 @@ def _check_rsi_volume_signal(ticker: str) -> str | None:
 #   "ATH_DCA" — Crash mode:  3-split ATH drawdown DCA buying
 #
 # Transition logic:
-#   LOC → ATH_DCA: ATH drawdown >= TRIGGER_1 (crash detected)
-#   ATH_DCA → LOC: Manual only (set STRATEGY_MODE="LOC" to resume)
+#   LOC → ATH_DCA: ATH drawdown >= TRIGGER_1 (crash detected)  [automatic]
+#   ATH_DCA → LOC: Recovery re-entry (backtest-validated rule) [automatic]
+#                  DD narrowed to DD_RATIO × TRIGGER_1 + MA20>MA60
+#                  + MIN_DAYS business days elapsed (bear-trap filter).
+#                  Manual override (STRATEGY_MODE="LOC") still works.
+#
+# Recovery re-entry preserves ATH_DCA_USED_SPLITS, so if the market
+# re-crashes the existing automatic LOC→ATH_DCA switch resumes and the
+# unused 2차/3차 splits continue from the reserved cash (safety net).
+
+
+def _compute_ath_drawdown(ticker: str) -> tuple[float, float, float] | None:
+    """
+    Fetch 1y Close history and compute (current_dd, rolling_ath, current_price).
+    Returns None on data failure. Shared by the LOC→ATH_DCA switch check and
+    the recovery re-entry check (single yfinance fetch, single source of truth).
+    """
+    try:
+        stock = yf.Ticker(ticker)
+        hist = stock.history(period="1y", interval="1d", auto_adjust=True)
+        if hist.empty:
+            return None
+        closes = hist["Close"].dropna()
+        if len(closes) < 20:
+            return None
+        current_price = float(closes.iloc[-1])
+        rolling_ath = float(closes.expanding().max().iloc[-1])
+        if rolling_ath <= 0:
+            return None
+        current_dd = (rolling_ath - current_price) / rolling_ath
+        return current_dd, rolling_ath, current_price
+    except Exception as exc:
+        print(f"  ⚠️ {ticker} drawdown fetch failed: {exc}")
+        return None
+
+
+def _fetch_ma_alignment(ticker: str) -> tuple[float, float, float] | None:
+    """
+    Fetch 120d Close history and compute (current_price, ma20, ma60).
+    Returns None on data failure or insufficient history. Same MA20/MA60
+    methodology as check_macro_and_technical_signals().
+    """
+    try:
+        stock = yf.Ticker(ticker)
+        hist = stock.history(period="120d", interval="1d", auto_adjust=False)
+        if hist.empty:
+            return None
+        closes = hist["Close"].dropna()
+        if len(closes) < 60:
+            return None
+        current_price = float(closes.iloc[-1])
+        ma20 = float(closes.rolling(window=20).mean().iloc[-1])
+        ma60 = float(closes.rolling(window=60).mean().iloc[-1])
+        return current_price, ma20, ma60
+    except Exception as exc:
+        print(f"  ⚠️ {ticker} MA fetch failed: {exc}")
+        return None
+
+
+def _check_recovery_reentry(ticker: str, pos: dict) -> str | None:
+    """
+    Evaluate the backtest-validated recovery re-entry rule for a position
+    currently in ATH_DCA (crash) mode.
+
+    Returns a human-readable reason string when the position should switch
+    back to LOC, or None when it should stay in ATH_DCA.
+
+    Conditions (validated in sigma_backtest.py --ath-dca-recovery):
+      1. At least one ATH split still unused (2차/3차 reserved as safety net)
+      2. >= MIN_DAYS business days elapsed since ATH_DCA entry (bear-trap
+         filter; the 2024-08 V-recovery backtest fired on D+43)
+      3. Drawdown narrowed to <= DD_RATIO × TRIGGER_1 (recovery confirmed)
+      4. MA20 > MA60 (bullish alignment) when MA_CONFIRM is true
+
+    Per-position config (defaults shown):
+      "RECOVERY_REENTRY": {
+        "ENABLED": false,    # OPT-IN — true enables automatic re-entry
+        "DD_RATIO": 0.5,     # DD must narrow to 50%% of TRIGGER_1
+        "MIN_DAYS": 30,      # business days since crash entry
+        "MA_CONFIRM": true   # also require MA20 > MA60
+      }
+    State (auto-managed): pos["ATH_DCA_ENTERED_ON"] = "YYYY-MM-DD"
+
+    User chose full LOC resume (no budget cap) — on re-entry the normal
+    20-split LOC ladder runs again; 2차/3차 reserves stay available in
+    ATH_DCA_USED_SPLITS for a re-crash.
+    """
+    ath_dca = pos.get("ATH_DCA", {})
+    rec = pos.get("RECOVERY_REENTRY", {})
+    if not rec.get("ENABLED", False):
+        return None
+
+    # 1) Require at least one split still reserved
+    total_splits = int(ath_dca.get("SPLITS", 3))
+    used = pos.get("ATH_DCA_USED_SPLITS", []) or []
+    if not isinstance(used, list):
+        used = []
+    remaining = [s for s in range(1, total_splits + 1) if s not in used]
+    if not remaining:
+        return None  # all splits used — wait for a fresh ATH cycle
+
+    # 2) Minimum elapsed business days since crash entry
+    today = datetime.now(ZoneInfo("America/New_York")).date()
+    entered_str = pos.get("ATH_DCA_ENTERED_ON")
+    if not entered_str:
+        # First evaluation with recovery enabled — start the clock now
+        pos["ATH_DCA_ENTERED_ON"] = today.strftime("%Y-%m-%d")
+        return None
+    try:
+        entered_date = datetime.strptime(entered_str, "%Y-%m-%d").date()
+    except ValueError:
+        pos["ATH_DCA_ENTERED_ON"] = today.strftime("%Y-%m-%d")
+        return None
+    min_days = int(rec.get("MIN_DAYS", 30))
+    if min_days < 1:
+        min_days = 30  # guard against misconfigured bear-trap filter
+    elapsed = business_days_elapsed(entered_date, today)
+    if elapsed < min_days:
+        return None
+
+    # 3) Drawdown narrowed to DD_RATIO × TRIGGER_1
+    trigger_1 = _parse_ath_trigger(ath_dca.get("TRIGGER_1"))
+    if trigger_1 is None:
+        return None
+    dd_info = _compute_ath_drawdown(ticker)
+    if dd_info is None:
+        return None
+    current_dd, _, _ = dd_info
+    dd_ratio = float(rec.get("DD_RATIO", 0.5))
+    if not 0 < dd_ratio < 1:
+        dd_ratio = 0.5  # guard against misconfigured DD_RATIO
+    if current_dd > trigger_1 * dd_ratio:
+        return None
+
+    # 4) MA20 > MA60 (bullish alignment) when MA_CONFIRM
+    if rec.get("MA_CONFIRM", True):
+        ma_info = _fetch_ma_alignment(ticker)
+        if ma_info is None:
+            return None
+        price, ma20, ma60 = ma_info
+        if not (price > ma20 > ma60):
+            return None
+
+    return (f"DD {current_dd*100:.1f}% ≤ {dd_ratio*100:.0f}%×T1({trigger_1*100:.0f}%)"
+            f" + MA20>MA60 (D+{elapsed}, 예비분 {len(remaining)}차 보존)")
+
 
 def _evaluate_strategy_mode(ticker: str, pos: dict) -> str:
     """
     Evaluate whether a position's STRATEGY_MODE should switch.
-    Returns the new mode ("LOC" or "ATH_DCA") without writing it.
-    The caller is responsible for persisting the change.
+    Returns the new mode ("LOC" or "ATH_DCA") without writing the mode
+    itself — the caller persists STRATEGY_MODE. NOTE: this function MAY
+    record the state field ATH_DCA_ENTERED_ON into pos as a side effect
+    (recovery re-entry clock); the caller's save_portfolio() persists it.
+
+    When automatic recovery re-entry fires, the reason string (DD/MA/D+N)
+    is stored in the transient key pos["_RECOVERY_REASON"] so callers can
+    surface it in notifications; _build_briefing_lines() consumes it and
+    pops it before save_portfolio().
 
     LOC → ATH_DCA transition:
       1. ATH_DCA.ENABLED must be true
       2. Current ATH drawdown >= TRIGGER_1 threshold
+      (on switch, records ATH_DCA_ENTERED_ON for the recovery clock)
 
     ATH_DCA → LOC transition:
-      Manual only — set STRATEGY_MODE back to "LOC" in portfolio_config.json
-      to resume normal LOC buying after ATH DCA cycle is complete.
+      Automatic recovery re-entry (_check_recovery_reentry) — backtest-
+      validated rule that switches back to LOC once the market has
+      recovered (DD narrowed + MA bullish + min days elapsed). Manual
+      override (STRATEGY_MODE="LOC") still works as before.
     """
     current_mode = str(pos.get("STRATEGY_MODE", "LOC")).upper()
     ath_dca = pos.get("ATH_DCA", {})
@@ -1472,30 +1628,32 @@ def _evaluate_strategy_mode(ticker: str, pos: dict) -> str:
         # Check if we should switch to ATH_DCA mode
         if trigger_1_raw is None:
             return "LOC"
-        try:
-            stock = yf.Ticker(ticker)
-            hist = stock.history(period="1y", interval="1d", auto_adjust=True)
-            if hist.empty:
-                return "LOC"
-            closes = hist["Close"].dropna()
-            if len(closes) < 20:
-                return "LOC"
-            current_price = float(closes.iloc[-1])
-            rolling_ath = float(closes.expanding().max().iloc[-1])
-            if rolling_ath <= 0:
-                return "LOC"
-            current_dd = (rolling_ath - current_price) / rolling_ath
-        except Exception as exc:
-            print(f"  ⚠️ {ticker} mode eval failed: {exc}")
+        dd_info = _compute_ath_drawdown(ticker)
+        if dd_info is None:
             return "LOC"
+        current_dd, _, _ = dd_info
 
         if current_dd >= trigger_1_raw:
+            # Record crash-entry date so the recovery re-entry clock starts
+            # (only when switching INTO crash mode, not on re-evaluation)
+            today = datetime.now(ZoneInfo("America/New_York")).date()
+            pos["ATH_DCA_ENTERED_ON"] = today.strftime("%Y-%m-%d")
             print(f"🔄 {ticker}: LOC → ATH_DCA mode switch (DD={current_dd*100:.1f}% >= T1={trigger_1_raw*100:.0f}%)")
             return "ATH_DCA"
         return "LOC"
 
     else:  # current_mode == "ATH_DCA"
-        # Once in crash mode, stay until user manually reverts STRATEGY_MODE to LOC
+        # Automatic recovery re-entry: switch back to LOC once the market
+        # has recovered (backtest-validated). Preserves unused splits so
+        # 2차/3차 resume on a re-crash. Falls back to staying in crash mode
+        # (legacy manual-only behavior) when conditions aren't met.
+        reason = _check_recovery_reentry(ticker, pos)
+        if reason is not None:
+            # Transient — consumed by _build_briefing_lines (Discord Mode
+            # line) and popped before save_portfolio, so it never persists.
+            pos["_RECOVERY_REASON"] = reason
+            print(f"🔄 {ticker}: ATH_DCA → LOC recovery re-entry ({reason})")
+            return "LOC"
         return "ATH_DCA"
 
 
@@ -1511,9 +1669,17 @@ def _evaluate_all_strategy_modes(cfg: dict) -> list[str]:
         current_mode = str(pos.get("STRATEGY_MODE", "LOC")).upper()
         if new_mode != current_mode:
             pos["STRATEGY_MODE"] = new_mode
-            messages.append(
-                f"🔄 **{ticker}: {current_mode} → {new_mode} 모드 전환**"
-            )
+            if current_mode == "ATH_DCA" and new_mode == "LOC":
+                # ATH_DCA → LOC happens automatically via recovery re-entry
+                # (or manual override) — include the reason for transparency.
+                detail = f" — {pos.get('_RECOVERY_REASON', '')}" if pos.get("_RECOVERY_REASON") else ""
+                messages.append(
+                    f"🔄 **{ticker}: {current_mode} → {new_mode} 모드 전환 (회복 재진입){detail}**"
+                )
+            else:
+                messages.append(
+                    f"🔄 **{ticker}: {current_mode} → {new_mode} 모드 전환**"
+                )
         # Ensure field exists even if no change
     return messages
 
@@ -1529,6 +1695,11 @@ def _build_briefing_lines(now_ny: datetime, cfg: dict) -> list[str]:
     positions = cfg.get("POSITIONS", {})
 
     for ticker, pos_cfg in positions.items():
+        # Consume the transient recovery-reentry reason FIRST so it is always
+        # removed from pos regardless of downstream continue/exception paths
+        # (prevents _RECOVERY_REASON leaking into portfolio_config.json).
+        recovery_reason = pos_cfg.pop("_RECOVERY_REASON", None)
+
         strategy_mode = str(pos_cfg.get("STRATEGY_MODE", "LOC")).upper()
         buy_sig, sell_sig, reason = check_macro_and_technical_signals(ticker, pos_cfg)
         
@@ -1545,10 +1716,14 @@ def _build_briefing_lines(now_ny: datetime, cfg: dict) -> list[str]:
         if drawdown_line:
             lines.append(drawdown_line)
 
-        # Mode indicator
+        # Mode indicator (+ recovery re-entry reason if it just fired —
+        # already popped at the top of the loop, never reaches config)
         mode_icon = "📗" if strategy_mode == "LOC" else "🚨"
         mode_label = "Normal (LOC)" if strategy_mode == "LOC" else "CRASH (ATH DCA)"
-        lines.append(f"• **Mode:** {mode_icon} {mode_label}")
+        mode_line = f"• **Mode:** {mode_icon} {mode_label}"
+        if recovery_reason:
+            mode_line += f" | 🔄 **회복 재진입** ({recovery_reason})"
+        lines.append(mode_line)
 
         lines.append(f"• **Signals:** Buy[{buy_sig}] / Sell[{sell_sig}] | {reason}")
 

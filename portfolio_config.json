@@ -26,7 +26,14 @@
             "ATH_DCA_USED_SPLITS": [
                 1
             ],
-            "ATH_DCA_CONFIG_FINGERPRINT": "3|-35%|-50%|STAGE5|v2 crash-mode"
+            "ATH_DCA_CONFIG_FINGERPRINT": "3|-35%|-50%|STAGE5|v2 crash-mode",
+            "RECOVERY_REENTRY": {
+                "ENABLED": true,
+                "DD_RATIO": 0.5,
+                "MIN_DAYS": 30,
+                "MA_CONFIRM": true
+            },
+            "ATH_DCA_ENTERED_ON": "2026-03-27"
         },
         "SOXL": {
             "LOOKBACK_DAYS": 252,
@@ -52,7 +59,14 @@
             "ATH_DCA_USED_SPLITS": [
                 1
             ],
-            "ATH_DCA_CONFIG_FINGERPRINT": "3|-60%|-70%|STAGE5|v2 crash-mode"
+            "ATH_DCA_CONFIG_FINGERPRINT": "3|-60%|-70%|STAGE5|v2 crash-mode",
+            "RECOVERY_REENTRY": {
+                "ENABLED": true,
+                "DD_RATIO": 0.5,
+                "MIN_DAYS": 30,
+                "MA_CONFIRM": true
+            },
+            "ATH_DCA_ENTERED_ON": "2026-07-28"
         }
     },
     "STRATEGY": {

@@ -63,6 +63,13 @@ SELL_SIGMA_RATIO     = MGR_SIGMA_RATIO     # 시그마 비율 threshold
 # Sell execution
 SELL_PCT             = 0.50    # 청산 비율 50%
 
+# Stage 5 bottom-confirmation delay: the 60-day low must be at least this
+# many trading days old before the Stage-5 proxy can fire.  Prevents the
+# proxy from triggering on the FIRST day of a crash (when the current close
+# IS the fresh 60-day low and RSI has just collapsed) and instead fires only
+# after the market has stabilized near the bottom.
+STAGE5_CONFIRM_DAYS = 5
+
 # Sweep range
 SWEEP_START = 0.6
 SWEEP_STOP  = 3.0
@@ -443,9 +450,15 @@ def _is_backtest_stage5(prices: pd.Series, volumes: pd.Series) -> bool:
       3. Volume contraction < 85%% of 20-day MA (optional — skipped
          when volume data is unavailable, e.g. fetch_data() returns
          only Close/Low)
+      4. Bottom-confirmation delay: the 60-day low must be at least
+         STAGE5_CONFIRM_DAYS trading days old.  On the first day of a
+         sharp crash the current close IS the fresh 60-day low and RSI
+         has just collapsed, so without this guard the "bottom" fires
+         immediately at the start of a crash instead of at the real
+         bottom.
 
-    When conditions 1+2 (and 3 if available) align, it suggests the
-    market has found a bottom — triggers the 3rd ATH DCA split.
+    When conditions align, it suggests the market has found a bottom —
+    triggers the 3rd ATH DCA split.
     """
     if len(prices) < 60:
         return False
@@ -455,9 +468,15 @@ def _is_backtest_stage5(prices: pd.Series, volumes: pd.Series) -> bool:
         return False
     latest_rsi = float(rsi.iloc[-1])
 
-    low_60 = float(prices.tail(60).min())
+    tail60 = prices.tail(60)
+    low_60 = float(tail60.min())
     current = float(prices.iloc[-1])
     near_low = current <= low_60 * 1.05
+
+    # Bottom-confirmation guard (#4 above)
+    days_since_low = len(prices) - 1 - prices.index.get_loc(tail60.idxmin())
+    if days_since_low < STAGE5_CONFIRM_DAYS:
+        return False
 
     # Volume contraction — graceful fallback when volume unavailable
     has_volume = len(volumes) > 20 and float(volumes.tail(20).mean()) > 0
@@ -718,6 +737,344 @@ def run_backtest_ath_dca(
     }
 
 
+# ══════════════════════════════════════════════
+# ATH DCA Backtest — 회복 재진입 (Recovery Re-entry) 변형
+# ══════════════════════════════════════════════
+# 문제: 현행 듀얼 모드는 ATH_DCA(크래시)로 들어가면 수동 전환 전까지
+# 그 모드에 갇혀, 1차 이후 반등하는 장에서 2차/3차 대기 중 기회비용 발생.
+#
+# 회복 재진입 규칙: 크래시 모드에 있는 동안 아래 신호가 모두 충족되면
+# 자동으로 LOC(정상) 모드로 복귀해 남은 예비금의 일부를 20분할 LOC로
+# 전환한다.
+#   1) DD가 TRIGGER_1 × recovery_dd_ratio 이하로 좁혀짐 (회복 확인)
+#   2) [선택] MA20 > MA60 (불리시 정렬) — recovery_ma_confirm
+#   3) 크래시 진입 후 최소 recovery_min_days 거래일 경과 (베어트랩 필터)
+# 이후 시장이 다시 무너지면 (DD >= TRIGGER_1) 자동으로 ATH_DCA 복귀,
+# 사용 안 된 분할(2차/3차)은 남은 현금에서 이어서 발동한다.
+
+
+def run_backtest_ath_dca_recovery(
+    df: pd.DataFrame,
+    entry_multiplier: float = ENTRY_MULTIPLIER,
+    ticker: str = TICKER,
+    ath_dca_config: dict | None = None,
+    verbose: bool = False,
+    initial_cash: float | None = None,
+    loc_buy_amount: float | None = None,
+    recovery_dd_ratio: float = 0.5,
+    recovery_ma_confirm: bool = True,
+    recovery_min_days: int = 30,
+    recovery_loc_budget_pct: float = 0.5,
+) -> dict:
+    """
+    Walk-forward backtest of the dual-mode system with RECOVERY RE-ENTRY.
+
+    Same engine as run_backtest_ath_dca() plus an automatic ATH_DCA → LOC
+    transition (recovery re-entry): while in crash mode, once the market
+    recovers (DD narrowed to recovery_dd_ratio × TRIGGER_1, optionally MA
+    bullish alignment, and at least recovery_min_days elapsed), the strategy
+    switches back to LOC mode and resumes sigma-based LOC buying using a
+    budget of `remaining_cash × recovery_loc_budget_pct` (the rest stays
+    reserved for 2차/3차 crash splits).
+
+    New parameters:
+      - recovery_dd_ratio:      DD narrowing threshold relative to TRIGGER_1
+                                (0.5 = drawdown cut in half from T1).
+      - recovery_ma_confirm:    also require MA20 > MA60 (bullish alignment)
+                                before re-entering LOC.
+      - recovery_min_days:      minimum trading days in crash mode before a
+                                recovery switch is allowed (bear-trap filter).
+      - recovery_loc_budget_pct: fraction of remaining cash freed up for LOC
+                                buying on re-entry (rest stays crash reserve).
+
+    Returns the same result shape as run_backtest_ath_dca() plus
+    recovery_transitions log and recovery loc buys flagged in trade_log.
+    """
+    if ath_dca_config is None:
+        ath_dca_config = load_ath_dca_config(ticker)
+    if initial_cash is None:
+        initial_cash = float(INITIAL_CASH)
+    if loc_buy_amount is None:
+        loc_buy_amount = float(BUY_AMOUNT)
+
+    # Parse ATH DCA triggers
+    total_splits = int(ath_dca_config.get("SPLITS", 3))
+    triggers: dict[int, tuple[str, float]] = {}
+    for i in range(1, total_splits + 1):
+        raw = ath_dca_config.get(f"TRIGGER_{i}")
+        if _is_stage5_trigger(raw):
+            triggers[i] = ("STAGE5", 0.0)
+        else:
+            val = _parse_ath_trigger(raw)
+            if val is not None and 0 < val < 1:
+                triggers[i] = ("PCT", val)
+
+    t1_threshold = triggers[1][1] if (1 in triggers and triggers[1][0] == "PCT") else None
+    if t1_threshold is None:
+        raise ValueError("Recovery re-entry requires TRIGGER_1 as a PCT trigger.")
+
+    ath_split_amount = initial_cash / total_splits
+
+    closes = df['Close'].to_numpy(dtype=float)
+    lows = df['Low'].to_numpy(dtype=float)
+    volumes_arr = df.get('Volume')
+    if volumes_arr is not None:
+        volumes_arr = volumes_arr.to_numpy(dtype=float)
+    dates_idx = df.index
+
+    # ── State ──────────────────────────────────────────────────────
+    cash = float(initial_cash)
+    shares = 0.0
+    dca_buys = 0
+    ath_buys = 0
+    strategy_mode = "LOC"  # starts in normal mode
+    used_splits: list[int] = []
+    rolling_ath = 0.0
+    trade_log = []
+    daily_values = []
+    mode_log = []
+    recovery_transitions = []
+    crash_since_idx: int | None = None   # idx when ATH_DCA mode was entered
+    loc_budget = 0.0                     # remaining LOC budget during recovery phase
+    in_recovery_phase = False            # True = LOC buys come from recovery budget
+    start_idx = LOOKBACK_DAYS
+    stage5_triggered_at: str | None = None
+
+    # Precompute MA20/MA60 for the whole series (avoid recomputing per day)
+    closes_s = pd.Series(closes)
+    ma20_arr = closes_s.rolling(20).mean().to_numpy(dtype=float)
+    ma60_arr = closes_s.rolling(60).mean().to_numpy(dtype=float)
+
+    for i in range(start_idx, len(df)):
+        prev_close = float(closes[i - 1])
+        today_low = float(lows[i])
+        today_close = float(closes[i])
+        today_date: pd.Timestamp = dates_idx[i]
+
+        # ── Update rolling ATH ─────────────────────────────────────
+        if today_close > rolling_ath:
+            rolling_ath = today_close
+
+        current_dd = ((rolling_ath - today_close) / rolling_ath) if rolling_ath > 0 else 0.0
+
+        # ── Mode switch check (LOC → ATH_DCA) ──────────────────────
+        if strategy_mode == "LOC":
+            if current_dd >= t1_threshold:
+                strategy_mode = "ATH_DCA"
+                crash_since_idx = i
+                loc_budget = 0.0
+                in_recovery_phase = False
+                mode_log.append({
+                    'date': today_date, 'mode': 'ATH_DCA',
+                    'reason': f"ATH DD {current_dd*100:.1f}% >= T1 ({t1_threshold*100:.0f}%)",
+                    'dd_pct': round(current_dd * 100, 1),
+                })
+                if verbose:
+                    print(f"  🔄 {today_date.date()} | LOC → ATH_DCA (DD={current_dd*100:.1f}%)")
+
+        # ── In ATH_DCA mode: evaluate split triggers ────────────────
+        if strategy_mode == "ATH_DCA":
+            for split_num in sorted(triggers):
+                if split_num in used_splits:
+                    continue
+
+                trigger_type, threshold = triggers[split_num]
+                triggered = False
+                trigger_label = ""
+
+                if trigger_type == "PCT":
+                    if current_dd >= threshold:
+                        triggered = True
+                        trigger_label = f"ATH DD {current_dd*100:.1f}% >= -{threshold*100:.0f}%"
+                else:  # STAGE5
+                    price_slice = df['Close'].iloc[:i + 1]
+                    vol_slice = (df['Volume'].iloc[:i + 1]
+                                 if 'Volume' in df.columns and volumes_arr is not None
+                                 else pd.Series(dtype=float))
+                    if _is_backtest_stage5(price_slice, vol_slice):
+                        triggered = True
+                        trigger_label = "Stage 5 proxy (RSI<35 + price near 60d low + vol contraction)"
+
+                if triggered:
+                    split_amount = ath_split_amount
+                    buy_price = today_close
+                    buy_shares = min(split_amount / buy_price, cash / buy_price) if buy_price > 0 else 0
+                    actual_amt = buy_shares * buy_price
+
+                    cash -= actual_amt
+                    shares += buy_shares
+                    ath_buys += 1
+                    used_splits.append(split_num)
+
+                    trade_log.append({
+                        'date': today_date,
+                        'type': f'ATH_{split_num}차',
+                        'price': round(buy_price, 2),
+                        'shares': round(buy_shares, 4),
+                        'amount': round(actual_amt, 2),
+                        'dd_pct': round(current_dd * 100, 1),
+                        'trigger': trigger_label,
+                        'cash_after': round(cash, 2),
+                        'mode': 'ATH_DCA',
+                        'recovery': False,
+                    })
+
+                    if trigger_type == "STAGE5":
+                        stage5_triggered_at = today_date.strftime("%Y-%m-%d")
+
+                    if verbose:
+                        print(f"  🚨 {today_date.date()} | ATH {split_num}차 filled @ ${buy_price:.2f}"
+                              f" | {trigger_label}")
+
+            # ── RECOVERY RE-ENTRY: ATH_DCA → LOC ────────────────────
+            # Only when not all splits used yet, enough time elapsed, and
+            # the market has recovered from the crash drawdown.
+            remaining_splits = [s for s in triggers if s not in used_splits]
+            if (remaining_splits and crash_since_idx is not None
+                    and (i - crash_since_idx) >= recovery_min_days):
+                dd_recovered = current_dd <= t1_threshold * recovery_dd_ratio
+
+                ma_ok = True
+                if recovery_ma_confirm:
+                    ma20 = ma20_arr[i]
+                    ma60 = ma60_arr[i]
+                    ma_ok = not (np.isnan(ma20) or np.isnan(ma60)) and today_close > ma20 > ma60
+
+                if dd_recovered and ma_ok:
+                    strategy_mode = "LOC"
+                    loc_budget = cash * recovery_loc_budget_pct
+                    in_recovery_phase = True
+                    recovery_transitions.append({
+                        'date': today_date,
+                        'dd_pct': round(current_dd * 100, 1),
+                        'reason': (f"DD {current_dd*100:.1f}% <= {recovery_dd_ratio}×T1"
+                                   + (" + MA20>MA60" if recovery_ma_confirm else "")
+                                   + f" (D+{i - crash_since_idx})"),
+                        'loc_budget': round(loc_budget, 2),
+                        'remaining_splits': list(remaining_splits),
+                    })
+                    mode_log.append({
+                        'date': today_date, 'mode': 'LOC',
+                        'reason': f"Recovery re-entry (DD {current_dd*100:.1f}%)",
+                        'dd_pct': round(current_dd * 100, 1),
+                    })
+                    crash_since_idx = None
+                    if verbose:
+                        print(f"  🔄 {today_date.date()} | ATH_DCA → LOC (recovery re-entry, DD={current_dd*100:.1f}%)")
+
+        # ── LOC mode: normal DCA buy (only when NOT in ATH_DCA mode) ─
+        if strategy_mode == "LOC":
+            lookback_window = pd.Series(closes[i - LOOKBACK_DAYS: i])
+            sigma, _ = _calculate_volatility_from_closes(
+                lookback_window, LOOKBACK_DAYS, VOL_METHOD, EWMA_LAMBDA
+            )
+            loc_price = _calculate_loc_from_sigma(prev_close, sigma, entry_multiplier)
+            triggered = today_low <= loc_price
+
+            buy_price = min(today_close, loc_price) if triggered else None
+
+            if triggered and buy_price is not None and dca_buys < MAX_BUYS:
+                # Recovery phase: ONLY spend the remaining loc_budget — once
+                # it is exhausted, LOC buying STOPS so the crash reserve for
+                # 2차/3차 splits is preserved. Normal phase: buy freely.
+                if in_recovery_phase:
+                    amt = min(loc_buy_amount, loc_budget, cash)
+                else:
+                    amt = min(loc_buy_amount, cash)
+
+                if amt >= 1.0:
+                    buy_shares = amt / buy_price
+                    cash -= amt
+                    loc_budget = max(0.0, loc_budget - amt)
+                    shares += buy_shares
+                    dca_buys += 1
+
+                    trade_log.append({
+                        'date': today_date,
+                        'type': 'LOC',
+                        'price': round(buy_price, 2),
+                        'shares': round(buy_shares, 4),
+                        'amount': round(amt, 2),
+                        'sigma': round(sigma, 4),
+                        'loc': round(loc_price, 2),
+                        'cash_after': round(cash, 2),
+                        'mode': 'LOC',
+                        'recovery': in_recovery_phase,
+                    })
+
+                    if verbose:
+                        print(f"  📌 {today_date.date()} | LOC filled @ ${buy_price:.2f}"
+                              f" (σ={sigma:.4f}, loc=${loc_price:.2f})")
+
+        # ── Record portfolio value ─────────────────────────────────
+        portfolio_value = cash + shares * today_close
+        daily_values.append({
+            'date': today_date,
+            'close': today_close,
+            'value': round(portfolio_value, 2),
+            'mode': strategy_mode,
+        })
+
+    # ── Compute metrics (identical to base engine) ─────────────────
+    dv_array = np.array([d['value'] for d in daily_values])
+    if len(dv_array) > 1:
+        daily_ret = dv_array[1:] / dv_array[:-1] - 1
+    else:
+        daily_ret = np.array([0.0])
+    ret_mean = float(daily_ret.mean())
+    ret_std = float(daily_ret.std())
+    sharpe = float(np.sqrt(252) * ret_mean / ret_std) if ret_std > 0 else 0.0
+
+    peak = np.maximum.accumulate(dv_array)
+    dd = (dv_array - peak) / peak
+    mdd = float(dd.min() * 100)
+
+    asset_start = float(daily_values[0]['close'])
+    asset_end = float(daily_values[-1]['close'])
+    buy_hold_ret = (asset_end - asset_start) / asset_start * 100
+
+    total_invested = sum(t['amount'] for t in trade_log)
+    final_price = float(daily_values[-1]['close'])
+    wins = sum(1 for t in trade_log if final_price > t['price']) if trade_log else 0
+    win_rate = wins / len(trade_log) * 100 if trade_log else 0.0
+
+    final_val = float(daily_values[-1]['value'])
+    total_ret = (final_val - initial_cash) / initial_cash * 100
+
+    return {
+        'multiplier': entry_multiplier,
+        'ticker': ticker,
+        'total_return': round(total_ret, 2),
+        'final_value': round(final_val, 2),
+        'sharpe': round(sharpe, 2),
+        'mdd': round(mdd, 2),
+        'buy_hold_ret': round(buy_hold_ret, 2),
+        'total_buys': dca_buys + ath_buys,
+        'dca_buys': dca_buys,
+        'ath_buys': ath_buys,
+        'total_invested': round(total_invested, 2),
+        'win_rate': round(win_rate, 1),
+        'final_price': round(final_price, 2),
+        'remaining_cash': round(cash, 2),
+        'final_shares': round(shares, 4),
+        'period_start': daily_values[0]['date'],
+        'period_end': daily_values[-1]['date'],
+        'strategy_mode': strategy_mode,
+        'used_splits': used_splits,
+        'stage5_triggered_at': stage5_triggered_at,
+        'mode_log': mode_log,
+        'trade_log': trade_log,
+        'daily_values': daily_values,
+        # Recovery-specific additions
+        'recovery_transitions': recovery_transitions,
+        'recovery_loc_buys': sum(1 for t in trade_log if t.get('recovery') and t['type'] == 'LOC'),
+        'loc_budget_pct': recovery_loc_budget_pct,
+        'recovery_dd_ratio': recovery_dd_ratio,
+        'recovery_ma_confirm': recovery_ma_confirm,
+        'recovery_min_days': recovery_min_days,
+    }
+
+
 def print_ath_dca_report(r: dict):
     """Print a detailed report for the ATH DCA dual-mode backtest."""
     p_start: pd.Timestamp = r['period_start']
@@ -789,6 +1146,80 @@ def print_ath_dca_report(r: dict):
     print("\n" + "═" * 72)
     print("  ✅ ATH DCA Backtest Complete")
     print("═" * 72)
+
+
+def print_recovery_comparison_report(r_base: dict, r_rec: dict):
+    """Side-by-side comparison: 현행 (3차 대기) vs 회복 재진입 (Recovery Re-entry)."""
+    p_start: pd.Timestamp = r_base['period_start']
+    p_end: pd.Timestamp = r_base['period_end']
+
+    print("\n")
+    print("═" * 88)
+    print(f"  📊 {r_base['ticker']} — 현행 vs 회복 재진입 성능 비교")
+    print("═" * 88)
+    print(f"  Capital : ${INITIAL_CASH:,}")
+    print(f"  Period  : {p_start.date()}  →  {p_end.date()}")
+    print("─" * 88)
+
+    # ── Key Metrics Table ───────────────────────────────────────────
+    def _diff(a: float, b: float) -> float:
+        return b - a
+
+    metrics = [
+        ("Total Return", f"{r_base['total_return']:+.2f}%", f"{r_rec['total_return']:+.2f}%",
+         _diff(r_base['total_return'], r_rec['total_return'])),
+        ("Final Value", f"${r_base['final_value']:,.2f}", f"${r_rec['final_value']:,.2f}",
+         _diff(r_base['final_value'], r_rec['final_value'])),
+        ("Sharpe Ratio", f"{r_base['sharpe']}", f"{r_rec['sharpe']}",
+         _diff(r_base['sharpe'], r_rec['sharpe'])),
+        ("Max Drawdown", f"{r_base['mdd']:.2f}%", f"{r_rec['mdd']:.2f}%",
+         -_diff(r_base['mdd'], r_rec['mdd'])),  # positive = improvement
+        ("Buy & Hold", f"{r_base['buy_hold_ret']:+.2f}%", f"{r_rec['buy_hold_ret']:+.2f}%", 0),
+        ("Alpha vs B&H", f"{r_base['total_return'] - r_base['buy_hold_ret']:+.2f}%",
+         f"{r_rec['total_return'] - r_rec['buy_hold_ret']:+.2f}%",
+         _diff(r_base['total_return'] - r_base['buy_hold_ret'],
+               r_rec['total_return'] - r_rec['buy_hold_ret'])),
+    ]
+
+    print(f"  {'Metric':<16} {'현행 (3차 대기)':>16} {'회복 재진입':>16} {'Diff':>9}")
+    print(f"  {'─'*16} {'─'*16} {'─'*16} {'─'*9}")
+    for name, base_val, rec_val, diff in metrics:
+        diff_str = f"{diff:+.2f}" if isinstance(diff, (int, float)) and abs(diff) > 0.005 else ""
+        arrow = ""
+        if isinstance(diff, (int, float)) and abs(diff) > 0.005 and name not in ("Buy & Hold",):
+            arrow = " 🟢" if diff > 0 else " 🔴"
+        print(f"  {name:<16} {base_val:>16} {rec_val:>16} {diff_str:>7}{arrow}")
+
+    # ── Activity ────────────────────────────────────────────────────
+    print(f"\n  {'Activity':<18} {'현행':>12} {'회복 재진입':>12}")
+    print(f"  {'─'*18} {'─'*12} {'─'*12}")
+    print(f"  {'LOC fills':<18} {r_base['dca_buys']:>12} {r_rec['dca_buys']:>12}")
+    print(f"  {'ATH DCA fills':<18} {r_base['ath_buys']:>12} {r_rec['ath_buys']:>12}")
+    print(f"  {'Used splits':<18} {str(r_base['used_splits']):>12} {str(r_rec['used_splits']):>12}")
+    print(f"  {'Total invested':<18} ${r_base['total_invested']:>9,.0f} ${r_rec['total_invested']:>9,.0f}")
+    print(f"  {'Remaining cash':<18} ${r_base['remaining_cash']:>9,.0f} ${r_rec['remaining_cash']:>9,.0f}")
+    print(f"  {'Final shares':<18} {r_base['final_shares']:>12.1f} {r_rec['final_shares']:>12.1f}")
+
+    if r_rec.get('recovery_transitions'):
+        print(f"\n  🔄 Recovery Re-entry Transitions ({len(r_rec['recovery_transitions'])}회)")
+        for t in r_rec['recovery_transitions']:
+            print(f"     {t['date'].strftime('%Y-%m-%d')} | DD {t['dd_pct']:+.1f}% | {t['reason']}"
+                  f" | LOC budget ${t['loc_budget']:,.0f}")
+        budget = r_rec.get('recovery_loc_budget_pct', 0.0)
+        print(f"  📋 Recovery budget : {budget*100:.0f}% of cash on re-entry"
+              f" | LOC fills from budget: {r_rec.get('recovery_loc_buys', 0)}"
+              f" | ⚠️ 예산 소진 후엔 크래시 예비금 보존을 위해 LOC 매수 중단")
+    print(f"\n  🔎 해석:")
+    ret_diff = r_rec['total_return'] - r_base['total_return']
+    if abs(ret_diff) < 0.01:
+        print("     두 전략의 수익이 동일 (회복 전환이 발생하지 않았거나 무영향)")
+    elif ret_diff > 0:
+        print(f"     회복 재진입이 현행 대비 수익 {ret_diff:+.2f}%p 우위")
+    else:
+        print(f"     회복 재진입이 현행 대비 수익 {ret_diff:+.2f}%p 열위 (드라이 파우더 소진 효과)")
+    print("\n" + "═" * 88)
+    print("  ✅ Recovery Comparison Complete")
+    print("═" * 88)
 
 
 # ══════════════════════════════════════════════
@@ -1509,7 +1940,43 @@ if __name__ == "__main__":
     portfolio_run   = "--portfolio-run" in sys.argv
     sell_mode       = "--sell" in sys.argv
     ath_dca_mode    = "--ath-dca" in sys.argv
-    if ath_dca_mode:
+    recovery_mode   = "--ath-dca-recovery" in sys.argv
+
+    # Optional --end-date YYYY-MM-DD (default: today). Useful to backtest
+    # historical crash→recovery cycles (e.g. --end-date 2023-06-30 for the
+    # 2022 bear market bottom, or 2025-03-31 for the Aug-2024 V-recovery).
+    end_date: date | None = None
+    if "--end-date" in sys.argv:
+        idx = sys.argv.index("--end-date")
+        if idx + 1 < len(sys.argv):
+            try:
+                end_date = date.fromisoformat(sys.argv[idx + 1])
+            except ValueError:
+                print(f"⚠️ Invalid --end-date value: {sys.argv[idx + 1]} (use YYYY-MM-DD)")
+                sys.exit(1)
+
+    if recovery_mode:
+        tickers = ["TQQQ", "SOXL"]
+        print(f"\n🚀 ATH DCA + 회복 재진입(Recovery Re-entry) 백테스트 비교")
+        print(f"   Capital: ${INITIAL_CASH:,}")
+        print(f"   Period : {BACKTEST_DAYS} trading days ending {end_date or 'today'}")
+        print("─" * 88)
+        for tkr in tickers:
+            mult = load_entry_multiplier(tkr)
+            ath_cfg = load_ath_dca_config(tkr)
+            print(f"\n📊 {tkr} — entry_mult={mult}, ATH_DCA: {ath_cfg.get('SPLITS', 3)}splits")
+            # include_volume=True: Stage-5 proxy needs volume-contraction data
+            df = fetch_data(tkr, end_date=end_date, include_volume=True)
+            r_base = run_backtest_ath_dca(
+                df, entry_multiplier=mult, ticker=tkr,
+                ath_dca_config=ath_cfg, verbose=False
+            )
+            r_rec = run_backtest_ath_dca_recovery(
+                df, entry_multiplier=mult, ticker=tkr,
+                ath_dca_config=ath_cfg, verbose=False
+            )
+            print_recovery_comparison_report(r_base, r_rec)
+    elif ath_dca_mode:
         tickers = ["TQQQ", "SOXL"]
         print(f"\n🚀 ATH DCA 듀얼 모드 백테스트")
         print(f"   Capital: ${INITIAL_CASH:,}")
@@ -1519,7 +1986,8 @@ if __name__ == "__main__":
             mult = load_entry_multiplier(tkr)
             ath_cfg = load_ath_dca_config(tkr)
             print(f"\n📊 {tkr} — entry_mult={mult}, ATH_DCA: {ath_cfg.get('SPLITS', 3)}splits")
-            df = fetch_data(tkr)
+            # include_volume=True: Stage-5 proxy needs volume-contraction data
+            df = fetch_data(tkr, include_volume=True)
             r = run_backtest_ath_dca(
                 df, entry_multiplier=mult, ticker=tkr,
                 ath_dca_config=ath_cfg, verbose=True
