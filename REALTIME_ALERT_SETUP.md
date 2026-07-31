@@ -10,7 +10,7 @@ cron-job.org (정확한 N분 알람)
    │ POST /repos/{owner}/{repo}/dispatches   (event_type: ath-dca-monitor)
    ▼
 GitHub Actions (repository_dispatch 트리거 — schedule 지연 없음)
-   │ python sigma_DCA_manager.py --ath-monitor
+   │ python3 sigma_DCA_manager.py --ath-monitor
    ▼
 Finnhub /quote (실시간 가격)  ←── FINNHUB_API_KEY (선택, 없으면 yfinance 종가)
    ▼
@@ -74,17 +74,17 @@ export GITHUB_OWNER=bs02089-sys
 export GITHUB_REPO=strategy_engine
 
 # 2) 미리보기 (실제 생성 전)
-python setup_cronjob_org.py --dry-run
+python3 setup_cronjob_org.py --dry-run
 
 # 3) 실제 생성 (장중 10분 간격 기본값)
-python setup_cronjob_org.py
+python3 setup_cronjob_org.py
 
 # 4) 기존 잡 확인
 export CRONJOB_ORG_API_KEY=xxx
-python setup_cronjob_org.py --list
+python3 setup_cronjob_org.py --list
 
 # 5) 테스트 — 워크플로우 1회 실제 실행 확인 (GitHub Actions 탭에서 확인)
-python setup_cronjob_org.py --test-dispatch
+python3 setup_cronjob_org.py --test-dispatch
 ```
 
 선택 환경변수: `GITHUB_EVENT_TYPE`(기본 `ath-dca-monitor`),
@@ -149,7 +149,7 @@ python setup_cronjob_org.py --test-dispatch
   - `repository_dispatch: types: [ath-dca-monitor]` 추가 → cron-job.org 호출 시 즉시 실행
   - `concurrency` 그룹으로 야간 브리핑과 실시간 폴링이 동시에 돌지 않게 직렬화
   - `FINNHUB_API_KEY` 시크릿을 환경변수로 주입
-  - dispatch 이벤트면 `python sigma_DCA_manager.py --ath-monitor`, 아니면 기존 야간 브리핑
+  - dispatch 이벤트면 `python3 sigma_DCA_manager.py --ath-monitor`, 아니면 기존 야간 브리핑
 
 - `sigma_DCA_manager.py`
   - `check_ath_dca_signals(cfg, realtime_prices, alerts_only=True)`:
@@ -169,7 +169,7 @@ python setup_cronjob_org.py --test-dispatch
 export FINNHUB_API_KEY=xxxx
 export DISCORD_WEBHOOK=https://discord.com/api/webhooks/...
 export DISCORD_USER_ID=123456789
-python sigma_DCA_manager.py --ath-monitor
+python3 sigma_DCA_manager.py --ath-monitor
 ```
 - 트리거/임박이 없으면 `✅ No ATH DCA trigger/imminent alerts this poll.`
 - 시뮬레이션 확인: 임시로 `portfolio_config.json`의 `TRIGGER_1`을 현재가 대비 높게
