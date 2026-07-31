@@ -1,3 +1,3 @@
-✅ Finnhub TQQQ: $64.96
-✅ Finnhub SOXL: $120.52
+✅ Finnhub TQQQ: $64.79
+✅ Finnhub SOXL: $119.76
 ✅ No ATH DCA alerts (trigger/imminent/wait-rollover) this poll.
