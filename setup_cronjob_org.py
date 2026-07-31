@@ -27,6 +27,7 @@ GitHub Actions의 `sigma_dca_manager.yml`(--ath-monitor 분기)를 실행시킵�
   python setup_cronjob_org.py --dry-run    # 페이로드만 출력 (API 미호출, 시크릿 마스킹)
   python setup_cronjob_org.py --list       # 기존 잡 목록 조회
   python setup_cronjob_org.py --test-dispatch  # 테스트 dispatch 1회 발사 (워크플로우 실행)
+  python setup_cronjob_org.py --update-pat # 크론잡에 저장된 GITHUB_PAT를 새 토큰으로 갱신
 """
 import base64
 import copy
@@ -201,10 +202,28 @@ def create_job(cronjob_api_key: str, payload: dict) -> int:
     return resp.json().get("jobId")
 
 
+def update_job(cronjob_api_key: str, job_id: int, job_body: dict) -> None:
+    """cron-job.org 기존 잡 갱신 (PUT /jobs/{jobId}).
+
+    --update-pat 모드에서 사용 — 기존 잡의 job 바디를 그대로 받아
+    Authorization 헤더만 새 PAT로 교체한 뒤 갱신합니다. 스케줄/제목/URL/
+    타임아웃 등 다른 설정은 완전히 보존됩니다.
+    """
+    resp = requests.put(
+        f"{CRONJOB_API_BASE}/jobs/{job_id}",
+        headers=_cronjob_headers(cronjob_api_key),
+        json={"job": job_body},
+        timeout=15,
+    )
+    if resp.status_code != 200:
+        raise SystemExit(f"❌ 크론잡 갱신 실패 ({resp.status_code}): {resp.text[:400]}")
+
+
 def main() -> None:
     dry_run = "--dry-run" in sys.argv
     show_list = "--list" in sys.argv
     test_mode = "--test-dispatch" in sys.argv
+    update_pat_mode = "--update-pat" in sys.argv
 
     owner = _env("GITHUB_OWNER", "<owner>")
     repo = _env("GITHUB_REPO", "<repo>")
@@ -226,6 +245,47 @@ def main() -> None:
             if not _env(key):
                 raise SystemExit(f"❌ 환경변수 {key}가 설정되지 않았습니다.")
         test_dispatch(owner, repo, pat, event_type)
+        return
+
+    if update_pat_mode:
+        # ── 크론잡에 저장된 GITHUB_PAT 갱신 ──────────────────────
+        for key in ("CRONJOB_ORG_API_KEY", "GITHUB_PAT", "GITHUB_OWNER", "GITHUB_REPO"):
+            if not _env(key):
+                raise SystemExit(f"❌ 환경변수 {key}가 설정되지 않았습니다.")
+
+        # 1) 새 PAT가 유효한지 먼저 검증 (죽은 토큰을 크론잡에 기록하지 않도록)
+        ok, msg = verify_github(owner, repo, pat, event_type)
+        print(msg)
+        if not ok:
+            raise SystemExit("❌ 새 GitHub PAT 검증 실패 — 크론잡을 갱신하지 않았습니다.")
+
+        # 2) 기존 잡 찾기 (URL+제목 매칭) — 전체 job 바디를 재사용해
+        #    스케줄/타임아웃/제목/URL을 보존하고 헤더만 교체한다.
+        dispatches_url = _github_dispatches_url(owner, repo)
+        existing = list_jobs(cronjob_key)
+        target = next(
+            (
+                j
+                for j in existing
+                if j.get("job", {}).get("url") == dispatches_url
+                and j.get("job", {}).get("title") == job_title
+            ),
+            None,
+        )
+        if target is None:
+            raise SystemExit(
+                f"❌ 갱신할 크론잡을 찾을 수 없습니다: {dispatches_url} "
+                f"(제목: {job_title}). 먼저 `python setup_cronjob_org.py`로 생성하세요."
+            )
+        job_id = target.get("jobId")
+        if job_id is None:
+            raise SystemExit("❌ 크론잡 jobId를 찾을 수 없습니다 — 목록 응답을 확인하세요.")
+        job_body = copy.deepcopy(target.get("job", {}))
+        headers = job_body.setdefault("extendedData", {}).setdefault("headers", {})
+        headers["Authorization"] = f"Bearer {pat}"
+        update_job(cronjob_key, job_id, job_body)
+        print(f"✅ 크론잡(jobId={job_id})의 GITHUB_PAT를 새 토큰으로 갱신했습니다.")
+        print("   테스트: python setup_cronjob_org.py --test-dispatch")
         return
 
     if not dry_run and not show_list:
