@@ -1,4 +1,3 @@
 ✅ Finnhub TQQQ: $63.30
 ✅ Finnhub SOXL: $114.72
-• ⏳ **SOXL 회복 재진입 대기:** D+3/30 영업일 (남은 27영업일 | 진입 2026-07-28, 경과 3일)
-✅ Discord briefing sent successfully.
+✅ No ATH DCA alerts (trigger/imminent/wait-rollover) this poll.
