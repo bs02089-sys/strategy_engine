@@ -1684,18 +1684,18 @@ def _evaluate_all_strategy_modes(cfg: dict) -> list[str]:
     return messages
 
 
-def _recovery_wait_line(ticker: str, pos_cfg: dict, today_ny: date) -> str | None:
-    """Return the recovery re-entry wait-monitor line for a position, or None.
+RECOVERY_NUDGE_MILESTONES = (5, 1)  # remaining business days that fire a one-time 🔔 pre-alert
 
-    Shown ONLY while the bear-trap clock is still running:
-      - strategy_mode is ATH_DCA (not LOC)
-      - RECOVERY_REENTRY.ENABLED is true
-      - ATH_DCA_ENTERED_ON is set and parseable
-      - business_days_elapsed < MIN_DAYS
 
-    Positions already past the wait (e.g. TQQQ D+90) return None, so the
-    nightly briefing and the --ath-monitor realtime channel stay clean once
-    re-entry is actually possible.
+def _recovery_clock(pos_cfg: dict, today_ny: date) -> tuple[int, int, int, date] | None:
+    """Return (elapsed_bd, min_days, remaining, entered_date) for a
+    recovery-enabled ATH_DCA position, or None when the recovery wait
+    monitor does not apply (LOC mode / RECOVERY_REENTRY disabled /
+    ATH_DCA_ENTERED_ON missing or unparseable).
+
+    Shared by the nightly briefing wait line (_recovery_wait_line) and the
+    realtime D-5/D-1 pre-alert (_recovery_nudge_line) so both use the exact
+    same bear-trap clock.
     """
     if str(pos_cfg.get("STRATEGY_MODE", "LOC")).upper() == "LOC":
         return None
@@ -1713,12 +1713,64 @@ def _recovery_wait_line(ticker: str, pos_cfg: dict, today_ny: date) -> str | Non
     if min_days < 1:
         min_days = 30
     elapsed_bd = business_days_elapsed(entered_date, today_ny)
-    if elapsed_bd >= min_days:
+    return elapsed_bd, min_days, min_days - elapsed_bd, entered_date
+
+
+def _recovery_wait_line(ticker: str, pos_cfg: dict, today_ny: date) -> str | None:
+    """Return the recovery re-entry wait-monitor line for a position, or None.
+
+    Shown ONLY while the bear-trap clock is still running:
+      - strategy_mode is ATH_DCA (not LOC)
+      - RECOVERY_REENTRY.ENABLED is true
+      - ATH_DCA_ENTERED_ON is set and parseable
+      - business_days_elapsed < MIN_DAYS
+
+    Shows both the business-day countdown (the bear-trap clock) and the
+    calendar days since crash entry, so the remaining wait is visible in
+    both units. Positions already past the wait (e.g. TQQQ D+90) return
+    None, so the nightly briefing and the --ath-monitor realtime channel
+    stay clean once re-entry is actually possible.
+    """
+    clock = _recovery_clock(pos_cfg, today_ny)
+    if clock is None:
         return None
-    remaining = min_days - elapsed_bd
+    elapsed_bd, min_days, remaining, entered_date = clock
+    if remaining <= 0:
+        return None
+    cal_days = (today_ny - entered_date).days
     return (
         f"• ⏳ **{ticker} 회복 재진입 대기:** D+{elapsed_bd}/{min_days} "
-        f"영업일 (남은 {remaining}영업일 | 진입 {entered_str})"
+        f"영업일 (남은 {remaining}영업일 | 진입 {entered_date.strftime('%Y-%m-%d')}, "
+        f"경과 {cal_days}일)"
+    )
+
+
+def _recovery_nudge_line(ticker: str, pos_cfg: dict, today_ny: date) -> str | None:
+    """Return a one-time 're-entry imminent' pre-alert (🔔), or None.
+
+    Fires once per milestone in RECOVERY_NUDGE_MILESTONES (D-5 and D-1
+    business days remaining) via the persisted ATH_DCA_NUDGE_SENT list, so
+    a 5-10min realtime scheduler can't repeat it. If the bear-trap clock
+    resets (remaining jumps above the max milestone — e.g. a fresh crash
+    cycle), stale marks are cleared so the next countdown re-fires.
+    """
+    clock = _recovery_clock(pos_cfg, today_ny)
+    if clock is None:
+        return None
+    elapsed_bd, min_days, remaining, _ = clock
+    if remaining > max(RECOVERY_NUDGE_MILESTONES):
+        pos_cfg.pop("ATH_DCA_NUDGE_SENT", None)  # fresh clock — reset stale marks
+        return None
+    if remaining not in RECOVERY_NUDGE_MILESTONES:
+        return None
+    sent = pos_cfg.setdefault("ATH_DCA_NUDGE_SENT", [])
+    if remaining in sent:
+        return None
+    sent.append(remaining)
+    return (
+        f"🔔 **{ticker} 재진입 임박!** 남은 대기 {remaining}영업일 "
+        f"(D+{elapsed_bd}/{min_days}) — MIN_DAYS 클럭이 곧 끝납니다. "
+        f"회복 신호 시 LOC 자동 재진입 예정."
     )
 
 
@@ -1854,6 +1906,7 @@ def run_ath_dca_monitor() -> None:
       - 📡 imminent warning (drawdown within 5%p of the next trigger)
       - 🔄 ATH DCA config-change reset (rare + important)
       - ⏳ recovery re-entry wait rollover (once per business day)
+      - 🔔 recovery re-entry imminent (one-time at D-5 / D-1 remaining)
 
     Recurring status lines / cycle tracking are skipped (alerts_only=True)
     and imminent warnings are deduplicated per (ticker, split) via
@@ -1900,20 +1953,29 @@ def run_ath_dca_monitor() -> None:
         pos["ATH_DCA_WAIT_SENT"] = sig
         messages.append(wait_line)
 
+    # Re-entry imminent pre-alert (🔔) — one-time at D-5 / D-1 remaining
+    # business days, deduped per milestone via ATH_DCA_NUDGE_SENT.
+    for ticker, pos in cfg.get("POSITIONS", {}).items():
+        nudge_line = _recovery_nudge_line(ticker, pos, today_ny)
+        if nudge_line:
+            messages.append(nudge_line)
+
     # Persist ATH_DCA_USED_SPLITS + ATH_DCA_IMMINENT_SENT + ATH_DCA_WAIT_SENT
-    # dedup state so the next poll knows what was already emitted.
+    # + ATH_DCA_NUDGE_SENT dedup state so the next poll knows what was
+    # already emitted.
     save_portfolio(cfg)
 
     # Only actionable alerts belong in the realtime channel: 🚨 trigger /
     # 📡 imminent, 🔄 config-change reset (rare + important — a changed
-    # trigger resets split state), and ⏳ wait-period rollover (once per
-    # business day). The wait line starts with a "• ⏳" bullet so match the
-    # emoji anywhere, not just startswith. ⚠️ fetch-failure messages are
-    # dropped here (the nightly briefing reports them) so a flaky yfinance
-    # fetch can't spam Discord every 5-10 minutes.
+    # trigger resets split state), ⏳ wait-period rollover (once per
+    # business day), and 🔔 re-entry imminent (once per milestone). The wait
+    # line starts with a "• ⏳" bullet so match the emoji anywhere, not just
+    # startswith. ⚠️ fetch-failure messages are dropped here (the nightly
+    # briefing reports them) so a flaky yfinance fetch can't spam Discord
+    # every 5-10 minutes.
     alerts = [
         m for m in messages
-        if m.startswith(("🚨", "📡", "🔄")) or "⏳" in m
+        if m.startswith(("🚨", "📡", "🔄", "🔔")) or "⏳" in m
     ]
     if not alerts:
         print("✅ No ATH DCA alerts (trigger/imminent/wait-rollover) this poll.")
