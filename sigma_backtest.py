@@ -738,12 +738,12 @@ def run_backtest_ath_dca(
 
 
 # ══════════════════════════════════════════════
-# ATH DCA Backtest — 회복 재진입 (Recovery Re-entry) 변형
+# ATH DCA Backtest — 비상 모드 종료 (Emergency Mode Exit) 변형
 # ══════════════════════════════════════════════
 # 문제: 현행 듀얼 모드는 ATH_DCA(크래시)로 들어가면 수동 전환 전까지
 # 그 모드에 갇혀, 1차 이후 반등하는 장에서 2차/3차 대기 중 기회비용 발생.
 #
-# 회복 재진입 규칙: 크래시 모드에 있는 동안 아래 신호가 모두 충족되면
+# 비상 모드 종료 규칙: 크래시 모드에 있는 동안 아래 신호가 모두 충족되면
 # 자동으로 LOC(정상) 모드로 복귀해 남은 예비금의 일부를 20분할 LOC로
 # 전환한다.
 #   1) DD가 TRIGGER_1 × recovery_dd_ratio 이하로 좁혀짐 (회복 확인)
@@ -955,12 +955,12 @@ def run_backtest_ath_dca_recovery(
                     })
                     mode_log.append({
                         'date': today_date, 'mode': 'LOC',
-                        'reason': f"Recovery re-entry (DD {current_dd*100:.1f}%)",
+                        'reason': f"Emergency mode exit (DD {current_dd*100:.1f}%)",
                         'dd_pct': round(current_dd * 100, 1),
                     })
                     crash_since_idx = None
                     if verbose:
-                        print(f"  🔄 {today_date.date()} | ATH_DCA → LOC (recovery re-entry, DD={current_dd*100:.1f}%)")
+                        print(f"  🔄 {today_date.date()} | ATH_DCA → LOC (emergency mode exit, DD={current_dd*100:.1f}%)")
 
         # ── LOC mode: normal DCA buy (only when NOT in ATH_DCA mode) ─
         if strategy_mode == "LOC":
@@ -1149,13 +1149,13 @@ def print_ath_dca_report(r: dict):
 
 
 def print_recovery_comparison_report(r_base: dict, r_rec: dict):
-    """Side-by-side comparison: 현행 (3차 대기) vs 회복 재진입 (Recovery Re-entry)."""
+    """Side-by-side comparison: 현행 (3차 대기) vs 비상 모드 종료 (Emergency Mode Exit)."""
     p_start: pd.Timestamp = r_base['period_start']
     p_end: pd.Timestamp = r_base['period_end']
 
     print("\n")
     print("═" * 88)
-    print(f"  📊 {r_base['ticker']} — 현행 vs 회복 재진입 성능 비교")
+    print(f"  📊 {r_base['ticker']} — 현행 vs 비상 모드 종료 성능 비교")
     print("═" * 88)
     print(f"  Capital : ${INITIAL_CASH:,}")
     print(f"  Period  : {p_start.date()}  →  {p_end.date()}")
@@ -1181,7 +1181,7 @@ def print_recovery_comparison_report(r_base: dict, r_rec: dict):
                r_rec['total_return'] - r_rec['buy_hold_ret'])),
     ]
 
-    print(f"  {'Metric':<16} {'현행 (3차 대기)':>16} {'회복 재진입':>16} {'Diff':>9}")
+    print(f"  {'Metric':<16} {'현행 (3차 대기)':>16} {'비상 모드 종료':>16} {'Diff':>9}")
     print(f"  {'─'*16} {'─'*16} {'─'*16} {'─'*9}")
     for name, base_val, rec_val, diff in metrics:
         diff_str = f"{diff:+.2f}" if isinstance(diff, (int, float)) and abs(diff) > 0.005 else ""
@@ -1191,7 +1191,7 @@ def print_recovery_comparison_report(r_base: dict, r_rec: dict):
         print(f"  {name:<16} {base_val:>16} {rec_val:>16} {diff_str:>7}{arrow}")
 
     # ── Activity ────────────────────────────────────────────────────
-    print(f"\n  {'Activity':<18} {'현행':>12} {'회복 재진입':>12}")
+    print(f"\n  {'Activity':<18} {'현행':>12} {'비상 모드 종료':>12}")
     print(f"  {'─'*18} {'─'*12} {'─'*12}")
     print(f"  {'LOC fills':<18} {r_base['dca_buys']:>12} {r_rec['dca_buys']:>12}")
     print(f"  {'ATH DCA fills':<18} {r_base['ath_buys']:>12} {r_rec['ath_buys']:>12}")
@@ -1201,12 +1201,12 @@ def print_recovery_comparison_report(r_base: dict, r_rec: dict):
     print(f"  {'Final shares':<18} {r_base['final_shares']:>12.1f} {r_rec['final_shares']:>12.1f}")
 
     if r_rec.get('recovery_transitions'):
-        print(f"\n  🔄 Recovery Re-entry Transitions ({len(r_rec['recovery_transitions'])}회)")
+        print(f"\n  🔄 비상 모드 종료 전환 ({len(r_rec['recovery_transitions'])}회)")
         for t in r_rec['recovery_transitions']:
             print(f"     {t['date'].strftime('%Y-%m-%d')} | DD {t['dd_pct']:+.1f}% | {t['reason']}"
                   f" | LOC budget ${t['loc_budget']:,.0f}")
         budget = r_rec.get('recovery_loc_budget_pct', 0.0)
-        print(f"  📋 Recovery budget : {budget*100:.0f}% of cash on re-entry"
+        print(f"  📋 Emergency mode exit budget : {budget*100:.0f}% of cash on exit"
               f" | LOC fills from budget: {r_rec.get('recovery_loc_buys', 0)}"
               f" | ⚠️ 예산 소진 후엔 크래시 예비금 보존을 위해 LOC 매수 중단")
     print(f"\n  🔎 해석:")
@@ -1214,9 +1214,9 @@ def print_recovery_comparison_report(r_base: dict, r_rec: dict):
     if abs(ret_diff) < 0.01:
         print("     두 전략의 수익이 동일 (회복 전환이 발생하지 않았거나 무영향)")
     elif ret_diff > 0:
-        print(f"     회복 재진입이 현행 대비 수익 {ret_diff:+.2f}%p 우위")
+        print(f"     비상 모드 종료가 현행 대비 수익 {ret_diff:+.2f}%p 우위")
     else:
-        print(f"     회복 재진입이 현행 대비 수익 {ret_diff:+.2f}%p 열위 (드라이 파우더 소진 효과)")
+        print(f"     비상 모드 종료가 현행 대비 수익 {ret_diff:+.2f}%p 열위 (드라이 파우더 소진 효과)")
     print("\n" + "═" * 88)
     print("  ✅ Recovery Comparison Complete")
     print("═" * 88)
@@ -1957,7 +1957,7 @@ if __name__ == "__main__":
 
     if recovery_mode:
         tickers = ["TQQQ", "SOXL"]
-        print(f"\n🚀 ATH DCA + 회복 재진입(Recovery Re-entry) 백테스트 비교")
+        print(f"\n🚀 ATH DCA + 비상 모드 종료(Emergency Mode Exit) 백테스트 비교")
         print(f"   Capital: ${INITIAL_CASH:,}")
         print(f"   Period : {BACKTEST_DAYS} trading days ending {end_date or 'today'}")
         print("─" * 88)

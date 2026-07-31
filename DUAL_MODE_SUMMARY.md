@@ -19,14 +19,14 @@ LOC ─────────────────────────�
   TQQQ: -35%  /  SOXL: -60%
 
 ATH_DCA ──────────────────────────────▶ LOC
-  (자동) 회복 재진입 — 아래 조건이 모두 충족 시 (RECOVERY_REENTRY.ENABLED=true)
+  (자동) 비상 모드 종료 — 아래 조건이 모두 충족 시 (RECOVERY_REENTRY.ENABLED=true)
     ① 잔여 분할 1개 이상 (2차/3차 예비금 보존)
     ② ATH_DCA_ENTERED_ON(크래시 진입일)부터 MIN_DAYS(30) 영업일 경과
     ③ DD ≤ DD_RATIO(0.5) × TRIGGER_1   (TQQQ 17.5%, SOXL 30%)
     ④ MA20 > MA60 (불리시 정렬, MA_CONFIRM=true)
   (수동) 사용자가 STRATEGY_MODE = "LOC"로 변경해도 동작
 
-  ⚠️ 재진입 시 ATH_DCA_USED_SPLITS는 보존 → 재급락 시 2차/3차 이어서 발동
+  ⚠️ 비상 모드 종료 시 ATH_DCA_USED_SPLITS는 보존 → 재급락 시 2차/3차 이어서 발동
   ⚠️ 백필: 현재 TQQQ 크래시 진입일 2026-03-27(90영업일 경과), SOXL 2026-07-28(3영업일 경과)
 ```
 
@@ -60,7 +60,7 @@ ATH_DCA ────────────────────────
 │  ③ 듀얼 모드 전환 평가                       │
 │  ├─ DD ≥ TRIGGER_1? → ATH_DCA로 자동 전환    │
 │  └─ ATH_DCA 상태?                            │
-│     ├─ 회복 신호? → LOC로 자동 복귀 (재진입)  │
+│     ├─ 회복 신호? → LOC로 자동 복귀 (비상 모드 종료)  │
 │     └─ 아니면 유지 (2차/3차 대기)             │
 └─────────────────┬───────────────────────────┘
                   ▼
@@ -92,9 +92,9 @@ ATH_DCA ────────────────────────
 | **평소** | 아무것도 안 해도 됨 ✅ |
 | **급락장 진입** | 아무것도 안 해도 됨 (자동 전환) ✅ |
 | **비상 모드 중** | 아무것도 안 해도 됨 (Stage 5까지 자동 감지) ✅ |
-| **시장 회복 후** | 아무것도 안 해도 됨 — **회복 재진입이 자동으로 LOC 복귀** ✅ |
+| **시장 회복 후** | 아무것도 안 해도 됨 — **비상 모드 종료가 자동으로 LOC 복귀** ✅ |
 | **추가 자금 생김** | LOC 가격 확인 후 직접 매수 ✋ |
-| **회복 재진입 파라미터 변경** | `RECOVERY_REENTRY` 블록 (ENABLED/DD_RATIO/MIN_DAYS/MA_CONFIRM) |
+| **비상 모드 종료 파라미터 변경** | `RECOVERY_REENTRY` 블록 (ENABLED/DD_RATIO/MIN_DAYS/MA_CONFIRM) |
 
 ---
 
@@ -123,7 +123,7 @@ ATH_DCA ────────────────────────
 ### 추가된 파일
 | 파일 | 설명 |
 |:-----|:------|
-| **`test_sigma_dca_manager.py`** | 단위 테스트: STAGE5 트리거, PCT+STAGE5 혼합, 재진입 등 (30 tests) |
+| **`test_sigma_dca_manager.py`** | 단위 테스트: STAGE5 트리거, PCT+STAGE5 혼합, 비상 모드 종료 등 (30 tests) |
 | **`test_integration.py`** | 통합 테스트: 설정 파일 공유, env var 우선순위, 순환 참조 방지 (11 tests) |
 
 ### 수정된 파일
@@ -154,8 +154,8 @@ ATH_DCA ────────────────────────
      ├── ATH_DCA_USED_SPLITS              (자동 관리)
      ├── ATH_DCA_CYCLE_ATH                (사이클 완료 시 기록)
      ├── ATH_DCA_CONFIG_FINGERPRINT       (설정 변경 감지)
-     ├── RECOVERY_REENTRY                 (회복 재진입: ENABLED/DD_RATIO/MIN_DAYS/MA_CONFIRM)
-     └── ATH_DCA_ENTERED_ON               (자동 관리 — 크래시 진입일, 재진입 클럭 기준)
+     ├── RECOVERY_REENTRY                 (비상 모드 종료: ENABLED/DD_RATIO/MIN_DAYS/MA_CONFIRM)
+     └── ATH_DCA_ENTERED_ON               (자동 관리 — 크래시 진입일, 비상 모드 종료 클럭 기준)
 
  market_state.json  (읽기 전용 — MarketStageSystem.py가 작성)
  └── SOXL / TQQQ

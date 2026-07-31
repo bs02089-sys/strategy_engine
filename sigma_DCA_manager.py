@@ -1652,7 +1652,7 @@ def _evaluate_strategy_mode(ticker: str, pos: dict) -> str:
             # Transient — consumed by _build_briefing_lines (Discord Mode
             # line) and popped before save_portfolio, so it never persists.
             pos["_RECOVERY_REASON"] = reason
-            print(f"🔄 {ticker}: ATH_DCA → LOC recovery re-entry ({reason})")
+            print(f"🔄 {ticker}: ATH_DCA → LOC 비상 모드 종료 ({reason})")
             return "LOC"
         return "ATH_DCA"
 
@@ -1674,7 +1674,7 @@ def _evaluate_all_strategy_modes(cfg: dict) -> list[str]:
                 # (or manual override) — include the reason for transparency.
                 detail = f" — {pos.get('_RECOVERY_REASON', '')}" if pos.get("_RECOVERY_REASON") else ""
                 messages.append(
-                    f"🔄 **{ticker}: {current_mode} → {new_mode} 모드 전환 (회복 재진입){detail}**"
+                    f"🔄 **{ticker}: {current_mode} → {new_mode} 모드 전환 (비상 모드 종료){detail}**"
                 )
             else:
                 messages.append(
@@ -1739,7 +1739,7 @@ def _recovery_wait_line(ticker: str, pos_cfg: dict, today_ny: date) -> str | Non
         return None
     cal_days = (today_ny - entered_date).days
     return (
-        f"• ⏳ **{ticker} 회복 재진입 대기:** D+{elapsed_bd}/{min_days} "
+        f"• ⏳ **{ticker} 비상 모드 종료 대기:** D+{elapsed_bd}/{min_days} "
         f"영업일 (남은 {remaining}영업일 | 진입 {entered_date.strftime('%Y-%m-%d')}, "
         f"경과 {cal_days}일)"
     )
@@ -1768,9 +1768,9 @@ def _recovery_nudge_line(ticker: str, pos_cfg: dict, today_ny: date) -> str | No
         return None
     sent.append(remaining)
     return (
-        f"🔔 **{ticker} 재진입 임박!** 남은 대기 {remaining}영업일 "
+        f"🔔 **{ticker} 비상 모드 종료 임박!** 남은 대기 {remaining}영업일 "
         f"(D+{elapsed_bd}/{min_days}) — MIN_DAYS 클럭이 곧 끝납니다. "
-        f"회복 신호 시 LOC 자동 재진입 예정."
+        f"회복 신호 시 LOC 모드 자동 복귀 예정."
     )
 
 
@@ -1812,7 +1812,7 @@ def _build_briefing_lines(now_ny: datetime, cfg: dict) -> list[str]:
         mode_label = "Normal (LOC)" if strategy_mode == "LOC" else "CRASH (ATH DCA)"
         mode_line = f"• **Mode:** {mode_icon} {mode_label}"
         if recovery_reason:
-            mode_line += f" | 🔄 **회복 재진입** ({recovery_reason})"
+            mode_line += f" | 🔄 **비상 모드 종료** ({recovery_reason})"
         lines.append(mode_line)
 
         # Recovery re-entry wait monitor — shown ONLY while the bear-trap
