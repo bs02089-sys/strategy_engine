@@ -28,6 +28,7 @@ GitHub Actions의 `sigma_dca_manager.yml`(--ath-monitor 분기)를 실행시킵�
   python setup_cronjob_org.py --list       # 기존 잡 목록 조회
   python setup_cronjob_org.py --test-dispatch  # 테스트 dispatch 1회 발사 (워크플로우 실행)
   python setup_cronjob_org.py --update-pat # 크론잡에 저장된 GITHUB_PAT를 새 토큰으로 갱신
+  python setup_cronjob_org.py --update-schedule  # 크론잡 폴링 간격 갱신 (POLL_MINUTES/UTC_HOURS 반영)
 """
 import base64
 import copy
@@ -47,6 +48,23 @@ except ImportError:
 CRONJOB_API_BASE = "https://api.cron-job.org"
 GITHUB_API_BASE = "https://api.github.com"
 WORKFLOW_PATH = ".github/workflows/sigma_dca_manager.yml"
+
+# cron-job.org jobDetails에 포함된 응답 전용(읽기 전용) 필드 — PATCH 시 제거해야 400을 피한다
+READONLY_JOB_FIELDS = (
+    "jobId",
+    "lastStatus",
+    "lastDuration",
+    "lastExecution",
+    "nextExecution",
+    "sslCertExpiry",
+    "someFailed",
+)
+
+
+def _strip_readonly_fields(job_body: dict) -> None:
+    """jobDetails의 읽기 전용 필드를 제거 (in-place)."""
+    for _readonly in READONLY_JOB_FIELDS:
+        job_body.pop(_readonly, None)
 
 
 def _env(key: str, default: str = "") -> str:
@@ -246,6 +264,7 @@ def main() -> None:
     show_list = "--list" in sys.argv
     test_mode = "--test-dispatch" in sys.argv
     update_pat_mode = "--update-pat" in sys.argv
+    update_schedule_mode = "--update-schedule" in sys.argv
 
     owner = _env("GITHUB_OWNER", "<owner>")
     repo = _env("GITHUB_REPO", "<repo>")
@@ -298,22 +317,55 @@ def main() -> None:
         if not job_body:
             raise SystemExit("❌ 크론잡 상세 조회 결과가 비어 있습니다 — 갱신을 중단합니다.")
         # jobDetails에는 응답 전용(읽기 전용) 필드가 포함되어 있으므로
-        # PUT 전에 제거 — 포함된 채 보내면 cron-job.org가 400으로 거부 가능
-        for _readonly in (
-            "jobId",
-            "lastStatus",
-            "lastDuration",
-            "lastExecution",
-            "nextExecution",
-            "sslCertExpiry",
-            "someFailed",
-        ):
-            job_body.pop(_readonly, None)
+        # PATCH 전에 제거 — 포함된 채 보내면 cron-job.org가 400으로 거부 가능
+        _strip_readonly_fields(job_body)
         headers = job_body.setdefault("extendedData", {}).setdefault("headers", {})
         headers["Authorization"] = f"Bearer {pat}"
         update_job(cronjob_key, job_id, job_body)
         print(f"✅ 크론잡(jobId={job_id})의 GITHUB_PAT를 새 토큰으로 갱신했습니다.")
         print("   테스트: python setup_cronjob_org.py --test-dispatch")
+        return
+
+    if update_schedule_mode:
+        # ── 크론잡 폴링 간격(스케줄) 갱신 ──────────────────────────
+        # PAT는 불필요 (GitHub API 호출 없음) — 크론잡 위치 확인에
+        # 필요한 GITHUB_OWNER/REPO + CRONJOB_ORG_API_KEY만 요구한다.
+        for key in ("CRONJOB_ORG_API_KEY", "GITHUB_OWNER", "GITHUB_REPO"):
+            if not _env(key):
+                raise SystemExit(f"❌ 환경변수 {key}가 설정되지 않았습니다.")
+
+        # 1) 기존 잡 찾기 (URL+제목 매칭)
+        dispatches_url = _github_dispatches_url(owner, repo)
+        existing = list_jobs(cronjob_key)
+        job_id = find_existing_job(existing, dispatches_url, job_title)
+        if job_id is None:
+            raise SystemExit(
+                f"❌ 갱신할 크론잡을 찾을 수 없습니다: {dispatches_url} "
+                f"(제목: {job_title}). 먼저 `python setup_cronjob_org.py`로 생성하세요."
+            )
+
+        # 2) 기존 job 바디를 그대로 가져와 schedule만 교체한다
+        #    → Authorization 헤더/제목/URL/타임아웃/saveResponses 완전 보존
+        job_body = get_job(cronjob_key, job_id)
+        if not job_body:
+            raise SystemExit("❌ 크론잡 상세 조회 결과가 비어 있습니다 — 갱신을 중단합니다.")
+        _strip_readonly_fields(job_body)
+        old_minutes = job_body.get("schedule", {}).get("minutes", []) or []
+        old_step = (
+            old_minutes[1] - old_minutes[0] if len(old_minutes) > 1 else poll_minutes
+        )
+        new_minutes = list(range(0, 60, poll_minutes))
+        job_body["schedule"] = _build_schedule(poll_minutes, hours_start, hours_end)
+        update_job(cronjob_key, job_id, job_body)
+        print(
+            f"✅ 크론잡(jobId={job_id})의 폴링 간격을 "
+            f"{old_step}분 → {poll_minutes}분으로 갱신했습니다."
+        )
+        print(
+            f"   장중 {hours_start}:00~{hours_end}:00 UTC, 월~금 — 매 {poll_minutes}분마다 "
+            f"(실행 분: {', '.join(str(m).zfill(2) for m in new_minutes)})"
+        )
+        print("   테스트: python3 setup_cronjob_org.py --test-dispatch")
         return
 
     if not dry_run and not show_list:
@@ -352,8 +404,8 @@ def main() -> None:
     dup_id = find_existing_job(existing, cfg["dispatches_url"], job_title)
     if dup_id is not None:
         print(f"⚠️ 동일한 크론잡이 이미 존재합니다 (jobId={dup_id}). 생성하지 않았습니다.")
-        print("   간격/시간 변경 시: cron-job.org 콘솔에서 해당 잡을 수정하거나,")
-        print("   먼저 삭제한 뒤 이 스크립트를 다시 실행하세요.")
+        print("   간격/시간 변경 시: `python setup_cronjob_org.py --update-schedule`")
+        print("   (POLL_MINUTES/UTC_HOURS_START/UTC_HOURS_END 반영) — 또는 잡을 삭제 후 재생성.")
         print_jobs(existing)
         return
 

@@ -91,6 +91,22 @@ python3 setup_cronjob_org.py --test-dispatch
 `POLL_MINUTES`(기본 `10`), `UTC_HOURS_START`(기본 `13`),
 `UTC_HOURS_END`(기본 `21`), `JOB_TITLE`.
 
+**간격/시간 변경 (기존 잡 갱신):** 생성 후 `POLL_MINUTES`·`UTC_HOURS_*`를
+바꾸려면 새로 생성하지 말고 아래로 기존 잡의 스케줄만 갱신합니다
+(PAT·제목·URL·헤더 완전 보존, 삭제/재생성 불필요):
+
+```bash
+# 15분 간격으로 변경 예시 (저장소가 공개라 10분 유지도 무방 — 아래 참고 사항 참조)
+export POLL_MINUTES=15
+export CRONJOB_ORG_API_KEY=xxx   # cron-job.org 콘솔 Settings → API key
+export GITHUB_OWNER=bs02089-sys
+export GITHUB_REPO=strategy_engine
+python3 setup_cronjob_org.py --update-schedule
+```
+
+> `--update-schedule`은 GitHub PAT를 요구하지 않습니다 (GitHub API 호출 없음).
+> PAT까지 함께 바꾸려면 `--update-pat`를 먼저 실행하세요.
+
 ---
 
 ### 방법 B — 수동 설정
@@ -117,7 +133,8 @@ python3 setup_cronjob_org.py --test-dispatch
 - **비공개 저장소 Actions 분(minutes) 주의**: 무료 티어는 월 2,000분 제한.
   10분 간격 × 장중 8시간 × 22거래일 ≈ 1,056회/월, 각 회당 1~2분이면
   **2,000분을 초과할 수 있습니다**. 비공개 저장소라면 **`*/15`(15분, ≈700분/월)**
-  간격을 권장하고, 공개 저장소(무제한)라면 5~10분도 가능합니다.
+  간격을 권장하고, **공개 저장소(무제한)라면 5~10분도 가능합니다.**
+  (2026-07-31 확인: 본 저장소는 **공개** — 10분 유지 또는 15분 전환 모두 문제 없음)
 
 ---
 
