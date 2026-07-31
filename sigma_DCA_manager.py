@@ -1725,6 +1725,30 @@ def _build_briefing_lines(now_ny: datetime, cfg: dict) -> list[str]:
             mode_line += f" | 🔄 **회복 재진입** ({recovery_reason})"
         lines.append(mode_line)
 
+        # Recovery re-entry wait monitor — shown ONLY while the bear-trap
+        # clock is still running (elapsed < MIN_DAYS). Positions already past
+        # the wait (e.g. TQQQ D+90) display nothing, so the briefing stays
+        # clean once re-entry is actually possible.
+        if strategy_mode != "LOC":
+            rec_block = pos_cfg.get("RECOVERY_REENTRY", {})
+            if rec_block.get("ENABLED", False):
+                entered_str = pos_cfg.get("ATH_DCA_ENTERED_ON")
+                if entered_str:
+                    try:
+                        entered_date = datetime.strptime(entered_str, "%Y-%m-%d").date()
+                        min_days = int(rec_block.get("MIN_DAYS", 30))
+                        if min_days < 1:
+                            min_days = 30
+                        elapsed_bd = business_days_elapsed(entered_date, today_ny)
+                        if elapsed_bd < min_days:
+                            remaining = min_days - elapsed_bd
+                            lines.append(
+                                f"• ⏳ **{ticker} 회복 재진입 대기:** D+{elapsed_bd}/{min_days} "
+                                f"영업일 (남은 {remaining}영업일 | 진입 {entered_str})"
+                            )
+                    except ValueError:
+                        pass
+
         lines.append(f"• **Signals:** Buy[{buy_sig}] / Sell[{sell_sig}] | {reason}")
 
         rotation_due, elapsed_bd, exit_days = check_rotation_exit_signal(pos_cfg, today_ny)
