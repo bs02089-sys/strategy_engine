@@ -24,9 +24,10 @@
                 "STRATEGY": "v2 crash-mode"
             },
             "ATH_DCA_USED_SPLITS": [
-                1
+                2
             ],
-            "ATH_DCA_CONFIG_FINGERPRINT": "3|-35%|-50%|STAGE5|v2 crash-mode"
+            "ATH_DCA_CONFIG_FINGERPRINT": "3|-35%|-20%|STAGE5|v2 crash-mode",
+            "ATH_DCA_IMMINENT_SENT": {}
         },
         "SOXL": {
             "LOOKBACK_DAYS": 252,
