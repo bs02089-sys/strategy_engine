@@ -223,13 +223,15 @@ def create_job(cronjob_api_key: str, payload: dict) -> int:
 
 
 def update_job(cronjob_api_key: str, job_id: int, job_body: dict) -> None:
-    """cron-job.org 기존 잡 갱신 (PUT /jobs/{jobId}).
+    """cron-job.org 기존 잡 갱신 (PATCH /jobs/{jobId}).
 
+    cron-job.org API에서 기존 잡 갱신은 PUT이 아니라 **PATCH**만 허용한다
+    (PUT /jobs는 신규 생성 전용 — PUT /jobs/{jobId}는 404를 반환).
     --update-pat 모드에서 사용 — 기존 잡의 job 바디를 그대로 받아
     Authorization 헤더만 새 PAT로 교체한 뒤 갱신합니다. 스케줄/제목/URL/
     타임아웃 등 다른 설정은 완전히 보존됩니다.
     """
-    resp = requests.put(
+    resp = requests.patch(
         f"{CRONJOB_API_BASE}/jobs/{job_id}",
         headers=_cronjob_headers(cronjob_api_key),
         json={"job": job_body},
