@@ -66,7 +66,8 @@
                 "MIN_DAYS": 30,
                 "MA_CONFIRM": true
             },
-            "ATH_DCA_ENTERED_ON": "2026-07-28"
+            "ATH_DCA_ENTERED_ON": "2026-07-28",
+            "ATH_DCA_WAIT_SENT": "2026-07-31|• ⏳ **SOXL 회복 재진입 대기:** D+3/30 영업일 (남은 27영업일 | 진입 2026-07-28, 경과 3일)"
         }
     },
     "STRATEGY": {
