@@ -1684,6 +1684,44 @@ def _evaluate_all_strategy_modes(cfg: dict) -> list[str]:
     return messages
 
 
+def _recovery_wait_line(ticker: str, pos_cfg: dict, today_ny: date) -> str | None:
+    """Return the recovery re-entry wait-monitor line for a position, or None.
+
+    Shown ONLY while the bear-trap clock is still running:
+      - strategy_mode is ATH_DCA (not LOC)
+      - RECOVERY_REENTRY.ENABLED is true
+      - ATH_DCA_ENTERED_ON is set and parseable
+      - business_days_elapsed < MIN_DAYS
+
+    Positions already past the wait (e.g. TQQQ D+90) return None, so the
+    nightly briefing and the --ath-monitor realtime channel stay clean once
+    re-entry is actually possible.
+    """
+    if str(pos_cfg.get("STRATEGY_MODE", "LOC")).upper() == "LOC":
+        return None
+    rec_block = pos_cfg.get("RECOVERY_REENTRY", {})
+    if not rec_block.get("ENABLED", False):
+        return None
+    entered_str = pos_cfg.get("ATH_DCA_ENTERED_ON")
+    if not entered_str:
+        return None
+    try:
+        entered_date = datetime.strptime(entered_str, "%Y-%m-%d").date()
+    except ValueError:
+        return None
+    min_days = int(rec_block.get("MIN_DAYS", 30))
+    if min_days < 1:
+        min_days = 30
+    elapsed_bd = business_days_elapsed(entered_date, today_ny)
+    if elapsed_bd >= min_days:
+        return None
+    remaining = min_days - elapsed_bd
+    return (
+        f"• ⏳ **{ticker} 회복 재진입 대기:** D+{elapsed_bd}/{min_days} "
+        f"영업일 (남은 {remaining}영업일 | 진입 {entered_str})"
+    )
+
+
 def _build_briefing_lines(now_ny: datetime, cfg: dict) -> list[str]:
     lines = [f"🌙 **U.S. Market LOC Portfolio Briefing** ({now_ny.strftime('%Y-%m-%d %H:%M %Z')})"]
     today_ny = now_ny.date()
@@ -1729,25 +1767,9 @@ def _build_briefing_lines(now_ny: datetime, cfg: dict) -> list[str]:
         # clock is still running (elapsed < MIN_DAYS). Positions already past
         # the wait (e.g. TQQQ D+90) display nothing, so the briefing stays
         # clean once re-entry is actually possible.
-        if strategy_mode != "LOC":
-            rec_block = pos_cfg.get("RECOVERY_REENTRY", {})
-            if rec_block.get("ENABLED", False):
-                entered_str = pos_cfg.get("ATH_DCA_ENTERED_ON")
-                if entered_str:
-                    try:
-                        entered_date = datetime.strptime(entered_str, "%Y-%m-%d").date()
-                        min_days = int(rec_block.get("MIN_DAYS", 30))
-                        if min_days < 1:
-                            min_days = 30
-                        elapsed_bd = business_days_elapsed(entered_date, today_ny)
-                        if elapsed_bd < min_days:
-                            remaining = min_days - elapsed_bd
-                            lines.append(
-                                f"• ⏳ **{ticker} 회복 재진입 대기:** D+{elapsed_bd}/{min_days} "
-                                f"영업일 (남은 {remaining}영업일 | 진입 {entered_str})"
-                            )
-                    except ValueError:
-                        pass
+        wait_line = _recovery_wait_line(ticker, pos_cfg, today_ny)
+        if wait_line:
+            lines.append(wait_line)
 
         lines.append(f"• **Signals:** Buy[{buy_sig}] / Sell[{sell_sig}] | {reason}")
 
@@ -1831,6 +1853,7 @@ def run_ath_dca_monitor() -> None:
       - 🚨 TRIGGER_1/2/3 fired (매수 신호)
       - 📡 imminent warning (drawdown within 5%p of the next trigger)
       - 🔄 ATH DCA config-change reset (rare + important)
+      - ⏳ recovery re-entry wait rollover (once per business day)
 
     Recurring status lines / cycle tracking are skipped (alerts_only=True)
     and imminent warnings are deduplicated per (ticker, split) via
@@ -1861,22 +1884,43 @@ def run_ath_dca_monitor() -> None:
         cfg, realtime_prices=realtime_prices or None, alerts_only=True
     )
 
-    # Persist ATH_DCA_USED_SPLITS + ATH_DCA_IMMINENT_SENT dedup state so
-    # the next poll knows which splits/warnings were already emitted.
+    # Recovery re-entry wait monitor (⏳) — once per business day. The
+    # countdown only rolls over on business days, so dedupe via
+    # ATH_DCA_WAIT_SENT ("YYYY-MM-DD|D+X/N") to keep a 5-10min poll
+    # scheduler from re-sending the identical line all day long.
+    today_ny = datetime.now(ZoneInfo("America/New_York")).date()
+    for ticker, pos in cfg.get("POSITIONS", {}).items():
+        wait_line = _recovery_wait_line(ticker, pos, today_ny)
+        if wait_line is None:
+            pos.pop("ATH_DCA_WAIT_SENT", None)  # wait over / not eligible — clear stale state
+            continue
+        sig = f"{today_ny}|{wait_line}"
+        if pos.get("ATH_DCA_WAIT_SENT") == sig:
+            continue  # already sent for today's countdown value
+        pos["ATH_DCA_WAIT_SENT"] = sig
+        messages.append(wait_line)
+
+    # Persist ATH_DCA_USED_SPLITS + ATH_DCA_IMMINENT_SENT + ATH_DCA_WAIT_SENT
+    # dedup state so the next poll knows what was already emitted.
     save_portfolio(cfg)
 
     # Only actionable alerts belong in the realtime channel: 🚨 trigger /
-    # 📡 imminent, plus 🔄 config-change reset (rare + important — a changed
-    # trigger resets split state). ⚠️ fetch-failure messages are dropped here
-    # (the nightly briefing reports them) so a flaky yfinance fetch can't
-    # spam Discord every 5-10 minutes.
-    alerts = [m for m in messages if m.startswith(("🚨", "📡", "🔄"))]
+    # 📡 imminent, 🔄 config-change reset (rare + important — a changed
+    # trigger resets split state), and ⏳ wait-period rollover (once per
+    # business day). The wait line starts with a "• ⏳" bullet so match the
+    # emoji anywhere, not just startswith. ⚠️ fetch-failure messages are
+    # dropped here (the nightly briefing reports them) so a flaky yfinance
+    # fetch can't spam Discord every 5-10 minutes.
+    alerts = [
+        m for m in messages
+        if m.startswith(("🚨", "📡", "🔄")) or "⏳" in m
+    ]
     if not alerts:
-        print("✅ No ATH DCA trigger/imminent alerts this poll.")
+        print("✅ No ATH DCA alerts (trigger/imminent/wait-rollover) this poll.")
         return
 
     for msg in alerts:
-        print(f"🚨 {msg.splitlines()[0]}")
+        print(msg.splitlines()[0])
 
     _send_discord(
         webhook_url=webhook,
