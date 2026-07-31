@@ -131,7 +131,7 @@ ATH_DCA ────────────────────────
 ### 추가된 파일
 | 파일 | 설명 |
 |:-----|:------|
-| **`setup_cronjob_org.py`** | cron-job.org 실시간 알림 설정 자동화 (생성/목록/테스트/토큰 갱신) |
+| **`setup_cronjob_org.py`** | cron-job.org 실시간 알림 설정 자동화 (생성/--list/--test-dispatch/--update-pat/--update-schedule) |
 | **`REALTIME_ALERT_SETUP.md`** | 실시간 ATH DCA 알림 설정 가이드 |
 
 ### 수정된 파일
@@ -142,8 +142,9 @@ ATH_DCA ────────────────────────
 | **`portfolio_config.json`** | `TRIGGER_3: "STAGE5"`, `STRATEGY_MODE`, `RECOVERY_REENTRY`, `ATH_DCA_ENTERED_ON` + dedup 상태키(`WAIT_SENT`/`NUDGE_SENT`/`IMMINENT_SENT`) 추가 |
 | **`.github/workflows/sigma_dca_manager.yml`** | `repository_dispatch(ath-dca-monitor)` 트리거 + `concurrency` 직렬화 + `FINNHUB_API_KEY` 시크릿 + `--ath-monitor` 분기 + `git pull --rebase` |
 | **`sigma_DCA_manager_flowchart.py`** | Stage 5 통합 반영, 비상 모드 종료/실시간 모니터 흐름 반영, 함수/파일 참조 최신화 |
-| **`README.md`** | 단일 설정 파일 명시, 듀얼 모드/실시간 알림 설명 업데이트, 워크플로우 크론 표 최신화, 설정 예시·목차 앵커 정리 |
-| **`REALTIME_ALERT_SETUP.md`** | `python` → `python3` 표기 통일 |
+| **`README.md`** | 단일 설정 파일 명시, 듀얼 모드/실시간 알림 설명 업데이트, 워크플로우 크론 표 최신화, 설정 예시·목차 앵커 정리, `--update-schedule` 플래그 반영 |
+| **`setup_cronjob_org.py`** | `--update-schedule` 추가 (기존 잡의 폴링 간격만 PATCH 갱신, PAT 불필요) + `READONLY_JOB_FIELDS`/`_strip_readonly_fields()` 헬퍼 추출로 `--update-pat`과 DRY |
+| **`REALTIME_ALERT_SETUP.md`** | `python` → `python3` 표기 통일 + `--update-schedule` 절차 추가 |
 | **용어 통일 (전 파일)** | "회복 재진입" → **비상 모드 종료** / ATH 사이클 "재진입" → **사이클 재시작** / 브리핑 Mode 라벨 한국어화 — 사용자 표시 용어 전면 정리 |
 | **`.github/workflows/bear_market_signals.yml`** | `bear_config.json` 참조 제거 (존재하지 않는 파일) |
 
@@ -192,6 +193,6 @@ ATH_DCA ────────────────────────
 | **sigma_DCA_manager.py** | DCA 브리핑 + Discord 전송 | ✅ (직접 읽음) |
 | **MarketStageSystem.py** | 시장 단계 감지 (bottom/top 0~5) | ✅ (공유 함수 사용) |
 | **bear_market_signals.py** | 약세장 7대 신호 분석 | ❌ (독립 실행, signal_report.json만 출력) |
-| **setup_cronjob_org.py** | cron-job.org 실시간 알림 설정 자동화 (생성/목록/테스트/토큰 갱신) | ❌ (환경변수만 사용) |
-| **cron-job.org (외부)** | 정확한 N분 알람 → `repository_dispatch` 발사 | ❌ (GitHub API 호출) |
+| **setup_cronjob_org.py** | cron-job.org 실시간 알림 설정 자동화 (생성/--list/--test-dispatch/--update-pat/--update-schedule) | ❌ (환경변수만 사용) |
+| **cron-job.org (외부)** | 정확한 N분 알람 → `repository_dispatch` 발사 (현재 15분 간격, `POLL_MINUTES`로 조정) | ❌ (GitHub API 호출) |
 | **Finnhub (외부)** | `/quote` 실시간 가격 (FINNHUB_API_KEY) | ❌ (REST API) |
