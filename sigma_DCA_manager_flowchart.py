@@ -390,7 +390,7 @@ check_peak_sell_signal_with_cooldown()
  yfinance API (외부 데이터)
  ├── 1mo 데이터 → get_prev_close() (전일 종가)
  ├── 120d 데이터 → check_macro_and_technical_signals() (MA20/MA60)
- ├── 252d+ 데이터 → get_period_ath() / get_realtime_sigma() / recompute_sigma()
+ ├── 252d+ 데이터 → get_period_ath() / get_realtime_sigma() / recompute_sigma_for_ticker()
  ├── 1y 데이터 → check_ath_dca_signals() (ATH 하락률)
  └── 6mo 데이터 → _check_rsi_volume_signal() (RSI + Volume)
 
