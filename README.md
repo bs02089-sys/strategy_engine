@@ -88,7 +88,7 @@
 - GitHub Actions `schedule` 크론은 best-effort라 피크 시간대에 수 분~수 시간 지연될 수 있음
 - **cron-job.org**(정확한 N분 알람)가 `repository_dispatch` 이벤트를 발사 → 워크플로우가 `--ath-monitor` 분기로 즉시 실행
 - **Finnhub** 실시간 가격으로 🚨 트리거 / 📡 임박(5%p)만 전송 (중복 제거: 갭이 1.0%p 이상 좁혀질 때만 재알림)
-- 설정 자동화: `setup_cronjob_org.py` (생성 / --list / --test-dispatch / --update-pat)
+- 설정 자동화: `setup_cronjob_org.py` (생성 / --list / --test-dispatch / --update-pat / --update-schedule)
 - 상세 가이드: `REALTIME_ALERT_SETUP.md`
 
 ### 8️⃣ Discord 브리핑
@@ -145,7 +145,7 @@
 | **sigma_DCA_manager.py** | 📌 **메인 실행 파일** — LOC 목표가 계산, 신호 평가, Discord 브리핑 + `--ath-monitor` 실시간 알림 |
 | **sigma_DCA_manager_flowchart.py** | 시스템 전체 플로우차트 문서 |
 | **sigma_backtest.py** | 백테스트 엔진 — 단일 실행, 승수 스윕, 다중 기간 검증, 포트폴리오 최적화 |
-| **setup_cronjob_org.py** | cron-job.org 실시간 알림 설정 자동화 (생성/--list/--test-dispatch/--update-pat) |
+| **setup_cronjob_org.py** | cron-job.org 실시간 알림 설정 자동화 (생성/--list/--test-dispatch/--update-pat/--update-schedule) |
 | **MarketStageSystem.py** | 독립적인 시장 단계 시스템 — 바닥 단계 감지 |
 | **bear_market_signals.py** | 약세장 신호 분석 시스템 |
 | **portfolio_config.json** | 📌 **포트폴리오 설정** — 포지션, Sigma, DCA 파라미터, 모드 상태 |
@@ -294,11 +294,12 @@ export GITHUB_PAT=xxx            # GitHub PAT (Contents: Read and write)
 export GITHUB_OWNER=bs02089-sys
 export GITHUB_REPO=strategy_engine
 
-python3 setup_cronjob_org.py --dry-run       # 생성 전 미리보기
-python3 setup_cronjob_org.py                 # 실제 생성 (장중 10분 간격 기본)
-python3 setup_cronjob_org.py --list          # 등록된 잡 목록
-python3 setup_cronjob_org.py --test-dispatch # 테스트 dispatch 1회
-python3 setup_cronjob_org.py --update-pat    # 크론잡에 저장된 PAT 갱신 (토큰 재발급 시)
+python3 setup_cronjob_org.py --dry-run          # 생성 전 미리보기
+python3 setup_cronjob_org.py                    # 실제 생성 (장중 10분 간격 기본)
+python3 setup_cronjob_org.py --list             # 등록된 잡 목록
+python3 setup_cronjob_org.py --test-dispatch    # 테스트 dispatch 1회
+python3 setup_cronjob_org.py --update-pat       # 크론잡에 저장된 PAT 갱신 (토큰 재발급 시)
+python3 setup_cronjob_org.py --update-schedule  # 폴링 간격 갱신 (POLL_MINUTES/UTC_HOURS 반영)
 ```
 
 ### 백테스트 실행
