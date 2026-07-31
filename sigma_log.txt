@@ -1,11 +1,3 @@
-🔍 Starting price lookup for TQQQ...
-   → Trying yfinance history (1/3)...
-   🩺 [debug] TQQQ raw last rows: 2026-07-24=64.00, 2026-07-27=63.40, 2026-07-28=61.56, 2026-07-29=57.75, 2026-07-30=63.30
-   🩺 [debug] now_ny=2026-07-30T20:59:15.699585-04:00 today_ny=2026-07-30 last_date=2026-07-30 settle_deadline=2026-07-30T16:15:00-04:00 today_session_settled=True
-✅ TQQQ yfinance success: $63.30 (07-30)
-🔍 Starting price lookup for SOXL...
-   → Trying yfinance history (1/3)...
-   🩺 [debug] SOXL raw last rows: 2026-07-24=136.81, 2026-07-27=128.15, 2026-07-28=109.54, 2026-07-29=91.99, 2026-07-30=114.72
-   🩺 [debug] now_ny=2026-07-30T20:59:16.510808-04:00 today_ny=2026-07-30 last_date=2026-07-30 settle_deadline=2026-07-30T16:15:00-04:00 today_session_settled=True
-✅ SOXL yfinance success: $114.72 (07-30)
-✅ Discord briefing sent successfully.
+✅ Finnhub TQQQ: $63.30
+✅ Finnhub SOXL: $114.72
+✅ No ATH DCA trigger/imminent alerts this poll.
