@@ -956,7 +956,7 @@ def check_ath_dca_signals(cfg: dict,
                     pos.pop("ATH_DCA_ENTERED_ON", None)  # new cycle — restart recovery clock
                     changed = True
                     messages.append(
-                        f"🔄 **{ticker} ATH DCA 재진입 준비 완료!**\n"
+                        f"🔄 **{ticker} ATH DCA 사이클 재시작 준비 완료!**\n"
                         f"   • 신규 ATH: \\${rolling_ath_val:.2f} (이전: \\${cycle_ath_f:.2f})\n"
                         f"   • 새로운 하락 사이클 대기 중"
                     )
@@ -967,9 +967,9 @@ def check_ath_dca_signals(cfg: dict,
                     # Still recovering toward new ATH
                     recovery_pct = (rolling_ath_val / cycle_ath_f - 1) * 100
                     messages.append(
-                        f"✅ **{ticker} ATH {total_splits}차 DCA 전체 완료 (재진입 대기)**\n"
+                        f"✅ **{ticker} ATH {total_splits}차 DCA 전체 완료 (사이클 재시작 대기)**\n"
                         f"   • 현재 ATH: \\${rolling_ath_val:.2f}\n"
-                        f"   • 재진입 조건: 신규 ATH > \\${cycle_ath_f:.2f}\n"
+                        f"   • 사이클 재시작 조건: 신규 ATH > \\${cycle_ath_f:.2f}\n"
                         f"   • 회복 진행률: {recovery_pct:+.1f}%"
                     )
                     continue  # skip remaining status lines
@@ -980,7 +980,7 @@ def check_ath_dca_signals(cfg: dict,
                 messages.append(
                     f"✅ **{ticker} ATH {total_splits}차 DCA 모두 완료!**\n"
                     f"   • 사이클 ATH 기록: \\${rolling_ath_val:.2f}\n"
-                    f"   • 신규 ATH 갱신 시 재진입 대기"
+                    f"   • 신규 ATH 갱신 시 사이클 재시작 대기"
                 )
                 continue  # skip remaining status lines
 

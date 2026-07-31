@@ -186,7 +186,7 @@
 │     │     ├─ DD < 임계값 but 5%p 이내 → 📡 임박 알림                        │
 │     │     └─ 기타 → 건너뜀                                                   │
 │     ├─ 전체 분할 완료 시 ATH_DCA_CYCLE_ATH 기록                              │
-│     └─ 신규 ATH > CYCLE_ATH × 1.01 → 🔄 재진입 준비 (사용 분할 초기화)       │
+│     └─ 신규 ATH > CYCLE_ATH × 1.01 → 🔄 사이클 재시작 준비 (사용 분할 초기화)       │
 └──────────────────────────────────┬───────────────────────────────────────────┘
                                    │
                                    ▼
@@ -519,9 +519,9 @@ jobs:
   ✅ TQQQ yfinance success: $42.15 (07-29)
   🔍 Starting price lookup for SOXL...
   ✅ SOXL yfinance success: $12.34 (07-29)
-  📊 ATH DCA check: TQQQ - 모든 분할 완료 (재진입 대기)
+  📊 ATH DCA check: TQQQ - 모든 분할 완료 (사이클 재시작 대기)
   ⚙️ Mode: LOC → (ATH DD >= 35% 시 자동 전환)
-  📊 ATH DCA check: SOXL - 모든 분할 완료 (재진입 대기)
+  📊 ATH DCA check: SOXL - 모든 분할 완료 (사이클 재시작 대기)
   ⚙️ Mode: LOC → (ATH DD >= 60% 시 자동 전환)
   ✅ Discord briefing sent successfully.
 
