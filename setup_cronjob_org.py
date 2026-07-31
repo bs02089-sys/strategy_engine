@@ -175,19 +175,39 @@ def print_jobs(jobs: list[dict]) -> None:
         return
     print(f"📋 등록된 크론잡 ({len(jobs)}개):")
     for j in jobs:
-        job = j.get("job", {})
         print(
-            f"  - [{j.get('jobId')}] {job.get('title', '(제목 없음)')} "
-            f"enabled={job.get('enabled')} → {job.get('url', '')}"
+            f"  - [{j.get('jobId')}] {j.get('title', '(제목 없음)')} "
+            f"enabled={j.get('enabled')} → {j.get('url', '')}"
         )
 
 
 def find_existing_job(jobs: list[dict], dispatches_url: str, job_title: str) -> int | None:
+    """목록 응답에서 URL+제목이 일치하는 잡의 jobId 반환 (없으면 None).
+
+    cron-job.org의 GET /jobs 응답은 평면 구조(jobId/url/title이 최상위)라
+    j["job"] 중첩 없이 직접 접근한다.
+    """
     for j in jobs:
-        job = j.get("job", {})
-        if job.get("url") == dispatches_url and job.get("title") == job_title:
+        if j.get("url") == dispatches_url and j.get("title") == job_title:
             return j.get("jobId")
     return None
+
+
+def get_job(cronjob_api_key: str, job_id: int) -> dict:
+    """cron-job.org 단일 잡 상세 조회 (GET /jobs/{jobId}).
+
+    목록(GET /jobs) 응답에는 extendedData(헤더/바디)가 포함되지 않으므로,
+    --update-pat처럼 기존 헤더를 보존한 채 갱신하려면 반드시 상세 조회가 필요.
+    응답의 jobDetails 객체를 반환한다.
+    """
+    resp = requests.get(
+        f"{CRONJOB_API_BASE}/jobs/{job_id}",
+        headers=_cronjob_headers(cronjob_api_key),
+        timeout=15,
+    )
+    if resp.status_code != 200:
+        raise SystemExit(f"❌ 크론잡 상세 조회 실패 ({resp.status_code}): {resp.text[:300]}")
+    return resp.json().get("jobDetails", {})
 
 
 def create_job(cronjob_api_key: str, payload: dict) -> int:
@@ -259,28 +279,34 @@ def main() -> None:
         if not ok:
             raise SystemExit("❌ 새 GitHub PAT 검증 실패 — 크론잡을 갱신하지 않았습니다.")
 
-        # 2) 기존 잡 찾기 (URL+제목 매칭) — 전체 job 바디를 재사용해
-        #    스케줄/타임아웃/제목/URL을 보존하고 헤더만 교체한다.
+        # 2) 기존 잡 찾기 (URL+제목 매칭) — 목록은 평면 구조(jobId/url/title 최상위)
         dispatches_url = _github_dispatches_url(owner, repo)
         existing = list_jobs(cronjob_key)
-        target = next(
-            (
-                j
-                for j in existing
-                if j.get("job", {}).get("url") == dispatches_url
-                and j.get("job", {}).get("title") == job_title
-            ),
-            None,
-        )
-        if target is None:
+        job_id = find_existing_job(existing, dispatches_url, job_title)
+        if job_id is None:
             raise SystemExit(
                 f"❌ 갱신할 크론잡을 찾을 수 없습니다: {dispatches_url} "
                 f"(제목: {job_title}). 먼저 `python setup_cronjob_org.py`로 생성하세요."
             )
-        job_id = target.get("jobId")
-        if job_id is None:
-            raise SystemExit("❌ 크론잡 jobId를 찾을 수 없습니다 — 목록 응답을 확인하세요.")
-        job_body = copy.deepcopy(target.get("job", {}))
+
+        # 3) 목록 응답에는 extendedData(헤더)가 없으므로 단일 잡 상세를
+        #    조회해 기존 job 바디를 그대로 가져온 뒤 Authorization만 교체한다.
+        #    → 스케줄/타임아웃/제목/URL/saveResponses 완전 보존
+        job_body = get_job(cronjob_key, job_id)
+        if not job_body:
+            raise SystemExit("❌ 크론잡 상세 조회 결과가 비어 있습니다 — 갱신을 중단합니다.")
+        # jobDetails에는 응답 전용(읽기 전용) 필드가 포함되어 있으므로
+        # PUT 전에 제거 — 포함된 채 보내면 cron-job.org가 400으로 거부 가능
+        for _readonly in (
+            "jobId",
+            "lastStatus",
+            "lastDuration",
+            "lastExecution",
+            "nextExecution",
+            "sslCertExpiry",
+            "someFailed",
+        ):
+            job_body.pop(_readonly, None)
         headers = job_body.setdefault("extendedData", {}).setdefault("headers", {})
         headers["Authorization"] = f"Bearer {pat}"
         update_job(cronjob_key, job_id, job_body)
