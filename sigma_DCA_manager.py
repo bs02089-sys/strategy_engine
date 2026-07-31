@@ -743,7 +743,9 @@ def _compute_ath_dca_config_fingerprint(ath_dca: dict) -> str:
     return "|".join(parts)
 
 
-def check_ath_dca_signals(cfg: dict) -> list[str]:
+def check_ath_dca_signals(cfg: dict,
+                          realtime_prices: dict | None = None,
+                          alerts_only: bool = False) -> list[str]:
     """
     Evaluate ATH drawdown DCA triggers for every position that has
     ATH_DCA.ENABLED == true.
@@ -769,6 +771,15 @@ def check_ath_dca_signals(cfg: dict) -> list[str]:
 
     State is persisted via pos["ATH_DCA_USED_SPLITS"] (caller must
     save the config after this function returns).
+
+    Optional parameters (used by the realtime --ath-monitor mode):
+      - realtime_prices: {ticker: current_price} overrides the yfinance
+        last-close so drawdown is measured against live prices (Finnhub).
+      - alerts_only: emit ONLY actionable alerts (🚨 trigger / 📡 imminent
+        within 5%p) and suppress recurring status lines. Imminent alerts
+        are deduplicated via pos["ATH_DCA_IMMINENT_SENT"] so frequent
+        polls don't spam — a warning re-sends only when the gap narrows
+        by >= 1.0%p since the previous alert.
     """
     messages = []
     positions = cfg.get("POSITIONS", {})
@@ -791,6 +802,7 @@ def check_ath_dca_signals(cfg: dict) -> list[str]:
         if stored_fp is not None and current_fp != stored_fp:
             pos["ATH_DCA_USED_SPLITS"] = []
             pos.pop("ATH_DCA_CYCLE_ATH", None)
+            pos["ATH_DCA_IMMINENT_SENT"] = {}
             pos["ATH_DCA_CONFIG_FINGERPRINT"] = current_fp
             used = []
             messages.append(
@@ -826,6 +838,10 @@ def check_ath_dca_signals(cfg: dict) -> list[str]:
             if len(closes) < 20:
                 continue
             current_price = float(closes.iloc[-1])
+            # Realtime mode: prefer live price (Finnhub) over the yfinance
+            # last-close so intraday trigger/imminent events fire now.
+            if realtime_prices and ticker in realtime_prices:
+                current_price = float(realtime_prices[ticker])
             rolling_ath_val = float(closes.expanding().max().iloc[-1])
         except Exception as exc:
             messages.append(f"  ⚠️ {ticker} ATH_DCA data fetch failed: {exc}")
@@ -854,6 +870,7 @@ def check_ath_dca_signals(cfg: dict) -> list[str]:
                     used.append(split_num)
                     changed = True
                     triggered_this_run = True
+                    pos.get("ATH_DCA_IMMINENT_SENT", {}).pop(str(split_num), None)
                     # Use the actual current drawdown as the effective threshold
                     effective_threshold = current_dd
                     target_price = round(rolling_ath_val * (1 - effective_threshold), 2)
@@ -874,6 +891,7 @@ def check_ath_dca_signals(cfg: dict) -> list[str]:
                     used.append(split_num)
                     changed = True
                     triggered_this_run = True
+                    pos.get("ATH_DCA_IMMINENT_SENT", {}).pop(str(split_num), None)
                     target_price = round(rolling_ath_val * (1 - threshold), 2)
 
                     messages.append(
@@ -886,6 +904,15 @@ def check_ath_dca_signals(cfg: dict) -> list[str]:
                     )
 
                 elif gap_pct < 5.0:
+                    # Realtime mode: dedupe so an imminent warning isn't
+                    # re-sent every poll — re-alert only when the gap has
+                    # narrowed by >= 1.0%p since the previous alert.
+                    if alerts_only:
+                        sent = pos.setdefault("ATH_DCA_IMMINENT_SENT", {})
+                        prev_gap = sent.get(str(split_num))
+                        if prev_gap is not None and gap_pct >= prev_gap - 1.0:
+                            continue
+                        sent[str(split_num)] = round(gap_pct, 2)
                     messages.append(
                         f"📡 **{ticker} ATH {split_num}차 DCA 임박!**\n"
                         f"   • ATH: \\${rolling_ath_val:.2f}\n"
@@ -896,6 +923,12 @@ def check_ath_dca_signals(cfg: dict) -> list[str]:
         # Persist state if changed
         if changed:
             pos["ATH_DCA_USED_SPLITS"] = sorted(used)
+
+        # Realtime mode: only trigger/imminent alerts belong here — cycle
+        # tracking, re-entry detection and status lines are owned by the
+        # nightly briefing (which saves them right after this call).
+        if alerts_only:
+            continue
 
         # ── ATH Reset / Re-entry detection ─────────────────────────
         # If all splits have been used, check whether a NEW all-time
@@ -918,6 +951,7 @@ def check_ath_dca_signals(cfg: dict) -> list[str]:
                     # New ATH confirmed — reset for next cycle
                     pos["ATH_DCA_USED_SPLITS"] = []
                     pos.pop("ATH_DCA_CYCLE_ATH", None)
+                    pos["ATH_DCA_IMMINENT_SENT"] = {}  # clear stale dedup state
                     changed = True
                     messages.append(
                         f"🔄 **{ticker} ATH DCA 재진입 준비 완료!**\n"
@@ -1556,6 +1590,104 @@ def _build_briefing_lines(now_ny: datetime, cfg: dict) -> list[str]:
 
 
 # ═══════════════════════════════════════════════════════════
+# Realtime ATH DCA Monitor — --ath-monitor mode
+# ═══════════════════════════════════════════════════════════
+# GitHub Actions `schedule` cron is best-effort and can be delayed by
+# minutes to hours at peak load, so realtime (1~5min) alerting is driven
+# by an external scheduler (cron-job.org) that POSTs a GitHub
+# `repository_dispatch` event every N minutes → this lightweight mode.
+#
+# Pipeline:
+#   cron-job.org (exact N-min alarm)
+#     → POST /repos/{owner}/{repo}/dispatches  (event_type: ath-dca-monitor)
+#     → workflow runs: python sigma_DCA_manager.py --ath-monitor
+#     → Finnhub /quote realtime price override (fallback: yfinance close)
+#     → check_ath_dca_signals(alerts_only=True) → 🚨/📡 only, deduped
+#     → Discord webhook (same secrets as the nightly briefing)
+
+def _fetch_finnhub_quote(ticker: str, api_key: str) -> float | None:
+    """Fetch the real-time current price from Finnhub /quote (free tier).
+
+    Returns None on failure so the monitor falls back to yfinance's last
+    close rather than aborting the whole poll.
+    """
+    url = f"https://finnhub.io/api/v1/quote?symbol={ticker}&token={api_key}"
+    try:
+        resp = requests.get(url, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        price = _safe_float(data.get("c"))  # "c" = current price
+        if price is not None and price > 0:
+            print(f"✅ Finnhub {ticker}: ${price:.2f}")
+            return price
+    except Exception as e:
+        print(f"⚠️ Finnhub quote fetch failed for {ticker}: {e}")
+    return None
+
+
+def run_ath_dca_monitor() -> None:
+    """Lightweight realtime ATH DCA alerting (--ath-monitor mode).
+
+    Sends ONLY actionable alerts to Discord:
+      - 🚨 TRIGGER_1/2/3 fired (매수 신호)
+      - 📡 imminent warning (drawdown within 5%p of the next trigger)
+      - 🔄 ATH DCA config-change reset (rare + important)
+
+    Recurring status lines / cycle tracking are skipped (alerts_only=True)
+    and imminent warnings are deduplicated per (ticker, split) via
+    ATH_DCA_IMMINENT_SENT persisted in the config, so a 5-min scheduler
+    can't spam the channel with the same warning every poll.
+    """
+    cfg = load_portfolio()
+    webhook, user_id = resolve_discord_config(cfg)
+
+    # Realtime price override via Finnhub. Env-var ONLY on purpose — the
+    # config file is committed to the repo, so a key stored there would
+    # leak into git history. Set FINNHUB_API_KEY as a GitHub Actions secret
+    # (and locally via export).
+    api_key = os.environ.get("FINNHUB_API_KEY", "")
+    realtime_prices: dict[str, float] = {}
+    if api_key:
+        for ticker, pos in cfg.get("POSITIONS", {}).items():
+            ath_dca = pos.get("ATH_DCA", {})
+            if ath_dca.get("ENABLED", False):
+                price = _fetch_finnhub_quote(ticker, api_key)
+                if price is not None:
+                    realtime_prices[ticker] = price
+    else:
+        print("⚠️ FINNHUB_API_KEY not set — using yfinance last close (may lag intraday).")
+
+    # Only alerts (🚨 trigger / 📡 imminent); suppress status lines.
+    messages = check_ath_dca_signals(
+        cfg, realtime_prices=realtime_prices or None, alerts_only=True
+    )
+
+    # Persist ATH_DCA_USED_SPLITS + ATH_DCA_IMMINENT_SENT dedup state so
+    # the next poll knows which splits/warnings were already emitted.
+    save_portfolio(cfg)
+
+    # Only actionable alerts belong in the realtime channel: 🚨 trigger /
+    # 📡 imminent, plus 🔄 config-change reset (rare + important — a changed
+    # trigger resets split state). ⚠️ fetch-failure messages are dropped here
+    # (the nightly briefing reports them) so a flaky yfinance fetch can't
+    # spam Discord every 5-10 minutes.
+    alerts = [m for m in messages if m.startswith(("🚨", "📡", "🔄"))]
+    if not alerts:
+        print("✅ No ATH DCA trigger/imminent alerts this poll.")
+        return
+
+    for msg in alerts:
+        print(f"🚨 {msg.splitlines()[0]}")
+
+    _send_discord(
+        webhook_url=webhook,
+        user_id=user_id,
+        title=f"🚨 ATH DCA Realtime Alert",
+        content="\n\n".join(alerts),
+    )
+
+
+# ═══════════════════════════════════════════════════════════
 # Execution Loop
 # ═══════════════════════════════════════════════════════════
 def execute_dual_tactical_trader() -> None:
@@ -1597,4 +1729,7 @@ def execute_dual_tactical_trader() -> None:
 
 
 if __name__ == "__main__":
-    execute_dual_tactical_trader()
+    if "--ath-monitor" in sys.argv:
+        run_ath_dca_monitor()
+    else:
+        execute_dual_tactical_trader()
