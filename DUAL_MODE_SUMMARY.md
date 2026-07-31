@@ -38,6 +38,11 @@ ATH_DCA ────────────────────────
 | 항목 | TQQQ | SOXL |
 |:----|:----:|:----:|
 | **기본 모드** | LOC | LOC |
+| **현재 STRATEGY_MODE** ⚠️스냅샷 | **ATH_DCA** (진입 2026-03-27) | **ATH_DCA** (진입 2026-07-28) |
+
+> ⚠️ 위 "현재 STRATEGY_MODE" 행은 **2026-07-31 기준 스냅샷**입니다. 실제 모드는
+> `portfolio_config.json`의 `STRATEGY_MODE`가 소스이며, 비상 모드 종료로 LOC 복귀 시
+> 자동 갱신됩니다.
 | **LOC 매수** | Sigma × 1.1 | Sigma × 1.1 |
 | **ATH_DCA 1차** | **-35%** | **-60%** |
 | **ATH_DCA 2차** | -50% | -70% |
@@ -64,7 +69,6 @@ ATH_DCA ────────────────────────
 │     ├─ 비상 모드 종료 신호? → LOC로 자동 복귀  │
 │     │   (잔여분할+30일+DD회복+MA20>MA60)      │
 │     └─ 아니면 유지 (2차/3차 대기 + ⏳ 대기표시)│
-└─────────────────┬───────────────────────────┘
 └─────────────────┬───────────────────────────┘
                   ▼
 ┌─────────────────────────────────────────────┐
@@ -133,12 +137,14 @@ ATH_DCA ────────────────────────
 ### 수정된 파일
 | 파일 | 변경 내용 |
 |:-----|:---------|
-| **`sigma_DCA_manager.py`** | `_is_stage5_trigger()` 추가, `check_ath_dca_signals()`에 STAGE5 타입 + 실시간 모드(realtime_prices/alerts_only) 지원, `resolve_discord_config()` 추가, 비상 모드 종료(`_check_recovery_reentry`) + 대기/임박 모니터, `--ath-monitor` 진입점 |
+| **`sigma_DCA_manager.py`** | `_is_stage5_trigger()` 추가, `check_ath_dca_signals()`에 STAGE5 타입 + 실시간 모드(realtime_prices/alerts_only) 지원, `resolve_discord_config()` 추가, 비상 모드 종료(`_check_recovery_reentry`) + 대기/임박 모니터, `--ath-monitor` 진입점, 브리핑 Mode 라벨 한국어화 |
 | **`MarketStageSystem.py`** | `portfolio_config.json` 읽도록 변경, Discord 설정 `resolve_discord_config()` 공유, `_load_config()` 제거 |
-| **`portfolio_config.json`** | `TRIGGER_3: "STAGE5"`, `STRATEGY_MODE`, `RECOVERY_REENTRY`, `ATH_DCA_ENTERED_ON` 추가 |
-| **`.github/workflows/sigma_dca_manager.yml`** | `repository_dispatch(ath-dca-monitor)` 트리거 + `concurrency` 직렬화 + `FINNHUB_API_KEY` 시크릿 + `--ath-monitor` 분기 |
-| **`sigma_DCA_manager_flowchart.py`** | Stage 5 통합 반영, 비상 모드 종료 흐름 반영 |
-| **`README.md`** | 단일 설정 파일 명시, 듀얼 모드 설명 업데이트 |
+| **`portfolio_config.json`** | `TRIGGER_3: "STAGE5"`, `STRATEGY_MODE`, `RECOVERY_REENTRY`, `ATH_DCA_ENTERED_ON` + dedup 상태키(`WAIT_SENT`/`NUDGE_SENT`/`IMMINENT_SENT`) 추가 |
+| **`.github/workflows/sigma_dca_manager.yml`** | `repository_dispatch(ath-dca-monitor)` 트리거 + `concurrency` 직렬화 + `FINNHUB_API_KEY` 시크릿 + `--ath-monitor` 분기 + `git pull --rebase` |
+| **`sigma_DCA_manager_flowchart.py`** | Stage 5 통합 반영, 비상 모드 종료/실시간 모니터 흐름 반영, 함수/파일 참조 최신화 |
+| **`README.md`** | 단일 설정 파일 명시, 듀얼 모드/실시간 알림 설명 업데이트, 워크플로우 크론 표 최신화, 설정 예시·목차 앵커 정리 |
+| **`REALTIME_ALERT_SETUP.md`** | `python` → `python3` 표기 통일 |
+| **용어 통일 (전 파일)** | "회복 재진입" → **비상 모드 종료** / ATH 사이클 "재진입" → **사이클 재시작** / 브리핑 Mode 라벨 한국어화 — 사용자 표시 용어 전면 정리 |
 | **`.github/workflows/bear_market_signals.yml`** | `bear_config.json` 참조 제거 (존재하지 않는 파일) |
 
 ### 삭제된 파일
@@ -186,3 +192,6 @@ ATH_DCA ────────────────────────
 | **sigma_DCA_manager.py** | DCA 브리핑 + Discord 전송 | ✅ (직접 읽음) |
 | **MarketStageSystem.py** | 시장 단계 감지 (bottom/top 0~5) | ✅ (공유 함수 사용) |
 | **bear_market_signals.py** | 약세장 7대 신호 분석 | ❌ (독립 실행, signal_report.json만 출력) |
+| **setup_cronjob_org.py** | cron-job.org 실시간 알림 설정 자동화 (생성/목록/테스트/토큰 갱신) | ❌ (환경변수만 사용) |
+| **cron-job.org (외부)** | 정확한 N분 알람 → `repository_dispatch` 발사 | ❌ (GitHub API 호출) |
+| **Finnhub (외부)** | `/quote` 실시간 가격 (FINNHUB_API_KEY) | ❌ (REST API) |
