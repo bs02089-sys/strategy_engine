@@ -330,7 +330,7 @@ format_drawdown_line()
   └── calculate_drawdown_and_recovery()
       → "전고점 $XX 기준 하락률 XX% / 회복필요 XX%"
 
-check_peak_sell_signal()                       ← 백테스트 전용 (backtest.py)
+check_peak_sell_signal()                       ← 백테스트 전용 (sigma_backtest.py)
   ├── get_rolling_ath()
   ├── get_20day_return()
   └── get_sigma_spike_ratio()
@@ -527,7 +527,8 @@ jobs:
       - run: python bear_market_signals.py > bear_log.txt 2>&1
       - name: Sync and Notify
         run: |
-          git add bear_log.txt signal_report.json bear_config.json
+          [ -f "bear_log.txt" ] && git add bear_log.txt
+          [ -f "signal_report.json" ] && git add signal_report.json
           git commit -m "update: signals $(date +'%Y-%m-%d')" || echo "No changes"
           git push
 
