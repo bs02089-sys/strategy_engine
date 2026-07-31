@@ -19,7 +19,7 @@
                 "ENABLED": true,
                 "SPLITS": 3,
                 "TRIGGER_1": "-35%",
-                "TRIGGER_2": "-20%",
+                "TRIGGER_2": "-50%",
                 "TRIGGER_3": "STAGE5",
                 "STRATEGY": "v2 crash-mode"
             },
