@@ -4,8 +4,10 @@
   Sigma DCA Manager — 전체 시스템 플로우차트
 ══════════════════════════════════════════════════════════════════════
   파일: sigma_DCA_manager.py
-  최종 업데이트: 2026-07-30
+  최종 업데이트: 2026-07-31
   듀얼 모드: LOC (일반) / ATH DCA (비상)
+  비상 모드 종료: 시장 회복 감지 시 LOC 자동 복귀 (RECOVERY_REENTRY)
+  실시간 알림: cron-job.org → repository_dispatch → --ath-monitor
 ══════════════════════════════════════════════════════════════════════
 
 [목차]
@@ -26,12 +28,16 @@
 """
 📌 Sigma DCA Manager는 매일 정해진 시간에 GitHub Actions에서 실행되어,
    portfolio_config.json에 설정된 포지션(TQQQ, SOXL)의 LOC 매수 목표가를
-   계산하고, RSI+거래량 복합 신호, 전고점 청산 신호, ATH 하락분할 DCA를
-   평가하여 디스코드로 종합 브리핑을 전송하는 자동화 시스템입니다.
+   계산하고, RSI+거래량 복합 신호, 전고점 청산 신호, ATH 하락분할 DCA,
+   비상 모드 종료(회복 감지)를 평가하여 디스코드로 종합 브리핑을 전송합니다.
+   또한 cron-job.org가 발사하는 repository_dispatch로 장중 실시간 ATH DCA
+   알림(--ath-monitor)을 전송합니다.
 
 🔗 연동 시스템:
   - MarketStageSystem.py → market_state.json (바닥 단계 정보)
   - bear_market_signals.py → signal_report.json (시장 리스크 점수)
+  - cron-job.org → repository_dispatch (실시간 알림 발사)
+  - Finnhub → /quote 실시간 가격 (FINNHUB_API_KEY)
 """
 
 # =============================================================================
@@ -40,7 +46,7 @@
 """
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │                   🚀 sigma_DCA_manager.py (메인 진입점)                       │
-│            (GitHub Actions가 매일 23:24 UTC에 자동 실행)                       │
+│   (GitHub Actions: 매일 23:24 UTC 야간 브리핑 + cron-job.org 실시간 dispatch) │
 └──────────────────────────────────┬───────────────────────────────────────────┘
                                    │
                                    ▼
@@ -86,7 +92,7 @@
                                    │
                                    ▼
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│  [4] 듀얼 모드 전환 평가 ⭐신규                                               │
+│  [4] 듀얼 모드 전환 평가 ⭐신규⭐                                               │
 │                                                                              │
 │  _evaluate_all_strategy_modes(cfg)                                           │
 │  ├─ 각 포지션의 STRATEGY_MODE 확인                                           │
@@ -96,11 +102,16 @@
 │  │  ├─ 현재 ATH DD >= TRIGGER_1 (TQQQ: -35%, SOXL: -60%)                   │
 │  │  └─ 모드 전환: STRATEGY_MODE = "ATH_DCA"                                 │
 │  │                                                                          │
-│  │  ATH_DCA → LOC 전환 조건: (사용자 수동)                                     │
-│  │  ├─ 3분할 모두 사용 완료 (len(used) >= total_splits)                     │
-│  │  ├─ 신규 ATH > CYCLE_ATH × 1.01 (회복 완료)                               │
-│  │  └─ 모드 전환: STRATEGY_MODE = "LOC"                                     │
+│  │  ATH_DCA → LOC 전환 조건: (자동 비상 모드 종료 — RECOVERY_REENTRY)         │
+│  │  _check_recovery_reentry() — 아래 4조건 모두 충족 시 자동 복귀:             │
+│  │  ├─ ① 잔여 분할 1개 이상 (2차/3차 예비금 보존)                            │
+│  │  ├─ ② 진입일(ATH_DCA_ENTERED_ON)부터 MIN_DAYS(30) 영업일 경과            │
+│  │  ├─ ③ DD ≤ DD_RATIO(0.5) × TRIGGER_1   (TQQQ 17.5% / SOXL 30%)         │
+│  │  └─ ④ MA20 > MA60 (불리시 정렬, MA_CONFIRM=true)                         │
+│  │  └─ (사용자 수동 STRATEGY_MODE="LOC" 변경도 동작)                        │
 │  │                                                                          │
+│  ├─ 대기 중 표시: _recovery_wait_line() → ⏳ D+X/MIN_DAYS (하루 1회 dedup)   │
+│  ├─ 임박 넛지: _recovery_nudge_line() → 🔔 남은 D-5/D-1 (1회 dedup)         │
 │  ├─ 모드 전환 발생 시 → console에 출력                                        │
 │  └─ cfg에 변경 사항 기록 (save_portfolio()에서 저장)                           │
 └──────────────────────────────────┬───────────────────────────────────────────┘
@@ -175,18 +186,25 @@
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │  [6] ATH 하락분할 DCA 신호 확인 ⭐신규⭐                                    │
 │                                                                              │
-│  check_ath_dca_signals(cfg)                                                  │
+│  check_ath_dca_signals(cfg, realtime_prices=None, alerts_only=False)         │
 │  └─ 각 포지션 ATH_DCA.ENABLED 확인                                           │
 │     ├─ 비활성화 → 다음 포지션                                                │
 │     ├─ 활성화 → yfinance 1년 데이터 다운로드                                 │
 │     │  ├─ ATH 계산 (Close 기준, expanding max)                              │
-│     │  ├─ 현재 하락률(DD) 계산                                               │
+│     │  ├─ 현재 하락률(DD) 계산 (realtime_prices 있으면 Finnhub 실시간가 우선) │
 │     │  └─ 각 TRIGGER_N 평가 (1차/2차/3차...)                                 │
 │     │     ├─ DD ≥ 임계값 → 🚨 매수 신호! + ATH_DCA_USED_SPLITS 기록         │
 │     │     ├─ DD < 임계값 but 5%p 이내 → 📡 임박 알림                        │
+│     │     │   (alerts_only: ATH_DCA_IMMINENT_SENT로 갭 1.0%p 좁힘 시만 재알림) │
 │     │     └─ 기타 → 건너뜀                                                   │
 │     ├─ 전체 분할 완료 시 ATH_DCA_CYCLE_ATH 기록                              │
 │     └─ 신규 ATH > CYCLE_ATH × 1.01 → 🔄 사이클 재시작 준비 (사용 분할 초기화)       │
+│                                                                              │
+│  ⭐실시간 모드 (--ath-monitor):                                              │
+│  run_ath_dca_monitor()                                                       │
+│  ├─ Finnhub /quote로 실시간 가격 수집 (realtime_prices 오버라이드)           │
+│  ├─ check_ath_dca_signals(alerts_only=True) → 🚨/📡만, 상태 줄 생략           │
+│  └─ 트리거/임박만 Discord 전송 (스팸 방지 dedup)                              │
 └──────────────────────────────────┬───────────────────────────────────────────┘
                                    │
                                    ▼
@@ -197,6 +215,7 @@
 │  ├─ @유저 멘션 포함                                                          │
 │  ├─ 내용 4096자 제한 / 제목 256자 제한                                       │
 │  └─ Discord Webhook API 호출                                                 │
+│  (실시간 모드는 title="🚨 ATH DCA Realtime Alert"로 전송)                     │
 └──────────────────────────────────┬───────────────────────────────────────────┘
                                    │
                                    ▼
@@ -215,11 +234,15 @@
 
 📌 듀얼 모드 시스템:
    각 포지션의 STRATEGY_MODE 필드에 따라:
-   - "LOC" (📗 Normal):    20분할 Sigma 기반 LOC 매수 진행
-   - "ATH_DCA" (🚨 Crash):  3분할 ATH 하락분할 DCA 매수 (LOC 중단)
+   - "LOC" (📗 일반 모드):     20분할 Sigma 기반 LOC 매수 진행
+   - "ATH_DCA" (🚨 비상 모드):  3분할 ATH 하락분할 DCA 매수 (LOC 중단)
+   - ATH_DCA → LOC: 비상 모드 종료 (RECOVERY_REENTRY 4조건 자동 복귀)
 
-📌 ATH DCA 체크([5])는 브리핑 빌더와 별도로 실행되며, 그 결과는
+📌 ATH DCA 체크([6])는 브리핑 빌더와 별도로 실행되며, 그 결과는
    별도 Discord 메시지로 전송됨 (또는 save_portfolio()로 상태만 저장).
+
+📌 실시간 알림 (--ath-monitor): 야간 브리핑과 별도로 cron-job.org가
+   repository_dispatch를 발사하면 워크플로우가 --ath-monitor 분기로 실행.
 """
 
 # =============================================================================
@@ -246,7 +269,10 @@ sigma_DCA_manager.py (직접 실행)
 │
 ├── _evaluate_all_strategy_modes()             ← 듀얼 모드 평가
 │   ├── LOC → ATH_DCA: ATH DD >= TRIGGER_1
-│   └── ATH_DCA → LOC: 사용자 수동 전환 (STRATEGY_MODE="LOC")
+│   └── ATH_DCA → LOC (자동 비상 모드 종료):
+│       └── _check_recovery_reentry()  — ①잔여분할 ②30일 ③DD≤DD_RATIO×T1 ④MA20>MA60
+│   ├── _recovery_wait_line()                  ⏳ 대기 모니터 (하루 1회 dedup)
+│   └── _recovery_nudge_line()                 🔔 임박 넛지 (D-5/D-1, 1회 dedup)
 │
 ├── _build_briefing_lines()                    ← 브리핑 생성 (모드별)
 │   ├── get_market_score()                     ← signal_report.json
@@ -267,23 +293,29 @@ sigma_DCA_manager.py (직접 실행)
 │   │       ├── _calculate_loc_from_sigma()
 │   │       └── get_realtime_sigma()
 │   │           └── _fetch_closes_for_lookback()
-│   ├── _format_all_in_line()                  ← market_state.json
-│   │   ├── get_bottom_stage()
-│   │   └── Stage 5 → ATH DCA 3차 트리거로 통합          ← portfolio_config.json
-│   │
+│   ├── mode_line: 📗 일반 모드 (LOC) / 🚨 비상 모드 (ATH DCA)
+│   │   └── 비상 모드 종료 발생 시 " | 🔄 **비상 모드 종료** (reason)" 추가
+│   ├── get_bottom_stage()                     ← market_state.json
+│   │   └── Stage 5 → ATH DCA 3차 트리거로 통합
 │   └── _check_rsi_volume_signal()             ← yfinance API
 │       ├── _calculate_rsi()     (SOXL: 14일 / TQQQ: 21일)
 │       ├── _TICKER_ZONES lookup (SOXL / TQQQ)
 │       └── Zone 1 + Zone 2 평가
 │
-├── check_ath_dca_signals(cfg)                 ⭐신규⭐ ATH 하락분할 DCA
+├── check_ath_dca_signals(cfg, realtime_prices=None, alerts_only=False)
 │   ├── _parse_ath_trigger()                   (-30% → 0.30)
 │   ├── yfinance 1년 데이터 다운로드
 │   ├── ATH (expanding max) 계산
-│   ├── 각 TRIGGER_N 평가
+│   ├── realtime_prices → Finnhub 실시간가 오버라이드
+│   ├── 각 TRIGGER_N 평가 (alerts_only: 📡 갭 1.0%p dedup)
 │   └── ATH_DCA_USED_SPLITS / CYCLE_ATH 관리
 │
 ├── _send_discord()                            → Discord Webhook
+│
+├── run_ath_dca_monitor()                      ⭐실시간 모드 (--ath-monitor)
+│   ├── _fetch_finnhub_quote(ticker, key)      ← Finnhub /quote (실패 시 yfinance 종가)
+│   ├── check_ath_dca_signals(alerts_only=True)
+│   └── 🚨/📡/🔄 알림만 Discord 전송
 │
 └── send_monthly_ping_if_due()
     └── save_portfolio()
@@ -325,14 +357,20 @@ check_peak_sell_signal_with_cooldown()
  │   ├── ALLOCATION_PCT, INVEST_TYPE
  │   ├── START_DATE
  │   ├── ROTATION_EXIT_DAYS (for ROTATION_3M)
+ │   ├── STRATEGY_MODE ⭐ (LOC / ATH_DCA — 자동 관리)
  │   ├── ATH_DCA ⭐신규
  │   │   ├── ENABLED (true/false)
  │   │   ├── SPLITS (분할 수)
- │   │   ├── TRIGGER_1 ~ TRIGGER_N (하락률 임계값)
- │   │   └── STRATEGY (설명)   │   ├── ATH_DCA_USED_SPLITS (사용된 분할 목록, 자동 관리)
-   │   ├── ATH_DCA_CYCLE_ATH (사이클 완료 시점 ATH 기록)
-   │   └── ATH_DCA_CONFIG_FINGERPRINT ⭐신규 (설정 변경 감지용 지문)
-   │       → TRIGGER/SPLITS/STRATEGY 변경 시 자동 감지 → 분할 상태 초기화
+ │   │   ├── TRIGGER_1 ~ TRIGGER_N (하락률 임계값 / STAGE5)
+ │   │   └── STRATEGY (설명)
+ │   ├── ATH_DCA_USED_SPLITS (사용된 분할 목록, 자동 관리)
+ │   ├── ATH_DCA_CYCLE_ATH (사이클 완료 시점 ATH 기록)
+ │   ├── ATH_DCA_CONFIG_FINGERPRINT ⭐신규 (설정 변경 감지용 지문)
+ │   │   → TRIGGER/SPLITS/STRATEGY 변경 시 자동 감지 → 분할 상태 초기화
+ │   ├── ATH_DCA_ENTERED_ON (비상 모드 진입일 — 종료 클럭 기준)
+ │   ├── ATH_DCA_WAIT_SENT / ATH_DCA_NUDGE_SENT (⏳/🔔 전송 dedup)
+ │   ├── ATH_DCA_IMMINENT_SENT (📡 실시간 임박 갭 dedup)
+ │   └── RECOVERY_REENTRY ⭐ (비상 모드 종료: ENABLED/DD_RATIO/MIN_DAYS/MA_CONFIRM)
  └── LAST_MONTHLY_PING
 
  portfolio_config.json  (읽기 전용, MarketStageSystem.py가 공유)
@@ -428,26 +466,45 @@ check_peak_sell_signal_with_cooldown()
 name: Sigma DCA Manager Engine
 on:
   schedule:
-    - cron: '24 23 * * 1-5'   # 월~금 23:24 UTC = 19:24 ET (장 마감 후)
+    - cron: '24 23 * * 1-5'   # 월~금 23:24 UTC = 19:24 ET (장 마감 후 야간 브리핑)
+  repository_dispatch:
+    types: [ath-dca-monitor]  # cron-job.org 실시간 알림 발사
   workflow_dispatch:           # 수동 실행 지원
+
+concurrency:
+  group: sigma-dca-manager     # 야간 브리핑 ↔ 실시간 폴링 직렬화
+  cancel-in-progress: false
 
 jobs:
   run-dca-manager:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+      DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
+      FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: {python-version: '3.12'}
       - run: pip install yfinance pandas requests numpy pytz pandas_market_calendars
-      - run: python sigma_DCA_manager.py > sigma_log.txt 2>&1
+      - name: Realtime Monitor (repository_dispatch)
+        if: github.event_name == 'repository_dispatch'
+        run: python sigma_DCA_manager.py --ath-monitor > sigma_log.txt 2>&1
+      - name: Scheduled Briefing
+        if: github.event_name != 'repository_dispatch'
+        run: python sigma_DCA_manager.py > sigma_log.txt 2>&1
       - name: Sync and Notify
+        if: always()
         run: |
           git config --global user.name "DCA Bot"
           git config --global user.email "bot@example.com"
-          git add sigma_log.txt portfolio_config.json sigma_history.csv
+          [ -f sigma_log.txt ] && git add sigma_log.txt
+          [ -f portfolio_config.json ] && git add portfolio_config.json
+          [ -f sigma_history.csv ] && git add sigma_history.csv
           git commit -m "update: dca-log $(date +'%Y-%m-%d')" || echo "No changes"
+          git pull --rebase || true
           git push
 
 
@@ -508,6 +565,7 @@ jobs:
   1. 23:00 UTC — bear_market_signals.yml   (시장 리스크 평가)
   2. 23:14 UTC — tracker.yml               (시장 단계 추적)
   3. 23:24 UTC — sigma_dca_manager.yml      (LOC 브리핑)
+  4. 장중 N분 — cron-job.org → repository_dispatch(ath-dca-monitor) → --ath-monitor 실시간 알림
 
 
 📌 실행 로그 예시 (GitHub Actions Console):
@@ -569,12 +627,10 @@ jobs:
 """
 📁 strategy_engine/
 │
-├── 📄 sigma_DCA_manager.py              ★ 메인 실행 파일 (LOC/Discord 브리핑)
+├── 📄 sigma_DCA_manager.py              ★ 메인 실행 파일 (LOC/Discord 브리핑 + --ath-monitor)
 ├── 📄 sigma_DCA_manager_flowchart.py    ★ 본 문서
 ├── 📄 sigma_backtest.py                 백테스트 엔진 (승수 스윕/포트폴리오 최적화)
-├── 📄 optimize_ath_dca.py               ATH DCA 트리거 최적화
-├── 📄 verify_split_strategy.py         분할 매수 전략 검증
-│
+├── 📄 setup_cronjob_org.py              cron-job.org 실시간 알림 설정 자동화
 ├── 📄 MarketStageSystem.py              시장 단계 트래커
 ├── 📄 bear_market_signals.py            약세장 신호 분석
 │
@@ -585,11 +641,13 @@ jobs:
 ├── 📄 sigma_history.csv                 Sigma 변경 이력 (자동 생성)
 │
 ├── 📄 README.md                         시스템 문서
+├── 📄 DUAL_MODE_SUMMARY.md              듀얼 모드 구조 요약 문서
+├── 📄 REALTIME_ALERT_SETUP.md           실시간 알림 설정 가이드
 ├── 📄 requirements.txt                  Python 의존성 목록
 ├── 📄 cape_cache.json                   CAPE 캐시 (bear_market_signals.py)
 │
 └── 📁 .github/workflows/
-    ├── sigma_dca_manager.yml           ★ DCA 자동 실행 (23:24 UTC)
+    ├── sigma_dca_manager.yml           ★ DCA 자동 실행 (23:24 UTC + 실시간 dispatch)
     ├── bear_market_signals.yml         신호 분석 자동 실행 (23:00 UTC)
     └── tracker.yml                     시장 단계 추적 자동 실행 (23:14 UTC)
 """
@@ -605,7 +663,7 @@ if __name__ == "__main__":
     print("  in ASCII diagrams and structured comments.")
     print()
     print("  📍 File: sigma_DCA_manager_flowchart.py")
-    print("  📅 Last updated: 2026-07-30")
+    print("  📅 Last updated: 2026-07-31")
     print()
     print("  💡 Tip: Use 'cat' to view, or open in VS Code")
     print("  with collapsed sections for easy navigation.")

@@ -27,7 +27,8 @@ ATH_DCA ────────────────────────
   (수동) 사용자가 STRATEGY_MODE = "LOC"로 변경해도 동작
 
   ⚠️ 비상 모드 종료 시 ATH_DCA_USED_SPLITS는 보존 → 재급락 시 2차/3차 이어서 발동
-  ⚠️ 백필: 현재 TQQQ 크래시 진입일 2026-03-27(90영업일 경과), SOXL 2026-07-28(3영업일 경과)
+  ⚠️ 대기 클록 표시: SOXL ⏳ D+3/30 영업일 (진입 2026-07-28) — 브리핑/실시간 알림에 표시
+  ⚠️ TQQQ는 진입 2026-03-27 기준 30영업일 경과 완료 → 대기 표시 없음 (종료 검사 활성)
 ```
 
 ---
@@ -60,8 +61,10 @@ ATH_DCA ────────────────────────
 │  ③ 듀얼 모드 전환 평가                       │
 │  ├─ DD ≥ TRIGGER_1? → ATH_DCA로 자동 전환    │
 │  └─ ATH_DCA 상태?                            │
-│     ├─ 회복 신호? → LOC로 자동 복귀 (비상 모드 종료)  │
-│     └─ 아니면 유지 (2차/3차 대기)             │
+│     ├─ 비상 모드 종료 신호? → LOC로 자동 복귀  │
+│     │   (잔여분할+30일+DD회복+MA20>MA60)      │
+│     └─ 아니면 유지 (2차/3차 대기 + ⏳ 대기표시)│
+└─────────────────┬───────────────────────────┘
 └─────────────────┬───────────────────────────┘
                   ▼
 ┌─────────────────────────────────────────────┐
@@ -95,6 +98,7 @@ ATH_DCA ────────────────────────
 | **시장 회복 후** | 아무것도 안 해도 됨 — **비상 모드 종료가 자동으로 LOC 복귀** ✅ |
 | **추가 자금 생김** | LOC 가격 확인 후 직접 매수 ✋ |
 | **비상 모드 종료 파라미터 변경** | `RECOVERY_REENTRY` 블록 (ENABLED/DD_RATIO/MIN_DAYS/MA_CONFIRM) |
+| **토큰 재발급(실시간 알림 깨질 때)** | `export GITHUB_PAT=...` + `python3 setup_cronjob_org.py --update-pat` |
 
 ---
 
@@ -123,16 +127,17 @@ ATH_DCA ────────────────────────
 ### 추가된 파일
 | 파일 | 설명 |
 |:-----|:------|
-| **`test_sigma_dca_manager.py`** | 단위 테스트: STAGE5 트리거, PCT+STAGE5 혼합, 비상 모드 종료 등 (30 tests) |
-| **`test_integration.py`** | 통합 테스트: 설정 파일 공유, env var 우선순위, 순환 참조 방지 (11 tests) |
+| **`setup_cronjob_org.py`** | cron-job.org 실시간 알림 설정 자동화 (생성/목록/테스트/토큰 갱신) |
+| **`REALTIME_ALERT_SETUP.md`** | 실시간 ATH DCA 알림 설정 가이드 |
 
 ### 수정된 파일
 | 파일 | 변경 내용 |
 |:-----|:---------|
-| **`sigma_DCA_manager.py`** | `_is_stage5_trigger()` 추가, `check_ath_dca_signals()`에 STAGE5 타입 지원, `_format_all_in_line()` 제거, `get_all_in_percent()` 제거, `resolve_discord_config()` 추가 |
+| **`sigma_DCA_manager.py`** | `_is_stage5_trigger()` 추가, `check_ath_dca_signals()`에 STAGE5 타입 + 실시간 모드(realtime_prices/alerts_only) 지원, `resolve_discord_config()` 추가, 비상 모드 종료(`_check_recovery_reentry`) + 대기/임박 모니터, `--ath-monitor` 진입점 |
 | **`MarketStageSystem.py`** | `portfolio_config.json` 읽도록 변경, Discord 설정 `resolve_discord_config()` 공유, `_load_config()` 제거 |
-| **`portfolio_config.json`** | `TRIGGER_3: "STAGE5"` |
-| **`sigma_DCA_manager_flowchart.py`** | Stage 5 통합 반영, `get_all_in_percent` 참조 제거 |
+| **`portfolio_config.json`** | `TRIGGER_3: "STAGE5"`, `STRATEGY_MODE`, `RECOVERY_REENTRY`, `ATH_DCA_ENTERED_ON` 추가 |
+| **`.github/workflows/sigma_dca_manager.yml`** | `repository_dispatch(ath-dca-monitor)` 트리거 + `concurrency` 직렬화 + `FINNHUB_API_KEY` 시크릿 + `--ath-monitor` 분기 |
+| **`sigma_DCA_manager_flowchart.py`** | Stage 5 통합 반영, 비상 모드 종료 흐름 반영 |
 | **`README.md`** | 단일 설정 파일 명시, 듀얼 모드 설명 업데이트 |
 | **`.github/workflows/bear_market_signals.yml`** | `bear_config.json` 참조 제거 (존재하지 않는 파일) |
 
@@ -150,12 +155,16 @@ ATH_DCA ────────────────────────
  ├── DISCORD_WEBHOOK, DISCORD_USER_ID     (← resolve_discord_config() 공유)
  └── POSITIONS → TQQQ / SOXL
      ├── Sigma 관련: LOOKBACK_DAYS, VOL_METHOD, DAILY_SIGMA 등
+     ├── STRATEGY_MODE                    (LOC / ATH_DCA — 자동 관리)
      ├── ATH_DCA: ENABLED, SPLITS, TRIGGER_1~3, STRATEGY
      ├── ATH_DCA_USED_SPLITS              (자동 관리)
      ├── ATH_DCA_CYCLE_ATH                (사이클 완료 시 기록)
      ├── ATH_DCA_CONFIG_FINGERPRINT       (설정 변경 감지)
-     ├── RECOVERY_REENTRY                 (비상 모드 종료: ENABLED/DD_RATIO/MIN_DAYS/MA_CONFIRM)
-     └── ATH_DCA_ENTERED_ON               (자동 관리 — 크래시 진입일, 비상 모드 종료 클럭 기준)
+     ├── ATH_DCA_ENTERED_ON               (크래시 진입일, 비상 모드 종료 클럭 기준)
+     ├── ATH_DCA_WAIT_SENT                (⏳ 대기 모니터 일일 전송 dedup)
+     ├── ATH_DCA_NUDGE_SENT               (🔔 임박 넛지 전송 dedup)
+     ├── ATH_DCA_IMMINENT_SENT            (📡 실시간 임박 갭 dedup — 1.0%p 좁힘 시 재알림)
+     └── RECOVERY_REENTRY                 (비상 모드 종료: ENABLED/DD_RATIO/MIN_DAYS/MA_CONFIRM)
 
  market_state.json  (읽기 전용 — MarketStageSystem.py가 작성)
  └── SOXL / TQQQ
