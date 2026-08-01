@@ -19,14 +19,14 @@
                 "ENABLED": true,
                 "SPLITS": 3,
                 "TRIGGER_1": "-35%",
-                "TRIGGER_2": "-45%",
+                "TRIGGER_2": "-50%",
                 "TRIGGER_3": "STAGE5",
                 "STRATEGY": "v2 crash-mode"
             },
             "ATH_DCA_USED_SPLITS": [
                 1
             ],
-            "ATH_DCA_CONFIG_FINGERPRINT": "3|-35%|-45%|STAGE5|v2 crash-mode",
+            "ATH_DCA_CONFIG_FINGERPRINT": "3|-35%|-50%|STAGE5|v2 crash-mode",
             "RECOVERY_REENTRY": {
                 "ENABLED": true,
                 "DD_RATIO": 0.5,
