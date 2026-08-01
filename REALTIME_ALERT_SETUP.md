@@ -5,6 +5,8 @@ GitHub Actions의 `schedule` 크론은 **best-effort(최선 노력)** 방식이�
 발생을 **1~5분 수준의 실시간**으로 받으려면, GitHub 외부의 정확한 스케줄러가 워크플로우를
 "당겨서 실행(pull)"하게 만듭니다.
 
+> 🔗 **관련 문서**: [TRIGGER_OPTIMIZATION_SUMMARY.md](TRIGGER_OPTIMIZATION_SUMMARY.md) — ATH_DCA 트리거 최적화 분석 — 바닥 분포 · 후보값 스윕 · 의사결정 근거
+
 ```
 cron-job.org (정확한 N분 알람)
    │ POST /repos/{owner}/{repo}/dispatches   (event_type: ath-dca-monitor)
@@ -212,3 +214,5 @@ python3 sigma_DCA_manager.py --ath-monitor
 - **노이즈 커밋**: 폴링마다 `sigma_log.txt`가 갱신되고 임박 갭이 바뀌면
   `portfolio_config.json`도 커밋됩니다. 정상 동작이며 저장소 활동 유지에 도움이
   되지만 git 히스토리가 늘어납니다.
+- **트리거 값 근거**: TQQQ `TRIGGER_2=-50%`, SOXL `TRIGGER_2=-70%` 등 트리거 후보값의
+  최적화 근거(2016~2026 월말 스윕)는 [TRIGGER_OPTIMIZATION_SUMMARY.md](TRIGGER_OPTIMIZATION_SUMMARY.md) 참고.
