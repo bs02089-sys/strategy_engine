@@ -643,6 +643,7 @@ jobs:
 │
 ├── 📄 README.md                         시스템 문서
 ├── 📄 DUAL_MODE_SUMMARY.md              듀얼 모드 구조 요약 문서
+├── 📄 TRIGGER_OPTIMIZATION_SUMMARY.md      ATH_DCA 트리거 최적화 분석
 ├── 📄 REALTIME_ALERT_SETUP.md           실시간 알림 설정 가이드
 ├── 📄 requirements.txt                  Python 의존성 목록
 ├── 📄 cape_cache.json                   CAPE 캐시 (bear_market_signals.py)

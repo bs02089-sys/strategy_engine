@@ -16,6 +16,7 @@
 - [GitHub Actions 자동화](#-github-actions-자동화)
 - [백테스트](#-백테스트)
 - [연동 시스템](#-연동-시스템)
+- [관련 문서](#-관련-문서)
 - [라이선스](#-라이선스)
 
 ---
@@ -149,6 +150,9 @@
 | **MarketStageSystem.py** | 독립적인 시장 단계 시스템 — 바닥 단계 감지 |
 | **bear_market_signals.py** | 약세장 신호 분석 시스템 |
 | **portfolio_config.json** | 📌 **포트폴리오 설정** — 포지션, Sigma, DCA 파라미터, 모드 상태 |
+| **TRIGGER_OPTIMIZATION_SUMMARY.md** | ATH_DCA 트리거 최적화 분석 — 바닥 분포 · 후보값 스윕 · 의사결정 근거 |
+| **DUAL_MODE_SUMMARY.md** | 듀얼 모드(LOC ↔ ATH_DCA) 구조 요약 문서 |
+| **REALTIME_ALERT_SETUP.md** | 실시간 ATH DCA 알림 설정 가이드 |
 | ~~MarketStage_config.json~~ | (제거됨 — portfolio_config.json으로 통합) |
 | **sigma_history.csv** | Sigma 갱신 이력 (자동 생성) |
 | **market_state.json** | 시장 단계 상태 정보 (자동 생성) |
@@ -380,6 +384,9 @@ python3 sigma_DCA_manager_flowchart.py
 - LOC 목표가: `전일종가 × (1 - σ × 승수)`
 - 매수 조건: 당일 저가 ≤ LOC 목표가
 
+> 📊 **ATH_DCA 트리거 최적화 분석** — 10년 치 월말 스윕 기반 TQQQ/SOXL 트리거 후보값 비교와
+> 의사결정 근거는 [TRIGGER_OPTIMIZATION_SUMMARY.md](TRIGGER_OPTIMIZATION_SUMMARY.md) 참고.
+
 ---
 
 ## 🔗 연동 시스템
@@ -409,6 +416,16 @@ python3 sigma_DCA_manager_flowchart.py
 - **Sigma 갱신 주기**: 90일(약 63거래일) 또는 설정(VOL_METHOD/EWMA_LAMBDA) 변경 시
 - **실시간 알림**: GitHub Actions 스케줄은 60일간 활동 없으면 자동 비활성화되지만,
   cron-job.org 폴링이 매일 커밋을 만들어내므로 자연히 유지됩니다.
+
+---
+
+## 📄 관련 문서
+
+| 문서 | 설명 |
+|------|------|
+| [TRIGGER_OPTIMIZATION_SUMMARY.md](TRIGGER_OPTIMIZATION_SUMMARY.md) | ATH_DCA 트리거 최적화 분석 — 바닥 분포 · 후보값 스윕 · 의사결정 근거 |
+| [DUAL_MODE_SUMMARY.md](DUAL_MODE_SUMMARY.md) | 듀얼 모드(LOC ↔ ATH_DCA) 시스템 전체 구조 요약 |
+| [REALTIME_ALERT_SETUP.md](REALTIME_ALERT_SETUP.md) | 실시간 ATH DCA 알림 설정 가이드 |
 
 ---
 

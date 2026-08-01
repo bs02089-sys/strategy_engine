@@ -1,5 +1,7 @@
 # 📋 듀얼 모드 시스템 — 전체 구조 요약
 
+> 🔗 **관련 문서**: [TRIGGER_OPTIMIZATION_SUMMARY.md](TRIGGER_OPTIMIZATION_SUMMARY.md) — ATH_DCA 트리거 최적화 분석 · 바닥 분포 · 후보값 스윕 · 의사결정 근거
+
 ---
 
 ## 1️⃣ 두 가지 모드
@@ -133,6 +135,7 @@ ATH_DCA ────────────────────────
 |:-----|:------|
 | **`setup_cronjob_org.py`** | cron-job.org 실시간 알림 설정 자동화 (생성/--list/--test-dispatch/--update-pat/--update-schedule) |
 | **`REALTIME_ALERT_SETUP.md`** | 실시간 ATH DCA 알림 설정 가이드 |
+| **`TRIGGER_OPTIMIZATION_SUMMARY.md`** | ATH_DCA 트리거 최적화 분석 — 바닥 분포 · 후보값 스윕 · 의사결정 근거 (2026-08-01) |
 
 ### 수정된 파일
 | 파일 | 변경 내용 |
