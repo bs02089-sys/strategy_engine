@@ -474,7 +474,11 @@ def _is_backtest_stage5(prices: pd.Series, volumes: pd.Series) -> bool:
     near_low = current <= low_60 * 1.05
 
     # Bottom-confirmation guard (#4 above)
-    days_since_low = len(prices) - 1 - prices.index.get_loc(tail60.idxmin())
+    # Compute the low's position in the full price series directly so we
+    # avoid type issues when the index is non-unique or when get_loc() returns
+    # a slice/boolean mask instead of a single integer.
+    low_pos_in_series = len(prices) - len(tail60) + int(np.argmin(tail60.to_numpy()))
+    days_since_low = len(prices) - 1 - low_pos_in_series
     if days_since_low < STAGE5_CONFIRM_DAYS:
         return False
 
