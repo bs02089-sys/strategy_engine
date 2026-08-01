@@ -60,7 +60,7 @@
 
 ### 4️⃣ ATH 하락분할 DCA
 - ATH 대비 하락률에 따라 N분할 매수 트리거
-- 설정 예시 (현재 값): TQQQ -35% / -50% / Stage 5 바닥, SOXL -60% / -70% / Stage 5 바닥 — 각각 1/3씩
+- 설정 예시 (현재 값): TQQQ -35% / -45% / Stage 5 바닥, SOXL -60% / -70% / Stage 5 바닥 — 각각 1/3씩
 - 전 사이클 완료 후 신규 ATH 갱신 시 **자동 초기화 및 사이클 재시작**
 - 임박 알림 (목표 임계값 5%p 이내 접근 시)
 
@@ -75,7 +75,7 @@
 ### 6️⃣ 듀얼 모드 전환 + ATH 하락분할 DCA (비상 모드)
 - **LOC 모드** (📗): 평상시 Sigma 기반 LOC 20분할 매수
 - **ATH DCA 모드** (🚨): ATH 하락률이 TRIGGER_1 도달 시 자동 전환 → 3차 분할 매수
-  - 1차/2차: ATH 대비 설정된 % 하락 시 (TQQQ: -35%/-50%, SOXL: -60%/-70%)
+  - 1차/2차: ATH 대비 설정된 % 하락 시 (TQQQ: -35%/-45%, SOXL: -60%/-70%)
   - **3차: MarketStageSystem의 Stage 5 바닥 감지 시 발동**
 - MarketStageSystem.py가 `market_state.json`에 기록한 바닥 단계를 ATH DCA 3차 트리거로 활용
 - 전 사이클(3차) 완료 후 신규 ATH 갱신 시 자동 초기화 및 사이클 재시작
@@ -211,7 +211,7 @@ pandas_market_calendars  # NYSE 휴장일 계산
                 "ENABLED": true,
                 "SPLITS": 3,
                 "TRIGGER_1": "-35%",
-                "TRIGGER_2": "-50%",
+                "TRIGGER_2": "-45%",
                 "TRIGGER_3": "STAGE5",
                 "STRATEGY": "v2 crash-mode"
             },
