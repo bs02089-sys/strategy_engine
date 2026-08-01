@@ -2020,6 +2020,7 @@ def execute_dual_tactical_trader() -> None:
     # Persist ALL config changes (sigma updates, rotation resets, ATH DCA state, mode switches)
     save_portfolio(cfg)
 
+
     _send_discord(
         webhook_url=webhook, 
         user_id=user_id, 
