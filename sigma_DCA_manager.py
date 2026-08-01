@@ -1013,14 +1013,14 @@ def check_ath_dca_signals(cfg: dict,
             if nxt_type == "PCT":
                 next_gap = (nxt_threshold - current_dd) * 100
                 messages.append(
-                    f"📊 **{ticker} ATH {nxt}차 DCA 완료**\n"
+                    f"📊 **{ticker} ATH {nxt}차 DCA**\n"
                     f"   • ATH: \\${rolling_ath_val:.2f}\n"
                     f"   • 실행: {len(used)}/{total_splits}차 ✅\n"
                     f"   • 다음({nxt}차): 추가 {next_gap:+.1f}%p 하락 시"
                 )
             else:  # STAGE5
                 messages.append(
-                    f"📊 **{ticker} ATH {nxt}차 DCA 완료**\n"
+                    f"📊 **{ticker} ATH {nxt}차 DCA**\n"
                     f"   • ATH: \\${rolling_ath_val:.2f}\n"
                     f"   • 실행: {len(used)}/{total_splits}차 ✅\n"
                     f"   • 다음({nxt}차): Stage 5 바닥 감지 시 트리거"
