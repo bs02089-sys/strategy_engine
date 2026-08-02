@@ -1205,7 +1205,7 @@ def print_recovery_comparison_report(r_base: dict, r_rec: dict):
     print(f"  {'Final shares':<18} {r_base['final_shares']:>12.1f} {r_rec['final_shares']:>12.1f}")
 
     if r_rec.get('recovery_transitions'):
-        print(f"\n  🔄 비상 모드 종료 전환 ({len(r_rec['recovery_transitions'])}회)")
+        print(f"\n  🔄 비상 모드 종료 ({len(r_rec['recovery_transitions'])}회)")
         for t in r_rec['recovery_transitions']:
             print(f"     {t['date'].strftime('%Y-%m-%d')} | DD {t['dd_pct']:+.1f}% | {t['reason']}"
                   f" | LOC budget ${t['loc_budget']:,.0f}")
