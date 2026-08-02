@@ -3,8 +3,9 @@
 # ============================================================
 # 기준 환경: 로컬 가상환경 .venv (Python 3.14.4)
 # CI 환경: GitHub Actions (ubuntu-latest, Python 3.14) — 로컬/가상환경/CI 모두
-#          Python 3.14.4로 통일되어 있으며, 하단 패키지는 전부 Python 3.14에서
-#          설치·실행 검증 완료 (pip install --dry-run 검증)
+#          Python 3.14.x로 통일 (CI는 setup-python이 최신 3.14 패치로 해석,
+#          실제 실행은 3.14.6 확인됨). 하단 패키지는 전부 Python 3.14에서
+#          설치·실행 검증 완료 (pip install --dry-run + GitHub Actions run #92)
 #
 # 재생성 방법:
 #   .venv/bin/pip freeze > requirements.txt
