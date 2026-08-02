@@ -13,8 +13,6 @@ concurrency:
 jobs:
   run-signal:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     env:
       DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
       DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
@@ -43,16 +41,3 @@ jobs:
       - name: Show logs on failure
         if: failure()
         run: cat signal_log.txt
-
-      - name: Commit signal log
-        # 로그 뷰어 UI 표시 실패에 대비 — signal_log.txt를 저장소에 커밋하여
-        # 언제든 리포 파일로 확인 가능하게 함 (다른 워크플로우와 동일 패턴)
-        # gitignore의 *_log.txt 패턴 때문에 -f(강제 추가) 사용 (tracker와 동일)
-        if: always()
-        run: |
-          git config --global user.name "Signals Bot"
-          git config --global user.email "bot@example.com"
-          [ -f "signal_log.txt" ] && git add -f signal_log.txt
-          git commit -m "update: dca-signal-log $(date +'%Y-%m-%d')" || echo "No changes to commit"
-          git pull --rebase || true
-          git push

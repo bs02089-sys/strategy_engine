@@ -31,8 +31,7 @@ jobs:
         run: |
           git config --global user.name "Signals Bot"
           git config --global user.email "bot@example.com"
-          # 존재하는 파일만 골라서 커밋
-          [ -f "bear_log.txt" ] && git add bear_log.txt
+          # 상태 파일만 커밋 (로그는 저장하지 않음)
           [ -f "signal_report.json" ] && git add signal_report.json
           git commit -m "update: signals $(date +'%Y-%m-%d')" || echo "No changes to commit"
           git push

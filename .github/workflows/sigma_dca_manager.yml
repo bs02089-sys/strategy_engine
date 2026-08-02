@@ -58,10 +58,9 @@ jobs:
           git config --global user.name "DCA Bot"
           git config --global user.email "bot@example.com"
 
-          [ -f "sigma_log.txt" ] && git add sigma_log.txt
+          # 상태 파일만 커밋 (로그/히스토리는 저장하지 않음 — 커밋 노이즈 방지)
           [ -f "portfolio_config.json" ] && git add portfolio_config.json
-          [ -f "sigma_history.csv" ] && git add sigma_history.csv
 
-          git commit -m "update: dca-log $(date +'%Y-%m-%d')" || echo "No changes to commit"
+          git commit -m "update: dca-state $(date +'%Y-%m-%d')" || echo "No changes to commit"
           git pull --rebase || true
           git push
