@@ -124,7 +124,7 @@
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │              GitHub Actions (스케줄러 + 실시간)                  │
-│  야간 브리핑: 매일 23:24 UTC (월~금)                            │
+│  야간 실행: 매일 23:30 UTC — 브리핑+신호 (월~금)               │
 │  실시간 알림: cron-job.org → repository_dispatch (장중 N분)    │
 └─────────────────┬───────────────────────────────────────────────┘
                   │ 실행
@@ -350,26 +350,17 @@ python3 DCA_MA_strategy_flowchart.py
 
 ## 🤖 GitHub Actions 자동화
 
-### `dca_ma_strategy.yml` — 정기 브리핑 + 실시간 ATH DCA 알림
+### `dca_ma_strategy.yml` — 통합: 정기 브리핑 + MA 레짐 신호 + 실시간 ATH DCA 알림
 
 | 트리거 | 시간 (UTC) | 설명 |
 |--------|------------|------|
-| 예약 실행 | 매일 23:24 (월~금) | 장 마감 후 야간 브리핑 |
+| 예약 실행 | 매일 23:30 (월~금) | 장 마감 후 야간 브리핑 + MA 레짐 전략 신호를 **순차 발송** |
 | repository_dispatch | 장중 N분 (cron-job.org) | `--ath-monitor` 실시간 알림 (🚨/📡) |
 | 수동 실행 | 사용자 요청 시 | workflow_dispatch 수동 실행 |
 
-> `concurrency` 그룹(`sigma-dca-manager`)으로 야간 브리핑과 실시간 폴링이
-> 동시에 실행되지 않도록 직렬화됩니다.
-
-### `dca_ma_signal.yml` — MA 레짐 전략 신호 → Discord
-
-| 트리거 | 시간 (UTC) | 설명 |
-|--------|------------|------|
-| 예약 실행 | 매일 23:40 (월~금) | DCA_MA_strategy.py `--signal --discord --all` — TQQQ+SOXL 신호를 **단일 메시지**로 Discord 발송 |
-| 수동 실행 | 사용자 요청 시 | workflow_dispatch 수동 실행 |
-
-> 신호 발송은 실전 브리핑과 별도로 `DCA_MA_strategy.py --signal`의 MA 레짐
-> 신호(종가·날짜·LOC 매수가·레짐 상태·액션)를 TQQQ/SOXL 한 번에 전송합니다.
+> - 23:30 UTC 실행 시 `DCA_MA_strategy.py`(브리핑) → `--signal --discord --all`(TQQQ+SOXL 신호) 순서로 발송합니다.
+> - 신호 메시지: 종가·날짜 · LOC 매수가 · 레짐 상태 · 액션을 한 번에 전송.
+> - `concurrency` 그룹으로 야간 실행과 실시간 폴링이 동시에 돌지 않게 직렬화됩니다.
 
 ### `bear_market_signals.yml` — 약세장 신호
 

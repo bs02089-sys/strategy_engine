@@ -46,7 +46,7 @@
 """
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │                   🚀 DCA_MA_strategy.py (메인 진입점)                       │
-│   (GitHub Actions: 매일 23:24 UTC 야간 브리핑 + cron-job.org 실시간 dispatch) │
+│   (GitHub Actions: 매일 23:30 UTC 브리핑+신호 + cron-job.org 실시간 dispatch) │
 └──────────────────────────────────┬───────────────────────────────────────────┘
                                    │
                                    ▼
@@ -491,7 +491,7 @@ _ma_filter_lines()
 name: Sigma DCA Manager Engine
 on:
   schedule:
-    - cron: '24 23 * * 1-5'   # 월~금 23:24 UTC = 19:24 ET (장 마감 후 야간 브리핑)
+    - cron: '30 23 * * 1-5'   # 월~금 23:30 UTC = 19:30 ET (장 마감 후 브리핑+신호)
   repository_dispatch:
     types: [ath-dca-monitor]  # cron-job.org 실시간 알림 발사
   workflow_dispatch:           # 수동 실행 지원
@@ -597,12 +597,11 @@ jobs:
           git push
 
 
-📌 워크플로우 실행 순서 (23:00~23:40 UTC, 월~금):
+📌 워크플로우 실행 순서 (23:00~23:30 UTC, 월~금):
   1. 23:00 UTC — bear_market_signals.yml   (시장 리스크 평가)
   2. 23:14 UTC — tracker.yml               (시장 단계 추적)
-  3. 23:24 UTC — dca_ma_strategy.yml      (LOC 브리핑)
-  4. 23:40 UTC — dca_ma_signal.yml        (MA 레짐 전략 신호 → Discord)
-  5. 장중 N분 — cron-job.org → repository_dispatch(ath-dca-monitor) → --ath-monitor 실시간 알림
+  3. 23:30 UTC — dca_ma_strategy.yml      (LOC 브리핑 + MA 레짐 전략 신호 순차 발송)
+  4. 장중 N분 — cron-job.org → repository_dispatch(ath-dca-monitor) → --ath-monitor 실시간 알림
 
 
 📌 실행 로그 예시 (GitHub Actions Console):
@@ -684,8 +683,7 @@ jobs:
 ├── 📄 cape_cache.json                   CAPE 캐시 (bear_market_signals.py)
 │
 └── 📁 .github/workflows/
-    ├── dca_ma_strategy.yml           ★ DCA 자동 실행 (23:24 UTC + 실시간 dispatch)
-    ├── dca_ma_signal.yml             MA 레짐 전략 신호 → Discord (23:40 UTC)
+    ├── dca_ma_strategy.yml           ★ 통합 — 브리핑 + MA 신호 (23:30 UTC) + 실시간 dispatch
     ├── bear_market_signals.yml         신호 분석 자동 실행 (23:00 UTC)
     └── tracker.yml                     시장 단계 추적 자동 실행 (23:14 UTC)
 """
