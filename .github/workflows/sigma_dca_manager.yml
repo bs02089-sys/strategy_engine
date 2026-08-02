@@ -37,11 +37,16 @@ jobs:
 
       - name: Run Realtime ATH DCA Monitor (from cron-job.org dispatch)
         if: github.event_name == 'repository_dispatch'
-        run: python DCA_MA_strategy.py --ath-monitor > sigma_log.txt 2>&1
+        # tee: Actions 로그에도 표시 + sigma_log.txt 저장 (로그 표시 실패 방지)
+        run: |
+          set -o pipefail
+          python DCA_MA_strategy.py --ath-monitor 2>&1 | tee sigma_log.txt
 
       - name: Run DCA Manager (scheduled briefing)
         if: github.event_name != 'repository_dispatch'
-        run: python DCA_MA_strategy.py > sigma_log.txt 2>&1
+        run: |
+          set -o pipefail
+          python DCA_MA_strategy.py 2>&1 | tee sigma_log.txt
 
       - name: Show log on failure
         if: failure()

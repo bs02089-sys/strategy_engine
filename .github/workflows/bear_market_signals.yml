@@ -21,7 +21,10 @@ jobs:
       - run: pip install -r requirements.txt
       
       - name: Run Market Signals
-        run: python bear_market_signals.py > bear_log.txt 2>&1
+        # tee: Actions 로그에도 표시 + bear_log.txt 저장 (로그 표시 실패 방지)
+        run: |
+          set -o pipefail
+          python bear_market_signals.py 2>&1 | tee bear_log.txt
         
       - name: Sync and Notify
         if: always()

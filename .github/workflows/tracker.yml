@@ -24,7 +24,10 @@ jobs:
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
-        run: python MarketStageSystem.py > market_log.txt 2>&1
+        # tee: Actions 로그에도 표시 + market_log.txt 저장 (로그 표시 실패 방지)
+        run: |
+          set -o pipefail
+          python MarketStageSystem.py 2>&1 | tee market_log.txt
 
       - name: Commit and Push
         run: |
