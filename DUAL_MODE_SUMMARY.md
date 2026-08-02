@@ -68,6 +68,26 @@ ATH_DCA ────────────────────────
 | **ATH_DCA 1차** | **-35%** | **-60%** |
 | **ATH_DCA 2차** | -50% | -70% |
 | **ATH_DCA 3차** | **Stage 5 바닥 감지** | **Stage 5 바닥 감지** |
+| **MA 레짐 필터** | **MA20** (하향 돌파 → 전량 청산 / 상향 돌파 → 전액 재매수) | **MA250** (하향 돌파 → 전량 청산 / 상향 돌파 → DCA 재개) |
+
+---
+
+### MA 레짐 필터 (Moving-Average Regime Filter — 백테스트 검증 반영)
+
+기존 듀얼 모드에 **종가 × 이동평균(MA) 크로스 레짐 필터**를 얹어 MDD를 낮추는 설계입니다.
+`DCA_MA_strategy.py` 백테스트 검증(TQQQ MA20 +2,138.5% / -41.2%, SOXL MA250 +265.2% / -34.8%)을
+반영해 실전에 통합되었습니다.
+
+| 구분 | 동작 |
+|:----|:----|
+| **MA 하향 돌파** (종가 < MA) | 📉 **전량 청산 + 매수 금지** — LOC/RSI 매수 신호 생략, 현금 대기 |
+| **MA 상향 돌파** (종가 > MA) | TQQQ: 💰 **전액 재매수**(`REENTRY=lump`, 100%) / SOXL: 🔄 **DCA 재개**(`REENTRY=dca_reset`) |
+| **ATH_DCA 비상 모드** | 🚫 **필터 OFF** — 분할 매수 진행 중에는 개입하지 않음 (레짐 상태만 "참고" 표시) |
+| **비상 모드 종료 → LOC 복귀** | MA 필터 **재활성** |
+
+- 크로스 신호는 레짐 전환 시 **1회만** 발송 — `MA_FILTER_STATE`(`{regime, since}`) 영속화로 중복 알림 없음
+- 설정 변경(MA 일수/재진입 방식) 감지 시 `MA_FILTER_CONFIG_FINGERPRINT`로 상태 리셋
+- 설정: `MA_FILTER` 블록 (`ENABLED` / `MA_DAYS` / `REENTRY` / `REENTRY_PCT`)
 
 ---
 
@@ -93,8 +113,15 @@ ATH_DCA ────────────────────────
 └─────────────────┬───────────────────────────┘
                   ▼
 ┌─────────────────────────────────────────────┐
+│  ③-2 MA 레짐 필터 평가 (LOC 모드만)         │
+│  ├─ MA 하향 돌파 → 전량 청산 + 매수 금지      │
+│  ├─ MA 상향 돌파 → 전액 재매수/DCA 재개 신호  │
+│  └─ ATH_DCA 모드 → OFF (상태만 추적)         │
+└─────────────────┬───────────────────────────┘
+                  ▼
+┌─────────────────────────────────────────────┐
 │  ④ Discord 브리핑 생성 (모드별)              │
-│  ├─ 📗 LOC 모드: LOC 목표가 + RSI 신호 표시   │
+│  ├─ 📗 LOC 모드: LOC 목표가 + RSI 신호 + MA 레짐 │
 │  └─ 🚨 ATH_DCA 모드: LOC 중단 + ATH DCA 집중 │
 └─────────────────┬───────────────────────────┘
                   ▼
@@ -185,6 +212,9 @@ ATH_DCA ────────────────────────
  └── POSITIONS → TQQQ / SOXL
      ├── Sigma 관련: LOOKBACK_DAYS, VOL_METHOD, DAILY_SIGMA 등
      ├── STRATEGY_MODE                    (LOC / ATH_DCA — 자동 관리)
+     ├── MA_FILTER: ENABLED, MA_DAYS, REENTRY, REENTRY_PCT   (TQQQ MA20/lump, SOXL MA250/dca_reset)
+     ├── MA_FILTER_STATE                   (자동 관리 — {regime, since})
+     ├── MA_FILTER_CONFIG_FINGERPRINT      (설정 변경 감지 — 상태 리셋)
      ├── ATH_DCA: ENABLED, SPLITS, TRIGGER_1~3, STRATEGY
      ├── ATH_DCA_USED_SPLITS              (자동 관리)
      ├── ATH_DCA_CYCLE_ATH                (사이클 완료 시 기록)

@@ -303,10 +303,13 @@ DCA_MA_strategy.py (직접 실행)
 │   │   └── 비상 모드 종료 발생 시 " | 🔄 **비상 모드 종료** (reason)" 추가
 │   ├── get_bottom_stage()                     ← market_state.json
 │   │   └── Stage 5 → ATH DCA 3차 트리거로 통합
-│   └── _check_rsi_volume_signal()             ← yfinance API
-│       ├── _calculate_rsi()     (SOXL: 14일 / TQQQ: 21일)
-│       ├── _TICKER_ZONES lookup (SOXL / TQQQ)
-│       └── Zone 1 + Zone 2 평가
+│   ├── _check_ma_filter()                     ← MA 레짐 필터 (LOC 모드 활성)
+│   │   ├── _fetch_ma_closes()                 ← yfinance API (auto_adjust=True)
+│   │   │   └── _drop_unsettled_today_bar()    장중 미확정 바 제외 (거짓 크로스 방지)
+│   │   ├── 레짐 판정 (종가 > MA: above / < MA: below)
+│   │   ├── 크로스 1회 감지 (MA_FILTER_STATE 영속화)
+│   │   └── ATH_DCA 비상 모드 → suspended (OFF — 상태만 추적)
+│   └── _ma_filter_lines()                     → 레짐/크로스 알림 라인 (🚨/💰/🔄)
 │
 ├── check_ath_dca_signals(cfg, realtime_prices=None, alerts_only=False)
 │   ├── _parse_ath_trigger()                   (-30% → 0.30)
@@ -321,6 +324,7 @@ DCA_MA_strategy.py (직접 실행)
 ├── run_ath_dca_monitor()                      ⭐실시간 모드 (--ath-monitor)
 │   ├── _fetch_finnhub_quote(ticker, key)      ← Finnhub /quote (실패 시 yfinance 종가)
 │   ├── check_ath_dca_signals(alerts_only=True)
+│   ├── _check_ma_filter() → 크로스 알림      ← MA 레짐 크로스 (LOC 모드만, 1회 dedup)
 │   └── 🚨/📡/🔄 알림만 Discord 전송
 │
 └── send_monthly_ping_if_due()
@@ -345,6 +349,17 @@ check_peak_sell_signal()                       ← 백테스트 전용 (DCA_MA_s
 
 check_peak_sell_signal_with_cooldown()
   └── check_peak_sell_signal() + _COOLDOWN_DAYS (60거래일)
+
+[MA 레짐 필터 엔진 (실전 반영 — 백테스트 검증)]
+_check_ma_filter()
+  ├── _fetch_ma_closes()                       ← yfinance API
+  │   └── _drop_unsettled_today_bar()
+  ├── MA_FILTER_STATE {regime, since} 영속화
+  ├── crossed_down / crossed_up 1회 감지
+  └── suspended (ATH_DCA 모드 OFF)
+
+_ma_filter_lines()
+  └── 🟢/🟡 레짐 상태 + 🚨 하향 돌파(전량 청산) / 💰 전액 재매수(TQQQ) / 🔄 DCA 재개(SOXL)
 """
 
 # =============================================================================
@@ -364,6 +379,10 @@ check_peak_sell_signal_with_cooldown()
  │   ├── START_DATE
  │   ├── ROTATION_EXIT_DAYS (for ROTATION_3M)
  │   ├── STRATEGY_MODE ⭐ (LOC / ATH_DCA — 자동 관리)
+ │   ├── MA_FILTER ⭐신규 (TQQQ: MA20+lump, SOXL: MA250+dca_reset)
+ │   │   ├── ENABLED, MA_DAYS, REENTRY, REENTRY_PCT
+ │   │   ├── MA_FILTER_STATE {regime, since} (자동 관리)
+ │   │   └── MA_FILTER_CONFIG_FINGERPRINT (설정 변경 감지)
  │   ├── ATH_DCA ⭐신규
  │   │   ├── ENABLED (true/false)
  │   │   ├── SPLITS (분할 수)
