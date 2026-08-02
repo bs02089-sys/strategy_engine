@@ -17,8 +17,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Set up Python
         uses: actions/setup-python@v5
-        with: {python-version: '3.12'}
-      - run: pip install yfinance pandas requests numpy pytz holidays
+        with: {python-version: '3.14'}
+      - run: pip install -r requirements.txt
       
       - name: Run Market Signals
         run: python bear_market_signals.py > bear_log.txt 2>&1

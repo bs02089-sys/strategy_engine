@@ -487,8 +487,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: {python-version: '3.12'}
-      - run: pip install yfinance pandas requests numpy pytz pandas_market_calendars
+        with: {python-version: '3.14'}
+      - run: pip install -r requirements.txt
       - name: Realtime Monitor (repository_dispatch)
         if: github.event_name == 'repository_dispatch'
         run: python sigma_DCA_manager.py --ath-monitor > sigma_log.txt 2>&1
@@ -522,8 +522,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: {python-version: '3.12'}
-      - run: pip install yfinance pandas requests numpy pytz holidays
+        with: {python-version: '3.14'}
+      - run: pip install -r requirements.txt
       - run: python bear_market_signals.py > bear_log.txt 2>&1
       - name: Sync and Notify
         run: |
@@ -549,8 +549,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: {python-version: '3.12'}
-      - run: pip install pandas requests yfinance
+        with: {python-version: '3.14'}
+      - run: pip install -r requirements.txt
       - run: python MarketStageSystem.py > market_log.txt 2>&1
       - name: Commit and Push
         run: |

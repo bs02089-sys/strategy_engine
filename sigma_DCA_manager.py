@@ -1116,14 +1116,29 @@ def check_macro_and_technical_signals(ticker: str, pos_cfg: dict) -> tuple[bool,
 
 
 def _get_nyse_holidays(start_date: date, end_date: date) -> np.ndarray | None:
+    """
+    Returns NYSE holidays in [start_date, end_date] as a datetime64[D] array.
+
+    Uses the calendar's `valid_days()` API instead of the removed `holidays()`
+    method: pandas_market_calendars 5.x changed `nyse.holidays()` to return a
+    CustomBusinessDay offset object (no longer a DatetimeIndex), which silently
+    broke the old conversion and made business-day counting ignore holidays.
+    Holidays here = all weekdays in range minus valid trading days, which is
+    exactly the complement np.busday_count() needs.
+    """
     try:
         import pandas_market_calendars as mcal
         nyse = mcal.get_calendar("NYSE")
-        all_holidays = np.array(nyse.holidays(), dtype="datetime64[D]")
         start64 = np.datetime64(start_date)
-        end64 = np.datetime64(end_date)
-        return all_holidays[(all_holidays >= start64) & (all_holidays <= end64)]
-    except (ImportError, Exception):
+        end64 = np.datetime64(end_date) + np.timedelta64(1, "D")  # inclusive end
+        all_days = np.arange(start64, end64, dtype="datetime64[D]")
+        all_weekdays = all_days[np.is_busday(all_days)]
+        valid = np.array(
+            nyse.valid_days(start_date=start_date, end_date=end_date),
+            dtype="datetime64[D]",
+        )
+        return np.setdiff1d(all_weekdays, valid)
+    except Exception:
         return None
 
 
