@@ -27,6 +27,7 @@
                 1
             ],
             "ATH_DCA_CONFIG_FINGERPRINT": "3|-35%|-50%|STAGE5|v2 crash-mode",
+
             "RECOVERY_REENTRY": {
                 "ENABLED": true,
                 "DD_RATIO": 0.5,
