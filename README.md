@@ -321,6 +321,10 @@ python3 sigma_backtest.py --multi-sweep
 # 포트폴리오 비중 최적화 (TQQQ/SOXL)
 python3 sigma_backtest.py --portfolio-sweep
 python3 sigma_backtest.py --multi-portfolio-sweep
+
+# 듀얼 모드 비교 — 현행 vs 비상 모드 종료 (종료일 지정 가능)
+python3 sigma_backtest.py --ath-dca-recovery
+python3 sigma_backtest.py --ath-dca-recovery --end-date 2020-08-31   # 2020 COVID 크래시 포함 구간
 ```
 
 ### 플로우차트 문서 보기
@@ -376,6 +380,7 @@ python3 sigma_DCA_manager_flowchart.py
 - **다중 기간 스윕**: 여러 시장 국면(강세/약세/회복)에 걸쳐 일관된 승수 검증
 - **포트폴리오 스윕**: TQQQ/SOXL 비중 최적화 (10%~90%)
 - **전고점 청산 비교**: DCA 단독 vs DCA+전고점50%청산 성능 비교
+- **듀얼 모드 비교 (--ath-dca-recovery)**: 현행(3차 대기) vs 비상 모드 종료(Emergency Mode Exit) 성능 비교
 - **상세 리포트**: 샤프 비율, 최대 낙폭, 승률, 월별 수익률 등
 
 ### 사용 기술
@@ -386,6 +391,11 @@ python3 sigma_DCA_manager_flowchart.py
 
 > 📊 **ATH_DCA 트리거 최적화 분석** — 10년 치 월말 스윕 기반 TQQQ/SOXL 트리거 후보값 비교와
 > 의사결정 근거는 [TRIGGER_OPTIMIZATION_SUMMARY.md](TRIGGER_OPTIMIZATION_SUMMARY.md) 참고.
+
+> 🧪 **비상 모드 종료 실효성 검증 (2026-08-02)** — `--ath-dca-recovery --end-date 2020-08-31`
+> (2020 COVID 크래시 포함 구간)에서 TQQQ가 현행 대비 **+4.67%p**(+136.17% vs +131.50%) 우위를
+> 기록했습니다. 단, 크래시 후 **잔여 현금(예비금)이 남아있을 때만** 효과가 있으므로 예비금 보존이
+> 핵심입니다. 상세는 [DUAL_MODE_SUMMARY.md](DUAL_MODE_SUMMARY.md) 참고.
 
 ---
 
