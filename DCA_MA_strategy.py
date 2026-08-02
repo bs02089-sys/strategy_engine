@@ -6,14 +6,14 @@
 하나로 통합한 단일 파일입니다 (2026-08-02).
 
 실전 엔진 (기본 실행):
-  - 일일 Discord 브리핑: LOC 목표가 · Sigma 자동 갱신 · 전고점 50% 청산 ·
-    ATH 하락분할 DCA · MA 레짐 필터 · 로테이션 초기화 · 시장 바닥 단계
+  - 일일 Discord 브리핑 (통합 메시지): LOC 목표가 · Sigma 자동 갱신 · 전고점 50% 청산 ·
+    ATH 하락분할 DCA · MA 레짐 필터(실행 액션 라인·비상 트리거 포함) · 로테이션 초기화 · 시장 바닥 단계
   - --ath-monitor: 장중 실시간 ATH DCA 알림 (cron-job.org → repository_dispatch)
 
 전략 모드 (백테스트/신호):
   - --backtest: 시그마 DCA + MA 레짐 필터 백테스트 (티커별 기본 설정)
-  - --signal: 실시간 신호 (종가+날짜 · LOC 매수가 · ATH 대비 MDD · 비상 트리거)
-  - --signal --discord: Discord 발송 | --all: 전 종목(TQQQ+SOXL) 단일 메시지
+  - --signal: 실시간 신호 (종가+날짜 · LOC 매수가 · ATH 대비 MDD · 비상 트리거) — 콘솔용
+  - --signal --discord: Discord 발송 | --all: 전 종목(TQQQ+SOXL) 단일 메시지 (수동 확인용)
 
 Usage:
   python3 DCA_MA_strategy.py                              # 일일 브리핑 (기본)
@@ -1990,6 +1990,42 @@ def _ma_filter_lines(info: dict) -> list[str]:
     return lines
 
 
+def _ma_action_line(ma_info: dict) -> str:
+    """MA 레짐 기반 실행 액션 라인(▶) — 신호 메시지의 액션을 브리핑에 통합.
+
+    current_signal()의 액션 로직과 동일한 규칙 (suspended 여부와 무관하게
+    순수 MA 레짐으로 표시 — 비상 모드여도 현재 추세 위치를 보여준다).
+    """
+    if not ma_info.get("enabled") or not ma_info.get("regime"):
+        return ""
+    ma_days = ma_info.get("ma_days", 0)
+    if ma_info.get("crossed_down"):
+        return f"▶ 🔴 **전량 매도 (MA{ma_days} 하향 이탈 → 현금 전환)**"
+    if ma_info.get("regime") == "below":
+        return f"▶ 🟡 **현금 유지 (MA{ma_days} 아래 — 매수 금지, 재돌파 대기)**"
+    if ma_info.get("crossed_up"):
+        if ma_info.get("reentry") == "lump":
+            pct = float(ma_info.get("reentry_pct", 1.0))
+            verb = "전액 재매수" if pct >= 1.0 else f"{pct*100:.0f}% 재매수"
+            return f"▶ 🟢 **{verb} (MA{ma_days} 상향 재돌파 → 올인 재진입)**"
+        return f"▶ 🟢 **분할매수 재개 (MA{ma_days} 상향 재돌파 → DCA 카운터 리셋)**"
+    return f"▶ 🟢 **보유 유지 (MA{ma_days} 위 — LOC 분할매수 조건 확인)**"
+
+
+def _next_trigger_line(ticker: str) -> str:
+    """다음 비상 트리거까지 갭 라인(📡) — 신호 메시지의 비상 트리거 정보를
+    브리핑 티커 블록에 통합. 다음 트리거가 없으면 빈 문자열."""
+    try:
+        ath = _ath_info(ticker)
+    except Exception:
+        return ""
+    if not ath.get("next_trigger"):
+        return ""
+    if ath.get("next_gap_pct") is not None:
+        return f"• 📡 **다음 비상 트리거:** {ath['next_trigger']}까지 {-ath['next_gap_pct']:+.1f}%p"
+    return f"• 📡 **다음 비상 트리거:** {ath['next_trigger']}"
+
+
 def _build_briefing_lines(now_ny: datetime, cfg: dict) -> list[str]:
     lines = [f"🌙 **U.S. Market LOC Portfolio Briefing** ({now_ny.strftime('%Y-%m-%d %H:%M %Z')})"]
     today_ny = now_ny.date()
@@ -2056,21 +2092,30 @@ def _build_briefing_lines(now_ny: datetime, cfg: dict) -> list[str]:
             lines.append(f"• 🔴 **[D+{exit_days} Rotation Maturity] Period expired — Review for sell! (Elapsed: {elapsed_bd} days)**")
 
         if strategy_mode == "LOC":
-            if ma_blocked:
-                # MA 레짐 아래: 매수 금지 — LOC/RSI 매수 신호 생략
-                lines.append(f"• 🚫 **매수 금지 — MA{ma_info.get('ma_days')} 아래 레짐 (현금 대기)**")
-            else:
-                # Normal mode: show LOC action line
+            # LOC 매수가 — MA 레짐과 무관하게 항상 표시 (신호 메시지 공통 정보)
+            lines.append(_format_loc_action_line(ticker, prev_close, cfg))
+            if not ma_blocked:
+                # Normal mode: RSI+Volume composite buy signal
                 if sell_sig is True:
                     lines.append("• 🚨 **[Warning] Risk area — Check LOC criteria conservatively**")
-                lines.append(_format_loc_action_line(ticker, prev_close, cfg))
-                # RSI+Volume composite buy signal (LOC mode only)
                 rsi_vol_line = _check_rsi_volume_signal(ticker)
                 if rsi_vol_line:
                     lines.append(rsi_vol_line)
+            # ma_blocked: 매수 금지는 ▶ 액션 라인에서 안내 (별도 🚫 라인 생략)
         else:
             # ATH_DCA (crash) mode: show LOC price for reference
             lines.append(_format_loc_action_line(ticker, prev_close, cfg))
+
+        # ── 신호 메시지 통합: ▶ 실행 액션 라인 + 📡 다음 비상 트리거 ──
+        action_line = _ma_action_line(ma_info)
+        if action_line:
+            lines.append(action_line)
+        # ATH_DCA 미사용 포지션은 yfinance 1y 조회를 피하기 위해 생략
+        ath_dca_cfg = pos_cfg.get("ATH_DCA", {}) or {}
+        if ath_dca_cfg.get("ENABLED", False):
+            trigger_line = _next_trigger_line(ticker)
+            if trigger_line:
+                lines.append(trigger_line)
 
     # ── ATH Drawdown DCA Monitor (includes Stage 5 All-In as split trigger) ──
     ath_dca_lines = check_ath_dca_signals(cfg)
@@ -2266,7 +2311,7 @@ def execute_dual_tactical_trader() -> None:
     _send_discord(
         webhook_url=webhook, 
         user_id=user_id, 
-        title=f"📋 AI & Semi Portfolio LOC Briefing", 
+        title=f"📋 AI & Semi Portfolio Briefing (LOC + MA 레짐 신호 통합)", 
         content="\n".join(briefing_lines)
     )
     

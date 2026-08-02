@@ -45,13 +45,14 @@ jobs:
           set -o pipefail
           python DCA_MA_strategy.py --ath-monitor 2>&1 | tee sigma_log.txt
 
-      - name: Run Daily Briefing + MA Signal (scheduled)
+      - name: Run Daily Briefing (통합 메시지 — MA 레짐 신호 포함)
         if: github.event_name != 'repository_dispatch'
-        # 23:30 UTC — 브리핑(일반 실행)과 MA 레짐 전략 신호(--signal)를 순차 발송
+        # 23:30 UTC — 통합 브리핑 1건만 Discord 발송 (신호 메시지는 브리핑에 통합)
+        # --signal은 콘솔 로그 확인용으로만 실행 (Discord 중복 발송 없음)
         run: |
           set -o pipefail
           python DCA_MA_strategy.py 2>&1 | tee sigma_log.txt
-          python DCA_MA_strategy.py --signal --discord --all 2>&1 | tee -a sigma_log.txt
+          python DCA_MA_strategy.py --signal --all 2>&1 | tee -a sigma_log.txt
 
       - name: Show log on failure
         if: failure()
