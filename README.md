@@ -1,4 +1,4 @@
-# Sigma DCA Manager
+# DCA MA Strategy
 
 미국 주식 시장 **Sigma 기반 LOC 매수 목표가 자동 계산** 및 **디스코드 브리핑 자동 발송** 시스템입니다.
 
@@ -23,7 +23,7 @@
 
 ## 📌 개요
 
-**Sigma DCA Manager**는 매일 미국 장 마감 후 정해진 시간에 자동 실행되어:
+**DCA MA Strategy**는 매일 미국 장 마감 후 정해진 시간에 자동 실행되어:
 1. 포트폴리오에 등록된 티커(TQQQ, SOXL 등)의 변동성을 계산/갱신
 2. Sigma 기반 LOC 매수 목표가 산출
 3. RSI+거래량 복합 매수 신호 평가 (12년 백테스트 검증)
@@ -109,12 +109,12 @@
 - 설정 자동화: `setup_cronjob_org.py` (생성 / --list / --test-dispatch / --update-pat / --update-schedule)
 - 상세 가이드: `REALTIME_ALERT_SETUP.md`
 
-### 8️⃣ Discord 브리핑
+### 9️⃣ Discord 브리핑
 - 매일 정해진 시간에 Discord Webhook으로 종합 브리핑 전송
 - 각 티커별: 현재가, Sigma, LOC 목표가, 전고점 대비 하락률/회복률, 매수/매도 신호
 - 매월 1일 월간 작동 확인 Ping 전송
 
-### 9️⃣ 로테이션 포지션 자동 초기화
+### 🔟 로테이션 포지션 자동 초기화
 - ROTATION_3M 포지션: 설정된 영업일(기본 63일) 경과 후 자동 초기화 + Sigma 재계산
 
 ---
@@ -170,7 +170,7 @@
 | **DUAL_MODE_SUMMARY.md** | 듀얼 모드(LOC ↔ ATH_DCA) 구조 요약 문서 |
 | **REALTIME_ALERT_SETUP.md** | 실시간 ATH DCA 알림 설정 가이드 |
 | ~~MarketStage_config.json~~ | (제거됨 — portfolio_config.json으로 통합) |
-| **sigma_history.csv** | Sigma 갱신 이력 (자동 생성) |
+| **sigma_history.csv** | Sigma 갱신 이력 (런타임 자동 생성 — 추적 제외) |
 | **market_state.json** | 시장 단계 상태 정보 (자동 생성) |
 | **signal_report.json** | 시장 리스크 점수 (자동 생성) |
 | **requirements.txt** | Python 의존성 패키지 목록 |
