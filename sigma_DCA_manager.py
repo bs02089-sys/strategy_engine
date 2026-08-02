@@ -998,7 +998,7 @@ def check_ath_dca_signals(cfg: dict,
                     f"📡 **{ticker} ATH 1차 DCA 임박!**\n"
                     f"   • ATH: \\${rolling_ath_val:.2f}\n"
                     f"   • 현재 DD: {current_dd_pct:.1f}%\n"
-                    f"   • 1차(-{first_threshold*100:.0f}%) 까지: {next_gap:+.1f}%p"
+                    f"   • 1차(-{first_threshold*100:.0f}%) 까지: {-next_gap:+.1f}%p"
                 )
             else:  # STAGE5 — no percentage gap to show
                 messages.append(

@@ -478,7 +478,8 @@ def _ath_line(ath: dict) -> str:
         line += " | 🚨 비상 모드"
     if ath.get("next_trigger"):
         if ath.get("next_gap_pct") is not None:
-            line += f" | 비상 {ath['next_trigger']}까지 {ath['next_gap_pct']:+.1f}%p"
+            # 갭 = 추가 하락 필요 낙폭(음수) — 비상 트리거까지 "-X.X%p"로 표시
+            line += f" | 비상 {ath['next_trigger']}까지 {-ath['next_gap_pct']:+.1f}%p"
         else:
             line += f" | 다음 비상 {ath['next_trigger']}"
     elif ath.get("all_done"):
