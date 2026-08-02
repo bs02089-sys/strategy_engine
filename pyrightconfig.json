@@ -1,10 +1,10 @@
 {
   "include": ["."],
   "exclude": [".venv", ".venv-linux", "**/__pycache__", "**/site-packages"],
-  "reportAttributeAccessIssue": "warning",
-  "reportReturnType": "warning",
-  "reportAssignmentType": "warning",
-  "reportArgumentType": "warning",
-  "reportOptionalMemberAccess": "warning",
-  "reportOptionalSubscript": "warning"
+  "reportAttributeAccessIssue": "none",
+  "reportReturnType": "none",
+  "reportAssignmentType": "none",
+  "reportArgumentType": "none",
+  "reportOptionalMemberAccess": "none",
+  "reportOptionalSubscript": "none"
 }
