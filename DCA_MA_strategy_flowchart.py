@@ -122,7 +122,10 @@
 │  ┌────────────────────────────────────────────────────────────────────────┐ │
 │  │  📌 듀얼 모드 표시: 각 포지션의 STRATEGY_MODE 표시                     │ │
 │  │  ├─ 📗 LOC 모드: LOC 목표가 + RSI/볼륨 신호 표시                       │ │
-│  │  └─ 🚨 ATH_DCA 모드: LOC 중단 표시 + ATH DCA 브리핑                   │ │
+│  │  └─ 🚨 ATH_DCA 모드: LOC 참고가 + ATH DCA 브리핑                      │ │
+│  │  📌 신호 통합 (브리핑 1건 — MA 레짐 신호 포함):                        │ │
+│  │  ├─ ▶ 실행 액션 라인 (_ma_action_line) — MA 레짐 기반                  │ │
+│  │  └─ 📡 다음 비상 트리거 (_next_trigger_line) — 가격($) 포함            │ │
 │                                                                              │
 │  ┌────────────────────────────────────────────────────────────────────────┐ │
 │  │  제목: "🌙 U.S. Market LOC Portfolio Briefing (YYYY-MM-DD HH:MM EST)" │ │
@@ -194,9 +197,10 @@
 │     │  ├─ 현재 하락률(DD) 계산 (realtime_prices 있으면 Finnhub 실시간가 우선) │
 │     │  └─ 각 TRIGGER_N 평가 (1차/2차/3차...)                                 │
 │     │     ├─ DD ≥ 임계값 → 🚨 매수 신호! + ATH_DCA_USED_SPLITS 기록         │
-│     │     ├─ DD < 임계값 but 5%p 이내 → 📡 임박 알림                        │
+│     │     ├─ DD < 임계값 but 5%p 이내 → 📡 임박 알림 (가격 $ 포함)          │
 │     │     │   (alerts_only: ATH_DCA_IMMINENT_SENT로 갭 1.0%p 좁힘 시만 재알림) │
 │     │     └─ 기타 → 건너뜀                                                   │
+│     │  └─ 상태 라인: "다음(N차): 추가 X.X%p 하락 시 ($목표가)" (트리거 가격 표시)
 │     ├─ 전체 분할 완료 시 ATH_DCA_CYCLE_ATH 기록                              │
 │     └─ 신규 ATH > CYCLE_ATH × 1.01 → 🔄 사이클 재시작 준비 (사용 분할 초기화)       │
 │                                                                              │
@@ -244,8 +248,9 @@
    단, 크래시 후 잔여 현금(예비금)이 남아있을 때만 효과가 있으므로
    예비금 보존이 실효성의 핵심. 상세는 DUAL_MODE_SUMMARY.md 참고.
 
-📌 ATH DCA 체크([6])는 브리핑 빌더와 별도로 실행되며, 그 결과는
-   별도 Discord 메시지로 전송됨 (또는 save_portfolio()로 상태만 저장).
+📌 ATH DCA 체크([6])는 브리핑 빌더와 별도로 실행되지만, 그 상태 라인은
+   통합 브리핑 하단 "📉 ATH Drawdown DCA Monitor" 섹션에 포함되어
+   하나의 Discord 메시지로 전송됨 (트리거 도달 가격($) 포함).
 
 📌 실시간 알림 (--ath-monitor): 야간 브리핑과 별도로 cron-job.org가
    repository_dispatch를 발사하면 워크플로우가 --ath-monitor 분기로 실행.
@@ -309,7 +314,11 @@ DCA_MA_strategy.py (직접 실행)
 │   │   ├── 레짐 판정 (종가 > MA: above / < MA: below)
 │   │   ├── 크로스 1회 감지 (MA_FILTER_STATE 영속화)
 │   │   └── ATH_DCA 비상 모드 → suspended (OFF — 상태만 추적)
-│   └── _ma_filter_lines()                     → 레짐/크로스 알림 라인 (🚨/💰/🔄)
+│   ├── _ma_filter_lines()                     → 레짐/크로스 알림 라인 (🚨/💰/🔄)
+│   ├── _ma_action_line()                      → ▶ 실행 액션 라인 (신호 통합)
+│   │   └── crossed_down/below/above/crossed_up → 매도/현금유지/보유/재매수
+│   └── _next_trigger_line()                   → 📡 다음 비상 트리거 (가격 $ 포함)
+│       └── _ath_info()                        → ATH/MDD + next_trigger/next_price
 │
 ├── check_ath_dca_signals(cfg, realtime_prices=None, alerts_only=False)
 │   ├── _parse_ath_trigger()                   (-30% → 0.30)
@@ -620,41 +629,38 @@ jobs:
   ✅ Discord briefing sent successfully.
 
 
-📌 디스코드 출력 예시 (2026-07-30 기준):
+📌 디스코드 출력 예시 (2026-07-31 기준 — 통합 브리핑 1건):
 
-  🌙 U.S. Market LOC Portfolio Briefing (2026-07-30 16:00 EST)
-  📊 Market Risk Score: 5 / 14
+  🌙 U.S. Market LOC Portfolio Briefing (2026-07-31 19:30 EDT)
+  📊 Market Risk Score: 7 / 14
   ────────────────────────────────────────
 
-  🔹 TQQQ (Close: $42.15 | 07-29 | LONG_YEAR / D+5)
-  • 📈 전고점: $87.02 (2026-07-25) 기준 하락률 -51.56% / 회복 필요 상승률 106.43%
+  🔹 TQQQ (Close: $64.62 | 07-31 | LONG_YEAR / D+4)
+  • 📈 전고점: $87.02 (2026-06-02) 기준 하락률 -25.74% / 회복 필요 34.66%
+  • Mode: 🚨 비상 모드 (ATH DCA)
+  • 📉 MA20 레짐 (참고): 🟡 MA 아래 — 비상 모드 중 MA 필터 OFF
   • Signals: Buy[True] / Sell[False] | LOC mechanical strategy active
-  • 🎯 [Action] LOC Buy: **$40.50**
+  • 🎯 [Action] LOC Buy: **$62.10**
+  ▶ 🟡 현금 유지 (MA20 아래 — 매수 금지, 재돌파 대기)
+  • 📡 다음 비상 트리거: 2차(-50%)까지 -24.3%p ($43.51)
 
-  📡 TQQQ RSI+Volume: ⏸️ 대기 (조건 미충족)
-     └ RSI: 41.7 | Vol: 1.11× 20일 평균
-     └ [RSI 25~35 Vol 0.3~0.7×] | [RSI 35~50 Vol 0.4~1.0×]
-
-  🚨 TQQQ ATH DCA 1차 매수 신호! 🔥 (LOC → ATH_DCA 모드 전환)
-  ⚙️ Mode: LOC → ATH_DCA (자동 전환)
-     • ATH: $87.02 | 현재 DD: -51.6% (임계: -10%)
-     • 현재가: $42.15 | 목표가: $78.32 (이하)
-     • 잔여: 2/3차
-
-  🔹 SOXL (Close: $12.34 | 07-29 | LONG_YEAR / D+5)
-  • 📈 전고점: $300.77 (2026-07-25) 기준 하락률 -95.90% / 회복 필요 상승률 2337.68%
+  🔹 SOXL (Close: $114.72 | 07-31 | LONG_YEAR / D+4)
+  • 📈 전고점: $300.77 (2026-06-22) 기준 하락률 -61.86% / 회복 필요 162.18%
+  • Mode: 🚨 비상 모드 (ATH DCA)
+  • 📉 MA250 레짐 (참고): 🟢 MA 위 — 비상 모드 중 MA 필터 OFF
   • Signals: Buy[True] / Sell[False] | LOC mechanical strategy active
-  • 🎯 [Action] LOC Buy: **$10.52**
+  • 🎯 [Action] LOC Buy: **$104.65**
+  ▶ 🟢 보유 유지 (MA250 위 — LOC 분할매수 조건 확인)
+  • 📡 다음 비상 트리거: 2차(-70%)까지 -8.1%p ($90.23)
 
-  📡 SOXL RSI+Volume: ⏸️ 대기 (조건 미충족)
-     └ RSI: 39.1 | Vol: 1.49× 20일 평균
-     └ [RSI 25~34 Vol 0.3~0.7×] | [RSI 34~40 Vol 0.4~0.9×]
-
-  🚨 SOXL ATH DCA 1차 매수 신호! 🔥 (LOC → ATH_DCA 모드 전환)
-  ⚙️ Mode: LOC → ATH_DCA (자동 전환)
-     • ATH: $300.77 | 현재 DD: -95.9% (임계: -15%)
-     • 현재가: $12.34 | 목표가: $255.65 (이하)
-     • 잔여: 2/3차
+  ────────────────────────────────────────
+  📉 ATH Drawdown DCA Monitor
+  📊 TQQQ ATH 2차 DCA
+     • ATH: $87.02 | 실행: 1/3차 ✅
+     • 다음(2차): 추가 +24.3%p 하락 시 ($43.51)
+  📊 SOXL ATH 2차 DCA
+     • ATH: $300.77 | 실행: 1/3차 ✅
+     • 다음(2차): 추가 +8.1%p 하락 시 ($90.23)
 """
 
 # =============================================================================
