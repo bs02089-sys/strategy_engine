@@ -39,7 +39,12 @@
                 "MIN_DAYS": 30,
                 "MA_CONFIRM": true
             },
-            "ATH_DCA_ENTERED_ON": "2026-03-27"
+            "ATH_DCA_ENTERED_ON": "2026-03-27",
+            "MA_FILTER_CONFIG_FINGERPRINT": "20|lump|1.0",
+            "MA_FILTER_STATE": {
+                "regime": "below",
+                "since": "2026-08-02"
+            }
         },
         "SOXL": {
             "LOOKBACK_DAYS": 252,
@@ -78,7 +83,12 @@
                 "MA_CONFIRM": true
             },
             "ATH_DCA_ENTERED_ON": "2026-07-28",
-            "ATH_DCA_WAIT_SENT": "2026-07-31|• ⏳ **SOXL 비상 모드 종료 대기:** D+3/30 영업일 (남은 27영업일 | 진입 2026-07-28, 경과 3일)"
+            "ATH_DCA_WAIT_SENT": "2026-07-31|• ⏳ **SOXL 비상 모드 종료 대기:** D+3/30 영업일 (남은 27영업일 | 진입 2026-07-28, 경과 3일)",
+            "MA_FILTER_CONFIG_FINGERPRINT": "250|dca_reset|1.0",
+            "MA_FILTER_STATE": {
+                "regime": "above",
+                "since": "2026-08-02"
+            }
         }
     },
     "STRATEGY": {
