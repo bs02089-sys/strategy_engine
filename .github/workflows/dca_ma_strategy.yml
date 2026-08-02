@@ -34,24 +34,25 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run signal and send to Discord
-        # tee: Actions 로그에도 표시 + signal.log 저장
+        # tee: Actions 로그에도 표시 + signal_log.txt 저장
         # pipefail: python 실패가 tee 때문에 가려지지 않도록 파이프 실패 전파
         run: |
           set -o pipefail
-          python DCA_MA_strategy.py --signal --discord --all 2>&1 | tee signal.log
+          python DCA_MA_strategy.py --signal --discord --all 2>&1 | tee signal_log.txt
 
       - name: Show logs on failure
         if: failure()
-        run: cat signal.log
+        run: cat signal_log.txt
 
       - name: Commit signal log
-        # 로그 뷰어 UI 표시 실패에 대비 — signal.log를 저장소에 커밋하여
+        # 로그 뷰어 UI 표시 실패에 대비 — signal_log.txt를 저장소에 커밋하여
         # 언제든 리포 파일로 확인 가능하게 함 (다른 워크플로우와 동일 패턴)
+        # gitignore의 *_log.txt 패턴 때문에 -f(강제 추가) 사용 (tracker와 동일)
         if: always()
         run: |
           git config --global user.name "Signals Bot"
           git config --global user.email "bot@example.com"
-          [ -f "signal.log" ] && git add signal.log
+          [ -f "signal_log.txt" ] && git add -f signal_log.txt
           git commit -m "update: dca-signal-log $(date +'%Y-%m-%d')" || echo "No changes to commit"
           git pull --rebase || true
           git push
