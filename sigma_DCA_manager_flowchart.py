@@ -4,7 +4,7 @@
   Sigma DCA Manager — 전체 시스템 플로우차트
 ══════════════════════════════════════════════════════════════════════
   파일: sigma_DCA_manager.py
-  최종 업데이트: 2026-07-31
+  최종 업데이트: 2026-08-02
   듀얼 모드: LOC (일반) / ATH DCA (비상)
   비상 모드 종료: 시장 회복 감지 시 LOC 자동 복귀 (RECOVERY_REENTRY)
   실시간 알림: cron-job.org → repository_dispatch → --ath-monitor
@@ -237,6 +237,13 @@
    - "LOC" (📗 일반 모드):     20분할 Sigma 기반 LOC 매수 진행
    - "ATH_DCA" (🚨 비상 모드):  3분할 ATH 하락분할 DCA 매수 (LOC 중단)
    - ATH_DCA → LOC: 비상 모드 종료 (RECOVERY_REENTRY 4조건 자동 복귀)
+
+📌 비상 모드 종료 실효성 검증 (백테스트, 2026-08-02):
+   sigma_backtest.py --ath-dca-recovery --end-date 2020-08-31
+   (2020 COVID 크래시 포함 구간)에서 TQQQ가 현행 대비 +4.67%p 우위
+   (+136.17% vs +131.50%, Sharpe 2.17 vs 2.14, MDD 동일 -39.62%).
+   단, 크래시 후 잔여 현금(예비금)이 남아있을 때만 효과가 있으므로
+   예비금 보존이 실효성의 핵심. 상세는 DUAL_MODE_SUMMARY.md 참고.
 
 📌 ATH DCA 체크([6])는 브리핑 빌더와 별도로 실행되며, 그 결과는
    별도 Discord 메시지로 전송됨 (또는 save_portfolio()로 상태만 저장).
@@ -630,7 +637,7 @@ jobs:
 │
 ├── 📄 sigma_DCA_manager.py              ★ 메인 실행 파일 (LOC/Discord 브리핑 + --ath-monitor)
 ├── 📄 sigma_DCA_manager_flowchart.py    ★ 본 문서
-├── 📄 sigma_backtest.py                 백테스트 엔진 (승수 스윕/포트폴리오 최적화)
+├── 📄 sigma_backtest.py                 백테스트 엔진 (승수 스윕/포트폴리오 최적화/듀얼 모드 비교 --ath-dca-recovery)
 ├── 📄 setup_cronjob_org.py              cron-job.org 실시간 알림 설정 자동화
 ├── 📄 MarketStageSystem.py              시장 단계 트래커
 ├── 📄 bear_market_signals.py            약세장 신호 분석
@@ -665,7 +672,7 @@ if __name__ == "__main__":
     print("  in ASCII diagrams and structured comments.")
     print()
     print("  📍 File: sigma_DCA_manager_flowchart.py")
-    print("  📅 Last updated: 2026-07-31")
+    print("  📅 Last updated: 2026-08-02")
     print()
     print("  💡 Tip: Use 'cat' to view, or open in VS Code")
     print("  with collapsed sections for easy navigation.")
