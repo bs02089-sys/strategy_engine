@@ -350,7 +350,7 @@ python3 DCA_MA_strategy_flowchart.py
 
 ## 🤖 GitHub Actions 자동화
 
-### `sigma_dca_manager.yml` — 정기 브리핑 + 실시간 ATH DCA 알림
+### `dca_ma_strategy.yml` — 정기 브리핑 + 실시간 ATH DCA 알림
 
 | 트리거 | 시간 (UTC) | 설명 |
 |--------|------------|------|
@@ -361,7 +361,7 @@ python3 DCA_MA_strategy_flowchart.py
 > `concurrency` 그룹(`sigma-dca-manager`)으로 야간 브리핑과 실시간 폴링이
 > 동시에 실행되지 않도록 직렬화됩니다.
 
-### `dca_ma_strategy.yml` — MA 레짐 전략 신호 → Discord
+### `dca_ma_signal.yml` — MA 레짐 전략 신호 → Discord
 
 | 트리거 | 시간 (UTC) | 설명 |
 |--------|------------|------|

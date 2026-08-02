@@ -189,7 +189,7 @@ ATH_DCA ────────────────────────
 | **`DCA_MA_strategy.py`** | `_is_stage5_trigger()` 추가, `check_ath_dca_signals()`에 STAGE5 타입 + 실시간 모드(realtime_prices/alerts_only) 지원, `resolve_discord_config()` 추가, 비상 모드 종료(`_check_recovery_reentry`) + 대기/임박 모니터, `--ath-monitor` 진입점, 브리핑 Mode 라벨 한국어화 |
 | **`MarketStageSystem.py`** | `portfolio_config.json` 읽도록 변경, Discord 설정 `resolve_discord_config()` 공유, `_load_config()` 제거 |
 | **`portfolio_config.json`** | `TRIGGER_3: "STAGE5"`, `STRATEGY_MODE`, `RECOVERY_REENTRY`, `ATH_DCA_ENTERED_ON` + dedup 상태키(`WAIT_SENT`/`NUDGE_SENT`/`IMMINENT_SENT`) 추가 |
-| **`.github/workflows/sigma_dca_manager.yml`** | `repository_dispatch(ath-dca-monitor)` 트리거 + `concurrency` 직렬화 + `FINNHUB_API_KEY` 시크릿 + `--ath-monitor` 분기 + `git pull --rebase` |
+| **`.github/workflows/dca_ma_strategy.yml`** | `repository_dispatch(ath-dca-monitor)` 트리거 + `concurrency` 직렬화 + `FINNHUB_API_KEY` 시크릿 + `--ath-monitor` 분기 + `git pull --rebase` |
 | **`DCA_MA_strategy_flowchart.py`** | Stage 5 통합 반영, 비상 모드 종료/실시간 모니터 흐름 반영, 함수/파일 참조 최신화 |
 | **`README.md`** | 단일 설정 파일 명시, 듀얼 모드/실시간 알림 설명 업데이트, 워크플로우 크론 표 최신화, 설정 예시·목차 앵커 정리, `--update-schedule` 플래그 반영 |
 | **`setup_cronjob_org.py`** | `--update-schedule` 추가 (기존 잡의 폴링 간격만 PATCH 갱신, PAT 불필요) + `READONLY_JOB_FIELDS`/`_strip_readonly_fields()` 헬퍼 추출로 `--update-pat`과 DRY |

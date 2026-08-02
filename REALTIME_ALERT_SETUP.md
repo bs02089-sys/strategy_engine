@@ -164,7 +164,7 @@ python3 setup_cronjob_org.py --update-schedule
 }
 ```
 
-- `.github/workflows/sigma_dca_manager.yml`
+- `.github/workflows/dca_ma_strategy.yml`
   - `repository_dispatch: types: [ath-dca-monitor]` 추가 → cron-job.org 호출 시 즉시 실행
   - `concurrency` 그룹으로 야간 브리핑과 실시간 폴링이 동시에 돌지 않게 직렬화
   - `FINNHUB_API_KEY` 시크릿을 환경변수로 주입

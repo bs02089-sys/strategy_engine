@@ -7,7 +7,7 @@ REALTIME_ALERT_SETUP.md의 수동 설정 절차를 자동화합니다.
 cron-job.org REST API(https://api.cron-job.org)를 사용해 GitHub
 `repository_dispatch`(event_type: ath-dca-monitor)를 호출하는 크론잡을
 만듭니다. 이 워크플로우는 github.com/.../dispatches 엔드포인트를 호출해
-GitHub Actions의 `sigma_dca_manager.yml`(--ath-monitor 분기)를 실행시킵니다.
+GitHub Actions의 `dca_ma_strategy.yml`(--ath-monitor 분기)를 실행시킵니다.
 
 사용 환경변수 (.env 파일 지원 — python-dotenv):
   CRONJOB_ORG_API_KEY   cron-job.org 콘솔 Settings에서 발급한 API 키
@@ -47,7 +47,7 @@ except ImportError:
 
 CRONJOB_API_BASE = "https://api.cron-job.org"
 GITHUB_API_BASE = "https://api.github.com"
-WORKFLOW_PATH = ".github/workflows/sigma_dca_manager.yml"
+WORKFLOW_PATH = ".github/workflows/dca_ma_strategy.yml"
 
 # cron-job.org jobDetails에 포함된 응답 전용(읽기 전용) 필드 — PATCH 시 제거해야 400을 피한다
 READONLY_JOB_FIELDS = (

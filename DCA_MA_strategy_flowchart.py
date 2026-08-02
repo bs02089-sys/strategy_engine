@@ -486,7 +486,7 @@ _ma_filter_lines()
 # 7. GitHub Actions 워크플로우
 # =============================================================================
 """
-📄 .github/workflows/sigma_dca_manager.yml (Sigma DCA Manager Engine)
+📄 .github/workflows/dca_ma_strategy.yml (Sigma DCA Manager Engine)
 
 name: Sigma DCA Manager Engine
 on:
@@ -600,8 +600,8 @@ jobs:
 📌 워크플로우 실행 순서 (23:00~23:40 UTC, 월~금):
   1. 23:00 UTC — bear_market_signals.yml   (시장 리스크 평가)
   2. 23:14 UTC — tracker.yml               (시장 단계 추적)
-  3. 23:24 UTC — sigma_dca_manager.yml      (LOC 브리핑)
-  4. 23:40 UTC — dca_ma_strategy.yml        (MA 레짐 전략 신호 → Discord)
+  3. 23:24 UTC — dca_ma_strategy.yml      (LOC 브리핑)
+  4. 23:40 UTC — dca_ma_signal.yml        (MA 레짐 전략 신호 → Discord)
   5. 장중 N분 — cron-job.org → repository_dispatch(ath-dca-monitor) → --ath-monitor 실시간 알림
 
 
@@ -684,8 +684,8 @@ jobs:
 ├── 📄 cape_cache.json                   CAPE 캐시 (bear_market_signals.py)
 │
 └── 📁 .github/workflows/
-    ├── sigma_dca_manager.yml           ★ DCA 자동 실행 (23:24 UTC + 실시간 dispatch)
-    ├── dca_ma_strategy.yml             MA 레짐 전략 신호 → Discord (23:40 UTC)
+    ├── dca_ma_strategy.yml           ★ DCA 자동 실행 (23:24 UTC + 실시간 dispatch)
+    ├── dca_ma_signal.yml             MA 레짐 전략 신호 → Discord (23:40 UTC)
     ├── bear_market_signals.yml         신호 분석 자동 실행 (23:00 UTC)
     └── tracker.yml                     시장 단계 추적 자동 실행 (23:14 UTC)
 """
