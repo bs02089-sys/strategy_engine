@@ -161,7 +161,7 @@
 | 파일 | 설명 |
 |------|------|
 | **DCA_MA_strategy.py** | 📌 **통합 완결판** — 실전 엔진(LOC 목표가/전고점 청산/ATH DCA/MA 레짐 필터/Discord 브리핑/`--ath-monitor`) + 백테스트 + `--signal` 실시간 신호 |
-| **sigma_DCA_manager_flowchart.py** | 시스템 전체 플로우차트 문서 |
+| **DCA_MA_strategy_flowchart.py** | 시스템 전체 플로우차트 문서 |
 | **setup_cronjob_org.py** | cron-job.org 실시간 알림 설정 자동화 (생성/--list/--test-dispatch/--update-pat/--update-schedule) |
 | **MarketStageSystem.py** | 독립적인 시장 단계 시스템 — 바닥 단계 감지 |
 | **bear_market_signals.py** | 약세장 신호 분석 시스템 |
@@ -343,7 +343,7 @@ python3 DCA_MA_strategy.py --backtest --fee 0.001        # 수수료 0.1% 반영
 ### 플로우차트 문서 보기
 
 ```bash
-python3 sigma_DCA_manager_flowchart.py
+python3 DCA_MA_strategy_flowchart.py
 ```
 
 ---

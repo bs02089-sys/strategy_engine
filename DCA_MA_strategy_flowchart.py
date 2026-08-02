@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 ══════════════════════════════════════════════════════════════════════
-  Sigma DCA Manager — 전체 시스템 플로우차트
+  DCA MA Strategy — 전체 시스템 플로우차트
 ══════════════════════════════════════════════════════════════════════
   파일: DCA_MA_strategy.py
   최종 업데이트: 2026-08-02
@@ -26,7 +26,7 @@
 # 1. 시스템 개요
 # =============================================================================
 """
-📌 Sigma DCA Manager는 매일 정해진 시간에 GitHub Actions에서 실행되어,
+📌 DCA MA Strategy는 매일 정해진 시간에 GitHub Actions에서 실행되어,
    portfolio_config.json에 설정된 포지션(TQQQ, SOXL)의 LOC 매수 목표가를
    계산하고, RSI+거래량 복합 신호, 전고점 청산 신호, ATH 하락분할 DCA,
    비상 모드 종료(회복 감지)를 평가하여 디스코드로 종합 브리핑을 전송합니다.
@@ -516,19 +516,22 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Realtime Monitor (repository_dispatch)
         if: github.event_name == 'repository_dispatch'
-        run: python DCA_MA_strategy.py --ath-monitor > sigma_log.txt 2>&1
+        run: |
+          set -o pipefail
+          python3 DCA_MA_strategy.py --ath-monitor 2>&1 | tee sigma_log.txt
       - name: Scheduled Briefing
         if: github.event_name != 'repository_dispatch'
-        run: python DCA_MA_strategy.py > sigma_log.txt 2>&1
+        run: |
+          set -o pipefail
+          python3 DCA_MA_strategy.py 2>&1 | tee sigma_log.txt
       - name: Sync and Notify
         if: always()
         run: |
           git config --global user.name "DCA Bot"
           git config --global user.email "bot@example.com"
-          [ -f sigma_log.txt ] && git add sigma_log.txt
-          [ -f portfolio_config.json ] && git add portfolio_config.json
-          [ -f sigma_history.csv ] && git add sigma_history.csv
-          git commit -m "update: dca-log $(date +'%Y-%m-%d')" || echo "No changes"
+          # 상태 파일만 커밋 (로그/히스토리는 저장하지 않음)
+          [ -f "portfolio_config.json" ] && git add portfolio_config.json
+          git commit -m "update: dca-state $(date +'%Y-%m-%d')" || echo "No changes to commit"
           git pull --rebase || true
           git push
 
@@ -549,12 +552,15 @@ jobs:
       - uses: actions/setup-python@v5
         with: {python-version: '3.14'}
       - run: pip install -r requirements.txt
-      - run: python bear_market_signals.py > bear_log.txt 2>&1
+      - name: Run Market Signals
+        run: |
+          set -o pipefail
+          python bear_market_signals.py 2>&1 | tee bear_log.txt
       - name: Sync and Notify
         run: |
-          [ -f "bear_log.txt" ] && git add bear_log.txt
+          # 상태 파일만 커밋 (로그는 저장하지 않음)
           [ -f "signal_report.json" ] && git add signal_report.json
-          git commit -m "update: signals $(date +'%Y-%m-%d')" || echo "No changes"
+          git commit -m "update: signals $(date +'%Y-%m-%d')" || echo "No changes to commit"
           git push
 
 
@@ -576,22 +582,27 @@ jobs:
       - uses: actions/setup-python@v5
         with: {python-version: '3.14'}
       - run: pip install -r requirements.txt
-      - run: python MarketStageSystem.py > market_log.txt 2>&1
+      - name: Run Tracker
+        run: |
+          set -o pipefail
+          python MarketStageSystem.py 2>&1 | tee market_log.txt
       - name: Commit and Push
         run: |
           git config --global user.name "Market Bot"
           git config --global user.email "bot@tracker.com"
-          git add -f market_log.txt market_state.json
-          git commit -m "Auto-update logs and stage state" || echo "No changes"
+          # 상태 파일만 커밋 (로그는 저장하지 않음)
+          git add -f market_state.json
+          git commit -m "Auto-update stage state" || echo "No changes"
           git pull --rebase
           git push
 
 
-📌 워크플로우 실행 순서 (23:00~23:24 UTC, 월~금):
+📌 워크플로우 실행 순서 (23:00~23:40 UTC, 월~금):
   1. 23:00 UTC — bear_market_signals.yml   (시장 리스크 평가)
   2. 23:14 UTC — tracker.yml               (시장 단계 추적)
   3. 23:24 UTC — sigma_dca_manager.yml      (LOC 브리핑)
-  4. 장중 N분 — cron-job.org → repository_dispatch(ath-dca-monitor) → --ath-monitor 실시간 알림
+  4. 23:40 UTC — dca_ma_strategy.yml        (MA 레짐 전략 신호 → Discord)
+  5. 장중 N분 — cron-job.org → repository_dispatch(ath-dca-monitor) → --ath-monitor 실시간 알림
 
 
 📌 실행 로그 예시 (GitHub Actions Console):
@@ -653,9 +664,8 @@ jobs:
 """
 📁 strategy_engine/
 │
-├── 📄 DCA_MA_strategy.py              ★ 메인 실행 파일 (LOC/Discord 브리핑 + --ath-monitor)
-├── 📄 sigma_DCA_manager_flowchart.py    ★ 본 문서
-├── 📄 DCA_MA_strategy.py              백테스트 + 실시간 신호 (MA 레짐 전략)
+├── 📄 DCA_MA_strategy.py              ★ 완결판 (실전 엔진 + 백테스트 + 실시간 신호)
+├── 📄 DCA_MA_strategy_flowchart.py    ★ 본 문서
 ├── 📄 setup_cronjob_org.py              cron-job.org 실시간 알림 설정 자동화
 ├── 📄 MarketStageSystem.py              시장 단계 트래커
 ├── 📄 bear_market_signals.py            약세장 신호 분석
@@ -664,7 +674,7 @@ jobs:
 ├── 📄 (MarketStage_config.json — 제거됨, portfolio_config.json으로 통합)
 ├── 📄 market_state.json                 시장 상태 저장 (자동 생성)
 ├── 📄 signal_report.json                신호 리포트 (자동 생성)
-├── 📄 sigma_history.csv                 Sigma 변경 이력 (자동 생성)
+├── 📄 sigma_history.csv                 Sigma 변경 이력 (런타임 자동 생성 — 추적 제외)
 │
 ├── 📄 README.md                         시스템 문서
 ├── 📄 DUAL_MODE_SUMMARY.md              듀얼 모드 구조 요약 문서
@@ -675,13 +685,14 @@ jobs:
 │
 └── 📁 .github/workflows/
     ├── sigma_dca_manager.yml           ★ DCA 자동 실행 (23:24 UTC + 실시간 dispatch)
+    ├── dca_ma_strategy.yml             MA 레짐 전략 신호 → Discord (23:40 UTC)
     ├── bear_market_signals.yml         신호 분석 자동 실행 (23:00 UTC)
     └── tracker.yml                     시장 단계 추적 자동 실행 (23:14 UTC)
 """
 
 if __name__ == "__main__":
     print("=" * 78)
-    print("  📖 Sigma DCA Manager — System Flowchart")
+    print("  📖 DCA MA Strategy — System Flowchart")
     print("  Open this file in any text editor to view the flowchart.")
     print("=" * 78)
     print()
@@ -689,7 +700,7 @@ if __name__ == "__main__":
     print("  It contains the complete system architecture")
     print("  in ASCII diagrams and structured comments.")
     print()
-    print("  📍 File: sigma_DCA_manager_flowchart.py")
+    print("  📍 File: DCA_MA_strategy_flowchart.py")
     print("  📅 Last updated: 2026-08-02")
     print()
     print("  💡 Tip: Use 'cat' to view, or open in VS Code")
