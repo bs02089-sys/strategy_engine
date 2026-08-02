@@ -162,9 +162,6 @@
 |------|------|
 | **sigma_DCA_manager.py** | 📌 **메인 실행 파일** — LOC 목표가 계산, 신호 평가, Discord 브리핑 + `--ath-monitor` 실시간 알림 |
 | **sigma_DCA_manager_flowchart.py** | 시스템 전체 플로우차트 문서 |
-| **sigma_backtest.py** | 백테스트 엔진 — 단일 실행, 승수 스윕, 다중 기간 검증, 포트폴리오 최적화 |
-| **tqqq_ma_crossover_backtest.py** | TQQQ MA 교차(단기/장기) 그리드 탐색 백테스트 — 최적 일선 + `--hybrid` 급락 분할매수 하이브리드 모드 |
-| **dca_ma_filter_backtest.py** | 기존 시그마 DCA 엔진 + MA 필터(청산형) 오버레이 — MDD 저감용 MA 일선 탐색 |
 | **DCA_MA_strategy.py** | 📌 **MA 레짐 전략** — DCA 기반 + MA 레짐 필터 — 백테스트 + `--signal` 실시간 신호 (티커별 기본 설정) |
 | **setup_cronjob_org.py** | cron-job.org 실시간 알림 설정 자동화 (생성/--list/--test-dispatch/--update-pat/--update-schedule) |
 | **MarketStageSystem.py** | 독립적인 시장 단계 시스템 — 바닥 단계 감지 |
@@ -333,26 +330,16 @@ python3 setup_cronjob_org.py --update-pat       # 크론잡에 저장된 PAT 갱
 python3 setup_cronjob_org.py --update-schedule  # 폴링 간격 갱신 (POLL_MINUTES/UTC_HOURS 반영)
 ```
 
-### 백테스트 실행
+### 백테스트 실행 (MA 레짐 전략)
 
 ```bash
-# 기본 단일 백테스트
-python3 sigma_backtest.py
-
-# 승수 스윕 최적화
-python3 sigma_backtest.py --sweep
-
-# 다중 기간 검증
-python3 sigma_backtest.py --multi-sweep
-
-# 포트폴리오 비중 최적화 (TQQQ/SOXL)
-python3 sigma_backtest.py --portfolio-sweep
-python3 sigma_backtest.py --multi-portfolio-sweep
-
-# 듀얼 모드 비교 — 현행 vs 비상 모드 종료 (종료일 지정 가능)
-python3 sigma_backtest.py --ath-dca-recovery
-python3 sigma_backtest.py --ath-dca-recovery --end-date 2020-08-31   # 2020 COVID 크래시 포함 구간
+python3 DCA_MA_strategy.py                      # TQQQ (MA20 + 올인 재진입)
+python3 DCA_MA_strategy.py --ticker SOXL        # SOXL (MA250 + DCA 재개)
+python3 DCA_MA_strategy.py --ticker SOXL --ma 30 --reentry dca_reset  # MDD 절감 대안
+python3 DCA_MA_strategy.py --fee 0.001          # 수수료 0.1% 반영
 ```
+
+상세 사용법(신호 모드 포함): [MA 레짐 전략](#ma-레짐-전략-dca_ma_strategypy)
 
 ### 플로우차트 문서 보기
 
@@ -409,16 +396,9 @@ python3 sigma_DCA_manager_flowchart.py
 
 ## 📊 백테스트
 
-`sigma_backtest.py`는 sigma_DCA_manager의 핵심 전략을 검증하는 백테스트 엔진입니다.
-
-### 기능
-- **단일 실행**: 설정된 ENTRY_MULTIPLIER로 1년 백테스트
-- **승수 스윕**: 0.6~3.0 범위의 승수를 테스트하여 최적 승수 탐색
-- **다중 기간 스윕**: 여러 시장 국면(강세/약세/회복)에 걸쳐 일관된 승수 검증
-- **포트폴리오 스윕**: TQQQ/SOXL 비중 최적화 (10%~90%)
-- **전고점 청산 비교**: DCA 단독 vs DCA+전고점50%청산 성능 비교
-- **듀얼 모드 비교 (--ath-dca-recovery)**: 현행(3차 대기) vs 비상 모드 종료(Emergency Mode Exit) 성능 비교
-- **상세 리포트**: 샤프 비율, 최대 낙폭, 승률, 월별 수익률 등
+백테스트는 **`DCA_MA_strategy.py`** 하나로 수행합니다 — 기존 시그마 DCA 엔진(승수 1.1,
+매수 $2,500×20, 전고점 50% 청산) + MA 레짐 필터를 티커별 기본 설정으로 검증하고,
+`--signal`로 실시간 신호도 확인합니다 (상세: [MA 레짐 전략](#ma-레짐-전략-dca_ma_strategypy)).
 
 ### 사용 기술
 - 일간 로그수익률 기반 변동성(σ) 계산
@@ -429,29 +409,14 @@ python3 sigma_DCA_manager_flowchart.py
 > 📊 **ATH_DCA 트리거 최적화 분석** — 10년 치 월말 스윕 기반 TQQQ/SOXL 트리거 후보값 비교와
 > 의사결정 근거는 [TRIGGER_OPTIMIZATION_SUMMARY.md](TRIGGER_OPTIMIZATION_SUMMARY.md) 참고.
 
-> 🧪 **비상 모드 종료 실효성 검증 (2026-08-02)** — `--ath-dca-recovery --end-date 2020-08-31`
-> (2020 COVID 크래시 포함 구간)에서 TQQQ가 현행 대비 **+4.67%p**(+136.17% vs +131.50%) 우위를
+> 🧪 **비상 모드 종료 실효성 검증 (2026-08-02)** — 2020 COVID 크래시 포함 구간에서
+> TQQQ가 현행 대비 **+4.67%p**(+136.17% vs +131.50%) 우위를
 > 기록했습니다. 단, 크래시 후 **잔여 현금(예비금)이 남아있을 때만** 효과가 있으므로 예비금 보존이
 > 핵심입니다. 상세는 [DUAL_MODE_SUMMARY.md](DUAL_MODE_SUMMARY.md) 참고.
 
-### TQQQ MA 교차 그리드 탐색 (`tqqq_ma_crossover_backtest.py`)
+### TQQQ MA 교차 그리드 탐색 (탐색 완료 — 툴 정리됨)
 
-유튜브 스타일의 "단기 MA가 장기 MA를 상향 돌파 시 매수, 하향 돌파 시 매도" 전략을
-$50,000 투자금 · 최근 10년(2016-08-02 ~ 2026-07-31) 구간에서 전수 탐색하는 툴입니다.
-
-```bash
-# 단기 1~40일 × 장기 20~250일 전체 그리드 (9,009개 조합) → 최적 일선 탐색
-python3 tqqq_ma_crossover_backtest.py
-
-# 특정 조합 상세 리포트
-python3 tqqq_ma_crossover_backtest.py 6 107
-
-# 순수 MA 교차 vs 하이브리드(MA + 급락 분할매수) 비교
-python3 tqqq_ma_crossover_backtest.py --hybrid
-
-# 특정 조합의 하이브리드 파라미터 스윕 (base 60~80% × dip 5~20% × tranches 1~3)
-python3 tqqq_ma_crossover_backtest.py --hybrid 7 104
-```
+유튜브 스타일 "단기/장기 MA 크로스" 전수 탐색(9,009개 조합)은 완료 후 파일을 정리했습니다.
 
 > 📊 **검증 결과 (2026-08-02)**: 10년 구간 수익률 최고 조합은 **20일/22일**(+2,628%, MDD -58%),
 > MDD 최소 조합은 **8일/73일**(MDD -37.5%, +952%), 저빈도 균형 추천 **7일/104일**(+1,842%, MDD -40.6%, 연 3.7회).
@@ -459,17 +424,10 @@ python3 tqqq_ma_crossover_backtest.py --hybrid 7 104
 > 하이브리드(예비금 + 급락 분할매수)는 예비금 기회비용과 나이프 잡기 효과로 **수익률이 절반 수준으로
 > 낮아지고 MDD만 개선**되므로, MDD 축소가 목표일 때만 적합합니다.
 
-### 기존 전략 + MA 필터 오버레이 (`dca_ma_filter_backtest.py`)
+### 기존 전략 + MA 필터 오버레이 (탐색 완료 — 툴 정리됨)
 
 기존 시그마 DCA 엔진(승수 1.1, 매수 $2,500×20, 전고점 50% 청산)에 **MA 레짐 필터(청산형)** 를
-얹어 기존 전략의 MDD를 낮추는 최적 MA 일선을 탐색합니다. 재진입 방식 2가지:
-
-- `dca_reset` — MA 재돌파 시 매수 카운터 리셋 후 DCA 분할 매수 재개 (기존 DCA 성격 유지)
-- `lump` — MA 재돌파 시 현금 전액 올인 재진입 (MA 크로스 성격)
-
-```bash
-python3 dca_ma_filter_backtest.py
-```
+얹는 일선 탐색은 완료 후 파일을 정리했습니다. 재진입 방식: `dca_reset`(DCA 재개) / `lump`(올인 재진입).
 
 > 🎯 **검증 결과 (2026-08-02)**: 기준선(MA 필터 없음)은 +273.7% / MDD **-49.1%**.
 > **MA 20일선 + 올인 재진입**이 최적으로 **+2,138.5% / MDD -41.2%** (MDD 7.9p 개선 + 수익 7.8배,

@@ -134,18 +134,16 @@
 ## 6️⃣ 재현 방법
 
 ```bash
-python3 sigma_backtest.py --ath-dca            # 현재 설정 듀얼 모드 백테스트
-python3 sigma_backtest.py --ath-dca-recovery   # 비상 모드 종료 비교
-
-# 후보값 비교: run_backtest_ath_dca()에 TRIGGER_2를 변경한 ath_dca_config를
-# 넘겨 직접 실행 — 아래 핵심 로직으로 재현 가능 (스윕 스크립트는 임시 경로라 미보존)
+# ⚠️ sigma_backtest.py는 2026-08-02 저장소 정리로 삭제 — 백테스트는 DCA_MA_strategy.py 사용
+# 듀얼 모드/비상 모드 종료 검증 결과는 README의 "📊 백테스트" 섹션 참고
 ```
 
 ```python
 # 후보값 스윕 핵심 로직 (참고용)
 import copy
-from sigma_backtest import (fetch_data, load_ath_dca_config, load_entry_multiplier,
-                            run_backtest_ath_dca)
+# ⚠️ sigma_backtest.py는 삭제되어 아래 import는 실행 불가 (참고용 원본 로직)
+# from sigma_backtest import (fetch_data, load_ath_dca_config, load_entry_multiplier,
+#                             run_backtest_ath_dca)
 df = fetch_data("TQQQ", include_volume=True)   # 스윕과 동일한 데이터 소스
 cfg = load_ath_dca_config("TQQQ")
 cfg2 = copy.deepcopy(cfg); cfg2["TRIGGER_2"] = "-50%"

@@ -42,7 +42,7 @@ import yfinance as yf
 from datetime import date, timedelta, datetime
 from zoneinfo import ZoneInfo
 
-# ⚠️ 엔진 로직은 sigma_backtest.run_backtest_with_sell 기반 복제본입니다.
+# ⚠️ 엔진 로직은 sigma_DCA_manager.py의 전략(시그마 LOC 매수 + 전고점 50% 청산)을 복제한 것입니다.
 # 원본 엔진(매수/전고점 청산/쿨다운) 수정 시 이 파일도 함께 동기화하세요.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from sigma_DCA_manager import (

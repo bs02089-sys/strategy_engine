@@ -239,8 +239,7 @@
    - ATH_DCA → LOC: 비상 모드 종료 (RECOVERY_REENTRY 4조건 자동 복귀)
 
 📌 비상 모드 종료 실효성 검증 (백테스트, 2026-08-02):
-   sigma_backtest.py --ath-dca-recovery --end-date 2020-08-31
-   (2020 COVID 크래시 포함 구간)에서 TQQQ가 현행 대비 +4.67%p 우위
+   (2020 COVID 크래시 포함 구간 백테스트)에서 TQQQ가 현행 대비 +4.67%p 우위
    (+136.17% vs +131.50%, Sharpe 2.17 vs 2.14, MDD 동일 -39.62%).
    단, 크래시 후 잔여 현금(예비금)이 남아있을 때만 효과가 있으므로
    예비금 보존이 실효성의 핵심. 상세는 DUAL_MODE_SUMMARY.md 참고.
@@ -337,7 +336,7 @@ format_drawdown_line()
   └── calculate_drawdown_and_recovery()
       → "전고점 $XX 기준 하락률 XX% / 회복필요 XX%"
 
-check_peak_sell_signal()                       ← 백테스트 전용 (sigma_backtest.py)
+check_peak_sell_signal()                       ← 백테스트 전용 (DCA_MA_strategy.py)
   ├── get_rolling_ath()
   ├── get_20day_return()
   └── get_sigma_spike_ratio()
@@ -637,7 +636,7 @@ jobs:
 │
 ├── 📄 sigma_DCA_manager.py              ★ 메인 실행 파일 (LOC/Discord 브리핑 + --ath-monitor)
 ├── 📄 sigma_DCA_manager_flowchart.py    ★ 본 문서
-├── 📄 sigma_backtest.py                 백테스트 엔진 (승수 스윕/포트폴리오 최적화/듀얼 모드 비교 --ath-dca-recovery)
+├── 📄 DCA_MA_strategy.py              백테스트 + 실시간 신호 (MA 레짐 전략)
 ├── 📄 setup_cronjob_org.py              cron-job.org 실시간 알림 설정 자동화
 ├── 📄 MarketStageSystem.py              시장 단계 트래커
 ├── 📄 bear_market_signals.py            약세장 신호 분석

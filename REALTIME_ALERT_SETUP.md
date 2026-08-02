@@ -216,8 +216,8 @@ python3 sigma_DCA_manager.py --ath-monitor
   되지만 git 히스토리가 늘어납니다.
 - **트리거 값 근거**: TQQQ `TRIGGER_2=-50%`, SOXL `TRIGGER_2=-70%` 등 트리거 후보값의
   최적화 근거(2016~2026 월말 스윕)는 [TRIGGER_OPTIMIZATION_SUMMARY.md](TRIGGER_OPTIMIZATION_SUMMARY.md) 참고.
-- **비상 모드 종료 실효성 검증 (백테스트, 2026-08-02)**: `sigma_backtest.py --ath-dca-recovery`로
-  크래시→회복 사이클을 검증한 결과, **2020 COVID 크래시 포함 구간(`--end-date 2020-08-31`)에서
+- **비상 모드 종료 실효성 검증 (백테스트, 2026-08-02)**: 백테스트로
+  크래시→회복 사이클을 검증한 결과, **2020 COVID 크래시 포함 구간에서
   TQQQ 비상 모드 종료가 +4.67%p 수익 우위**(+136.17% vs 현행 +131.50%, Sharpe 2.17 vs 2.14, MDD 동일 -39.62%)를
   냈습니다. 종료는 2020-06-23(D+81, DD 15.5% ≤ 0.5×T1 + MA20>MA60)에 1회 발동, 잔여 예비금 $3,333으로
   LOC 2회 추가 매수했습니다. 단, **종료 시점 잔여 현금이 $0(드라이 파우더 소진)이면 효과가 없어**

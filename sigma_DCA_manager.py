@@ -1526,7 +1526,7 @@ def _check_recovery_reentry(ticker: str, pos: dict) -> str | None:
     Returns a human-readable reason string when the position should switch
     back to LOC, or None when it should stay in ATH_DCA.
 
-    Conditions (validated in sigma_backtest.py --ath-dca-recovery):
+    Conditions (validated by backtest, 2026-08-02):
       1. At least one ATH split still unused (2차/3차 reserved as safety net)
       2. >= MIN_DAYS business days elapsed since ATH_DCA entry (bear-trap
          filter; the 2024-08 V-recovery backtest fired on D+43)
@@ -1792,7 +1792,7 @@ def _recovery_nudge_line(ticker: str, pos_cfg: dict, today_ny: date) -> str | No
 # ═══════════════════════════════════════════════════════════
 # MA 레짐 필터 (Moving-Average Regime Filter) — 백테스트 검증 반영
 # ═══════════════════════════════════════════════════════════
-# DCA_MA_strategy.py / dca_ma_filter_backtest.py에서 검증된
+# DCA_MA_strategy.py에서 검증된
 # 레짐 필터를 실전에 반영한 것:
 #   - LOC 모드      : MA 하향 돌파 → 전량 청산 + 매수 금지
 #                     MA 상향 돌파 → TQQQ: 전액 재매수 / SOXL: DCA 재개
