@@ -31,9 +31,10 @@
 5. 듀얼 모드 (LOC 일반 / ATH DCA 비상) 자동 전환
 6. ATH 하락분할 DCA 트리거 모니터링 (3차 분할, STAGE5 바닥 통합)
 7. 비상 모드 종료 — 시장 회복 감지 시 일반 모드(LOC) 자동 복귀
-8. 로테이션 포지션 만기 관리
-9. 종합 브리핑을 **Discord**로 전송
-10. 장중 실시간 ATH DCA 알림 (cron-job.org + Finnhub, `--ath-monitor`)
+8. MA 레짐 필터 — 종가×MA 크로스 기반 추세 필터 (LOC 모드: 전량 청산/재진입 신호)
+9. 로테이션 포지션 만기 관리
+10. 종합 브리핑을 **Discord**로 전송
+11. 장중 실시간 ATH DCA 알림 (cron-job.org + Finnhub, `--ath-monitor`)
 
 ---
 
@@ -85,7 +86,23 @@
   - 파라미터: `RECOVERY_REENTRY` 블록 (ENABLED / DD_RATIO / MIN_DAYS / MA_CONFIRM)
   - 브리핑에 ⏳ 대기 모니터(D+X/30)와 🔔 임박 넛지 알림 제공
 
-### 7️⃣ 장중 실시간 ATH DCA 알림 (--ath-monitor)
+### 7️⃣ MA 레짐 필터 (백테스트 검증 반영)
+
+기존 전략에 **종가 × 이동평균(MA) 크로스 레짐 필터**를 얹어 MDD를 낮추는 설계입니다.
+`DCA_MA_strategy.py`(TQQQ MA20 +2,138.5%/-41.2%, SOXL MA250 +265.2%/-34.8%)에서
+검증한 설정을 실전 `sigma_DCA_manager.py`에 반영했습니다.
+
+| 모드 | MA 필터 동작 |
+|------|-------------|
+| **LOC (일반)** | 🟢 활성 — MA 하향 돌파 → **🚨 전량 청산 + 매수 금지** (LOC/RSI 매수 신호 생략) / MA 상향 돌파 → **💰 전액 재매수**(TQQQ) 또는 **🔄 DCA 재개**(SOXL) |
+| **ATH_DCA (비상)** | OFF — 분할 매수 진행 중에는 개입하지 않음 (레짐 참고 표시만) |
+| **비상 모드 종료 → LOC 복귀** | 리커버리 리엔트리가 복귀를 판정하면 **MA 필터 다시 활성** |
+
+- 크로스 신호는 레짐 전환 시 **1회만** 발송 (상태 자동 영속화 → 중복 알림 없음)
+- 실시간 모니터(`--ath-monitor`)에서도 크로스 알림 발송
+- 설정: `MA_FILTER` 블록 (아래 [설정 파일](#-설정-파일-단일-파일) 참고)
+
+### 8️⃣ 장중 실시간 ATH DCA 알림 (--ath-monitor)
 - GitHub Actions `schedule` 크론은 best-effort라 피크 시간대에 수 분~수 시간 지연될 수 있음
 - **cron-job.org**(정확한 N분 알람)가 `repository_dispatch` 이벤트를 발사 → 워크플로우가 `--ath-monitor` 분기로 즉시 실행
 - **Finnhub** 실시간 가격으로 🚨 트리거 / 📡 임박(5%p)만 전송 (중복 제거: 갭이 1.0%p 이상 좁혀질 때만 재알림)
@@ -146,6 +163,9 @@
 | **sigma_DCA_manager.py** | 📌 **메인 실행 파일** — LOC 목표가 계산, 신호 평가, Discord 브리핑 + `--ath-monitor` 실시간 알림 |
 | **sigma_DCA_manager_flowchart.py** | 시스템 전체 플로우차트 문서 |
 | **sigma_backtest.py** | 백테스트 엔진 — 단일 실행, 승수 스윕, 다중 기간 검증, 포트폴리오 최적화 |
+| **tqqq_ma_crossover_backtest.py** | TQQQ MA 교차(단기/장기) 그리드 탐색 백테스트 — 최적 일선 + `--hybrid` 급락 분할매수 하이브리드 모드 |
+| **dca_ma_filter_backtest.py** | 기존 시그마 DCA 엔진 + MA 필터(청산형) 오버레이 — MDD 저감용 MA 일선 탐색 |
+| **DCA_MA_strategy.py** | 📌 **MA 레짐 전략** — DCA 기반 + MA 레짐 필터 — 백테스트 + `--signal` 실시간 신호 (티커별 기본 설정) |
 | **setup_cronjob_org.py** | cron-job.org 실시간 알림 설정 자동화 (생성/--list/--test-dispatch/--update-pat/--update-schedule) |
 | **MarketStageSystem.py** | 독립적인 시장 단계 시스템 — 바닥 단계 감지 |
 | **bear_market_signals.py** | 약세장 신호 분석 시스템 |
@@ -221,6 +241,12 @@ pandas_market_calendars  # NYSE 휴장일 계산
             },
             "ATH_DCA_USED_SPLITS": [1],
             "ATH_DCA_ENTERED_ON": "2026-03-27",
+            "MA_FILTER": {
+                "ENABLED": true,
+                "MA_DAYS": 20,
+                "REENTRY": "lump",
+                "REENTRY_PCT": 1.0
+            },
             "RECOVERY_REENTRY": {
                 "ENABLED": true,
                 "DD_RATIO": 0.5,
@@ -249,6 +275,7 @@ pandas_market_calendars  # NYSE 휴장일 계산
 | `STRATEGY_MODE` | 현재 전략 모드: `LOC` (일반) / `ATH_DCA` (비상) — 자동 관리 |
 | `ATH_DCA` | ATH 대비 하락분할 매수 설정 (`ENABLED`/`SPLITS`/`TRIGGER_1~3`) |
 | `RECOVERY_REENTRY` | 비상 모드 종료 파라미터 (`ENABLED`/`DD_RATIO`/`MIN_DAYS`/`MA_CONFIRM`) |
+| `MA_FILTER` | MA 레짐 필터 (`ENABLED`/`MA_DAYS`/`REENTRY`/`REENTRY_PCT`) — TQQQ: MA20+lump, SOXL: MA250+dca_reset |
 | `ATH_DCA_ENTERED_ON` | 비상 모드 진입일 — 비상 모드 종료 대기 클럭 기준 (자동 기록) |
 | `ROTATION_EXIT_DAYS` | ROTATION_3M 만기 영업일 수 |
 
@@ -348,6 +375,16 @@ python3 sigma_DCA_manager_flowchart.py
 > `concurrency` 그룹(`sigma-dca-manager`)으로 야간 브리핑과 실시간 폴링이
 > 동시에 실행되지 않도록 직렬화됩니다.
 
+### `dca_ma_strategy.yml` — MA 레짐 전략 신호 → Discord
+
+| 트리거 | 시간 (UTC) | 설명 |
+|--------|------------|------|
+| 예약 실행 | 매일 23:40 (월~금) | DCA_MA_strategy.py `--signal --discord` — TQQQ/SOXL 신호를 Discord로 발송 |
+| 수동 실행 | 사용자 요청 시 | workflow_dispatch 수동 실행 |
+
+> 신호 발송은 `sigma_DCA_manager.py` 브리핑과 별도로 `DCA_MA_strategy.py`의 티커별
+> MA 레짐 신호(레짐 상태/크로스 기준 재진입 액션)를 매일 전송합니다.
+
 ### `bear_market_signals.yml` — 약세장 신호
 
 | 트리거 | 시간 (UTC) | 설명 |
@@ -396,6 +433,92 @@ python3 sigma_DCA_manager_flowchart.py
 > (2020 COVID 크래시 포함 구간)에서 TQQQ가 현행 대비 **+4.67%p**(+136.17% vs +131.50%) 우위를
 > 기록했습니다. 단, 크래시 후 **잔여 현금(예비금)이 남아있을 때만** 효과가 있으므로 예비금 보존이
 > 핵심입니다. 상세는 [DUAL_MODE_SUMMARY.md](DUAL_MODE_SUMMARY.md) 참고.
+
+### TQQQ MA 교차 그리드 탐색 (`tqqq_ma_crossover_backtest.py`)
+
+유튜브 스타일의 "단기 MA가 장기 MA를 상향 돌파 시 매수, 하향 돌파 시 매도" 전략을
+$50,000 투자금 · 최근 10년(2016-08-02 ~ 2026-07-31) 구간에서 전수 탐색하는 툴입니다.
+
+```bash
+# 단기 1~40일 × 장기 20~250일 전체 그리드 (9,009개 조합) → 최적 일선 탐색
+python3 tqqq_ma_crossover_backtest.py
+
+# 특정 조합 상세 리포트
+python3 tqqq_ma_crossover_backtest.py 6 107
+
+# 순수 MA 교차 vs 하이브리드(MA + 급락 분할매수) 비교
+python3 tqqq_ma_crossover_backtest.py --hybrid
+
+# 특정 조합의 하이브리드 파라미터 스윕 (base 60~80% × dip 5~20% × tranches 1~3)
+python3 tqqq_ma_crossover_backtest.py --hybrid 7 104
+```
+
+> 📊 **검증 결과 (2026-08-02)**: 10년 구간 수익률 최고 조합은 **20일/22일**(+2,628%, MDD -58%),
+> MDD 최소 조합은 **8일/73일**(MDD -37.5%, +952%), 저빈도 균형 추천 **7일/104일**(+1,842%, MDD -40.6%, 연 3.7회).
+> 유튜버 기준 **6/107**은 수익률 82위/9,009·MDD 상위 35위로 전략이 유효함을 확인.
+> 하이브리드(예비금 + 급락 분할매수)는 예비금 기회비용과 나이프 잡기 효과로 **수익률이 절반 수준으로
+> 낮아지고 MDD만 개선**되므로, MDD 축소가 목표일 때만 적합합니다.
+
+### 기존 전략 + MA 필터 오버레이 (`dca_ma_filter_backtest.py`)
+
+기존 시그마 DCA 엔진(승수 1.1, 매수 $2,500×20, 전고점 50% 청산)에 **MA 레짐 필터(청산형)** 를
+얹어 기존 전략의 MDD를 낮추는 최적 MA 일선을 탐색합니다. 재진입 방식 2가지:
+
+- `dca_reset` — MA 재돌파 시 매수 카운터 리셋 후 DCA 분할 매수 재개 (기존 DCA 성격 유지)
+- `lump` — MA 재돌파 시 현금 전액 올인 재진입 (MA 크로스 성격)
+
+```bash
+python3 dca_ma_filter_backtest.py
+```
+
+> 🎯 **검증 결과 (2026-08-02)**: 기준선(MA 필터 없음)은 +273.7% / MDD **-49.1%**.
+> **MA 20일선 + 올인 재진입**이 최적으로 **+2,138.5% / MDD -41.2%** (MDD 7.9p 개선 + 수익 7.8배,
+> Calmar 5.6→51.9). 전반/후반기 MDD도 각각 -26.6%/-33.7%로 안정적.
+> 단, "기존 DCA 성격 유지"(dca_reset) 방식은 MDD를 줄이되(MA5~30: -1~-21%) 수익까지 같이
+> 줄어듭니다(MA5~30: +9~33%). 즉 **MDD와 수익을 동시에 얻으려면 MA20 + 올인 재진입**이 유일한
+> 답이며, 이는 사실상 "가격-20일선 크로스 + 전고점 부분청산" 하이브리드에 수렴합니다.
+
+### MA 레짐 전략 (`DCA_MA_strategy.py`)
+
+기존 시그마 DCA + MA 레짐 필터를 실제 운용용으로 만든 전략 파일입니다. 티커별 기본 설정:
+
+| 티커 | 기본 설정 | 10년 결과 | 용도 |
+|------|-----------|-----------|------|
+| TQQQ | MA20 + 올인 재진입 100% | +2,138.5% / MDD -41.2% | 수익·MDD 동시 개선 |
+| SOXL | **MA250 + DCA 재개** | **+265.2% / MDD -34.8%** | 수익 3배 (기존과 MDD 동일) |
+| SOXL (대안) | MA30 + DCA 재개 | +49.1% / MDD **-16.2%** | MDD 절감 우선 (전반 -14.8% / 후반 -17.2% 안정) |
+
+```bash
+# 백테스트
+python3 DCA_MA_strategy.py                          # TQQQ (MA20 lump)
+python3 DCA_MA_strategy.py --ticker SOXL            # SOXL (MA30 dca_reset)
+python3 DCA_MA_strategy.py --ticker SOXL --ma 250 --reentry dca_reset
+python3 DCA_MA_strategy.py --fee 0.001              # 수수료 0.1% 반영
+
+# 실시간 신호 (장 마감 후) — --discord로 Discord 발송 (GitHub Actions 자동화)
+python3 DCA_MA_strategy.py --signal
+python3 DCA_MA_strategy.py --signal --ticker SOXL
+python3 DCA_MA_strategy.py --signal --discord       # TQQQ 신호를 Discord로
+python3 DCA_MA_strategy.py --signal --discord --ticker SOXL
+```
+
+> ⚠️ **SOXL에 TQQQ식 MA20 올인을 적용하면 MDD가 -84.7%로 폭증합니다.** SOXL은 변동성이
+> 너무 커 짧은 20일선 타이밍이 휩쏘에 걸립니다. 티커별 특성에 맞는 설정을 사용하세요.
+
+### 실전 반영 — `sigma_DCA_manager.py` MA 레짐 필터
+
+`DCA_MA_strategy.py`에서 검증한 레짐 필터를 **실전 운용 엔진에 통합**했습니다
+(2026-08-02 기준, 알림 신호 방식 — 실제 주문 자동 실행은 없음):
+
+- **TQQQ (MA20 + lump)**: LOC 모드에서 종가가 MA20을 하향 돌파 → **🚨 전량 청산 + 매수 금지**,
+  상향 돌파 → **💰 전액 재매수** 신호
+- **SOXL (MA250 + dca_reset)**: LOC 모드에서 MA250 하향 돌파 → **🚨 전량 청산 + 매수 금지**,
+  상향 돌파 → **🔄 DCA 재개** 신호
+- **ATH_DCA 비상 모드 중에는 MA 필터 OFF** — 분할 매수 진행을 방해하지 않음 (레짐 참고 표시만)
+- 비상 모드 종료(리커버리 리엔트리)로 LOC 복귀 후 **MA 필터 다시 활성**
+- 레짐/크로스 상태는 `MA_FILTER_STATE`에 자동 기록 — 크로스 알림은 1회만 발송
+- 일일 브리핑의 `• 📉 **MA{n} 레짐:**` 라인과 실시간 모니터(`--ath-monitor`)의 🚨/💰/🔄 크로스
+  알림으로 확인 가능
 
 ---
 

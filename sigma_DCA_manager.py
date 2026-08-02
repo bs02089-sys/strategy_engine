@@ -1789,6 +1789,193 @@ def _recovery_nudge_line(ticker: str, pos_cfg: dict, today_ny: date) -> str | No
     )
 
 
+# ═══════════════════════════════════════════════════════════
+# MA 레짐 필터 (Moving-Average Regime Filter) — 백테스트 검증 반영
+# ═══════════════════════════════════════════════════════════
+# DCA_MA_strategy.py / dca_ma_filter_backtest.py에서 검증된
+# 레짐 필터를 실전에 반영한 것:
+#   - LOC 모드      : MA 하향 돌파 → 전량 청산 + 매수 금지
+#                     MA 상향 돌파 → TQQQ: 전액 재매수 / SOXL: DCA 재개
+#   - ATH_DCA 비상 모드: MA 필터 OFF (분할 매수 진행 중 개입 안 함)
+#   - 비상 모드 종료(리커버리 리엔트리) → LOC 복귀 후 MA 필터 재활성
+#
+# Config schema (per-position):
+#   "MA_FILTER": {
+#       "ENABLED": true,
+#       "MA_DAYS": 20,          # TQQQ 20 / SOXL 250
+#       "REENTRY": "lump",      # TQQQ: "lump"(전액), SOXL: "dca_reset"(DCA 재개)
+#       "REENTRY_PCT": 1.0       # lump 전액 비율 (선택)
+#   }
+# State (auto-managed): pos["MA_FILTER_STATE"] = {"regime", "since"}
+
+def _drop_unsettled_today_bar(closes: pd.Series) -> pd.Series:
+    """장중(당일 미체결) 상태면 마지막 바(오늘)를 제외한 확정 종가만 반환.
+
+    get_prev_close()와 동일한 정산(settle) 기준을 사용해, 실시간 모니터가
+    장중에 돌아도 인트라데이 가격으로 거짓 크로스가 발생하지 않도록 한다.
+    야간 브리핑(장 마감 후 실행)에서는 당일 확정 종가가 그대로 쓰인다.
+    """
+    now_ny = datetime.now(ZoneInfo("America/New_York"))
+    today_ny = now_ny.date()
+    market_close_settled_at = datetime.combine(
+        today_ny,
+        dtime(NY_MARKET_CLOSE_HOUR, NY_MARKET_CLOSE_MINUTE),
+        tzinfo=ZoneInfo("America/New_York"),
+    ) + timedelta(minutes=NY_CLOSE_SETTLE_BUFFER_MINUTES)
+    if now_ny >= market_close_settled_at:
+        return closes
+    last_idx = closes.index[-1]
+    last_date = last_idx.date() if isinstance(last_idx, pd.Timestamp) else pd.Timestamp(last_idx).date()
+    if last_date == today_ny and len(closes) >= 2:
+        return closes.iloc[:-1]
+    return closes
+
+
+def _fetch_ma_closes(ticker: str, ma_days: int, max_retries: int = 3):
+    """MA 계산용 종가 조회 — 백테스트와 동일하게 auto_adjust=True(조정 종가).
+
+    yfinance의 `period`는 달력일 기준이라, 확정 거래일 수를 보장하기 위해
+    달력일 버퍼를 더한다 (기존 _fetch_closes_for_lookback()와 동일 패턴).
+    """
+    buffer_days = max(30, int(ma_days * 0.6) + 30)
+    period_days = ma_days + buffer_days
+    last_err = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            stock = yf.Ticker(ticker)
+            hist = stock.history(period=f"{period_days}d", interval="1d", auto_adjust=True)
+            if hist.empty:
+                raise ValueError("Data empty.")
+            closes = hist["Close"].dropna()
+            if len(closes) < ma_days:
+                raise ValueError(f"Insufficient data ({len(closes)}/{ma_days}).")
+            closes = _drop_unsettled_today_bar(closes)
+            if len(closes) < ma_days:
+                raise ValueError(f"Insufficient settled data ({len(closes)}/{ma_days}).")
+            return closes
+        except Exception as e:
+            last_err = e
+            if attempt < max_retries:
+                time.sleep(2.0)
+    raise RuntimeError(f"❌ {ticker} MA data fetch failed after {max_retries} attempts") from last_err
+
+
+def _check_ma_filter(ticker: str, pos: dict) -> dict:
+    """
+    MA 레짐 필터를 평가한다. pos["MA_FILTER_STATE"]를 갱신하며
+    (호출자가 save_portfolio로 영속화) 크로스 이벤트는 전환 시 1회만 감지한다.
+
+    Returns:
+      enabled        : MA_FILTER.ENABLED
+      ma_days, close, ma_val, ma_pct
+      regime         : "above" | "below" | None
+      days_in_regime : 현재 레짐 지속 영업일 수
+      crossed_down   : 이번 평가에서 하향 돌파 (신규 이벤트)
+      crossed_up     : 이번 평가에서 상향 돌파 (신규 이벤트)
+      reentry        : "lump" | "dca_reset"
+      reentry_pct    : lump 재진입 비율
+      suspended      : ATH_DCA 비상 모드면 True (필터 OFF — 상태만 추적)
+    """
+    base: dict = {
+        "enabled": False, "ma_days": 0, "close": 0.0, "ma_val": 0.0,
+        "ma_pct": 0.0, "regime": None, "days_in_regime": 0,
+        "crossed_down": False, "crossed_up": False,
+        "reentry": "dca_reset", "reentry_pct": 1.0, "suspended": False,
+    }
+    mf = pos.get("MA_FILTER", {})
+    if not mf.get("ENABLED", False):
+        return base
+
+    ma_days = int(mf.get("MA_DAYS", 20))
+    if ma_days < 2:
+        return base
+    base["ma_days"] = ma_days
+    base["reentry"] = str(mf.get("REENTRY", "dca_reset"))
+    base["reentry_pct"] = float(mf.get("REENTRY_PCT", 1.0))
+    base["enabled"] = True
+    base["suspended"] = str(pos.get("STRATEGY_MODE", "LOC")).upper() == "ATH_DCA"
+
+    closes = _fetch_ma_closes(ticker, ma_days)
+    ma_series = closes.rolling(ma_days).mean()
+    close_now = float(closes.iloc[-1])
+    ma_now = float(ma_series.iloc[-1])
+    if not np.isfinite(ma_now) or ma_now <= 0:
+        return base
+
+    regime = "above" if close_now > ma_now else "below"
+    base["close"] = round(close_now, 2)
+    base["ma_val"] = round(ma_now, 2)
+    base["ma_pct"] = round((close_now - ma_now) / ma_now * 100, 2)
+    base["regime"] = regime
+
+    # 설정 변경(MA 일수/재진입 방식) 감지 시 상태 리셋 — 이전 MA 기간의
+    # 레짐이 남아 첫 평가에서 허위 크로스 알림을 내는 것을 방지
+    # (ATH_DCA의 CONFIG_FINGERPRINT 패턴과 동일한 방식).
+    cfg_fp = f"{ma_days}|{base['reentry']}|{base['reentry_pct']}"
+    if pos.get("MA_FILTER_CONFIG_FINGERPRINT") != cfg_fp:
+        pos["MA_FILTER_CONFIG_FINGERPRINT"] = cfg_fp
+        state = pos["MA_FILTER_STATE"] = {}
+    else:
+        state = pos.setdefault("MA_FILTER_STATE", {})
+
+    stored = state.get("regime")
+    today = datetime.now(ZoneInfo("America/New_York")).date()
+    if stored != regime:
+        state["regime"] = regime
+        state["since"] = today.strftime("%Y-%m-%d")
+    if stored == "above" and regime == "below":
+        base["crossed_down"] = True
+    elif stored == "below" and regime == "above":
+        base["crossed_up"] = True
+
+    since_str = state.get("since")
+    if since_str:
+        try:
+            since = datetime.strptime(since_str, "%Y-%m-%d").date()
+            base["days_in_regime"] = business_days_elapsed(since, today)
+        except ValueError:
+            base["days_in_regime"] = 0
+    return base
+
+
+def _ma_filter_lines(info: dict) -> list[str]:
+    """MA 레짐 상태/크로스 알림 라인 생성 (일일 브리핑·실시간 모니터 공용)."""
+    if not info.get("enabled") or not info.get("regime"):
+        return []
+    ma_days = info["ma_days"]
+    regime = info["regime"]
+    label = "MA 위 (보유/매수 가능)" if regime == "above" else "MA 아래 (매수 금지)"
+    icon = "🟢" if regime == "above" else "🟡"
+
+    if info.get("suspended"):
+        return [f"• 📉 **MA{ma_days} 레짐 (참고):** {icon} {label} — 비상 모드 중 MA 필터 OFF"]
+
+    lines = [
+        f"• 📉 **MA{ma_days} 레짐:** 종가 ${info['close']:.2f} vs MA{ma_days} "
+        f"${info['ma_val']:.2f} ({info['ma_pct']:+.1f}%) | {icon} {label} "
+        f"(레짐 {info.get('days_in_regime', 0)}일)"
+    ]
+    if info.get("crossed_down"):
+        lines.append(
+            f"🚨 **MA{ma_days} 하향 돌파 — 전량 청산 + 매수 금지!** "
+            f"(종가 ${info['close']:.2f} < MA{ma_days} ${info['ma_val']:.2f})"
+        )
+    if info.get("crossed_up"):
+        if info.get("reentry") == "lump":
+            pct = float(info.get("reentry_pct", 1.0))
+            verb = "전액 재매수" if pct >= 1.0 else f"{pct*100:.0f}% 재매수"
+            lines.append(
+                f"💰 **MA{ma_days} 상향 돌파 — {verb} 신호!** "
+                f"(종가 ${info['close']:.2f} > MA{ma_days} ${info['ma_val']:.2f})"
+            )
+        else:
+            lines.append(
+                f"🔄 **MA{ma_days} 상향 돌파 — DCA 재개 신호!** "
+                f"(종가 ${info['close']:.2f} > MA{ma_days} ${info['ma_val']:.2f})"
+            )
+    return lines
+
+
 def _build_briefing_lines(now_ny: datetime, cfg: dict) -> list[str]:
     lines = [f"🌙 **U.S. Market LOC Portfolio Briefing** ({now_ny.strftime('%Y-%m-%d %H:%M %Z')})"]
     today_ny = now_ny.date()
@@ -1838,6 +2025,16 @@ def _build_briefing_lines(now_ny: datetime, cfg: dict) -> list[str]:
         if wait_line:
             lines.append(wait_line)
 
+        # ── MA 레짐 필터 (백테스트 검증 반영: LOC 모드 활성 / 비상 모드 OFF) ──
+        ma_info = {"enabled": False}
+        try:
+            ma_info = _check_ma_filter(ticker, pos_cfg)
+            lines.extend(_ma_filter_lines(ma_info))
+        except Exception as e:
+            print(f"⚠️ {ticker} MA filter check failed: {e}")
+        ma_blocked = bool(ma_info.get("enabled") and not ma_info.get("suspended")
+                          and ma_info.get("regime") == "below")
+
         lines.append(f"• **Signals:** Buy[{buy_sig}] / Sell[{sell_sig}] | {reason}")
 
         rotation_due, elapsed_bd, exit_days = check_rotation_exit_signal(pos_cfg, today_ny)
@@ -1845,17 +2042,18 @@ def _build_briefing_lines(now_ny: datetime, cfg: dict) -> list[str]:
             lines.append(f"• 🔴 **[D+{exit_days} Rotation Maturity] Period expired — Review for sell! (Elapsed: {elapsed_bd} days)**")
 
         if strategy_mode == "LOC":
-            # Normal mode: show LOC action line
-            if sell_sig is True:
-                lines.append("• 🚨 **[Warning] Risk area — Check LOC criteria conservatively**")
-                lines.append(_format_loc_action_line(ticker, prev_close, cfg))
+            if ma_blocked:
+                # MA 레짐 아래: 매수 금지 — LOC/RSI 매수 신호 생략
+                lines.append(f"• 🚫 **매수 금지 — MA{ma_info.get('ma_days')} 아래 레짐 (현금 대기)**")
             else:
+                # Normal mode: show LOC action line
+                if sell_sig is True:
+                    lines.append("• 🚨 **[Warning] Risk area — Check LOC criteria conservatively**")
                 lines.append(_format_loc_action_line(ticker, prev_close, cfg))
-
-            # RSI+Volume composite buy signal (LOC mode only)
-            rsi_vol_line = _check_rsi_volume_signal(ticker)
-            if rsi_vol_line:
-                lines.append(rsi_vol_line)
+                # RSI+Volume composite buy signal (LOC mode only)
+                rsi_vol_line = _check_rsi_volume_signal(ticker)
+                if rsi_vol_line:
+                    lines.append(rsi_vol_line)
         else:
             # ATH_DCA (crash) mode: show LOC price for reference
             lines.append(_format_loc_action_line(ticker, prev_close, cfg))
@@ -1922,6 +2120,8 @@ def run_ath_dca_monitor() -> None:
       - 🔄 ATH DCA config-change reset (rare + important)
       - ⏳ recovery re-entry wait rollover (once per business day)
       - 🔔 recovery re-entry imminent (one-time at D-5 / D-1 remaining)
+      - 🚨/💰/🔄 MA 레짐 크로스 (하향 돌파 → 전량 청산, 상향 돌파 → 재매수/DCA 재개;
+        LOC 모드에서만 작동, 비상 모드 중에는 필터 OFF)
 
     Recurring status lines / cycle tracking are skipped (alerts_only=True)
     and imminent warnings are deduplicated per (ticker, split) via
@@ -1975,9 +2175,22 @@ def run_ath_dca_monitor() -> None:
         if nudge_line:
             messages.append(nudge_line)
 
+    # MA 레짐 크로스 알림 (LOC 모드에서만 작동 — 비상 모드 중에는 필터 OFF).
+    # 크로스는 레짐 전환 시 1회만 감지되고 MA_FILTER_STATE가 영속화되므로
+    # 5~10분 폴링 스케줄러가 같은 신호를 반복 발송하지 않는다.
+    for ticker, pos in cfg.get("POSITIONS", {}).items():
+        try:
+            ma_info = _check_ma_filter(ticker, pos)
+            cross_lines = [l for l in _ma_filter_lines(ma_info)
+                           if l.startswith(("🚨", "💰", "🔄"))]
+            if cross_lines:
+                messages.append("\n".join(cross_lines))
+        except Exception as e:
+            print(f"⚠️ {ticker} MA filter check failed: {e}")
+
     # Persist ATH_DCA_USED_SPLITS + ATH_DCA_IMMINENT_SENT + ATH_DCA_WAIT_SENT
-    # + ATH_DCA_NUDGE_SENT dedup state so the next poll knows what was
-    # already emitted.
+    # + ATH_DCA_NUDGE_SENT + MA_FILTER_STATE dedup state so the next poll
+    # knows what was already emitted.
     save_portfolio(cfg)
 
     # Only actionable alerts belong in the realtime channel: 🚨 trigger /
@@ -1990,7 +2203,7 @@ def run_ath_dca_monitor() -> None:
     # every 5-10 minutes.
     alerts = [
         m for m in messages
-        if m.startswith(("🚨", "📡", "🔄", "🔔")) or "⏳" in m
+        if m.startswith(("🚨", "📡", "🔄", "🔔", "💰")) or "⏳" in m
     ]
     if not alerts:
         print("✅ No ATH DCA alerts (trigger/imminent/wait-rollover) this poll.")

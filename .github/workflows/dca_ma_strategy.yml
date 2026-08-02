@@ -1,0 +1,42 @@
+name: DCA MA Strategy Signal
+
+on:
+  schedule:
+    # 매일 23:40 UTC = 19:40 ET (장 마감 후) — 월~금
+    - cron: "40 23 * * 1-5"
+  workflow_dispatch:
+
+concurrency:
+  group: dca-ma-strategy
+  cancel-in-progress: false
+
+jobs:
+  run-signal:
+    runs-on: ubuntu-latest
+    env:
+      DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+      DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: TQQQ MA20 신호 → Discord
+        run: python DCA_MA_strategy.py --signal --discord > signal_tqqq.log 2>&1
+
+      - name: SOXL MA250 신호 → Discord
+        run: python DCA_MA_strategy.py --signal --discord --ticker SOXL > signal_soxl.log 2>&1
+
+      - name: Show logs on failure
+        if: failure()
+        run: cat signal_tqqq.log signal_soxl.log
