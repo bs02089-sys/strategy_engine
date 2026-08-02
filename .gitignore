@@ -34,7 +34,7 @@ config_safe_backup.json
 !.gitignore
 
 # 핵심 소스 파일
-!sigma_DCA_manager.py
+!DCA_MA_strategy.py
 !sigma_DCA_garch_v1.py
 !news_agent.py
 !MarketStage_config.json

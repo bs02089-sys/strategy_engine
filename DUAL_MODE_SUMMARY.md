@@ -1,5 +1,8 @@
 # 📋 듀얼 모드 시스템 — 전체 구조 요약
 
+> ⚠️ **2026-08-02 통합**: 본 문서의 과거 변경 기록은 당시 `sigma_DCA_manager.py` 기준입니다.
+> 현재는 `DCA_MA_strategy.py`(완결판 — 실전 엔진 + 백테스트 + 신호)로 통합되었습니다.
+
 > 🔗 **관련 문서**: [TRIGGER_OPTIMIZATION_SUMMARY.md](TRIGGER_OPTIMIZATION_SUMMARY.md) — ATH_DCA 트리거 최적화 분석 — 바닥 분포 · 후보값 스윕 · 의사결정 근거
 
 ---
@@ -156,7 +159,7 @@ ATH_DCA ────────────────────────
 ### 수정된 파일
 | 파일 | 변경 내용 |
 |:-----|:---------|
-| **`sigma_DCA_manager.py`** | `_is_stage5_trigger()` 추가, `check_ath_dca_signals()`에 STAGE5 타입 + 실시간 모드(realtime_prices/alerts_only) 지원, `resolve_discord_config()` 추가, 비상 모드 종료(`_check_recovery_reentry`) + 대기/임박 모니터, `--ath-monitor` 진입점, 브리핑 Mode 라벨 한국어화 |
+| **`DCA_MA_strategy.py`** | `_is_stage5_trigger()` 추가, `check_ath_dca_signals()`에 STAGE5 타입 + 실시간 모드(realtime_prices/alerts_only) 지원, `resolve_discord_config()` 추가, 비상 모드 종료(`_check_recovery_reentry`) + 대기/임박 모니터, `--ath-monitor` 진입점, 브리핑 Mode 라벨 한국어화 |
 | **`MarketStageSystem.py`** | `portfolio_config.json` 읽도록 변경, Discord 설정 `resolve_discord_config()` 공유, `_load_config()` 제거 |
 | **`portfolio_config.json`** | `TRIGGER_3: "STAGE5"`, `STRATEGY_MODE`, `RECOVERY_REENTRY`, `ATH_DCA_ENTERED_ON` + dedup 상태키(`WAIT_SENT`/`NUDGE_SENT`/`IMMINENT_SENT`) 추가 |
 | **`.github/workflows/sigma_dca_manager.yml`** | `repository_dispatch(ath-dca-monitor)` 트리거 + `concurrency` 직렬화 + `FINNHUB_API_KEY` 시크릿 + `--ath-monitor` 분기 + `git pull --rebase` |
@@ -209,7 +212,7 @@ ATH_DCA ────────────────────────
 
 | 시스템 | 담당 | portfolio_config.json 사용 |
 |:-------|:-----|:--------------------------:|
-| **sigma_DCA_manager.py** | DCA 브리핑 + Discord 전송 | ✅ (직접 읽음) |
+| **DCA_MA_strategy.py** | DCA 브리핑 + Discord 전송 | ✅ (직접 읽음) |
 | **MarketStageSystem.py** | 시장 단계 감지 (bottom/top 0~5) | ✅ (공유 함수 사용) |
 | **bear_market_signals.py** | 약세장 7대 신호 분석 | ❌ (독립 실행, signal_report.json만 출력) |
 | **setup_cronjob_org.py** | cron-job.org 실시간 알림 설정 자동화 (생성/--list/--test-dispatch/--update-pat/--update-schedule) | ❌ (환경변수만 사용) |

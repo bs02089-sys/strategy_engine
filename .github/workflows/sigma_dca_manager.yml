@@ -37,11 +37,11 @@ jobs:
 
       - name: Run Realtime ATH DCA Monitor (from cron-job.org dispatch)
         if: github.event_name == 'repository_dispatch'
-        run: python sigma_DCA_manager.py --ath-monitor > sigma_log.txt 2>&1
+        run: python DCA_MA_strategy.py --ath-monitor > sigma_log.txt 2>&1
 
       - name: Run DCA Manager (scheduled briefing)
         if: github.event_name != 'repository_dispatch'
-        run: python sigma_DCA_manager.py > sigma_log.txt 2>&1
+        run: python DCA_MA_strategy.py > sigma_log.txt 2>&1
 
       - name: Show log on failure
         if: failure()

@@ -3,7 +3,7 @@
 ══════════════════════════════════════════════════════════════════════
   Sigma DCA Manager — 전체 시스템 플로우차트
 ══════════════════════════════════════════════════════════════════════
-  파일: sigma_DCA_manager.py
+  파일: DCA_MA_strategy.py
   최종 업데이트: 2026-08-02
   듀얼 모드: LOC (일반) / ATH DCA (비상)
   비상 모드 종료: 시장 회복 감지 시 LOC 자동 복귀 (RECOVERY_REENTRY)
@@ -45,7 +45,7 @@
 # =============================================================================
 """
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│                   🚀 sigma_DCA_manager.py (메인 진입점)                       │
+│                   🚀 DCA_MA_strategy.py (메인 진입점)                       │
 │   (GitHub Actions: 매일 23:24 UTC 야간 브리핑 + cron-job.org 실시간 dispatch) │
 └──────────────────────────────────┬───────────────────────────────────────────┘
                                    │
@@ -256,7 +256,7 @@
 # =============================================================================
 """
 [메인 실행 흐름]
-sigma_DCA_manager.py (직접 실행)
+DCA_MA_strategy.py (직접 실행)
 │
 ├── load_portfolio()                           ← portfolio_config.json
 ├── reset_matured_rotation_positions()
@@ -497,10 +497,10 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Realtime Monitor (repository_dispatch)
         if: github.event_name == 'repository_dispatch'
-        run: python sigma_DCA_manager.py --ath-monitor > sigma_log.txt 2>&1
+        run: python DCA_MA_strategy.py --ath-monitor > sigma_log.txt 2>&1
       - name: Scheduled Briefing
         if: github.event_name != 'repository_dispatch'
-        run: python sigma_DCA_manager.py > sigma_log.txt 2>&1
+        run: python DCA_MA_strategy.py > sigma_log.txt 2>&1
       - name: Sync and Notify
         if: always()
         run: |
@@ -634,7 +634,7 @@ jobs:
 """
 📁 strategy_engine/
 │
-├── 📄 sigma_DCA_manager.py              ★ 메인 실행 파일 (LOC/Discord 브리핑 + --ath-monitor)
+├── 📄 DCA_MA_strategy.py              ★ 메인 실행 파일 (LOC/Discord 브리핑 + --ath-monitor)
 ├── 📄 sigma_DCA_manager_flowchart.py    ★ 본 문서
 ├── 📄 DCA_MA_strategy.py              백테스트 + 실시간 신호 (MA 레짐 전략)
 ├── 📄 setup_cronjob_org.py              cron-job.org 실시간 알림 설정 자동화

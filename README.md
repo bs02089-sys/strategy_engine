@@ -90,7 +90,7 @@
 
 기존 전략에 **종가 × 이동평균(MA) 크로스 레짐 필터**를 얹어 MDD를 낮추는 설계입니다.
 `DCA_MA_strategy.py`(TQQQ MA20 +2,138.5%/-41.2%, SOXL MA250 +265.2%/-34.8%)에서
-검증한 설정을 실전 `sigma_DCA_manager.py`에 반영했습니다.
+검증한 설정을 실전 엔진(`DCA_MA_strategy.py`)에 반영했습니다.
 
 | 모드 | MA 필터 동작 |
 |------|-------------|
@@ -129,7 +129,7 @@
 └─────────────────┬───────────────────────────────────────────────┘
                   │ 실행
 ┌─────────────────▼───────────────────────────────────────────────┐
-│                  sigma_DCA_manager.py                            │
+│                  DCA_MA_strategy.py                            │
 │                                                                  │
 │  1. portfolio_config.json 불러오기                                │
 │  2. Sigma 갱신 (오래되었거나 설정 변경 시)                       │
@@ -160,9 +160,8 @@
 
 | 파일 | 설명 |
 |------|------|
-| **sigma_DCA_manager.py** | 📌 **메인 실행 파일** — LOC 목표가 계산, 신호 평가, Discord 브리핑 + `--ath-monitor` 실시간 알림 |
+| **DCA_MA_strategy.py** | 📌 **통합 완결판** — 실전 엔진(LOC 목표가/전고점 청산/ATH DCA/MA 레짐 필터/Discord 브리핑/`--ath-monitor`) + 백테스트 + `--signal` 실시간 신호 |
 | **sigma_DCA_manager_flowchart.py** | 시스템 전체 플로우차트 문서 |
-| **DCA_MA_strategy.py** | 📌 **MA 레짐 전략** — DCA 기반 + MA 레짐 필터 — 백테스트 + `--signal` 실시간 신호 (티커별 기본 설정) |
 | **setup_cronjob_org.py** | cron-job.org 실시간 알림 설정 자동화 (생성/--list/--test-dispatch/--update-pat/--update-schedule) |
 | **MarketStageSystem.py** | 독립적인 시장 단계 시스템 — 바닥 단계 감지 |
 | **bear_market_signals.py** | 약세장 신호 분석 시스템 |
@@ -293,14 +292,14 @@ LOC 목표가 = 전일종가 × (1 - sigma × ENTRY_MULTIPLIER)
 
 ```bash
 # LOC 브리핑 생성 및 Discord 전송 (기본 실행)
-python3 sigma_DCA_manager.py
+python3 DCA_MA_strategy.py
 
 # 장중 실시간 ATH DCA 알림 (cron-job.org dispatch에서 호출)
-python3 sigma_DCA_manager.py --ath-monitor
+python3 DCA_MA_strategy.py --ath-monitor
 
 # 특정 함수만 테스트
 python3 -c "
-from sigma_DCA_manager import get_prev_close, calculate_loc_price
+from DCA_MA_strategy import get_prev_close, calculate_loc_price
 import json
 with open('portfolio_config.json') as f:
     cfg = json.load(f)
@@ -333,10 +332,10 @@ python3 setup_cronjob_org.py --update-schedule  # 폴링 간격 갱신 (POLL_MIN
 ### 백테스트 실행 (MA 레짐 전략)
 
 ```bash
-python3 DCA_MA_strategy.py                      # TQQQ (MA20 + 올인 재진입)
-python3 DCA_MA_strategy.py --ticker SOXL        # SOXL (MA250 + DCA 재개)
-python3 DCA_MA_strategy.py --ticker SOXL --ma 30 --reentry dca_reset  # MDD 절감 대안
-python3 DCA_MA_strategy.py --fee 0.001          # 수수료 0.1% 반영
+python3 DCA_MA_strategy.py --backtest                    # TQQQ (MA20 + 올인 재진입)
+python3 DCA_MA_strategy.py --backtest --ticker SOXL      # SOXL (MA250 + DCA 재개)
+python3 DCA_MA_strategy.py --backtest --ticker SOXL --ma 30 --reentry dca_reset  # MDD 절감 대안
+python3 DCA_MA_strategy.py --backtest --fee 0.001        # 수수료 0.1% 반영
 ```
 
 상세 사용법(신호 모드 포함): [MA 레짐 전략](#ma-레짐-전략-dca_ma_strategypy)
@@ -369,7 +368,7 @@ python3 sigma_DCA_manager_flowchart.py
 | 예약 실행 | 매일 23:40 (월~금) | DCA_MA_strategy.py `--signal --discord --all` — TQQQ+SOXL 신호를 **단일 메시지**로 Discord 발송 |
 | 수동 실행 | 사용자 요청 시 | workflow_dispatch 수동 실행 |
 
-> 신호 발송은 `sigma_DCA_manager.py` 브리핑과 별도로 `DCA_MA_strategy.py`의 MA 레짐
+> 신호 발송은 실전 브리핑과 별도로 `DCA_MA_strategy.py --signal`의 MA 레짐
 > 신호(종가·날짜·LOC 매수가·레짐 상태·액션)를 TQQQ/SOXL 한 번에 전송합니다.
 
 ### `bear_market_signals.yml` — 약세장 신호
@@ -438,7 +437,7 @@ python3 sigma_DCA_manager_flowchart.py
 
 ### MA 레짐 전략 (`DCA_MA_strategy.py`)
 
-기존 시그마 DCA + MA 레짐 필터를 실제 운용용으로 만든 전략 파일입니다. 티커별 기본 설정:
+실전 엔진 + 백테스트/신호를 통합한 **완결판 단일 파일**입니다. MA 레짐 전략 티커별 기본 설정:
 
 | 티커 | 기본 설정 | 10년 결과 | 용도 |
 |------|-----------|-----------|------|
@@ -448,10 +447,10 @@ python3 sigma_DCA_manager_flowchart.py
 
 ```bash
 # 백테스트
-python3 DCA_MA_strategy.py                          # TQQQ (MA20 lump)
-python3 DCA_MA_strategy.py --ticker SOXL            # SOXL (MA30 dca_reset)
-python3 DCA_MA_strategy.py --ticker SOXL --ma 250 --reentry dca_reset
-python3 DCA_MA_strategy.py --fee 0.001              # 수수료 0.1% 반영
+python3 DCA_MA_strategy.py --backtest                # TQQQ (MA20 lump)
+python3 DCA_MA_strategy.py --backtest --ticker SOXL  # SOXL (MA30 dca_reset)
+python3 DCA_MA_strategy.py --backtest --ticker SOXL --ma 250 --reentry dca_reset
+python3 DCA_MA_strategy.py --backtest --fee 0.001    # 수수료 0.1% 반영
 
 # 실시간 신호 (장 마감 후) — --discord로 Discord 발송 (GitHub Actions 자동화)
 python3 DCA_MA_strategy.py --signal
@@ -464,7 +463,7 @@ python3 DCA_MA_strategy.py --signal --discord --all  # TQQQ+SOXL 단일 메시�
 > ⚠️ **SOXL에 TQQQ식 MA20 올인을 적용하면 MDD가 -84.7%로 폭증합니다.** SOXL은 변동성이
 > 너무 커 짧은 20일선 타이밍이 휩쏘에 걸립니다. 티커별 특성에 맞는 설정을 사용하세요.
 
-### 실전 반영 — `sigma_DCA_manager.py` MA 레짐 필터
+### 실전 반영 — `DCA_MA_strategy.py` MA 레짐 필터
 
 `DCA_MA_strategy.py`에서 검증한 레짐 필터를 **실전 운용 엔진에 통합**했습니다
 (2026-08-02 기준, 알림 신호 방식 — 실제 주문 자동 실행은 없음):
@@ -485,7 +484,7 @@ python3 DCA_MA_strategy.py --signal --discord --all  # TQQQ+SOXL 단일 메시�
 
 ### MarketStageSystem.py (portfolio_config.json 공유)
 - `portfolio_config.json`의 `POSITIONS` 키에서 티커 목록을 읽어 시장 바닥 단계(0~5) 감지
-- `sigma_DCA_manager`와 **설정 파일 공유** (`resolve_discord_config()` 공유)
+- `DCA_MA_strategy`와 **설정 파일 공유** (`resolve_discord_config()` 공유)
 - 감지된 바닥 단계(Stage 5)는 `market_state.json`에 기록 → **ATH DCA 3차 트리거로 사용**
 
 ### bear_market_signals.py (독립 실행)

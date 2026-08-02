@@ -123,7 +123,7 @@
 
 ## 5️⃣ 참고 — 설정 변경 시 부수 효과
 
-`sigma_DCA_manager.py`는 `ATH_DCA_CONFIG_FINGERPRINT` 변경을 감지하면:
+`DCA_MA_strategy.py`는 `ATH_DCA_CONFIG_FINGERPRINT` 변경을 감지하면:
 - `ATH_DCA_USED_SPLITS` 초기화 (사용 분할 리셋)
 - `ATH_DCA_ENTERED_ON` 제거 (비상 모드 종료 클럭 재시작)
 
