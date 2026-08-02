@@ -2718,7 +2718,8 @@ def _signal_discord_block(sig: dict, loc: float | None, ma_days: int, ath: dict)
     lines = [
         f"**{sig['ticker']} MA{ma_days} 레짐 전략 신호**",
         f"종가 ${sig['close']:.2f} ({sig['as_of']}) | "
-        f"MA{ma_days} ${sig['ma']:.2f} ({sig['distance_pct']:+.1f}%)",
+        # 부호: "MA의 종가 대비 위치" — MA가 종가 위(+) / 아래(-)
+        f"MA{ma_days} ${sig['ma']:.2f} ({-sig['distance_pct']:+.1f}%)",
     ]
     ath_line = _ath_line(ath)
     if ath_line:
@@ -2754,7 +2755,7 @@ def main():
             print("═" * 72)
             print(f"  기준일        : {sig['as_of']}")
             print(f"  종가          : ${sig['close']:.2f} ({sig['as_of']})")
-            print(f"  MA{md}        : ${sig['ma']:.2f}  (종가 대비 {sig['distance_pct']:+.1f}%)")
+            print(f"  MA{md}        : ${sig['ma']:.2f}  (종가 대비 {-sig['distance_pct']:+.1f}%)")
             if loc:
                 print(f"  LOC 매수      : ${loc:.2f}")
             ath_line = _ath_line(ath)
