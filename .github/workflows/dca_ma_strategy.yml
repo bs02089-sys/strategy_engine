@@ -31,12 +31,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: TQQQ MA20 신호 → Discord
-        run: python DCA_MA_strategy.py --signal --discord > signal_tqqq.log 2>&1
-
-      - name: SOXL MA250 신호 → Discord
-        run: python DCA_MA_strategy.py --signal --discord --ticker SOXL > signal_soxl.log 2>&1
+      - name: TQQQ·SOXL 신호 → Discord (단일 메시지)
+        run: python DCA_MA_strategy.py --signal --discord --all > signal.log 2>&1
 
       - name: Show logs on failure
         if: failure()
-        run: cat signal_tqqq.log signal_soxl.log
+        run: cat signal.log

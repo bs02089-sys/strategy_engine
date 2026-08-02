@@ -29,6 +29,8 @@ Usage:
   python3 DCA_MA_strategy.py --signal --ticker SOXL     # 오늘 신호 (SOXL)
   python3 DCA_MA_strategy.py --fee 0.001                # 수수료 0.1% 반영
   python3 DCA_MA_strategy.py --signal --discord         # 신호를 Discord로 발송 (GitHub Actions 연동)
+  python3 DCA_MA_strategy.py --signal --discord --all   # 전 종목(TQQQ+SOXL) 단일 메시지로 발송
+  # 참고: --all과 함께 --ma/--reentry를 주면 모든 종목에 동일하게 적용됩니다.
 """
 
 import sys
@@ -46,6 +48,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from sigma_DCA_manager import (
     _calculate_volatility_from_closes,
     _calculate_loc_from_sigma,
+    _is_stage5_trigger,
+    _parse_ath_trigger,
+    calculate_loc_price,
     check_peak_sell_signal_with_cooldown,
     resolve_discord_config,
     _send_discord,
@@ -346,8 +351,8 @@ def current_signal(ticker: str, ma_days: int, reentry: str, reentry_pct: float |
 # CLI
 # ══════════════════════════════════════════════
 def parse_args(argv: list[str]) -> dict:
-    opts = {"ticker": "TQQQ", "signal": False, "discord": False, "fee": 0.0,
-            "ma": None, "reentry": None, "reentry_pct": None}
+    opts = {"ticker": "TQQQ", "signal": False, "discord": False, "all": False,
+            "fee": 0.0, "ma": None, "reentry": None, "reentry_pct": None}
     i = 0
     while i < len(argv):
         a = argv[i]
@@ -357,6 +362,8 @@ def parse_args(argv: list[str]) -> dict:
             opts["signal"] = True; i += 1; continue
         if a == "--discord":
             opts["discord"] = True; i += 1; continue
+        if a == "--all":
+            opts["all"] = True; i += 1; continue
         if a == "--fee" and i + 1 < len(argv):
             opts["fee"] = float(argv[i + 1]); i += 2; continue
         if a == "--ma" and i + 1 < len(argv):
@@ -372,6 +379,127 @@ def parse_args(argv: list[str]) -> dict:
             opts["reentry_pct"] = float(argv[i + 1]); i += 2; continue
         i += 1
     return opts
+
+
+def _resolve_signal(ticker: str, opts: dict) -> tuple[dict, float | None, int, dict]:
+    """티커별 신호 dict + LOC 매수가 + ATH 정보 계산. (sig, loc, ma_days, ath) 반환."""
+    cfg = load_config(ticker)
+    dflt = TICKER_DEFAULTS.get(ticker, {"ma_days": 20, "reentry": "lump", "reentry_pct": 1.0})
+    ma_days = opts["ma"] if opts["ma"] is not None else dflt["ma_days"]
+    reentry = opts["reentry"] if opts["reentry"] is not None else dflt["reentry"]
+    reentry_pct = opts["reentry_pct"] if opts["reentry_pct"] is not None else dflt.get("reentry_pct", 1.0)
+
+    sig = current_signal(ticker, ma_days, reentry, reentry_pct, cfg["entry_multiplier"])
+
+    # LOC 매수가 — 메인 브리핑과 동일: 전일종가 × (1 - sigma × ENTRY_MULTIPLIER)
+    loc: float | None = None
+    try:
+        with open("portfolio_config.json", "r", encoding="utf-8") as f:
+            loc = calculate_loc_price(ticker, sig["close"], json.load(f))
+    except Exception as e:
+        print(f"⚠️ {ticker} LOC 계산 실패: {e}")
+
+    ath = _ath_info(ticker)
+    return sig, loc, ma_days, ath
+
+
+def _ath_info(ticker: str) -> dict:
+    """ATH 대비 MDD + 다음 비상 트리거 정보 — 비상 모드 판단용.
+
+    ATH/MDD 계산은 sigma_DCA_manager._compute_ath_drawdown과 동일 방법론
+    (1y auto_adjust=True, expanding max)을 단일 조회로 수행한다.
+    다음 트리거 갭은 check_ath_dca_signals와 같은 로직(미사용 분할 중
+    첫 번째의 PCT 임계값 vs 현재 DD)이다.
+    """
+    info: dict = {"ath": None, "ath_date": None, "dd_pct": None,
+                  "next_trigger": None, "next_gap_pct": None, "all_done": False,
+                  "mode": "LOC"}
+    try:
+        with open("portfolio_config.json", "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+        pos = cfg.get("POSITIONS", {}).get(ticker, {})
+        info["mode"] = str(pos.get("STRATEGY_MODE", "LOC")).upper()
+        ath_dca = pos.get("ATH_DCA", {})
+        enabled = bool(ath_dca.get("ENABLED", False))
+
+        hist = yf.Ticker(ticker).history(period="1y", interval="1d", auto_adjust=True)
+        if hist.empty:
+            return info
+        closes = hist["Close"].dropna()
+        if len(closes) < 20:
+            return info
+        current_price = float(closes.iloc[-1])
+        rolling_ath = float(closes.expanding().max().iloc[-1])
+        if rolling_ath <= 0:
+            return info
+        ath_idx = closes.idxmax()
+        info["ath"] = round(rolling_ath, 2)
+        info["ath_date"] = ath_idx.date().strftime("%m-%d")
+        # 하락률(음수) — 메인 브리핑의 "하락률 -25.74%"와 동일 부호
+        info["dd_pct"] = round((current_price - rolling_ath) / rolling_ath * 100, 1)
+
+        if not enabled:
+            return info
+        total_splits = int(ath_dca.get("SPLITS", 3))
+        used = pos.get("ATH_DCA_USED_SPLITS", []) or []
+        if not isinstance(used, list):
+            used = []
+        used = [int(s) for s in used]
+        current_dd = abs(info["dd_pct"]) / 100.0
+        next_found = False
+        for i in range(1, total_splits + 1):
+            if i in used:
+                continue
+            raw = ath_dca.get(f"TRIGGER_{i}")
+            if _is_stage5_trigger(raw):
+                info["next_trigger"] = f"{i}차(Stage 5 바닥)"
+                next_found = True
+                break
+            val = _parse_ath_trigger(raw)
+            if val is not None and 0 < val < 1:
+                info["next_trigger"] = f"{i}차(-{val*100:.0f}%)"
+                info["next_gap_pct"] = round((val - current_dd) * 100, 1)
+                next_found = True
+                break
+            # 파싱 실패/범위 밖이면 다음 분할로 (check_ath_dca_signals와 동일)
+        if not next_found:
+            info["all_done"] = True
+    except Exception as exc:
+        print(f"  ⚠️ {ticker} ATH info failed: {exc}")
+    return info
+
+
+def _ath_line(ath: dict) -> str:
+    """ATH 대비 낙폭 + 다음 비상 트리거 요약 (prefix 없이). 없으면 빈 문자열."""
+    if not ath.get("dd_pct"):
+        return ""
+    line = f"${ath['ath']:.2f} ({ath['ath_date']}) 대비 {ath['dd_pct']:+.1f}%"
+    if ath.get("mode") == "ATH_DCA":
+        line += " | 🚨 비상 모드"
+    if ath.get("next_trigger"):
+        if ath.get("next_gap_pct") is not None:
+            line += f" | 비상 {ath['next_trigger']}까지 {ath['next_gap_pct']:+.1f}%p"
+        else:
+            line += f" | 다음 비상 {ath['next_trigger']}"
+    elif ath.get("all_done"):
+        line += " | 비상 분할 완료"
+    return line
+
+
+def _signal_discord_block(sig: dict, loc: float | None, ma_days: int, ath: dict) -> str:
+    """티커별 Discord 블록 — 종가(날짜), MA, ATH 대비 MDD, LOC 매수가, 상태, 액션."""
+    loc_part = f"LOC 매수: ${loc:.2f} | " if loc else "LOC 매수: — | "
+    lines = [
+        f"**{sig['ticker']} MA{ma_days} 레짐 전략 신호**",
+        f"종가 ${sig['close']:.2f} ({sig['as_of']}) | "
+        f"MA{ma_days} ${sig['ma']:.2f} ({sig['distance_pct']:+.1f}%)",
+    ]
+    ath_line = _ath_line(ath)
+    if ath_line:
+        lines.append(f"ATH {ath_line}")
+    lines.append(f"{loc_part}상태: {sig['state']} (레짐 {sig['days_in_regime']}일)")
+    lines.append(f"▶ {sig['action']}")
+    return "\n".join(lines)
 
 
 def main():
@@ -391,30 +519,34 @@ def main():
 
     # ── 실시간 신호 모드 ─────────────────────────────────────
     if opts["signal"]:
-        sig = current_signal(ticker, ma_days, reentry, reentry_pct, cfg["entry_multiplier"])
-        print("\n" + "═" * 72)
-        print(f"  📡 {sig['ticker']} MA{ma_days} 레짐 전략 — 현재 신호")
-        print("═" * 72)
-        print(f"  기준일        : {sig['as_of']}")
-        print(f"  종가          : ${sig['close']:.2f}")
-        print(f"  MA{ma_days}        : ${sig['ma']:.2f}  (종가 대비 {sig['distance_pct']:+.1f}%)")
-        print(f"  현재 상태     : {sig['state']}")
-        print(f"  레짐 지속     : {sig['days_in_regime']}일")
-        print(f"\n  ▶ {sig['action']}")
-        print("\n" + "═" * 72)
+        tickers = list(TICKER_DEFAULTS.keys()) if opts["all"] else [ticker]
+        discord_blocks = []
+        for t in tickers:
+            sig, loc, md, ath = _resolve_signal(t, opts)
+            print("\n" + "═" * 72)
+            print(f"  📡 {sig['ticker']} MA{md} 레짐 전략 — 현재 신호")
+            print("═" * 72)
+            print(f"  기준일        : {sig['as_of']}")
+            print(f"  종가          : ${sig['close']:.2f} ({sig['as_of']})")
+            print(f"  MA{md}        : ${sig['ma']:.2f}  (종가 대비 {sig['distance_pct']:+.1f}%)")
+            if loc:
+                print(f"  LOC 매수      : ${loc:.2f}")
+            ath_line = _ath_line(ath)
+            if ath_line:
+                print(f"  ATH          : {ath_line}")
+            print(f"  현재 상태     : {sig['state']}")
+            print(f"  레짐 지속     : {sig['days_in_regime']}일")
+            print(f"\n  ▶ {sig['action']}")
+            print("\n" + "═" * 72)
+            discord_blocks.append(_signal_discord_block(sig, loc, md, ath))
 
-        # ── Discord 발송 (--discord) ────────────────────────────
-        if opts["discord"]:
+        # ── Discord 발송 (--discord) — 전 종목 단일 메시지 ────────
+        if opts["discord"] and discord_blocks:
             webhook, user_id = _resolve_discord()
-            content = (
-                f"**{sig['ticker']} MA{ma_days} 레짐 전략 신호** ({sig['as_of']})\n"
-                f"종가 ${sig['close']:.2f} | MA{ma_days} ${sig['ma']:.2f} "
-                f"({sig['distance_pct']:+.1f}%)\n"
-                f"상태: {sig['state']} (레짐 {sig['days_in_regime']}일)\n"
-                f"▶ {sig['action']}"
-            )
-            _send_discord(webhook, user_id,
-                          f"📡 {sig['ticker']} MA{ma_days} 신호", content)
+            content = "\n\n".join(discord_blocks)
+            print(content)  # Actions 로그 기록용 — 발송 실패/이미지 전달 시에도 확인 가능
+            title = "📡 DCA MA 레짐 전략 신호 (전 종목)" if opts["all"] else f"📡 {tickers[0]} 신호"
+            _send_discord(webhook, user_id, title, content)
         return
 
     # ── 백테스트 모드 (고정 검증 윈도우 사용) ──────────────────

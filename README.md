@@ -379,11 +379,11 @@ python3 sigma_DCA_manager_flowchart.py
 
 | 트리거 | 시간 (UTC) | 설명 |
 |--------|------------|------|
-| 예약 실행 | 매일 23:40 (월~금) | DCA_MA_strategy.py `--signal --discord` — TQQQ/SOXL 신호를 Discord로 발송 |
+| 예약 실행 | 매일 23:40 (월~금) | DCA_MA_strategy.py `--signal --discord --all` — TQQQ+SOXL 신호를 **단일 메시지**로 Discord 발송 |
 | 수동 실행 | 사용자 요청 시 | workflow_dispatch 수동 실행 |
 
-> 신호 발송은 `sigma_DCA_manager.py` 브리핑과 별도로 `DCA_MA_strategy.py`의 티커별
-> MA 레짐 신호(레짐 상태/크로스 기준 재진입 액션)를 매일 전송합니다.
+> 신호 발송은 `sigma_DCA_manager.py` 브리핑과 별도로 `DCA_MA_strategy.py`의 MA 레짐
+> 신호(종가·날짜·LOC 매수가·레짐 상태·액션)를 TQQQ/SOXL 한 번에 전송합니다.
 
 ### `bear_market_signals.yml` — 약세장 신호
 
@@ -500,6 +500,7 @@ python3 DCA_MA_strategy.py --signal
 python3 DCA_MA_strategy.py --signal --ticker SOXL
 python3 DCA_MA_strategy.py --signal --discord       # TQQQ 신호를 Discord로
 python3 DCA_MA_strategy.py --signal --discord --ticker SOXL
+python3 DCA_MA_strategy.py --signal --discord --all  # TQQQ+SOXL 단일 메시지 (워크플로우 기본)
 ```
 
 > ⚠️ **SOXL에 TQQQ식 MA20 올인을 적용하면 MDD가 -84.7%로 폭증합니다.** SOXL은 변동성이
