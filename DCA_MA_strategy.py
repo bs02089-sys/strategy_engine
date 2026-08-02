@@ -928,11 +928,12 @@ def check_ath_dca_signals(cfg: dict,
                         if prev_gap is not None and gap_pct >= prev_gap - 1.0:
                             continue
                         sent[str(split_num)] = round(gap_pct, 2)
+                    target_price = round(rolling_ath_val * (1 - threshold), 2)
                     messages.append(
                         f"📡 **{ticker} ATH {split_num}차 DCA 임박!**\n"
                         f"   • ATH: \\${rolling_ath_val:.2f}\n"
                         f"   • 현재 DD: {current_dd_pct:.1f}% (목표: -{threshold*100:.0f}%)\n"
-                        f"   • 추가 {gap_pct:.1f}%p 하락 시 트리거"
+                        f"   • 추가 {gap_pct:.1f}%p 하락 시 트리거 (${target_price:.2f})"
                     )
 
         # Persist state if changed
@@ -1008,11 +1009,12 @@ def check_ath_dca_signals(cfg: dict,
             first_type, first_threshold = triggers[1]
             if first_type == "PCT":
                 next_gap = (first_threshold - current_dd) * 100
+                target_price = round(rolling_ath_val * (1 - first_threshold), 2)
                 messages.append(
                     f"📡 **{ticker} ATH 1차 DCA 임박!**\n"
                     f"   • ATH: \\${rolling_ath_val:.2f}\n"
                     f"   • 현재 DD: {current_dd_pct:.1f}%\n"
-                    f"   • 1차(-{first_threshold*100:.0f}%) 까지: {-next_gap:+.1f}%p"
+                    f"   • 1차(-{first_threshold*100:.0f}%) 까지: {-next_gap:+.1f}%p (${target_price:.2f})"
                 )
             else:  # STAGE5 — no percentage gap to show
                 messages.append(
@@ -1026,11 +1028,12 @@ def check_ath_dca_signals(cfg: dict,
             nxt_type, nxt_threshold = triggers[nxt]
             if nxt_type == "PCT":
                 next_gap = (nxt_threshold - current_dd) * 100
+                target_price = round(rolling_ath_val * (1 - nxt_threshold), 2)
                 messages.append(
                     f"📊 **{ticker} ATH {nxt}차 DCA**\n"
                     f"   • ATH: \\${rolling_ath_val:.2f}\n"
                     f"   • 실행: {len(used)}/{total_splits}차 ✅\n"
-                    f"   • 다음({nxt}차): 추가 {next_gap:+.1f}%p 하락 시"
+                    f"   • 다음({nxt}차): 추가 {next_gap:+.1f}%p 하락 시 (${target_price:.2f})"
                 )
             else:  # STAGE5
                 messages.append(
@@ -2022,7 +2025,10 @@ def _next_trigger_line(ticker: str) -> str:
     if not ath.get("next_trigger"):
         return ""
     if ath.get("next_gap_pct") is not None:
-        return f"• 📡 **다음 비상 트리거:** {ath['next_trigger']}까지 {-ath['next_gap_pct']:+.1f}%p"
+        line = f"• 📡 **다음 비상 트리거:** {ath['next_trigger']}까지 {-ath['next_gap_pct']:+.1f}%p"
+        if ath.get("next_price"):
+            line += f" (${ath['next_price']:.2f})"
+        return line
     return f"• 📡 **다음 비상 트리거:** {ath['next_trigger']}"
 
 
@@ -2682,8 +2688,8 @@ def _ath_info(ticker: str) -> dict:
     첫 번째의 PCT 임계값 vs 현재 DD)이다.
     """
     info: dict = {"ath": None, "ath_date": None, "dd_pct": None,
-                  "next_trigger": None, "next_gap_pct": None, "all_done": False,
-                  "mode": "LOC"}
+                  "next_trigger": None, "next_gap_pct": None, "next_price": None,
+                  "all_done": False, "mode": "LOC"}
     try:
         with open("portfolio_config.json", "r", encoding="utf-8") as f:
             cfg = json.load(f)
@@ -2729,6 +2735,8 @@ def _ath_info(ticker: str) -> dict:
             if val is not None and 0 < val < 1:
                 info["next_trigger"] = f"{i}차(-{val*100:.0f}%)"
                 info["next_gap_pct"] = round((val - current_dd) * 100, 1)
+                # 트리거 도달 가격 = ATH × (1 - 트리거%) — 실행 참고용
+                info["next_price"] = round(rolling_ath * (1 - val), 2)
                 next_found = True
                 break
             # 파싱 실패/범위 밖이면 다음 분할로 (check_ath_dca_signals와 동일)
