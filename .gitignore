@@ -11,6 +11,8 @@ __pycache__/
 env/
 venv/
 .venv/
+.venv.bak.*/
+.venv*.bak/
 .idea/
 
 # 로그 파일 무시 패턴 (단, GARCH 실험 로그는 명시적으로 예외 처리)
