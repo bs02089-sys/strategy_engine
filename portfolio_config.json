@@ -88,6 +88,9 @@
             "MA_FILTER_STATE": {
                 "regime": "above",
                 "since": "2026-08-02"
+            },
+            "ATH_DCA_IMMINENT_SENT": {
+                "2": 4.7
             }
         }
     },
