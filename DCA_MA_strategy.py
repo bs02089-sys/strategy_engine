@@ -6,7 +6,7 @@
 하나로 통합한 단일 파일입니다 (2026-08-02).
 
 실전 엔진 (기본 실행):
-  - 일일 Discord 브리핑 (통합 메시지): LOC 목표가 · Sigma 자동 갱신 · 전고점 50% 청산 ·
+  - 일일 Discord 브리핑 (통합 메시지): LOC 목표가 · Sigma 자동 갱신 ·
     ATH 하락분할 DCA · MA 레짐 필터(실행 액션 라인·비상 트리거 포함) · 로테이션 초기화 · 시장 바닥 단계
   - --ath-monitor: 장중 실시간 ATH DCA 알림 (cron-job.org → repository_dispatch)
 
@@ -404,171 +404,6 @@ def get_prev_close(ticker: str) -> tuple[float | None, str]:
 
     print(f"❌ All price lookup methods failed for {ticker}")
     return None, "N/A"
-
-
-# ═══════════════════════════════════════════════════════════
-# Peak Sell Signal Engine — 전고점 근접 50% 청산 Signal
-# ═══════════════════════════════════════════════════════════
-# Triggers:
-#   1) Current price > Rolling All-Time High × ATH_RATIO
-#   2) 20-day return > RALLY_THRESHOLD (급등 확인)
-#   3) Short-term sigma (20d) / Long-term sigma (252d) > SIGMA_RATIO
-#   When ALL 3 conditions met → SELL SIGNAL (50% position trim recommended)
-
-_SELL_ATH_RATIO       = 0.90   # 전고점 90% 이상 (원래 85%에서 상향 — 더 엄격하게)
-_SELL_RALLY_THRESHOLD = 0.40   # 20일 상승률 40% 이상 (원래 30%에서 상향 — 큰 상승만 포착)
-_SELL_SIGMA_RATIO     = 0.0    # 시그마 조건 비활성화 (SOXL 3x 레버리지 특성상
-                                #    시그마 비율은 고점에서 0.7~1.0x, 폭락장에서 1.3~1.4x.
-                                #    즉 시그마 급등 = 폭락 신호, 고점 신호가 아님.
-                                #    0.0으로 설정해 조건을 항상 통과시킴)
-_SELL_SHORT_LOOKBACK  = 20
-_SELL_LONG_LOOKBACK   = 252
-
-
-def get_rolling_ath(prices: pd.Series) -> pd.Series:
-    """
-    Returns expanding (rolling all-time) high series from the price series.
-    First value = first price, monotonically non-decreasing.
-    """
-    return prices.expanding().max()
-
-
-def get_20day_return(closes: pd.Series) -> float | None:
-    """
-    Returns the (close[-1] / close[-21] - 1) return over ~20 trading days.
-    Uses shift(20) so the lookback is strictly prior to today; returns None
-    if insufficient data.
-    """
-    if len(closes) < 21:
-        return None
-    prev = float(closes.iloc[-21])
-    curr = float(closes.iloc[-1])
-    if prev <= 0:
-        return None
-    return (curr - prev) / prev
-
-
-def get_sigma_spike_ratio(closes: pd.Series,
-                          short_lookback: int = 20,
-                          long_lookback: int = 252,
-                          vol_method: str = "EWMA",
-                          ewma_lambda: float = 0.94) -> float | None:
-    """
-    Returns short_sigma / long_sigma.  A ratio > 1.0 means short-term
-    volatility is elevated relative to the long-term baseline.  Returns None
-    if either sigma can't be computed (not enough data).
-    """
-    if len(closes) < long_lookback:
-        return None
-    try:
-        short_sigma, _ = _calculate_volatility_from_closes(
-            closes, short_lookback, vol_method, ewma_lambda
-        )
-        long_sigma, _ = _calculate_volatility_from_closes(
-            closes, long_lookback, vol_method, ewma_lambda
-        )
-    except Exception:
-        return None
-    if long_sigma <= 0:
-        return None
-    return float(short_sigma / long_sigma)
-
-
-def check_peak_sell_signal(closes: pd.Series, ath_prices: pd.Series,
-                           lookback_days: int = 252) -> dict:
-    """
-    Evaluates the 3-condition peak sell signal for an asset.
-
-    ATH is computed from `ath_prices` (auto_adjust=True, Close-based per
-    standard financial analyst methodology).
-
-    Returns a dict:
-      signal: bool       — True when ALL 3 conditions are met
-      ath_price: float   — current rolling ATH
-      ath_pct: float     — current price / ATH (as %)
-      rally_20d: float   — 20-day return
-      sigma_ratio: float — short/long sigma ratio
-      reasons: list[str] — human-readable conditions met
-    """
-    result: dict = {
-        'signal': False,
-        'ath_price': 0.0,
-        'ath_pct': 0.0,
-        'rally_20d': 0.0,
-        'sigma_ratio': 0.0,
-        'reasons': [],
-        'conditions': {'ath_ok': False, 'rally_ok': False, 'sigma_ok': False},
-    }
-
-    if len(closes) < max(lookback_days, 21) or len(ath_prices) < 1:
-        return result
-
-    current_price = float(closes.iloc[-1])
-
-    # ── Condition 1: 전고점 85% 이상 ─────────────────────────────────
-    # Rolling ATH from ath_prices (Close 기준, auto_adjust=True)
-    rolling_ath = get_rolling_ath(ath_prices)
-    ath_price = float(rolling_ath.iloc[-1])
-    ath_pct = (current_price / ath_price * 100) if ath_price > 0 else 0.0
-    condition_ath = bool(ath_pct >= _SELL_ATH_RATIO * 100)
-
-    result['ath_price'] = round(ath_price, 2)
-    result['ath_pct'] = round(ath_pct, 1)
-
-    # ── Condition 2: 20일 상승률 30% 이상 ────────────────────────────
-    rally_20d = get_20day_return(closes)
-    condition_rally = bool(rally_20d is not None and rally_20d >= _SELL_RALLY_THRESHOLD)
-    result['rally_20d'] = round(rally_20d * 100, 1) if rally_20d is not None else 0.0
-
-    # ── Condition 3: 시그마 급등 (단기/장기 비율 1.5배) ────────────
-    sigma_ratio = get_sigma_spike_ratio(
-        closes, _SELL_SHORT_LOOKBACK, _SELL_LONG_LOOKBACK
-    )
-    condition_sigma = bool(sigma_ratio is not None and sigma_ratio >= _SELL_SIGMA_RATIO)
-    result['sigma_ratio'] = round(sigma_ratio, 2) if sigma_ratio is not None else 0.0
-
-    # ── Assemble result ─────────────────────────────────────────────
-    result['conditions']['ath_ok'] = condition_ath
-    result['conditions']['rally_ok'] = condition_rally
-    result['conditions']['sigma_ok'] = condition_sigma
-
-    if condition_ath:
-        result['reasons'].append(f"전고점 {ath_pct:.0f}% 도달")
-    if condition_rally:
-        result['reasons'].append(f"20일 +{result['rally_20d']:.0f}% 급등")
-    if condition_sigma:
-        result['reasons'].append(f"변동성 {result['sigma_ratio']:.1f}배 급등")
-
-    result['signal'] = condition_ath and condition_rally and condition_sigma
-
-    return result
-
-
-_COOLDOWN_DAYS = 60  # 매도 후 60거래일(약 3개월) 동안 재매도 금지
-
-
-def check_peak_sell_signal_with_cooldown(closes: pd.Series, ath_prices: pd.Series,
-                                          last_sell_idx: int | None = None,
-                                          current_idx: int = 0) -> dict:
-    """
-    Same as check_peak_sell_signal() but with a cooldown guard:
-    - If `last_sell_idx` is not None and the distance from `current_idx`
-      to `last_sell_idx` is less than `_COOLDOWN_DAYS`, the signal is
-      suppressed (returns signal=False + cooldown_active=True).
-    """
-    base = check_peak_sell_signal(closes, ath_prices)
-
-    if last_sell_idx is not None:
-        days_since_last_sell = current_idx - last_sell_idx
-        if days_since_last_sell < _COOLDOWN_DAYS:
-            base['signal'] = False
-            base['cooldown'] = True
-            base['cooldown_remaining'] = _COOLDOWN_DAYS - days_since_last_sell
-    else:
-        base['cooldown'] = False
-        base['cooldown_remaining'] = 0
-
-    return base
 
 
 def get_period_ath(ticker: str, lookback_days: int = 252, max_retries: int = 3) -> tuple[float | None, str | None]:
@@ -2341,7 +2176,6 @@ MAX_BUYS       = 20
 LOOKBACK_DAYS  = 252
 VOL_METHOD     = "EWMA"
 EWMA_LAMBDA    = 0.94
-SELL_PCT       = 0.50
 DEFAULT_MULTIPLIER = 1.1
 TEST_START  = date(2016, 8, 2)
 TEST_END    = date(2026, 8, 2)
@@ -2376,7 +2210,7 @@ def backtest(df: pd.DataFrame, ma_days: int | None = None,
              max_buys: int = MAX_BUYS,
              fee_rate: float = 0.0) -> dict:
     """
-    기존 시그마 DCA(전고점 50% 청산 포함) + MA 레짐 필터 백테스트.
+    기존 시그마 DCA + MA 레짐 필터 백테스트.
 
     ma_days=None → MA 필터 없음 (기존 전략 그대로)
     reentry="lump"      → 재돌파 시 현금의 reentry_pct만큼 올인 매수
@@ -2407,7 +2241,6 @@ def backtest(df: pd.DataFrame, ma_days: int | None = None,
     sell_log = []
     daily_values = []
     start_idx = LOOKBACK_DAYS
-    last_sell_idx = None
     rolling_ath_val = 0.0
 
     for i in range(start_idx, n):
@@ -2475,30 +2308,6 @@ def backtest(df: pd.DataFrame, ma_days: int | None = None,
                     "sigma": round(sigma, 4), "loc": round(loc_price, 2),
                     "cash_remaining": round(cash, 2), "type": "BUY",
                 })
-
-        # 전고점 근접 50% 청산 (기존 로직)
-        if i >= start_idx + 21 and shares > 0.01:
-            lookback_closes = pd.Series(closes[max(0, i - 252): i])
-            if len(lookback_closes) >= 21:
-                signal = check_peak_sell_signal_with_cooldown(
-                    lookback_closes, lookback_closes,
-                    last_sell_idx=last_sell_idx, current_idx=i
-                )
-                if signal["signal"]:
-                    sold_shares = shares * SELL_PCT
-                    sell_notional = sold_shares * today_close
-                    cash += sell_notional * (1 - fee_rate)
-                    total_sold += sell_notional
-                    shares -= sold_shares
-                    sells += 1
-                    last_sell_idx = i
-                    sell_log.append({
-                        "date": today_date, "price": round(today_close, 2),
-                        "shares": round(sold_shares, 4),
-                        "amount": round(sell_notional, 2),
-                        "cash_after": round(cash, 2), "type": "SELL",
-                        "reasons": ", ".join(signal["reasons"]),
-                    })
 
         portfolio_value = cash + shares * today_close
         daily_values.append({
@@ -2842,7 +2651,7 @@ def main():
     print(f"  설정: MA {ma_days}일 | 재진입 {reentry} | "
           + (f"재진입비율 {reentry_pct*100:.0f}%" if reentry == "lump" else "DCA 재개")
           + f" | 수수료 {fee*100:.2f}%")
-    print(f"  승수 {cfg['entry_multiplier']} | 매수 ${BUY_AMOUNT:,.0f}×{MAX_BUYS} | 전고점 {SELL_PCT*100:.0f}% 청산")
+    print(f"  승수 {cfg['entry_multiplier']} | 매수 ${BUY_AMOUNT:,.0f}×{MAX_BUYS}")
     print("─" * 84)
     for label, r in (("기존 전략 (MA 필터 없음)", base), ("레짐 필터 (MA 적용)", hyb)):
         print(f"\n  [{label}]")

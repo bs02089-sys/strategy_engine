@@ -4,7 +4,7 @@
   DCA MA Strategy — 전체 시스템 플로우차트
 ══════════════════════════════════════════════════════════════════════
   파일: DCA_MA_strategy.py
-  최종 업데이트: 2026-08-02
+  최종 업데이트: 2026-08-03
   듀얼 모드: LOC (일반) / ATH DCA (비상)
   비상 모드 종료: 시장 회복 감지 시 LOC 자동 복귀 (RECOVERY_REENTRY)
   실시간 알림: cron-job.org → repository_dispatch → --ath-monitor
@@ -16,9 +16,8 @@
   3. 함수 호출 관계도
   4. 데이터 파일 의존성
   5. RSI + Volume Zone 설정 (12년 백테스트 검증)
-  6. 전고점 청산 신호 설정
-  7. GitHub Actions 워크플로우
-  8. 파일 구성도
+  6. GitHub Actions 워크플로우
+  7. 파일 구성도
 ══════════════════════════════════════════════════════════════════════
 """
 
@@ -28,7 +27,7 @@
 """
 📌 DCA MA Strategy는 매일 정해진 시간에 GitHub Actions에서 실행되어,
    portfolio_config.json에 설정된 포지션(TQQQ, SOXL)의 LOC 매수 목표가를
-   계산하고, RSI+거래량 복합 신호, 전고점 청산 신호, ATH 하락분할 DCA,
+   계산하고, RSI+거래량 복합 신호, ATH 하락분할 DCA,
    비상 모드 종료(회복 감지)를 평가하여 디스코드로 종합 브리핑을 전송합니다.
    또한 cron-job.org가 발사하는 repository_dispatch로 장중 실시간 ATH DCA
    알림(--ath-monitor)을 전송합니다.
@@ -176,11 +175,6 @@
 │  │  │  ├─ Zone 1 검사 (RSI + Volume 조건)                              │ │ │
 │  │  │  ├─ Zone 2 검사 (RSI + Volume 조건)                              │ │ │
 │  │  │  └─ 결과: 🔥🔥🔥 두 구역 / 🔥 한 구역 / ⏸️ 대기                  │ │ │
-│  │  ├──────────────────────────────────────────────────────────────────┤ │ │
-│  │  │  [4-h] 전고점 근접 50% 청산 신호 ⭐ (브리핑 내 별도 평가)         │ │ │
-│  │  │  (브리핑 빌더에 직접 포함 — format_drawdown_line에서 처리)        │ │ │
-│  │  │  ├─ get_period_ath() → 전고점 (Close 기준, LOOKBACK_DAYS)        │ │ │
-│  │  │  └─ calculate_drawdown_and_recovery() → 하락률/회복률 표시        │ │ │
 │  │  └──────────────────────────────────────────────────────────────────┘ │ │
 │  └────────────────────────────────────────────────────────────────────────┘ │
 └──────────────────────────────────┬───────────────────────────────────────────┘
@@ -340,7 +334,7 @@ DCA_MA_strategy.py (직접 실행)
     └── save_portfolio()
 
 
-[전고점 청산 신호 엔진 (브리핑 내 간접 참조)]
+[전고점 하락률 표시 (브리핑)]
 get_period_ath()                               ← yfinance API
   └── _fetch_closes_for_lookback()             (retry 로직 공유)
 
@@ -348,16 +342,6 @@ format_drawdown_line()
   ├── get_period_ath()
   └── calculate_drawdown_and_recovery()
       → "전고점 $XX 기준 하락률 XX% / 회복필요 XX%"
-
-check_peak_sell_signal()                       ← 백테스트 전용 (DCA_MA_strategy.py)
-  ├── get_rolling_ath()
-  ├── get_20day_return()
-  └── get_sigma_spike_ratio()
-      ├── _calculate_volatility_from_closes()  (short 20d)
-      └── _calculate_volatility_from_closes()  (long 252d)
-
-check_peak_sell_signal_with_cooldown()
-  └── check_peak_sell_signal() + _COOLDOWN_DAYS (60거래일)
 
 [MA 레짐 필터 엔진 (실전 반영 — 백테스트 검증)]
 _check_ma_filter()
@@ -466,33 +450,7 @@ _ma_filter_lines()
 """
 
 # =============================================================================
-# 6. 전고점 청산 신호 설정
-# =============================================================================
-"""
-╔══════════════════════════════════════════════════════════════════════╗
-║                 전고점 근접 50% 청산 신호 설정                       ║
-╠══════════════════════════════════════════════════════════════════════╣
-║                                                                      ║
-║   조건 1: 현재가 > 전고점(ATH) × 90%                                 ║
-║     → get_rolling_ath(prices) — Close 기준 (표준 방법론)          ║
-║     → ATH 비율 = 현재가 / ATH * 100                                 ║
-║                                                                      ║
-║   조건 2: 20일 상승률 40% 이상                                       ║
-║     → get_20day_return(closes)                                       ║
-║     → (close[-1] / close[-21] - 1) ≥ 0.40                           ║
-║                                                                      ║
-║   조건 3: 단기 Sigma(20d) / 장기 Sigma(252d) 비율                    ║
-║     → get_sigma_spike_ratio()                                        ║
-║     → 현재 비활성화 (SOXL 특성상 0.0으로 설정 = 항상 통과)          ║
-║                                                                      ║
-║   매도 실행: 50% 포지션 청산 (백테스트 전용)                         ║
-║   쿨다운: 60거래일 (약 3개월) 동안 재매도 금지                       ║
-║                                                                      ║
-╚══════════════════════════════════════════════════════════════════════╝
-"""
-
-# =============================================================================
-# 7. GitHub Actions 워크플로우
+# 6. GitHub Actions 워크플로우
 # =============================================================================
 """
 📄 .github/workflows/dca_ma_strategy.yml (Sigma DCA Manager Engine)
@@ -664,7 +622,7 @@ jobs:
 """
 
 # =============================================================================
-# 8. 파일 구성도
+# 7. 파일 구성도
 # =============================================================================
 """
 📁 strategy_engine/
@@ -705,7 +663,7 @@ if __name__ == "__main__":
     print("  in ASCII diagrams and structured comments.")
     print()
     print("  📍 File: DCA_MA_strategy_flowchart.py")
-    print("  📅 Last updated: 2026-08-02")
+    print("  📅 Last updated: 2026-08-03")
     print()
     print("  💡 Tip: Use 'cat' to view, or open in VS Code")
     print("  with collapsed sections for easy navigation.")
