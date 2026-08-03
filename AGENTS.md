@@ -30,11 +30,25 @@ Not lazy about: input validation at trust boundaries, error handling that preven
 
 ## 프로젝트 컨벤션 (strategy_engine)
 
-- **단일 파일 엔진**: `DCA_MA_strategy.py`가 실전 브리핑 + 백테스트 + 신호를 모두 담당 (통합 완결판).
+### 현재 아키텍처
+- **단일 파일 엔진**: `DCA_MA_strategy.py` — 실전 브리핑 + 백테스트(`--backtest`) + 신호(`--signal`)를 모두 담당.
 - **설정 단일 소스**: `portfolio_config.json` (포지션/시그마/모드 상태). 설정값은 코드에 하드코딩하지 않고 여기에서 읽는다.
-- **문서**: `README.md` · `STRATEGY_RULES.md`(순수 규칙만) · `DCA_MA_strategy_flowchart.py`(플로우차트) ·
-  `DUAL_MODE_SUMMARY.md` 등. 기능/로직을 제거하면 문서에서도 함께 정리한다.
-- **검증**: 변경 후 `python3 -m py_compile <file>.py` 로 문법 확인, 가능하면 실제 실행
-  (`--signal` / `--backtest`)으로 동작 확인. 버그 검토는 코드 리뷰로 수행.
-- **커밋 메시지**: `type: 한글 요약 — 상세` 형식 (예: `refactor: ...`, `feat: ...`, `docs: ...`).
-- **언어**: 사용자 소통·문서는 한국어, 코드 식별자는 영어.
+- **현재 전략 규칙**: LOC ↔ ATH_DCA 듀얼 모드 · MA 레짐 필터(LOC 모드 한정) · ATH 하락분할 DCA(3분할, 3차 = Stage 5 바닥) ·
+  비상 모드 종료(RECOVERY_REENTRY: 미사용 분할 ≥1 + 30영업일 + DD ≤ TRIGGER_1×50% + MA20>MA60).
+- **신호 시스템**: 브리핑의 ▶ 실행 액션 라인은 신호이며 실제 체결은 사용자 수동 매매 — 엔진은 주문을 자동 실행하지 않는다.
+
+### 제거된 기능 — 재도입 금지
+- **전고점 50% 청산 (peak sell)**: 2026-08-03 제거. 백테스트 전용으로만 존재했고 실전 엔진에서는 실행되지 않았다.
+  관련 코드(`check_peak_sell_signal` 계열, `SELL_PCT`, `_SELL_*`)와 문서 언급(STRATEGY_RULES · README · 플로우차트)은
+  모두 삭제됨. 다시 추가하거나 문서에 언급하지 말 것.
+
+### 문서 규율
+- `STRATEGY_RULES.md`는 **순수 규칙만** — 백테스트 근거·성과 수치·미사용 기능 노트를 넣지 않는다.
+- 기능/로직 제거 시 모든 문서(README · 플로우차트 · 요약 문서)에서 함께 정리한다.
+- `DCA_MA_strategy_flowchart.py`는 플로우차트 문서, `DUAL_MODE_SUMMARY.md`·`TRIGGER_OPTIMIZATION_SUMMARY.md`는 설계/분석 문서.
+
+### 검증 & 커밋
+- 변경 후 `python3 -m py_compile <file>.py` 로 문법 확인, 가능하면 실제 실행(`--signal` / `--backtest`)으로 동작 확인.
+  버그 검토는 코드 리뷰로 수행.
+- 커밋 메시지: `type: 한글 요약 — 상세` 형식 (예: `refactor: ...`, `feat: ...`, `docs: ...`).
+- 언어: 사용자 소통·문서는 한국어, 코드 식별자는 영어.
