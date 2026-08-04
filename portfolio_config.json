@@ -42,8 +42,8 @@
             "ATH_DCA_ENTERED_ON": "2026-03-27",
             "MA_FILTER_CONFIG_FINGERPRINT": "20|lump|1.0",
             "MA_FILTER_STATE": {
-                "regime": "below",
-                "since": "2026-08-02"
+                "regime": "above",
+                "since": "2026-08-04"
             }
         },
         "SOXL": {
