@@ -385,7 +385,7 @@ _ma_filter_lines()
  │   ├── ATH_DCA_CYCLE_ATH (사이클 완료 시점 ATH 기록)
  │   ├── ATH_DCA_CONFIG_FINGERPRINT ⭐신규 (설정 변경 감지용 지문)
  │   │   → TRIGGER/SPLITS/STRATEGY 변경 시 자동 감지 → 분할 상태 초기화
- │   ├── ATH_DCA_ENTERED_ON (비상 모드 진입일 — 종료 클럭 기준)
+ │   ├── ATH_DCA_ENTERED_ON (비상 모드 진입일 — 유지 클럭 기준)
  │   ├── ATH_DCA_WAIT_SENT / ATH_DCA_NUDGE_SENT (⏳/🔔 전송 dedup)
  │   ├── ATH_DCA_IMMINENT_SENT (📡 실시간 임박 갭 dedup)
  │   └── RECOVERY_REENTRY ⭐ (비상 모드 종료: ENABLED/DD_RATIO/MIN_DAYS/MA_CONFIRM)

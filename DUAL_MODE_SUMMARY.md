@@ -219,7 +219,7 @@ ATH_DCA ────────────────────────
      ├── ATH_DCA_USED_SPLITS              (자동 관리)
      ├── ATH_DCA_CYCLE_ATH                (사이클 완료 시 기록)
      ├── ATH_DCA_CONFIG_FINGERPRINT       (설정 변경 감지)
-     ├── ATH_DCA_ENTERED_ON               (크래시 진입일, 비상 모드 종료 클럭 기준)
+     ├── ATH_DCA_ENTERED_ON               (크래시 진입일, 비상 모드 유지 클럭 기준)
      ├── ATH_DCA_WAIT_SENT                (⏳ 대기 모니터 일일 전송 dedup)
      ├── ATH_DCA_NUDGE_SENT               (🔔 임박 넛지 전송 dedup)
      ├── ATH_DCA_IMMINENT_SENT            (📡 실시간 임박 갭 dedup — 1.0%p 좁힘 시 재알림)

@@ -125,7 +125,7 @@
 
 `DCA_MA_strategy.py`는 `ATH_DCA_CONFIG_FINGERPRINT` 변경을 감지하면:
 - `ATH_DCA_USED_SPLITS` 초기화 (사용 분할 리셋)
-- `ATH_DCA_ENTERED_ON` 제거 (비상 모드 종료 클럭 재시작)
+- `ATH_DCA_ENTERED_ON` 제거 (비상 모드 유지 클럭 재시작)
 
 → 트리거 값을 바꾸면 **다음 실행부터 사이클이 초기화**되어 1차부터 다시 발동할 수 있음 (정상 동작).
 

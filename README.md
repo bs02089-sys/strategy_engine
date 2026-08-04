@@ -263,7 +263,7 @@ pandas_market_calendars  # NYSE 휴장일 계산
 | `ATH_DCA` | ATH 대비 하락분할 매수 설정 (`ENABLED`/`SPLITS`/`TRIGGER_1~3`) |
 | `RECOVERY_REENTRY` | 비상 모드 종료 파라미터 (`ENABLED`/`DD_RATIO`/`MIN_DAYS`/`MA_CONFIRM`) |
 | `MA_FILTER` | MA 레짐 필터 (`ENABLED`/`MA_DAYS`/`REENTRY`/`REENTRY_PCT`) — TQQQ: MA20+lump, SOXL: MA250+dca_reset |
-| `ATH_DCA_ENTERED_ON` | 비상 모드 진입일 — 비상 모드 종료 대기 클럭 기준 (자동 기록) |
+| `ATH_DCA_ENTERED_ON` | 비상 모드 진입일 — 비상 모드 유지 클럭 기준 (자동 기록) |
 | `ROTATION_EXIT_DAYS` | ROTATION_3M 만기 영업일 수 |
 
 ### LOC 목표가 계산식

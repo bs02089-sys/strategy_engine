@@ -1583,6 +1583,12 @@ def _recovery_clock(pos_cfg: dict, today_ny: date) -> tuple[int, int, int, date]
     return elapsed_bd, min_days, min_days - elapsed_bd, entered_date
 
 
+# 비상 모드 대기 상태 라벨 — 야간 브리핑과 --ath-monitor 리얼타임 양 채널이
+# 공유하는 _recovery_wait_line()에서 사용하는 단일 소스. 어느 종목이든 동일
+# 용어가 출력되도록 라벨은 이 상수로만 지정한다 (f-string 하드코딩 금지).
+ATH_DCA_WAIT_LABEL = "비상 모드 유지"
+
+
 def _recovery_wait_line(ticker: str, pos_cfg: dict, today_ny: date) -> str | None:
     """Return the recovery re-entry wait-monitor line for a position, or None.
 
@@ -1606,7 +1612,7 @@ def _recovery_wait_line(ticker: str, pos_cfg: dict, today_ny: date) -> str | Non
         return None
     cal_days = (today_ny - entered_date).days
     return (
-        f"• ⏳ **{ticker} 비상 모드 종료 대기:** D+{elapsed_bd}/{min_days} "
+        f"• ⏳ **{ticker} {ATH_DCA_WAIT_LABEL}:** D+{elapsed_bd}/{min_days} "
         f"영업일 (남은 {remaining}영업일 | 진입 {entered_date.strftime('%Y-%m-%d')}, "
         f"경과 {cal_days}일)"
     )
