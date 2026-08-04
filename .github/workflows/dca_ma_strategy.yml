@@ -26,6 +26,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Sync with latest remote (start from newest state)
+        # 체크아웃 직후 최신 원격 상태로 rebase — 봇이 스테일 상태를 기준으로
+        # 파일을 변경하지 않도록 충돌 윈도우를 최소화한다.
+        run: git pull --rebase
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -68,5 +73,8 @@ jobs:
           [ -f "portfolio_config.json" ] && git add portfolio_config.json
 
           git commit -m "update: dca-state $(date +'%Y-%m-%d')" || echo "No changes to commit"
-          git pull --rebase || true
+          # -X theirs: 충돌 시 원격(사람) 버전을 유지 — 봇의 스테일 상태는 버리고 다음 실행에서 재생성.
+          # || true: 일시적 실패(네트워크 등) 시에도 push는 계속 시도해 갱신 유실을 방지
+          # (충돌은 -X theirs가 자동 해결하므로 || true는 일시적 오류만 삼킨다)
+          git pull --rebase -X theirs || true
           git push

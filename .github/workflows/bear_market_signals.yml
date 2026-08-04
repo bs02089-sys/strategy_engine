@@ -15,6 +15,9 @@ jobs:
       DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
     steps:
       - uses: actions/checkout@v4
+      - name: Sync with latest remote (start from newest state)
+        # 체크아웃 직후 최신 원격 상태로 rebase — 스테일 상태 기준 변경 방지
+        run: git pull --rebase
       - name: Set up Python
         uses: actions/setup-python@v5
         with: {python-version: '3.14'}
@@ -34,6 +37,9 @@ jobs:
           # 상태 파일만 커밋 (로그는 저장하지 않음)
           [ -f "signal_report.json" ] && git add signal_report.json
           git commit -m "update: signals $(date +'%Y-%m-%d')" || echo "No changes to commit"
+          # -X theirs: 충돌 시 원격 버전 유지 — 봇 상태는 다음 실행에서 재생성.
+          # || true: 일시적 실패 시에도 push는 계속 시도 (기존에는 pull 자체가 없었음)
+          git pull --rebase -X theirs || true
           git push
           
       - name: Send Discord notification

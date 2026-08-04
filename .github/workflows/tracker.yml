@@ -16,6 +16,9 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+      - name: Sync with latest remote (start from newest state)
+        # 체크아웃 직후 최신 원격 상태로 rebase — 스테일 상태 기준 변경 방지
+        run: git pull --rebase
       - uses: actions/setup-python@v5
         with: {python-version: '3.14'}
       - run: pip install -r requirements.txt
@@ -36,5 +39,6 @@ jobs:
           # 상태 파일만 커밋 (로그는 저장하지 않음)
           git add -f market_state.json
           git commit -m "Auto-update stage state" || echo "No changes"
-          git pull --rebase
+          # -X theirs: 충돌 시 원격 버전 유지 — 봇 상태는 다음 실행에서 재생성
+          git pull --rebase -X theirs
           git push
