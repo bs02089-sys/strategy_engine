@@ -11,7 +11,7 @@ DISCORD_WEBHOOK = os.getenv(
     "DISCORD_WEBHOOK_URL", "YOUR_DISCORD_WEBHOOK_URL"
 )
 DISCORD_USER_ID = os.getenv("DISCORD_USER_ID", "YOUR_DISCORD_USER_ID")
-TICKER = "FNGU"
+TICKER = "SOXL"
 
 
 def fetch_finnhub_hourly_data(ticker, api_key):
