@@ -340,8 +340,8 @@ def analyze_ticker(ticker, df_4h, state):
         f"⚠️⚠️⚠️ **[{ticker}] 4시간봉 스윙 매도/익절(SELL) 시그널 포착!**\n"
         f"- 시간: {time_str}\n"
         f"- 가격: ${current_close:.2f}\n"
-            f"- 상태: 20 EMA 이탈 — 보유 포지션 정리\n"
-            f"- 💡 지금 깨어나셔서 매도 주문을 직접 실행해 주세요 (자동 매매 없음)"
+        f"- 상태: 20 EMA 이탈 — 보유 포지션 정리\n"
+        f"- 💡 지금 깨어나셔서 매도 주문을 직접 실행해 주세요 (자동 매매 없음)"
     )
     state.update({"state": "WAITING", "last_sell": time_str})
     log_signal(ticker, "SELL", df_4h.index[-1], current_close)

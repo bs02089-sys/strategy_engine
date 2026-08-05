@@ -23,12 +23,21 @@ GitHub Actions의 `dca_ma_strategy.yml`(--ath-monitor 분기)를 실행시킵니
   JOB_TITLE             기본값: "ATH DCA realtime monitor"
 
 사용법:
-  python setup_cronjob_org.py              # 실제 생성
+  python setup_cronjob_org.py              # ATH DCA 실시간 모니터 잡 생성 (기본)
+  python setup_cronjob_org.py --swing      # 스윙 봇 잡 생성 (4h봉 마감 직후 18:45/22:45 UTC, 월~금)
   python setup_cronjob_org.py --dry-run    # 페이로드만 출력 (API 미호출, 시크릿 마스킹)
   python setup_cronjob_org.py --list       # 기존 잡 목록 조회
   python setup_cronjob_org.py --test-dispatch  # 테스트 dispatch 1회 발사 (워크플로우 실행)
   python setup_cronjob_org.py --update-pat # 크론잡에 저장된 GITHUB_PAT를 새 토큰으로 갱신
   python setup_cronjob_org.py --update-schedule  # 크론잡 폴링 간격 갱신 (POLL_MINUTES/UTC_HOURS 반영)
+
+스윙 봇 잡 (--swing):
+  - 이벤트: repository_dispatch(event_type: swing-bot) → swing_bot.yml 실행
+  - 스케줄: 월~금 18:45/22:45 UTC — 4h봉(09:30/13:30 ET) 마감 직후
+    * 여름(DST): 봉 마감 17:30/21:30 UTC → 75분 후
+    * 겨울(EST): 봉 마감 18:30/22:30 UTC → 15분 후
+    (GitHub Actions 스케줄 크론보다 정확 — best-effort 지연/비활성화 우회)
+  - 관련 스크립트: setup_swing_cron.py (로컬 크론 — 평가 전용)
 """
 import base64
 import copy
@@ -48,6 +57,11 @@ except ImportError:
 CRONJOB_API_BASE = "https://api.cron-job.org"
 GITHUB_API_BASE = "https://api.github.com"
 WORKFLOW_PATH = ".github/workflows/dca_ma_strategy.yml"
+
+# 스윙 봇 잡 전용 설정
+SWING_WORKFLOW_PATH = ".github/workflows/swing_bot.yml"
+SWING_EVENT_TYPE = "swing-bot"
+SWING_JOB_TITLE = "Swing Bot 4h bar monitor"
 
 # cron-job.org jobDetails에 포함된 응답 전용(읽기 전용) 필드 — PATCH 시 제거해야 400을 피한다
 READONLY_JOB_FIELDS = (
@@ -102,6 +116,24 @@ def _build_schedule(poll_minutes: int, hours_start: int, hours_end: int) -> dict
     }
 
 
+def _build_swing_schedule() -> dict:
+    """스윙 봇 전용 스케줄: 월~금 18:45 / 22:45 UTC.
+
+    4h봉은 장 개장(09:30 ET) 기준 [09:30~13:30), [13:30~17:30) —
+    여름(DST) 마감 17:30/21:30 UTC, 겨울(EST) 마감 18:30/22:30 UTC.
+    18:45/22:45 UTC 실행은 두 계절 모두 '마감 직후'가 된다.
+    """
+    return {
+        "timezone": "UTC",
+        "expiresAt": 0,
+        "hours": [18, 22],
+        "mdays": [-1],
+        "minutes": [45],
+        "months": [-1],
+        "wdays": [1, 2, 3, 4, 5],   # 월~금
+    }
+
+
 def _build_job_payload(cfg: dict) -> dict:
     """cron-job.org PUT /jobs 페이로드 생성."""
     return {
@@ -133,10 +165,13 @@ def _redact_secrets(payload: dict) -> dict:
     return redacted
 
 
-def verify_github(owner: str, repo: str, pat: str, event_type: str) -> tuple[bool, str]:
+def verify_github(owner: str, repo: str, pat: str, event_type: str,
+                  workflow_path: str = WORKFLOW_PATH) -> tuple[bool, str]:
     """부작용 없는 GitHub 검증: PAT 인증 + 워크플로우 트리거 존재 확인.
 
     dispatch를 실제로 발사하지 않습니다(발사는 --test-dispatch 전용).
+    workflow_path: 검증할 워크플로우 파일 (기본 dca_ma_strategy.yml,
+    --swing 모드에선 swing_bot.yml).
     """
     headers = _github_headers(pat)
 
@@ -150,10 +185,10 @@ def verify_github(owner: str, repo: str, pat: str, event_type: str) -> tuple[boo
         return False, f"❌ GitHub API 오류 ({resp.status_code}): {resp.text[:200]}"
 
     # 2) 워크플로우 파일에 repository_dispatch 트리거 존재 확인
-    wf_url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}/contents/{WORKFLOW_PATH}"
+    wf_url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}/contents/{workflow_path}"
     wf_resp = requests.get(wf_url, headers=headers, timeout=15)
     if wf_resp.status_code != 200:
-        return False, f"❌ {WORKFLOW_PATH} 파일을 확인할 수 없습니다 ({wf_resp.status_code}) — 최신 코드 푸시 필요"
+        return False, f"❌ {workflow_path} 파일을 확인할 수 없습니다 ({wf_resp.status_code}) — 최신 코드 푸시 필요"
     try:
         content = base64.b64decode(wf_resp.json().get("content", "")).decode("utf-8", errors="ignore")
     except Exception:
@@ -265,21 +300,37 @@ def main() -> None:
     test_mode = "--test-dispatch" in sys.argv
     update_pat_mode = "--update-pat" in sys.argv
     update_schedule_mode = "--update-schedule" in sys.argv
+    swing_mode = "--swing" in sys.argv
 
     owner = _env("GITHUB_OWNER", "<owner>")
     repo = _env("GITHUB_REPO", "<repo>")
     pat = _env("GITHUB_PAT", "<pat>")
     cronjob_key = _env("CRONJOB_ORG_API_KEY", "<key>")
-    event_type = _env("GITHUB_EVENT_TYPE", "ath-dca-monitor")
-    poll_minutes = int(_env("POLL_MINUTES", "10"))
-    hours_start = int(_env("UTC_HOURS_START", "13"))
-    hours_end = int(_env("UTC_HOURS_END", "21"))
-    job_title = _env("JOB_TITLE", "ATH DCA realtime monitor")
 
-    if not (5 <= poll_minutes <= 60 and 60 % poll_minutes == 0):
-        raise SystemExit("❌ POLL_MINUTES는 60의 약수여야 합니다 (예: 5, 6, 10, 12, 15, 20, 30).")
-    if hours_start > hours_end:
-        raise SystemExit("❌ UTC_HOURS_START는 UTC_HOURS_END보다 작거나 같아야 합니다.")
+    if swing_mode:
+        # ── 스윙 봇 잡 전용 설정 (4h봉 마감 직후 고정 스케줄) ──────────
+        event_type = SWING_EVENT_TYPE
+        job_title = SWING_JOB_TITLE
+        workflow_path = SWING_WORKFLOW_PATH
+        schedule = _build_swing_schedule()
+        poll_minutes = hours_start = hours_end = None
+        job_desc = "스윙 봇 4h봉 모니터 (월~금 18:45/22:45 UTC)"
+    else:
+        # ── ATH DCA 실시간 모니터 잡 (장중 N분 폴링) ──────────────────
+        event_type = _env("GITHUB_EVENT_TYPE", "ath-dca-monitor")
+        poll_minutes = int(_env("POLL_MINUTES", "10"))
+        hours_start = int(_env("UTC_HOURS_START", "13"))
+        hours_end = int(_env("UTC_HOURS_END", "21"))
+        job_title = _env("JOB_TITLE", "ATH DCA realtime monitor")
+        workflow_path = WORKFLOW_PATH
+        schedule = _build_schedule(poll_minutes, hours_start, hours_end)
+        job_desc = f"장중 매 {poll_minutes}분 ATH DCA 실시간 알림"
+
+    if not swing_mode:
+        if not (5 <= poll_minutes <= 60 and 60 % poll_minutes == 0):
+            raise SystemExit("❌ POLL_MINUTES는 60의 약수여야 합니다 (예: 5, 6, 10, 12, 15, 20, 30).")
+        if hours_start > hours_end:
+            raise SystemExit("❌ UTC_HOURS_START는 UTC_HOURS_END보다 작거나 같아야 합니다.")
 
     if test_mode:
         for key in ("GITHUB_PAT", "GITHUB_OWNER", "GITHUB_REPO"):
@@ -295,7 +346,7 @@ def main() -> None:
                 raise SystemExit(f"❌ 환경변수 {key}가 설정되지 않았습니다.")
 
         # 1) 새 PAT가 유효한지 먼저 검증 (죽은 토큰을 크론잡에 기록하지 않도록)
-        ok, msg = verify_github(owner, repo, pat, event_type)
+        ok, msg = verify_github(owner, repo, pat, event_type, workflow_path)
         print(msg)
         if not ok:
             raise SystemExit("❌ 새 GitHub PAT 검증 실패 — 크론잡을 갱신하지 않았습니다.")
@@ -307,7 +358,7 @@ def main() -> None:
         if job_id is None:
             raise SystemExit(
                 f"❌ 갱신할 크론잡을 찾을 수 없습니다: {dispatches_url} "
-                f"(제목: {job_title}). 먼저 `python setup_cronjob_org.py`로 생성하세요."
+                f"(제목: {job_title}). 먼저 `python setup_cronjob_org.py{ ' --swing' if swing_mode else ''}`로 생성하세요."
             )
 
         # 3) 목록 응답에는 extendedData(헤더)가 없으므로 단일 잡 상세를
@@ -341,7 +392,7 @@ def main() -> None:
         if job_id is None:
             raise SystemExit(
                 f"❌ 갱신할 크론잡을 찾을 수 없습니다: {dispatches_url} "
-                f"(제목: {job_title}). 먼저 `python setup_cronjob_org.py`로 생성하세요."
+                f"(제목: {job_title}). 먼저 `python setup_cronjob_org.py{ ' --swing' if swing_mode else ''}`로 생성하세요."
             )
 
         # 2) 기존 job 바디를 그대로 가져와 schedule만 교체한다
@@ -350,21 +401,9 @@ def main() -> None:
         if not job_body:
             raise SystemExit("❌ 크론잡 상세 조회 결과가 비어 있습니다 — 갱신을 중단합니다.")
         _strip_readonly_fields(job_body)
-        old_minutes = job_body.get("schedule", {}).get("minutes", []) or []
-        old_step = (
-            old_minutes[1] - old_minutes[0] if len(old_minutes) > 1 else poll_minutes
-        )
-        new_minutes = list(range(0, 60, poll_minutes))
-        job_body["schedule"] = _build_schedule(poll_minutes, hours_start, hours_end)
+        job_body["schedule"] = schedule
         update_job(cronjob_key, job_id, job_body)
-        print(
-            f"✅ 크론잡(jobId={job_id})의 폴링 간격을 "
-            f"{old_step}분 → {poll_minutes}분으로 갱신했습니다."
-        )
-        print(
-            f"   장중 {hours_start}:00~{hours_end}:00 UTC, 월~금 — 매 {poll_minutes}분마다 "
-            f"(실행 분: {', '.join(str(m).zfill(2) for m in new_minutes)})"
-        )
+        print(f"✅ 크론잡(jobId={job_id})의 스케줄을 갱신했습니다: {job_desc}")
         print("   테스트: python3 setup_cronjob_org.py --test-dispatch")
         return
 
@@ -378,14 +417,14 @@ def main() -> None:
         "github_pat": pat,
         "event_type": event_type,
         "job_title": job_title,
-        "schedule": _build_schedule(poll_minutes, hours_start, hours_end),
+        "schedule": schedule,
     }
     payload = _build_job_payload(cfg)
 
     if dry_run:
-        print("🔍 [DRY RUN] 생성될 크론잡 페이로드 (시크릿은 ***로 마스킹):")
+        print(f"🔍 [DRY RUN] 생성될 크론잡 페이로드 ({job_desc}, 시크릿 *** 마스킹):")
         print(json.dumps(_redact_secrets(payload), indent=2, ensure_ascii=False))
-        print("\n위 내용이 맞다면 `python setup_cronjob_org.py`로 실행하세요.")
+        print(f"\n위 내용이 맞다면 `python setup_cronjob_org.py{' --swing' if swing_mode else ''}`로 실행하세요.")
         return
 
     if show_list:
@@ -395,7 +434,7 @@ def main() -> None:
         return
 
     # ── 실제 생성: 검증 → 중복 확인 → 생성 ────────────────────────
-    ok, msg = verify_github(owner, repo, pat, event_type)
+    ok, msg = verify_github(owner, repo, pat, event_type, workflow_path)
     print(msg)
     if not ok:
         raise SystemExit("❌ GitHub 검증 실패 — 크론잡을 생성하지 않았습니다.")
@@ -404,15 +443,15 @@ def main() -> None:
     dup_id = find_existing_job(existing, cfg["dispatches_url"], job_title)
     if dup_id is not None:
         print(f"⚠️ 동일한 크론잡이 이미 존재합니다 (jobId={dup_id}). 생성하지 않았습니다.")
-        print("   간격/시간 변경 시: `python setup_cronjob_org.py --update-schedule`")
-        print("   (POLL_MINUTES/UTC_HOURS_START/UTC_HOURS_END 반영) — 또는 잡을 삭제 후 재생성.")
+        print("   스케줄 변경 시: `python setup_cronjob_org.py --update-schedule`")
+        print(f"   {f'( --swing) ' if swing_mode else '(POLL_MINUTES/UTC_HOURS 반영) '}— 또는 잡을 삭제 후 재생성.")
         print_jobs(existing)
         return
 
     print("✅ cron-job.org API 키 인증 성공.")
     job_id = create_job(cronjob_key, payload)
-    print(f"🎉 크론잡 생성 완료! jobId = {job_id}")
-    print("\n✅ 설정 완료! 장중 매 N분마다 ATH DCA 실시간 알림이 실행됩니다.")
+    print(f"🎉 크론잡 생성 완료! jobId = {job_id} ({job_desc})")
+    print("\n✅ 설정 완료! 이벤트가 GitHub Actions 워크플로우를 실행합니다.")
     print("   테스트: python setup_cronjob_org.py --test-dispatch")
 
 

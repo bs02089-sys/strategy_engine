@@ -9,14 +9,11 @@ GitHub Actions와 병행해 로컬에서도 스윙 봇과 성과 평가를 자�
 '# swing-local' 주석을 달아 식별한다 (반복 설치 시 중복 방지).
 
 설치되는 크론 (KST, Asia/Seoul 기준):
-  - 봇: 미국 장중 4h봉 마감 직후 03:45 / 07:45 (월~금)
-    * 4h봉은 09:30/13:30 ET 세션 기준 [09:30~13:30), [13:30~17:30) —
-      여름(DST, UTC-4): 02:30/06:30 KST 마감, 겨울(EST, UTC-5): 03:30/07:30 KST 마감
-      → 03:45/07:45 KST 실행은 두 계절 모두에서 마감 직후가 되어
-      갓 닫힌 4h봉을 신호 판정에 포함한다 (부분 봉 방어가 안전망).
-      (주말 실행은 데이터가 없어 봇이 조용히 스킵)
+  - 봇: cron-job.org(swing-bot dispatch)가 담당 — 로컬 크론에서는 제외
+    * 4h봉 신호 감지는 클라우드(GHA)에서 실행되어 이 PC가 꺼져 있어도 동작
+    * 설정: python3 setup_cronjob_org.py --swing
   - 평가: 매일 08:00 (전날 신호 기준 성과 스냅샷 저장 + Discord 전송)
-  - 래퍼: swing_local_cron.sh (실행 전 git pull로 GHA 상태 동기화)
+  - 래퍼: swing_local_cron.sh eval (실행 전 git pull로 GHA 상태 동기화)
 
 사용법:
   python3 setup_swing_cron.py --dry-run    # 설치될 크론 라인만 출력 (미설치)
@@ -32,22 +29,26 @@ MARKER = "# swing-local"
 REPO_DIR = "/home/bs020/projects/strategy_engine"
 WRAPPER = f"{REPO_DIR}/swing_local_cron.sh"
 
-CRON_BOT = (
-    f"45 3,7 * * 1-5 {WRAPPER} bot {MARKER}"
-)
+# 봇 신호 감지는 cron-job.org → GitHub Actions(repository_dispatch: swing-bot)가 담당 —
+# 로컬 크론은 성과 평가(매일 08:00 KST)만 설치한다.
 CRON_EVAL = (
     f"0 8 * * * {WRAPPER} eval {MARKER}"
 )
-CRON_LINES = [CRON_BOT, CRON_EVAL]
+CRON_LINES = [CRON_EVAL]
 
 
 def get_crontab():
-  """현재 crontab 내용(문자열). 없으면 빈 문자열. 오류 시 SystemExit."""
+  """현재 crontab 내용(문자열).
+
+  - "no crontab for <user>"(정상): 빈 문자열 반환
+  - 그 외 오류(데몬 문제 등): SystemExit — 기존 크론을 덮어쓰지 않도록 중단
+  """
   proc = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
   if proc.returncode == 0:
     return proc.stdout
-  # "no crontab for <user>" → 빈 크론
-  return ""
+  if "no crontab" in proc.stderr.lower():
+    return ""
+  raise SystemExit(f"❌ crontab 조회 실패: {proc.stderr.strip()}")
 
 
 def set_crontab(content):
@@ -93,7 +94,6 @@ def main():
   new_lines = kept + CRON_LINES
   set_crontab("\n".join(new_lines) + "\n")
   print("✅ 로컬 크론 설치 완료 (KST 기준):")
-  print(f"  {CRON_BOT}")
   print(f"  {CRON_EVAL}")
   print("확인: python3 setup_swing_cron.py --list")
 
