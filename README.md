@@ -377,7 +377,7 @@ python3 DCA_MA_strategy_flowchart.py
 
 | 트리거 | 시간 (UTC) | 설명 |
 |--------|------------|------|
-| 예약 실행 | 14:00, 18:00 (월~금) | 한국 23:00/03:00 — 미국 장중 실시간 스윙 신호 확인 → Discord 알림 |
+| 예약 실행 | 장중 15분 폴링 (13:00~22:00, 월~금) | 미국 장중 실시간 스윙 신호 확인 — 4h봉 마감 즉시 Discord 알림 |
 | 수동 실행 | 사용자 요청 시 | workflow_dispatch 수동 실행 |
 
 > - 3중 EMA(10/20/50) 정배열 + 거래량 돌파 + 최근 5봉 고점 돌파로 BUY/SELL 신호를 냅니다.
@@ -419,11 +419,14 @@ python3 DCA_MA_strategy_flowchart.py
 
 #### 1) 봇: cron-job.org 잡 생성 (권장 — PC 상태와 무관)
 
-`setup_cronjob_org.py --swing`이 한국 23:00/03:00(월~금, **= 14:00/18:00 UTC**)에
-`repository_dispatch(swing-bot)`를 발사하는 크론잡을 만듭니다. 미국 장중(한국
-저녁~새벽)에 2회 실행되어, 사용자가 깨어 있는 시간대에 실시간으로 신호를 확인하고
-직접 매매할 수 있게 합니다. GitHub Actions 자체 스케줄 크론은 best-effort라
-지연/비활성화될 수 있어, 정확한 시각 알림으로 우회합니다.
+`setup_cronjob_org.py --swing`이 미국 장중 **15분 간격 폴링**(월~금, 기본 **UTC
+13:00~22:00**)으로 `repository_dispatch(swing-bot)`를 발사하는 크론잡을 만듭니다.
+신호는 **완성 4h봉 기준**이므로, 봉이 닫히는 순간(첫 봉 13:30 ET / 장 마감 봉
+16:00 ET)을 놓치지 않고 **15분 이내에 감지해 즉시 Discord로 알림**합니다
+(부분-봉 방어가 진행 중인 봉은 제외). 하루 2회 고정 실행 방식은 봉 마감 후 최대
+18시간 지연이 있어, 실시간 매매 타이밍에 맞추려면 폴링이 필요합니다.
+GitHub Actions 자체 스케줄 크론은 best-effort라 지연/비활성화될 수 있어,
+정확한 시각 알림으로 우회합니다.
 
 ```bash
 # .env 또는 환경변수 필요: CRONJOB_ORG_API_KEY, GITHUB_PAT, GITHUB_OWNER, GITHUB_REPO
@@ -436,13 +439,15 @@ python3 setup_cronjob_org.py --swing --test-dispatch  # 테스트 발사 (워크
 python3 setup_cronjob_org.py --list              # 등록된 잡 목록
 ```
 
-- 한국 23:00 = 미국 장 개시 전후(여름 10:00 ET / 겨울 09:00 ET), 한국 03:00 =
-  미국 장중(여름 14:00 ET / 겨울 13:00 ET) — 봇의 부분-봉 방어가 진행 중인 봉을
-  제외하고 직전 완성 봉 기준으로 판단합니다.
+- 신호 감지 시각 (봉 마감 직후, 폴링 15분 이내): 첫 4h봉 13:30 ET ≈ 한국
+  새벽 02:30(여름)/03:30(겨울), 장 마감 봉 16:00 ET ≈ 한국 05:00(여름)/06:00(겨울).
+- **알림 스팸 없음**: 상태 머신(`swing_state.json`)이 중복 BUY/SELL 알림을
+  차단하므로, 15분 폴링이라도 Discord 발송은 신호 상태가 전환될 때만 일어납니다.
+- 폴링 간격/시간대 변경: `SWING_POLL_MINUTES`(기본 15)·`SWING_UTC_HOURS_START`(기본 13)·
+  `SWING_UTC_HOURS_END`(기본 22) 환경변수 후 `setup_cronjob_org.py --swing --update-schedule`.
 - `swing_bot.yml`은 `repository_dispatch(swing-bot)` 트리거를 이미 지원합니다 (코드 푸시 후
-  사용). 기존 `schedule` 크론은 보조 수단으로 그대로 유지됩니다 — schedule(14:00/18:00 UTC)과
-  dispatch(14:00/18:00 UTC)가 동일 시각에 병행 실행될 수 있지만, 상태 머신이 중복
-  BUY/SELL 알림을 차단합니다.
+  사용). 기존 `schedule` 크론은 보조 수단으로 유지됩니다 — schedule(`*/15 13-22 * * 1-5`)과
+  dispatch(동일 스케줄)가 병행 실행될 수 있지만, 상태 머신이 중복 BUY/SELL 알림을 차단합니다.
 
 #### 2) 평가: 로컬 크론 (매일 08:00 KST)
 

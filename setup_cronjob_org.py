@@ -24,7 +24,7 @@ GitHub Actions의 `dca_ma_strategy.yml`(--ath-monitor 분기)를 실행시킵니
 
 사용법:
   python setup_cronjob_org.py              # ATH DCA 실시간 모니터 잡 생성 (기본)
-  python setup_cronjob_org.py --swing      # 스윙 봇 잡 생성 (한국 23:00/03:00 = UTC 14:00/18:00, 월~금)
+  python setup_cronjob_org.py --swing      # 스윙 봇 잡 생성 (미국 장중 15분 폴링, 월~금)
   python setup_cronjob_org.py --dry-run    # 페이로드만 출력 (API 미호출, 시크릿 마스킹)
   python setup_cronjob_org.py --list       # 기존 잡 목록 조회
   python setup_cronjob_org.py --test-dispatch  # 테스트 dispatch 1회 발사 (워크플로우 실행)
@@ -33,8 +33,12 @@ GitHub Actions의 `dca_ma_strategy.yml`(--ath-monitor 분기)를 실행시킵니
 
 스윙 봇 잡 (--swing):
   - 이벤트: repository_dispatch(event_type: swing-bot) → swing_bot.yml 실행
-  - 스케줄: 한국 23:00/03:00 (= UTC 14:00/18:00), 월~금 — 미국 장중 실시간
-    신호 확인 (사용자가 깨어 있어 직접 매매하는 시간대에 맞춤)
+  - 스케줄: 미국 장중 15분 간격 폴링 (기본 UTC 13~22시, 월~금) — 신호는 완성
+    4h봉 기준이므로 봉이 닫히는 순간(첫 봉 13:30 ET / 장 마감 봉 16:00 ET)을
+    놓치지 않고 15분 이내 감지해 실시간 알림한다. 상태 머신(swing_state.json)이
+    중복 BUY/SELL 알림을 차단하므로 폴링 빈도와 무관하게 스팸이 없다.
+  - 선택 환경변수: SWING_POLL_MINUTES(기본 15), SWING_UTC_HOURS_START(기본 13),
+    SWING_UTC_HOURS_END(기본 22) — 변경 후 `--swing --update-schedule`로 반영
   - 관련 스크립트: setup_swing_cron.py (로컬 크론 — 평가 전용)
 """
 import base64
@@ -114,24 +118,15 @@ def _build_schedule(poll_minutes: int, hours_start: int, hours_end: int) -> dict
     }
 
 
-def _build_swing_schedule() -> dict:
-    """스윙 봇 전용 스케줄: 한국 23:00 / 03:00 (= UTC 14:00 / 18:00), 월~금.
+def _build_swing_schedule(poll_minutes: int, hours_start: int, hours_end: int) -> dict:
+    """스윙 봇 전용 스케줄: 미국 장중 poll_minutes 분 간격 폴링, 월~금.
 
-    미국 장중(한국 저녁~새벽)에 2회 실행 — 사용자가 깨어 있는 시간대에
-    실시간으로 신호를 확인하고 직접 매매할 수 있게 한다. 03:00 KST는
-    전일 18:00 UTC에 해당하므로 hours=[14, 18]로 표현한다.
-    참고: wdays는 두 시간에 공통 적용되어 금요일 18:00 UTC 실행은
-    토요일 03:00 KST에 발생한다 (봇의 주말 캘린더 스킵이 처리).
+    신호는 완성 4h봉 기준이라 봉이 닫히는 순간(첫 봉 13:30 ET / 장 마감 봉
+    16:00 ET)을 놓치지 않도록 장중 내내 자주 실행한다. 기본 UTC 13~22시는
+    미국 장중(09:30~16:00 ET)을 여름/겨울 모두 포함하며, 상태 머신이 중복
+    알림을 차단하므로 BUY/SELL Discord 발송은 신호 전환 시에만 일어난다.
     """
-    return {
-        "timezone": "UTC",
-        "expiresAt": 0,
-        "hours": [14, 18],
-        "mdays": [-1],
-        "minutes": [0],
-        "months": [-1],
-        "wdays": [1, 2, 3, 4, 5],   # 월~금
-    }
+    return _build_schedule(poll_minutes, hours_start, hours_end)
 
 
 def _build_job_payload(cfg: dict) -> dict:
@@ -308,13 +303,15 @@ def main() -> None:
     cronjob_key = _env("CRONJOB_ORG_API_KEY", "<key>")
 
     if swing_mode:
-        # ── 스윙 봇 잡 전용 설정 (한국 23:00/03:00 고정 스케줄) ──────────
+        # ── 스윙 봇 잡 전용 설정 (미국 장중 15분 폴링) ────────────────
         event_type = SWING_EVENT_TYPE
         job_title = SWING_JOB_TITLE
         workflow_path = SWING_WORKFLOW_PATH
-        schedule = _build_swing_schedule()
-        poll_minutes = hours_start = hours_end = None
-        job_desc = "스윙 봇 실시간 모니터 (한국 23:00/03:00 = UTC 14:00/18:00)"
+        poll_minutes = int(_env("SWING_POLL_MINUTES", "15"))
+        hours_start = int(_env("SWING_UTC_HOURS_START", "13"))
+        hours_end = int(_env("SWING_UTC_HOURS_END", "22"))
+        schedule = _build_swing_schedule(poll_minutes, hours_start, hours_end)
+        job_desc = f"스윙 봇 실시간 모니터 (장중 매 {poll_minutes}분, UTC {hours_start}~{hours_end}시)"
     else:
         # ── ATH DCA 실시간 모니터 잡 (장중 N분 폴링) ──────────────────
         event_type = _env("GITHUB_EVENT_TYPE", "ath-dca-monitor")
@@ -326,11 +323,10 @@ def main() -> None:
         schedule = _build_schedule(poll_minutes, hours_start, hours_end)
         job_desc = f"장중 매 {poll_minutes}분 ATH DCA 실시간 알림"
 
-    if not swing_mode:
-        if not (5 <= poll_minutes <= 60 and 60 % poll_minutes == 0):
-            raise SystemExit("❌ POLL_MINUTES는 60의 약수여야 합니다 (예: 5, 6, 10, 12, 15, 20, 30).")
-        if hours_start > hours_end:
-            raise SystemExit("❌ UTC_HOURS_START는 UTC_HOURS_END보다 작거나 같아야 합니다.")
+    if not (5 <= poll_minutes <= 60 and 60 % poll_minutes == 0):
+        raise SystemExit("❌ POLL_MINUTES/SWING_POLL_MINUTES는 60의 약수여야 합니다 (예: 5, 6, 10, 12, 15, 20, 30).")
+    if hours_start > hours_end:
+        raise SystemExit("❌ UTC_HOURS_START/SWING_UTC_HOURS_START는 END보다 작거나 같아야 합니다.")
 
     if test_mode:
         for key in ("GITHUB_PAT", "GITHUB_OWNER", "GITHUB_REPO"):

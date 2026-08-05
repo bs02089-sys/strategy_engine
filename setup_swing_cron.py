@@ -11,6 +11,7 @@ GitHub Actions와 병행해 로컬에서도 스윙 봇과 성과 평가를 자�
 설치되는 크론 (KST, Asia/Seoul 기준):
   - 봇: cron-job.org(swing-bot dispatch)가 담당 — 로컬 크론에서는 제외
     * 4h봉 신호 감지는 클라우드(GHA)에서 실행되어 이 PC가 꺼져 있어도 동작
+    * 스케줄: 미국 장중 15분 폴링 (UTC 13~22시, 월~금) — 봉 마감 즉시 실시간 알림
     * 설정: python3 setup_cronjob_org.py --swing
   - 평가: 매일 08:00 (전날 신호 기준 성과 스냅샷 저장 + Discord 전송)
   - 래퍼: swing_local_cron.sh eval (실행 전 git pull로 GHA 상태 동기화)
