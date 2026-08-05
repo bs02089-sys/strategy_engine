@@ -111,16 +111,19 @@ def fetch_finnhub_hourly_data(ticker, api_key):
 
 
 def send_discord_alert(message):
-  """디스코드 웹훅 알림 전송"""
+  """디스코드 웹훅 알림 전송 (웨이크업 강화 포함)"""
   if not DISCORD_WEBHOOK or DISCORD_WEBHOOK == "YOUR_DISCORD_WEBHOOK":
     print(message)
     return
 
-  content = (
-      f"<@{DISCORD_USER_ID}> \n{message}"
+  # 웨이크업 강화: 멘션을 3회 반복 — 잠든 사이에도 Discord 모바일 알림이
+  # 강하게/여러 번 울리도록 (사용자가 직접 매매를 진행해야 하므로)
+  mention = (
+      " ".join([f"<@{DISCORD_USER_ID}>"] * 3)
       if DISCORD_USER_ID
-      else message
+      else ""
   )
+  content = (mention + "\n" + message) if mention else message
   requests.post(DISCORD_WEBHOOK, json={"content": content}, timeout=10)
 
 
@@ -315,10 +318,11 @@ def analyze_ticker(ticker, df_4h, state):
         print(f"[{ticker}] 이미 보유 중입니다. (추가 BUY 알림 생략)")
       else:
         msg = (
-            f"🚨 **[{ticker}] 4시간봉 스윙 매수(BUY) 시그널 포착!**\n"
+            f"🚨🚨🚨 **[{ticker}] 4시간봉 스윙 매수(BUY) 시그널 포착!**\n"
             f"- 시간: {time_str}\n"
             f"- 가격: ${current_close:.2f}\n"
-            f"- 상태: 첫 번째 속임수 신호 필터링 완료 후, 정식 돌파 매수 타점 도달"
+            f"- 상태: 첫 번째 속임수 신호 필터링 완료 후, 정식 돌파 매수 타점 도달\n"
+            f"- 💡 지금 깨어나셔서 매수 주문을 직접 실행해 주세요 (자동 매매 없음)"
         )
         # 중복 알림 방지를 위해 상태를 먼저 확정한 뒤 전송 — 전송 실패 시에도
         # 다음 실행에서 같은 신호를 다시 쏘지 않는다 (실패는 로그에 남김)
@@ -333,10 +337,11 @@ def analyze_ticker(ticker, df_4h, state):
   # 2) 매도/익절: 보유 중일 때만 20EMA 이탈 알림 (미보유 시 SELL 스팸 방지)
   if is_sell_signal and prev == "IN_POSITION":
     msg = (
-        f"⚠️ **[{ticker}] 4시간봉 스윙 매도/익절(SELL) 시그널 포착!**\n"
+        f"⚠️⚠️⚠️ **[{ticker}] 4시간봉 스윙 매도/익절(SELL) 시그널 포착!**\n"
         f"- 시간: {time_str}\n"
         f"- 가격: ${current_close:.2f}\n"
-        f"- 상태: 20 EMA 이탈 — 보유 포지션 정리"
+            f"- 상태: 20 EMA 이탈 — 보유 포지션 정리\n"
+            f"- 💡 지금 깨어나셔서 매도 주문을 직접 실행해 주세요 (자동 매매 없음)"
     )
     state.update({"state": "WAITING", "last_sell": time_str})
     log_signal(ticker, "SELL", df_4h.index[-1], current_close)

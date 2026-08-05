@@ -154,6 +154,8 @@
 | **DCA_MA_strategy.py** | 📌 **통합 완결판** — 실전 엔진(LOC 목표가/ATH DCA/MA 레짐 필터/Discord 브리핑/`--ath-monitor`) + 백테스트 + `--signal` 실시간 신호 |
 | **DCA_MA_strategy_flowchart.py** | 시스템 전체 플로우차트 문서 |
 | **setup_cronjob_org.py** | cron-job.org 실시간 알림 설정 자동화 (생성/--list/--test-dispatch/--update-pat/--update-schedule) |
+| **setup_swing_cron.py** | 스윙 봇/평가 로컬 크론 설정 자동화 (설치/--list/--remove/--dry-run) |
+| **swing_local_cron.sh** | 로컬 크론 래퍼 — git 동기화 후 봇/평가 실행 (setup_swing_cron.py가 설치) |
 | **MarketStageSystem.py** | 독립적인 시장 단계 시스템 — 바닥 단계 감지 |
 | **bear_market_signals.py** | 약세장 신호 분석 시스템 |
 | **swing_bot.py** | 골드핑거식 4시간봉 스윙 봇 — TQQQ/SOXL 다중 종목, 첫 신호 필터링, Discord 알림 |
@@ -409,6 +411,31 @@ python3 DCA_MA_strategy_flowchart.py
 >   누적 저장되고, 워크플로우가 커밋·푸시합니다 — 같은 달 재실행 시 해당 월만 갱신,
 >   월 단위 이력은 보존됩니다.
 > - 로컬 실행: `python3 swing_bot_eval.py [--ticker TQQQ] [--since 3m] [--no-mark] [--discord] [--save]`
+
+### `setup_swing_cron.py` — 로컬 크론 (KST, GitHub Actions와 병행)
+
+GitHub Actions 크론은 best-effort라 지연/비활성화될 수 있어, **로컬에서도 병행 실행**하여
+잠든 사이(한국 밤 = 미국 장중)의 신호를 놓치지 않도록 합니다. 실제 매매는 알림을 받은
+사용자가 직접 실행합니다 (자동 주문 없음).
+
+```bash
+python3 setup_swing_cron.py --dry-run   # 설치될 크론 라인 미리보기
+python3 setup_swing_cron.py             # 설치 (기존 크론 보존, 중복 방지)
+python3 setup_swing_cron.py --list      # 현재 crontab 목록
+python3 setup_swing_cron.py --remove    # 이 스크립트가 설치한 항목만 제거
+```
+
+| 항목 | 시간 (KST) | 설명 |
+|------|------------|------|
+| 봇 (swing_local_cron.sh bot) | 월~금 03:45, 07:45 | 4h봉(09:30/13:30 ET) 마감 직후 — 여름/겨울 모두 마감 직후가 되도록 설정, 부분 봉 방어가 안전망 |
+| 평가 (swing_local_cron.sh eval) | 매일 08:00 | `swing_bot_eval.py --save --since all --discord` — 성과 스냅샷 저장 + Discord 전송 |
+
+> - 래퍼는 실행 전 `git pull --rebase -X theirs`로 GHA가 커밋한 최신 상태/저널을 동기화하고,
+>   실행 로그는 `swing_local.log`에 기록됩니다 (`.gitignore`로 커밋 제외).
+> - **git push는 하지 않습니다** — 로컬 저장만. 저장소 반영은 GitHub Actions가 담당합니다.
+> - **웨이크업 강화**: BUY/SELL 알림 메시지에 멘션 3회 + "지금 깨어나서 직접 실행" 안내가
+>   포함되어, Discord 모바일 알림이 잠든 사이에도 강하게 울립니다 (Discord 앱에서 해당 서버
+>   알림을 "모든 메시지 + 소리"로 설정 권장).
 
 ### 환경 변수 (GitHub Secrets)
 

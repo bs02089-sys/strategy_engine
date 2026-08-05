@@ -17,6 +17,7 @@ venv/
 
 # 로그 파일 무시 패턴 (단, GARCH 실험 로그는 명시적으로 예외 처리)
 *_log.txt
+swing_local.log
 !sigma_DCA_garch_log.txt
 
 # 환경설정 파일 및 보안
