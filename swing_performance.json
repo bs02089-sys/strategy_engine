@@ -5,19 +5,24 @@
       "tickers": {
         "TEST": {
           "n_trades": 1,
-          "n_closed": 1,
-          "win_rate": 100.0,
-          "avg_ret": 8.11,
-          "total_return": 8.11,
-          "mdd": 0.0,
-          "pf": null,
-          "avg_hold_days": 3.0,
-          "avg_win": 8.11,
-          "avg_loss": 0.0,
-          "max_hold_days": 3
+          "n_closed": 0,
+          "win_rate": 0.0,
+          "avg_ret": -75.69,
+          "total_return": -75.69,
+          "mdd": -75.69,
+          "pf": 0.0,
+          "avg_hold_days": 0.0,
+          "avg_win": 0.0,
+          "avg_loss": -75.69,
+          "max_hold_days": 0,
+          "open": {
+            "buy_time": "2026-01-14 01:30",
+            "buy_price": 148.0,
+            "open_return_pct": -75.69
+          }
         }
       }
     }
   },
-  "updated": "2026-08-05T07:23:00.662194+00:00"
+  "updated": "2026-08-05T07:27:05.384848+00:00"
 }
