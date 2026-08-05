@@ -158,10 +158,12 @@
 | **swing_local_cron.sh** | 로컬 크론 래퍼 — git 동기화 후 평가 실행 (setup_swing_cron.py가 설치) |
 | **MarketStageSystem.py** | 독립적인 시장 단계 시스템 — 바닥 단계 감지 |
 | **bear_market_signals.py** | 약세장 신호 분석 시스템 |
-| **swing_bot.py** | 골드핑거식 4시간봉 스윙 봇 — TQQQ/SOXL 다중 종목, 첫 신호 필터링, 익절(3×ATR), Discord 알림 |
+| **swing_bot.py** | 골드핑거식 4시간봉 스윙 봇 — TQQQ/SOXL 다중 종목, 첫 신호 필터링, 종목별 익절(TQQQ 1.5×ATR/SOXL 3.5×ATR), Discord 알림 |
 | **swing_bot_eval.py** | 스윙 봇 실전 성과 평가 — 신호 저널(swing_signals.jsonl) 기반 월간 성과 보고 |
 | **swing_bot_backtest.py** | 스윙 전략 백테스트 — 타임프레임(1h~1D)·익절/청산 규칙(TP/20EMA/ATR)별 성과 비교 (독립 실행) |
+| **swing_tp_review.py** | TP 승수 분기 재평가 — 실전 신호 vs 백테스트 교차검증, 유지/조정 권고 보고 (자동 변경 없음) |
 | **portfolio_config.json** | 📌 **포트폴리오 설정** — 포지션, Sigma, DCA 파라미터, 모드 상태 |
+| **swing_config.json** | 📌 **스윙 봇 TP(익절) 승수 설정** — `TAKE_PROFIT_ATR` + 종목별 승수 + `AUTO_UPDATE` (분기 재평가가 조건부로 자동 갱신) |
 | **TRIGGER_OPTIMIZATION_SUMMARY.md** | ATH_DCA 트리거 최적화 분석 — 바닥 분포 · 후보값 스윕 · 의사결정 근거 |
 | **DUAL_MODE_SUMMARY.md** | 듀얼 모드(LOC ↔ ATH_DCA) 구조 요약 문서 |
 | **REALTIME_ALERT_SETUP.md** | 실시간 ATH DCA 알림 설정 가이드 |
@@ -387,10 +389,12 @@ python3 DCA_MA_strategy_flowchart.py
 > - **익절(TP)**: 보유 중 종가가 진입가 + TP 승수×진입 ATR에 도달하면 수익 확정 청산 신호를
 >   보냅니다. 20EMA 이탈까지 버티면 최대 이익의 ~90%를 반납하는 약점(2년 백테스트 MFE 반납
 >   90%)을 보완 — 익절 추가 시 총수익 개선·MDD 축소 확인.
->   **종목별 승수** (`TAKE_PROFIT_ATR_BY_TICKER`, 2년 스윙 백테스트 최적값):
+>   **종목별 승수** (`swing_config.json`의 `TAKE_PROFIT_ATR_BY_TICKER`, 2년 스윙 백테스트 최적값):
 >   - **TQQQ = 1.5×ATR** — 빡센 익절, contr 기준 +15.3%/-1.1% MDD
 >   - **SOXL = 3.5×ATR** — 느슨한 익절, contr 기준 +18.6%/-10.2% MDD
 >   - 미등록 종목은 `TAKE_PROFIT_ATR`(기본 3.0) 사용. 비활성화: `TAKE_PROFIT_ATR=0`.
+>   - 승수는 코드가 아닌 **`swing_config.json`에서 관리** — 코드 수정 없이 값을 바꿔 커밋하면
+>     적용됩니다 (환경변수 `TAKE_PROFIT_ATR`이 설정되면 그 값이 우선).
 >   TP 미도달 시의 손절/추세 청산은 기존 20EMA 이탈이 담당.
 > - 종목별 상태는 `swing_state.json`에 영속화 — 동일 신호의 중복 BUY/SELL 알림이 없습니다.
 > - 알림만 전송하며 실제 주문은 자동 실행하지 않습니다 (수동 매매). 종목 변경: `TICKERS` 환경변수.
@@ -412,6 +416,27 @@ python3 DCA_MA_strategy_flowchart.py
 |--------|------------|------|
 | 예약 실행 | 매월 1일 09:00 | 월간 실전 신호 성과 요약을 Discord로 전송 |
 | 수동 실행 | 사용자 요청 시 | workflow_dispatch 수동 실행 (언제든 평가) |
+
+### `swing_tp_review.yml` — TP 승수 분기 재평가 (3개월)
+
+| 트리거 | 시간 (UTC) | 설명 |
+|--------|------------|------|
+| 예약 실행 | 1/4/7/10월 1일 09:00 | TP 승수 재평가 보고서를 Discord로 전송 |
+| 수동 실행 | 사용자 요청 시 | workflow_dispatch 수동 실행 (언제든 재평가) |
+
+> - **익절(TP) 승수가 여전히 합리적인지 분기마다 자동 재평가**합니다.
+> - 종목당 청산 트레이드가 `--min-trades`(기본 5) 미만이면 "표본 부족 — 현행 승수 유지 권장"
+>   보고 후 종료합니다 (과적합 방지).
+> - 표본이 충분하면 **실전 성과(승률/평균수익/총수익) vs 백테스트 기대**를 비교하고,
+>   실전 평균수익이 기대의 50% 미만이면 승수 재검토(ADJUST)를 권고합니다.
+> - 백테스트 TP 스윕(0~5×ATR)을 재실행해 최적 승수와 현재 승수의 차이도 참고로 제시합니다.
+> - **조건부 자동 적용**: 표본 충분 + 실전 성과가 백테스트 기대 대비 저조(ADJUST)일 때만,
+>   스윕 최적 승수를 `swing_config.json`에 **자동 반영**하고 워크플로우가 자동 커밋합니다.
+>   - 변경 근거(실전 vs 기대 수치)가 Discord 보고서에 포함되어 추적 가능합니다.
+>   - 스윕 최적이 현행과 같거나 개선 폭이 1%p 미만이면 변경하지 않습니다 (잡음 방지).
+>   - `swing_config.json`의 `AUTO_UPDATE`를 `false`로 바꾸면 **자동 적용 OFF** —
+>     보고만 하고 승수는 수동으로 바꿉니다 (잠금 모드).
+> - 로컬 실행: `python3 swing_tp_review.py [--min-trades N] [--discord]`
 
 > - `swing_bot.py`가 누적한 `swing_signals.jsonl`(BUY/SELL 이벤트 저널)을 읽어
 >   승률·평균수익/손실·총수익·MDD·PF·보유기간·미청산 포지션을 산출합니다.
