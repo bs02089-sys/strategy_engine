@@ -158,9 +158,9 @@
 | **swing_local_cron.sh** | 로컬 크론 래퍼 — git 동기화 후 평가 실행 (setup_swing_cron.py가 설치) |
 | **MarketStageSystem.py** | 독립적인 시장 단계 시스템 — 바닥 단계 감지 |
 | **bear_market_signals.py** | 약세장 신호 분석 시스템 |
-| **swing_bot.py** | 골드핑거식 4시간봉 스윙 봇 — TQQQ/SOXL 다중 종목, 첫 신호 필터링, Discord 알림 |
+| **swing_bot.py** | 골드핑거식 4시간봉 스윙 봇 — TQQQ/SOXL 다중 종목, 첫 신호 필터링, 익절(3×ATR), Discord 알림 |
 | **swing_bot_eval.py** | 스윙 봇 실전 성과 평가 — 신호 저널(swing_signals.jsonl) 기반 월간 성과 보고 |
-| **swing_bot_backtest.py** | 스윙 전략 백테스트 — 타임프레임(1h~1D)·청산 규칙(20EMA/ATR)별 성과 비교 (독립 실행) |
+| **swing_bot_backtest.py** | 스윙 전략 백테스트 — 타임프레임(1h~1D)·익절/청산 규칙(TP/20EMA/ATR)별 성과 비교 (독립 실행) |
 | **portfolio_config.json** | 📌 **포트폴리오 설정** — 포지션, Sigma, DCA 파라미터, 모드 상태 |
 | **TRIGGER_OPTIMIZATION_SUMMARY.md** | ATH_DCA 트리거 최적화 분석 — 바닥 분포 · 후보값 스윕 · 의사결정 근거 |
 | **DUAL_MODE_SUMMARY.md** | 듀얼 모드(LOC ↔ ATH_DCA) 구조 요약 문서 |
@@ -384,16 +384,21 @@ python3 DCA_MA_strategy_flowchart.py
 > - **변동성 수축 필터**: 직전 봉 ATR이 20봉 평균보다 낮은(수축) 상태에서의 돌파만 신호로 인정
 >   (유튜버 영상의 '변동성 수축' 조건 구현 — 2년 백테스트에서 두 종목 성과/MDD 개선 확인)
 > - 하락 후 **첫 번째 신호는 필터링**(매수 스킵)하고 두 번째 신호에서만 매수합니다.
+> - **익절(TP)**: 보유 중 종가가 진입가 + `TAKE_PROFIT_ATR`×진입 ATR(기본 3.0)에 도달하면
+>   수익 확정 청산 신호를 보냅니다. 20EMA 이탈까지 버티면 최대 이익의 ~90%를 반납하는
+>   약점(2년 백테스트 MFE 반납 90%)을 보완 — 익절 추가 시 총수익 개선·MDD 축소 확인.
+>   비활성화: `TAKE_PROFIT_ATR=0`. TP 미도달 시의 손절/추세 청산은 기존 20EMA 이탈이 담당.
 > - 종목별 상태는 `swing_state.json`에 영속화 — 동일 신호의 중복 BUY/SELL 알림이 없습니다.
 > - 알림만 전송하며 실제 주문은 자동 실행하지 않습니다 (수동 매매). 종목 변경: `TICKERS` 환경변수.
 > - BUY/SELL 신호는 `swing_signals.jsonl`에 가격과 함께 누적 기록 — 월간 성과 평가의 입력.
 > - 과거 성과 검증: `swing_bot_backtest.py` (별도 파일 — 실전 봇과 분리)
 >   ```bash
->   python3 swing_bot_backtest.py                                 # TQQQ+SOXL, 4h, 20EMA 청산
+>   python3 swing_bot_backtest.py                                 # TQQQ+SOXL, 4h, 20EMA + TP 3.0
+>   python3 swing_bot_backtest.py --tp-atr 0                      # 익절 비활성화 (20EMA 단독)
 >   python3 swing_bot_backtest.py --ticker TQQQ --exit chan --atr-k 2.5 --trigger intra
 >   python3 swing_bot_backtest.py --ticker SOXL --tf 1D           # 일봉 비교
 >   ```
->   옵션: `--tf 1h/2h/4h/6h/1D` · `--exit ema20/chan/stop` · `--trigger close/intra` · `--period`
+>   옵션: `--tf 1h/2h/4h/6h/1D` · `--tp-atr N` · `--exit ema20/chan/stop` · `--trigger close/intra` · `--period`
 > - 실전 성과 평가: `swing_bot_eval.py` (아래 [실전 성과 평가](#-실전-성과-평가) 참고)
 
 ### `swing_eval.yml` — 스윙 봇 실전 성과 평가 (월간)

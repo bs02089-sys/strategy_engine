@@ -6,8 +6,10 @@
 실전 봇(swing_bot.py)의 진입 로직을 그대로 미러링해 과거 성과를 검증한다.
   - 진입: 3중 EMA(10/20/50) 정배열 + 거래량 돌파(20봉 평균+1σ) + 최근 5봉 고점 돌파,
           하락 후 첫 신호는 필터링 → 두 번째 신호에서 진입 (봇과 동일)
+  - 익절(TP, --tp-atr): 보유 중 종가 ≥ 진입가 + tp-atr×진입 ATR 도달 시 수익 확정 청산
+    (ema20 청산 전용, 기본 3.0 — 실전 봇 TAKE_PROFIT_ATR과 동일. 0 = 비활성화)
   - 청산 규칙 (--exit / --atr-k / --trigger):
-      ema20  : 종가 < 20EMA (현행 봇 기본)
+      ema20  : 종가 < 20EMA (TP 미도달 시의 손절/추세 청산 — 현행 봇 기본)
       chan   : 샹들리에 트레일링 — 최고가(진입 후) - k×ATR 이탈
       stop   : 고정 스톱 — 진입가 - k×ATR 이탈
       trigger: close(종가 기준 — 수동 알림 봇에 현실적) / intra(장중 저가 기준 — 스톱 주문)
@@ -29,7 +31,8 @@
   - 진입/청산은 봉 종가 또는 스톱가 기준 — 실제 체결 슬리피지·수수료 미반영.
 
 사용 예:
-  python3 swing_bot_backtest.py                          # TQQQ+SOXL, 4h, ema20
+  python3 swing_bot_backtest.py                          # TQQQ+SOXL, 4h, ema20 + TP 3.0
+  python3 swing_bot_backtest.py --tp-atr 0               # 익절 비활성화 (20EMA 단독)
   python3 swing_bot_backtest.py --ticker TQQQ --tf 4h --exit chan --atr-k 2.5 --trigger intra
   python3 swing_bot_backtest.py --ticker SOXL --tf 1D --exit ema20
   python3 swing_bot_backtest.py --tf 2h --exit stop --atr-k 2.0
@@ -119,10 +122,11 @@ def entry_filter_ok(df, i, row, entry, recent_highs, contr_ratio=1.0):
   raise ValueError(f"알 수 없는 진입 필터: {entry}")
 
 
-def backtest(df, exit_mode, k, trigger, entry="none", contr_ratio=1.0):
+def backtest(df, exit_mode, k, trigger, entry="none", contr_ratio=1.0, tp_atr=3.0):
   """봇 로직 미러 시뮬레이션.
 
   exit_mode: ema20|chan|stop, trigger: close|intra
+  tp_atr: >0이면 종가 ≥ 진입가 + tp_atr×진입 ATR 시 익절 청산 (기본 3.0 — 실전 봇과 동일)
   반환: trades = [(진입t, 진입p, 청산t, 청산p, 수익률, 보유, MAE, MFE)], eq = 지분곡선
   """
   trades, eq = [], []
@@ -143,7 +147,12 @@ def backtest(df, exit_mode, k, trigger, entry="none", contr_ratio=1.0):
       mfe = max(mfe, high / entry_p - 1)
       hh = max(hh, high)
       exit_p, do_exit = None, False
-      if exit_mode == "ema20":
+      # 익절(TP) 우선: 종가 ≥ 진입가 + tp_atr×진입 시점 ATR → 수익 확정 청산 (봇과 동일)
+      # ema20 청산 전용 — 실전 봇은 ema20만 사용하므로 chan/stop과의 순수 비교를 유지
+      if (tp_atr > 0 and exit_mode == "ema20"
+          and atr_entry is not None and close >= entry_p + tp_atr * atr_entry):
+        do_exit, exit_p = True, close
+      elif exit_mode == "ema20":
         do_exit, exit_p = close < row["EMA_20"], close
       elif exit_mode == "chan":
         trail = hh - k * row["ATR"]
@@ -228,18 +237,19 @@ def summarize(ticker, tf, label, trades, eq):
           f"{t[5].days:>5} {t[4]*100:+6.1f}% {t[6]*100:+6.1f}% {t[7]*100:+6.1f}%")
 
 
-def run_ticker(ticker, tf, exit_mode, k, trigger, entry, contr_ratio, period):
+def run_ticker(ticker, tf, exit_mode, k, trigger, entry, contr_ratio, period, tp_atr):
   df = load_bars(ticker, tf, period)
   if len(df) < 51:
     print(f"[{ticker}] 데이터 부족({len(df)}봉 < 51) — 분석 생략")
     return
   df = add_indicators(df)
-  trades, eq = backtest(df, exit_mode, k, trigger, entry, contr_ratio)
+  trades, eq = backtest(df, exit_mode, k, trigger, entry, contr_ratio, tp_atr)
   label = f"entry={entry}"
   if entry == "contr":
     label += f"(x{contr_ratio:g})"
   if entry != "none":
     label += " "
+  label += f"tp={tp_atr:g} " if tp_atr > 0 else ""
   label += f"exit={exit_mode}" + (f" k={k}" if exit_mode != "ema20" else "") \
       + f" trigger={trigger}"
   summarize(ticker, tf, label, trades, eq)
@@ -269,6 +279,8 @@ def main():
                  help="진입 필터 (기본 none)")
   p.add_argument("--contr-ratio", type=float, default=1.0,
                  help="수축 강도 임계값: 직전 ATR < 20봉 평균 × 비율 (기본 1.0, 0.9면 더 엄격)")
+  p.add_argument("--tp-atr", type=float, default=3.0,
+                 help="익절(TP, ema20 청산 전용): 종가 ≥ 진입가 + tp-atr×진입 ATR 시 청산 (기본 3.0 — 실전 봇과 동일, 0 = 끔)")
   p.add_argument("--period", default=DEFAULT_PERIOD, help="조회 기간 (기본 2y)")
   args = p.parse_args()
 
@@ -278,7 +290,8 @@ def main():
   k = args.atr_k if args.atr_k is not None else (2.5 if args.exit == "chan" else 2.0)
   for ticker in [t.strip().upper() for t in args.ticker.split(",") if t.strip()]:
     try:
-      run_ticker(ticker, tf, args.exit, k, args.trigger, args.entry, args.contr_ratio, args.period)
+      run_ticker(ticker, tf, args.exit, k, args.trigger, args.entry, args.contr_ratio,
+                 args.period, args.tp_atr)
     except Exception as exc:  # 한 종목 실패가 다른 종목을 막지 않도록
       print(f"[{ticker}] 백테스트 중 오류: {exc}")
 

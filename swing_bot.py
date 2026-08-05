@@ -9,7 +9,9 @@
   3. 변동성 수축 필터: 직전 봉 ATR이 20봉 평균보다 낮은(수축) 상태에서의 돌파만 인정
      (유튜버 영상의 '변동성 수축' 조건 구현 — 2년 백테스트에서 두 종목 성과/MDD 개선)
   4. 하락 후 '첫 번째 신호'는 필터링(매수 스킵) → 두 번째 신호에서만 매수
-  5. 20 EMA 이탈 시 매도/익절 신호
+  5. 익절(TP): 보유 중 종가가 진입가 + TAKE_PROFIT_ATR×진입 ATR에 도달하면 수익 확정 청산
+     (이익 반납 방지 — 백테스트 검증: 20EMA 단독 대비 총수익 개선, MFE 반납 90%→2~70%)
+  6. 20 EMA 이탈 시 매도/청산 신호 (TP 미도달 시의 손절·추세 청산)
   - 알림은 Discord Webhook으로만 전송 — 실제 주문 자동 실행 없음 (수동 매매)
   - 종목별 신호 상태는 swing_state.json에 영속화 — 중복 BUY/SELL 알림 방지
   - TICKERS 환경변수로 종목 목록 변경 가능 (콤마 구분, 기본: TQQQ,SOXL)
@@ -39,6 +41,9 @@ TICKERS = [
     for t in os.getenv("TICKERS", "TQQQ,SOXL").split(",")
     if t.strip()
 ]
+# 익절(TP): 보유 중 종가 ≥ 진입가 + TAKE_PROFIT_ATR × 진입 시점 ATR 이면 익절 매도 신호
+# (기본 3.0 — 더블 볼린저 영상의 손익비 3:1 개념과 동일. 0 = 비활성화)
+TAKE_PROFIT_ATR = float(os.getenv("TAKE_PROFIT_ATR", "3.0"))
 
 STATE_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "swing_state.json"
@@ -127,12 +132,20 @@ def send_discord_alert(message):
   requests.post(DISCORD_WEBHOOK, json={"content": content}, timeout=10)
 
 
+def default_ticker_state():
+  """종목별 기본 상태 — TP 판정에 쓰는 진입가/진입 ATR 키 포함"""
+  return {
+      "state": "WAITING",
+      "last_buy": None,
+      "last_sell": None,
+      "entry_price": None,
+      "entry_atr": None,
+  }
+
+
 def load_state():
   """swing_state.json 로드 — 없거나 손상 시 기본 상태 생성"""
-  default = {
-      t: {"state": "WAITING", "last_buy": None, "last_sell": None}
-      for t in TICKERS
-  }
+  default = {t: default_ticker_state() for t in TICKERS}
   if not os.path.exists(STATE_PATH):
     return default
   try:
@@ -141,7 +154,10 @@ def load_state():
   except (json.JSONDecodeError, OSError):
     return default
   for t in TICKERS:
-    data.setdefault(t, {"state": "WAITING", "last_buy": None, "last_sell": None})
+    # 기존 state(TP 추가 전 저장분)에도 키를 채워 넣음 — IN_POSITION 이력 보존
+    data.setdefault(t, default_ticker_state())
+    for key, val in default_ticker_state().items():
+      data[t].setdefault(key, val)
   return data
 
 
@@ -298,13 +314,63 @@ def analyze_ticker(ticker, df_4h, state):
 
   prev = state.get("state", "WAITING")
 
-  # 1) 매수 신호 분기 (원본 우선순위 유지: 돌파 > 매도)
+  # 0) 보유 중 → 청산(익절/20EMA) 우선 평가
+  #    ⚠️ 돌파(매수) 신호가 TP 목표 도달 봉에서 같이 발생해도 익절이 가로막히지 않도록
+  #    (TP 목표 = 진입가 + 3×ATR는 대부분 5봉 고점 돌파를 동반 — 청산을 먼저 본다)
+  if prev == "IN_POSITION":
+    # 0-1) 익절(TP) 우선: 진입가 + TAKE_PROFIT_ATR×진입 ATR 도달 → 수익 확정 청산
+    #      (이익 반납 방지 — 20EMA 이탈까지 버티면 최대 이익의 ~90%를 반납)
+    entry_price = state.get("entry_price")
+    entry_atr = state.get("entry_atr")
+    is_tp_signal = (
+        entry_price is not None
+        and entry_atr is not None
+        and TAKE_PROFIT_ATR > 0
+        and current_close >= entry_price + TAKE_PROFIT_ATR * entry_atr
+    )
+    if is_tp_signal:
+      msg = (
+          f"✅✅✅ **[{ticker}] 4시간봉 스윙 익절(TAKE PROFIT) 시그널 포착!**\n"
+          f"- 시간: {time_str}\n"
+          f"- 가격: ${current_close:.2f}\n"
+          f"- 상태: 진입가 ${entry_price:.2f} + {TAKE_PROFIT_ATR:g}×ATR 목표 도달"
+          " — 수익 확정 청산\n"
+          f"- 💡 지금 깨어나셔서 매도 주문을 직접 실행해 주세요 (자동 매매 없음)"
+      )
+      state.update({"state": "WAITING", "last_sell": time_str})
+      log_signal(ticker, "SELL", df_4h.index[-1], current_close)
+      try:
+        send_discord_alert(msg)
+      except requests.RequestException as exc:
+        print(f"[{ticker}] [오류] Discord 알림 전송 실패: {exc}")
+      return
+
+    # 0-2) 20EMA 이탈 — TP 미도달 시의 손절/추세 청산
+    if is_sell_signal:
+      msg = (
+          f"⚠️⚠️⚠️ **[{ticker}] 4시간봉 스윙 매도(SELL) 시그널 포착!**\n"
+          f"- 시간: {time_str}\n"
+          f"- 가격: ${current_close:.2f}\n"
+          f"- 상태: 20 EMA 이탈 (익절 목표 미도달) — 보유 포지션 정리\n"
+          f"- 💡 지금 깨어나셔서 매도 주문을 직접 실행해 주세요 (자동 매매 없음)"
+      )
+      state.update({"state": "WAITING", "last_sell": time_str})
+      log_signal(ticker, "SELL", df_4h.index[-1], current_close)
+      try:
+        send_discord_alert(msg)
+      except requests.RequestException as exc:
+        print(f"[{ticker}] [오류] Discord 알림 전송 실패: {exc}")
+      return
+
+    # 청산 신호 없음 — 보유 유지 (아래 매수 분기는 진입하지 않음)
+    print(f"[{ticker}] 보유 중 — 익절/청산 조건 미충족 (HOLD 상태)")
+    return
+
+  # 1) 매수 신호 분기 (미보유일 때만 — 보유 중 청산은 0)에서 처리)
   if is_current_breakout:
     if signal_state == "FIRST_FOUND":
-      # ⚠️ 하락 후 첫 번째 반등 신호 → 필터링 (보유 중이면 상태를 건드리지 않음)
-      if prev == "IN_POSITION":
-        print(f"[{ticker}] 보유 중 — 첫 번째 신호 감지 (알림 없음, 참고만)")
-      elif prev != "FIRST_FOUND":
+      # ⚠️ 하락 후 첫 번째 반등 신호 → 필터링
+      if prev != "FIRST_FOUND":
         print(
             f"[{ticker}] [필터링됨] 하락 후 첫 번째 반등 신호입니다."
             " 영상 가이드에 따라 매수를 건너뜁니다."
@@ -313,50 +379,35 @@ def analyze_ticker(ticker, df_4h, state):
       else:
         print(f"[{ticker}] 첫 번째 신호 필터링 상태 유지 중 (매수 스킵)")
     elif signal_state == "READY_FOR_BUY":
-      # 두 번째 진입 타이밍 — 단, 이미 보유 중이면 중복 BUY 알림 금지
-      if prev == "IN_POSITION":
-        print(f"[{ticker}] 이미 보유 중입니다. (추가 BUY 알림 생략)")
-      else:
-        msg = (
-            f"🚨🚨🚨 **[{ticker}] 4시간봉 스윙 매수(BUY) 시그널 포착!**\n"
-            f"- 시간: {time_str}\n"
-            f"- 가격: ${current_close:.2f}\n"
-            f"- 상태: 첫 번째 속임수 신호 필터링 완료 후, 정식 돌파 매수 타점 도달\n"
-            f"- 💡 지금 깨어나셔서 매수 주문을 직접 실행해 주세요 (자동 매매 없음)"
-        )
-        # 중복 알림 방지를 위해 상태를 먼저 확정한 뒤 전송 — 전송 실패 시에도
-        # 다음 실행에서 같은 신호를 다시 쏘지 않는다 (실패는 로그에 남김)
-        state.update({"state": "IN_POSITION", "last_buy": time_str})
-        log_signal(ticker, "BUY", df_4h.index[-1], current_close)
-        try:
-          send_discord_alert(msg)
-        except requests.RequestException as exc:
-          print(f"[{ticker}] [오류] Discord 알림 전송 실패: {exc}")
+      # 두 번째 진입 타이밍 — 정식 매수 알림
+      msg = (
+          f"🚨🚨🚨 **[{ticker}] 4시간봉 스윙 매수(BUY) 시그널 포착!**\n"
+          f"- 시간: {time_str}\n"
+          f"- 가격: ${current_close:.2f}\n"
+          f"- 상태: 첫 번째 속임수 신호 필터링 완료 후, 정식 돌파 매수 타점 도달\n"
+          f"- 💡 지금 깨어나셔서 매수 주문을 직접 실행해 주세요 (자동 매매 없음)"
+      )
+      # 중복 알림 방지를 위해 상태를 먼저 확정한 뒤 전송 — 전송 실패 시에도
+      # 다음 실행에서 같은 신호를 다시 쏘지 않는다 (실패는 로그에 남김)
+      # 익절(TP) 기준: 진입가 + 진입 시점 ATR을 상태에 저장 — 이후 익절 판정에 사용
+      state.update({
+          "state": "IN_POSITION",
+          "last_buy": time_str,
+          "entry_price": float(current_close),
+          "entry_atr": float(latest["ATR"]),
+      })
+      log_signal(ticker, "BUY", df_4h.index[-1], current_close)
+      try:
+        send_discord_alert(msg)
+      except requests.RequestException as exc:
+        print(f"[{ticker}] [오류] Discord 알림 전송 실패: {exc}")
     return
 
-  # 2) 매도/익절: 보유 중일 때만 20EMA 이탈 알림 (미보유 시 SELL 스팸 방지)
-  if is_sell_signal and prev == "IN_POSITION":
-    msg = (
-        f"⚠️⚠️⚠️ **[{ticker}] 4시간봉 스윙 매도/익절(SELL) 시그널 포착!**\n"
-        f"- 시간: {time_str}\n"
-        f"- 가격: ${current_close:.2f}\n"
-        f"- 상태: 20 EMA 이탈 — 보유 포지션 정리\n"
-        f"- 💡 지금 깨어나셔서 매도 주문을 직접 실행해 주세요 (자동 매매 없음)"
-    )
-    state.update({"state": "WAITING", "last_sell": time_str})
-    log_signal(ticker, "SELL", df_4h.index[-1], current_close)
-    try:
-      send_discord_alert(msg)
-    except requests.RequestException as exc:
-      print(f"[{ticker}] [오류] Discord 알림 전송 실패: {exc}")
-    return
-
-  # 3) 시그널 없음
+  # 2) 시그널 없음
   print(f"[{ticker}] 현재 조건에 부합하는 새로운 시그널이 없습니다. (HOLD 상태)")
 
-  # 4) 장기 이평선(EMA50) 아래 = 확실한 하락/조정 구간 → 상태 리셋
-  #    (보유 중에는 리셋하지 않음 — 매도 알림은 20EMA 기준이 계속 담당)
-  if current_close < latest["EMA_50"] and prev != "IN_POSITION":
+  # 3) 장기 이평선(EMA50) 아래 = 확실한 하락/조정 구간 → 상태 리셋 (미보유 시)
+  if current_close < latest["EMA_50"]:
     state["state"] = "WAITING"
 
 
@@ -378,9 +429,9 @@ def run_swing_strategy():
         )
         continue
 
-      ticker_state = state.setdefault(
-          ticker, {"state": "WAITING", "last_buy": None, "last_sell": None}
-      )
+      ticker_state = state.setdefault(ticker, default_ticker_state())
+      for key, val in default_ticker_state().items():
+        ticker_state.setdefault(key, val)
       before = json.dumps(ticker_state, ensure_ascii=False, sort_keys=True)
       analyze_ticker(ticker, df_4h, ticker_state)
       after = json.dumps(ticker_state, ensure_ascii=False, sort_keys=True)
