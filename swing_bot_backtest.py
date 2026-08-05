@@ -70,7 +70,7 @@ def load_bars(ticker, tf, period=DEFAULT_PERIOD):
       "Open": "first", "High": "max", "Low": "min", "Close": "last", "Volume": "sum",
   }).dropna()
   # 미완성 봉 방어 (봇과 동일)
-  if len(df) and df.index[-1] + pd.Timedelta(hours=hours) > pd.Timestamp.now(tz=SESSION_TZ):
+  if len(df) and pd.Timestamp(df.index[-1]) + pd.Timedelta(hours=hours) > pd.Timestamp.now(tz=SESSION_TZ):
     df = df.iloc[:-1]
   return df
 
@@ -132,6 +132,7 @@ def backtest(df, exit_mode, k, trigger, entry="none", contr_ratio=1.0):
   atr_entry = None
   equity = 1.0
   eq_at_entry = 1.0
+  mae, mfe = 0.0, 0.0  # 보유 시작 시 초기화 (pyright: possibly unbound 방지)
 
   for i in range(50, len(df)):
     row = df.iloc[i]
