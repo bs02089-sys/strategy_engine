@@ -41,9 +41,16 @@ TICKERS = [
     for t in os.getenv("TICKERS", "TQQQ,SOXL").split(",")
     if t.strip()
 ]
-# 익절(TP): 보유 중 종가 ≥ 진입가 + TAKE_PROFIT_ATR × 진입 시점 ATR 이면 익절 매도 신호
+# 익절(TP): 보유 중 종가 ≥ 진입가 + TP 승수 × 진입 시점 ATR 이면 익절 매도 신호
 # (기본 3.0 — 더블 볼린저 영상의 손익비 3:1 개념과 동일. 0 = 비활성화)
 TAKE_PROFIT_ATR = float(os.getenv("TAKE_PROFIT_ATR", "3.0"))
+# 종목별 TP 승수 — 2년 백테스트 스윙 최적값 (TQQQ는 빡센 익절, SOXL은 느슨한 익절):
+#   TQQQ 1.5: +15.3%/-1.1% MDD (contr) | SOXL 3.5: +18.6%/-10.2% MDD (contr)
+# 미등록 종목은 TAKE_PROFIT_ATR 기본값 사용
+TAKE_PROFIT_ATR_BY_TICKER = {
+    "TQQQ": 1.5,
+    "SOXL": 3.5,
+}
 
 STATE_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "swing_state.json"
@@ -322,18 +329,21 @@ def analyze_ticker(ticker, df_4h, state):
     #      (이익 반납 방지 — 20EMA 이탈까지 버티면 최대 이익의 ~90%를 반납)
     entry_price = state.get("entry_price")
     entry_atr = state.get("entry_atr")
+    # 종목별 승수 (기본값보다 우선) — TQQQ=1.5 / SOXL=3.5 (백테스트 최적값)
+    tp_atr = TAKE_PROFIT_ATR_BY_TICKER.get(ticker, TAKE_PROFIT_ATR)
     is_tp_signal = (
         entry_price is not None
         and entry_atr is not None
-        and TAKE_PROFIT_ATR > 0
-        and current_close >= entry_price + TAKE_PROFIT_ATR * entry_atr
+        and TAKE_PROFIT_ATR > 0  # 전역 OFF 스위치: TAKE_PROFIT_ATR=0이면 종목별 설정도 무시
+        and tp_atr > 0
+        and current_close >= entry_price + tp_atr * entry_atr
     )
     if is_tp_signal:
       msg = (
           f"✅✅✅ **[{ticker}] 4시간봉 스윙 익절(TAKE PROFIT) 시그널 포착!**\n"
           f"- 시간: {time_str}\n"
           f"- 가격: ${current_close:.2f}\n"
-          f"- 상태: 진입가 ${entry_price:.2f} + {TAKE_PROFIT_ATR:g}×ATR 목표 도달"
+          f"- 상태: 진입가 ${entry_price:.2f} + {tp_atr:g}×ATR 목표 도달"
           " — 수익 확정 청산\n"
           f"- 💡 지금 깨어나셔서 매도 주문을 직접 실행해 주세요 (자동 매매 없음)"
       )

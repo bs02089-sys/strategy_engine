@@ -384,21 +384,26 @@ python3 DCA_MA_strategy_flowchart.py
 > - **변동성 수축 필터**: 직전 봉 ATR이 20봉 평균보다 낮은(수축) 상태에서의 돌파만 신호로 인정
 >   (유튜버 영상의 '변동성 수축' 조건 구현 — 2년 백테스트에서 두 종목 성과/MDD 개선 확인)
 > - 하락 후 **첫 번째 신호는 필터링**(매수 스킵)하고 두 번째 신호에서만 매수합니다.
-> - **익절(TP)**: 보유 중 종가가 진입가 + `TAKE_PROFIT_ATR`×진입 ATR(기본 3.0)에 도달하면
->   수익 확정 청산 신호를 보냅니다. 20EMA 이탈까지 버티면 최대 이익의 ~90%를 반납하는
->   약점(2년 백테스트 MFE 반납 90%)을 보완 — 익절 추가 시 총수익 개선·MDD 축소 확인.
->   비활성화: `TAKE_PROFIT_ATR=0`. TP 미도달 시의 손절/추세 청산은 기존 20EMA 이탈이 담당.
+> - **익절(TP)**: 보유 중 종가가 진입가 + TP 승수×진입 ATR에 도달하면 수익 확정 청산 신호를
+>   보냅니다. 20EMA 이탈까지 버티면 최대 이익의 ~90%를 반납하는 약점(2년 백테스트 MFE 반납
+>   90%)을 보완 — 익절 추가 시 총수익 개선·MDD 축소 확인.
+>   **종목별 승수** (`TAKE_PROFIT_ATR_BY_TICKER`, 2년 스윙 백테스트 최적값):
+>   - **TQQQ = 1.5×ATR** — 빡센 익절, contr 기준 +15.3%/-1.1% MDD
+>   - **SOXL = 3.5×ATR** — 느슨한 익절, contr 기준 +18.6%/-10.2% MDD
+>   - 미등록 종목은 `TAKE_PROFIT_ATR`(기본 3.0) 사용. 비활성화: `TAKE_PROFIT_ATR=0`.
+>   TP 미도달 시의 손절/추세 청산은 기존 20EMA 이탈이 담당.
 > - 종목별 상태는 `swing_state.json`에 영속화 — 동일 신호의 중복 BUY/SELL 알림이 없습니다.
 > - 알림만 전송하며 실제 주문은 자동 실행하지 않습니다 (수동 매매). 종목 변경: `TICKERS` 환경변수.
 > - BUY/SELL 신호는 `swing_signals.jsonl`에 가격과 함께 누적 기록 — 월간 성과 평가의 입력.
 > - 과거 성과 검증: `swing_bot_backtest.py` (별도 파일 — 실전 봇과 분리)
 >   ```bash
->   python3 swing_bot_backtest.py                                 # TQQQ+SOXL, 4h, 20EMA + TP 3.0
+>   python3 swing_bot_backtest.py                                 # TQQQ+SOXL, 4h, 20EMA + TP(봇 설정 미러)
 >   python3 swing_bot_backtest.py --tp-atr 0                      # 익절 비활성화 (20EMA 단독)
+>   python3 swing_bot_backtest.py --tp-atr 3.0                    # 공통 승수로 재정의
 >   python3 swing_bot_backtest.py --ticker TQQQ --exit chan --atr-k 2.5 --trigger intra
 >   python3 swing_bot_backtest.py --ticker SOXL --tf 1D           # 일봉 비교
 >   ```
->   옵션: `--tf 1h/2h/4h/6h/1D` · `--tp-atr N` · `--exit ema20/chan/stop` · `--trigger close/intra` · `--period`
+>   옵션: `--tf 1h/2h/4h/6h/1D` · `--tp-atr auto/공통N/'TQQQ:1.5,...'` · `--exit ema20/chan/stop` · `--trigger close/intra` · `--period`
 > - 실전 성과 평가: `swing_bot_eval.py` (아래 [실전 성과 평가](#-실전-성과-평가) 참고)
 
 ### `swing_eval.yml` — 스윙 봇 실전 성과 평가 (월간)
