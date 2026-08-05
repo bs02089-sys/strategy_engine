@@ -41,16 +41,75 @@ TICKERS = [
     for t in os.getenv("TICKERS", "TQQQ,SOXL").split(",")
     if t.strip()
 ]
+# 스윙 봇 설정(TP 승수·AUTO_UPDATE)은 swing_config.json에서 관리 — 코드 수정 없이
+# 값을 바꿀 수 있다. (파일 없거나 손상 시 아래 기본값 폴백. TAKE_PROFIT_ATR 환경변수는
+# 배포 레벨 오버라이드)
+CONFIG_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "swing_config.json"
+)
+
+
+def _load_config(path=None):
+  """swing_config.json 로드 — 없거나 손상 시 기본값 사용.
+
+  path를 주면 해당 경로에서 읽는다(테스트용). 반환 dict는 항상 기본 키를 포함한다.
+  """
+  defaults = {
+      "TAKE_PROFIT_ATR": 3.0,
+      "TAKE_PROFIT_ATR_BY_TICKER": {"TQQQ": 1.5, "SOXL": 3.5},
+      "AUTO_UPDATE": True,
+  }
+  path = path or CONFIG_PATH
+  if not os.path.exists(path):
+    return defaults
+  try:
+    with open(path, "r", encoding="utf-8") as f:
+      data = json.load(f)
+  except (json.JSONDecodeError, OSError):
+    print(f"[경고] {path} 로드 실패 — 기본값 사용")
+    return defaults
+  merged = dict(defaults)
+  merged.update({k: data[k] for k in defaults if k in data})
+  return merged
+
+
+def _to_float(val, default):
+  """숫자/숫자 문자열 → float. 변환 불가(설정 오타) 시 default 반환 — 봇 크래시 방지."""
+  try:
+    return float(val)
+  except (TypeError, ValueError):
+    return default
+
+
+def _to_bool(val, default=True):
+  """설정 값 → bool. 'false'/'0'/'off' 문자열도 False로 인식 (수동 편집 오타 방어)."""
+  if isinstance(val, bool):
+    return val
+  if isinstance(val, str):
+    return val.strip().lower() not in ("false", "0", "no", "off")
+  if isinstance(val, (int, float)):
+    return val != 0
+  return default
+
+
+_TP_CONFIG = _load_config()
 # 익절(TP): 보유 중 종가 ≥ 진입가 + TP 승수 × 진입 시점 ATR 이면 익절 매도 신호
 # (기본 3.0 — 더블 볼린저 영상의 손익비 3:1 개념과 동일. 0 = 비활성화)
-TAKE_PROFIT_ATR = float(os.getenv("TAKE_PROFIT_ATR", "3.0"))
-# 종목별 TP 승수 — 2년 백테스트 스윙 최적값 (TQQQ는 빡센 익절, SOXL은 느슨한 익절):
+# 환경변수 TAKE_PROFIT_ATR이 설정되면 그 값 우선(배포 레벨 오버라이드)
+TAKE_PROFIT_ATR = _to_float(
+    os.getenv("TAKE_PROFIT_ATR", _TP_CONFIG.get("TAKE_PROFIT_ATR", 3.0)), 3.0
+)
+# 종목별 TP 승수 — 2년 백테스트 스윙 최적값 (swing_config.json에서 관리):
 #   TQQQ 1.5: +15.3%/-1.1% MDD (contr) | SOXL 3.5: +18.6%/-10.2% MDD (contr)
-# 미등록 종목은 TAKE_PROFIT_ATR 기본값 사용
-TAKE_PROFIT_ATR_BY_TICKER = {
-    "TQQQ": 1.5,
-    "SOXL": 3.5,
-}
+# 미등록 종목은 TAKE_PROFIT_ATR 기본값 사용. 잘못된 값은 건너뛰어 기본값 폴백.
+TAKE_PROFIT_ATR_BY_TICKER = {}
+for _k, _v in _TP_CONFIG.get("TAKE_PROFIT_ATR_BY_TICKER", {}).items():
+  _fv = _to_float(_v, None)
+  if _fv is not None:
+    TAKE_PROFIT_ATR_BY_TICKER[str(_k).upper()] = _fv
+# 자동 갱신 스위치: false면 분기 재평가(swing_tp_review.py)가 보고만 하고 승수를
+# 자동 변경하지 않는다 (수동 모드 — 사용자가 swing_config.json을 직접 수정)
+AUTO_UPDATE = _to_bool(_TP_CONFIG.get("AUTO_UPDATE", True))
 
 STATE_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "swing_state.json"
