@@ -156,6 +156,9 @@
 | **setup_cronjob_org.py** | cron-job.org 실시간 알림 설정 자동화 (생성/--list/--test-dispatch/--update-pat/--update-schedule) |
 | **MarketStageSystem.py** | 독립적인 시장 단계 시스템 — 바닥 단계 감지 |
 | **bear_market_signals.py** | 약세장 신호 분석 시스템 |
+| **swing_bot.py** | 골드핑거식 4시간봉 스윙 봇 — TQQQ/SOXL 다중 종목, 첫 신호 필터링, Discord 알림 |
+| **swing_bot_eval.py** | 스윙 봇 실전 성과 평가 — 신호 저널(swing_signals.jsonl) 기반 월간 성과 보고 |
+| **swing_bot_backtest.py** | 스윙 전략 백테스트 — 타임프레임(1h~1D)·청산 규칙(20EMA/ATR)별 성과 비교 (독립 실행) |
 | **portfolio_config.json** | 📌 **포트폴리오 설정** — 포지션, Sigma, DCA 파라미터, 모드 상태 |
 | **TRIGGER_OPTIMIZATION_SUMMARY.md** | ATH_DCA 트리거 최적화 분석 — 바닥 분포 · 후보값 스윕 · 의사결정 근거 |
 | **DUAL_MODE_SUMMARY.md** | 듀얼 모드(LOC ↔ ATH_DCA) 구조 요약 문서 |
@@ -164,6 +167,9 @@
 | **sigma_history.csv** | Sigma 갱신 이력 (런타임 자동 생성 — 추적 제외) |
 | **market_state.json** | 시장 단계 상태 정보 (자동 생성) |
 | **signal_report.json** | 시장 리스크 점수 (자동 생성) |
+| **swing_state.json** | 스윙 봇 종목별 신호 상태 (자동 생성 — 중복 알림 방지) |
+| **swing_signals.jsonl** | 스윙 봇 BUY/SELL 신호 이벤트 저널 (자동 생성 — 성과 평가용, 커밋되어 누적) |
+| **swing_performance.json** | 스윙 봇 월간 성과 스냅샷 (자동 생성 — 평가 시 누적 저장, 커밋되어 반영) |
 | **requirements.txt** | Python 의존성 패키지 목록 |
 
 ---
@@ -364,6 +370,45 @@ python3 DCA_MA_strategy_flowchart.py
 | 트리거 | 시간 (UTC) | 설명 |
 |--------|------------|------|
 | 예약 실행 | 매일 23:14 (월~금) | 바닥 단계 추적 |
+
+### `swing_bot.yml` — 4시간봉 스윙 봇 (TQQQ/SOXL)
+
+| 트리거 | 시간 (UTC) | 설명 |
+|--------|------------|------|
+| 예약 실행 | 18:00, 22:00 (월~금) | 4시간봉(09:30/13:30 ET) 확정 직후 스윙 신호 분석 → Discord 알림 |
+| 수동 실행 | 사용자 요청 시 | workflow_dispatch 수동 실행 |
+
+> - 3중 EMA(10/20/50) 정배열 + 거래량 돌파 + 최근 5봉 고점 돌파로 BUY/SELL 신호를 냅니다.
+> - **변동성 수축 필터**: 직전 봉 ATR이 20봉 평균보다 낮은(수축) 상태에서의 돌파만 신호로 인정
+>   (유튜버 영상의 '변동성 수축' 조건 구현 — 2년 백테스트에서 두 종목 성과/MDD 개선 확인)
+> - 하락 후 **첫 번째 신호는 필터링**(매수 스킵)하고 두 번째 신호에서만 매수합니다.
+> - 종목별 상태는 `swing_state.json`에 영속화 — 동일 신호의 중복 BUY/SELL 알림이 없습니다.
+> - 알림만 전송하며 실제 주문은 자동 실행하지 않습니다 (수동 매매). 종목 변경: `TICKERS` 환경변수.
+> - BUY/SELL 신호는 `swing_signals.jsonl`에 가격과 함께 누적 기록 — 월간 성과 평가의 입력.
+> - 과거 성과 검증: `swing_bot_backtest.py` (별도 파일 — 실전 봇과 분리)
+>   ```bash
+>   python3 swing_bot_backtest.py                                 # TQQQ+SOXL, 4h, 20EMA 청산
+>   python3 swing_bot_backtest.py --ticker TQQQ --exit chan --atr-k 2.5 --trigger intra
+>   python3 swing_bot_backtest.py --ticker SOXL --tf 1D           # 일봉 비교
+>   ```
+>   옵션: `--tf 1h/2h/4h/6h/1D` · `--exit ema20/chan/stop` · `--trigger close/intra` · `--period`
+> - 실전 성과 평가: `swing_bot_eval.py` (아래 [실전 성과 평가](#-실전-성과-평가) 참고)
+
+### `swing_eval.yml` — 스윙 봇 실전 성과 평가 (월간)
+
+| 트리거 | 시간 (UTC) | 설명 |
+|--------|------------|------|
+| 예약 실행 | 매월 1일 09:00 | 월간 실전 신호 성과 요약을 Discord로 전송 |
+| 수동 실행 | 사용자 요청 시 | workflow_dispatch 수동 실행 (언제든 평가) |
+
+> - `swing_bot.py`가 누적한 `swing_signals.jsonl`(BUY/SELL 이벤트 저널)을 읽어
+>   승률·평균수익/손실·총수익·MDD·PF·보유기간·미청산 포지션을 산출합니다.
+> - 미청산 포지션은 yfinance 현재가로 mark-to-market 하며, 실제 체결가가 신호가와
+>   다른 경우 저널의 `price`를 직접 수정해 보정할 수 있습니다.
+> - **자동 반영**: `--save` 실행 시 결과가 `swing_performance.json`에 월별 스냅샷으로
+>   누적 저장되고, 워크플로우가 커밋·푸시합니다 — 같은 달 재실행 시 해당 월만 갱신,
+>   월 단위 이력은 보존됩니다.
+> - 로컬 실행: `python3 swing_bot_eval.py [--ticker TQQQ] [--since 3m] [--no-mark] [--discord] [--save]`
 
 ### 환경 변수 (GitHub Secrets)
 
