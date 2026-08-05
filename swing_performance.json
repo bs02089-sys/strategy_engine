@@ -1,0 +1,23 @@
+{
+  "months": {
+    "2026-08": {
+      "since": "all",
+      "tickers": {
+        "TEST": {
+          "n_trades": 1,
+          "n_closed": 1,
+          "win_rate": 100.0,
+          "avg_ret": 8.11,
+          "total_return": 8.11,
+          "mdd": 0.0,
+          "pf": null,
+          "avg_hold_days": 3.0,
+          "avg_win": 8.11,
+          "avg_loss": 0.0,
+          "max_hold_days": 3
+        }
+      }
+    }
+  },
+  "updated": "2026-08-05T07:23:00.662194+00:00"
+}
