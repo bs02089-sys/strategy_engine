@@ -24,7 +24,7 @@ GitHub Actions의 `dca_ma_strategy.yml`(--ath-monitor 분기)를 실행시킵니
 
 사용법:
   python setup_cronjob_org.py              # ATH DCA 실시간 모니터 잡 생성 (기본)
-  python setup_cronjob_org.py --swing      # 스윙 봇 잡 생성 (4h봉 마감 직후 18:45/22:45 UTC, 월~금)
+  python setup_cronjob_org.py --swing      # 스윙 봇 잡 생성 (한국 23:00/03:00 = UTC 14:00/18:00, 월~금)
   python setup_cronjob_org.py --dry-run    # 페이로드만 출력 (API 미호출, 시크릿 마스킹)
   python setup_cronjob_org.py --list       # 기존 잡 목록 조회
   python setup_cronjob_org.py --test-dispatch  # 테스트 dispatch 1회 발사 (워크플로우 실행)
@@ -33,10 +33,8 @@ GitHub Actions의 `dca_ma_strategy.yml`(--ath-monitor 분기)를 실행시킵니
 
 스윙 봇 잡 (--swing):
   - 이벤트: repository_dispatch(event_type: swing-bot) → swing_bot.yml 실행
-  - 스케줄: 월~금 18:45/22:45 UTC — 4h봉(09:30/13:30 ET) 마감 직후
-    * 여름(DST): 봉 마감 17:30/21:30 UTC → 75분 후
-    * 겨울(EST): 봉 마감 18:30/22:30 UTC → 15분 후
-    (GitHub Actions 스케줄 크론보다 정확 — best-effort 지연/비활성화 우회)
+  - 스케줄: 한국 23:00/03:00 (= UTC 14:00/18:00), 월~금 — 미국 장중 실시간
+    신호 확인 (사용자가 깨어 있어 직접 매매하는 시간대에 맞춤)
   - 관련 스크립트: setup_swing_cron.py (로컬 크론 — 평가 전용)
 """
 import base64
@@ -117,18 +115,18 @@ def _build_schedule(poll_minutes: int, hours_start: int, hours_end: int) -> dict
 
 
 def _build_swing_schedule() -> dict:
-    """스윙 봇 전용 스케줄: 월~금 18:45 / 22:45 UTC.
+    """스윙 봇 전용 스케줄: 한국 23:00 / 03:00 (= UTC 14:00 / 18:00), 월~금.
 
-    4h봉은 장 개장(09:30 ET) 기준 [09:30~13:30), [13:30~17:30) —
-    여름(DST) 마감 17:30/21:30 UTC, 겨울(EST) 마감 18:30/22:30 UTC.
-    18:45/22:45 UTC 실행은 두 계절 모두 '마감 직후'가 된다.
+    미국 장중(한국 저녁~새벽)에 2회 실행 — 사용자가 깨어 있는 시간대에
+    실시간으로 신호를 확인하고 직접 매매할 수 있게 한다. 03:00 KST는
+    전일 18:00 UTC에 해당하므로 hours=[14, 18]로 표현한다.
     """
     return {
         "timezone": "UTC",
         "expiresAt": 0,
-        "hours": [18, 22],
+        "hours": [14, 18],
         "mdays": [-1],
-        "minutes": [45],
+        "minutes": [0],
         "months": [-1],
         "wdays": [1, 2, 3, 4, 5],   # 월~금
     }
@@ -308,13 +306,13 @@ def main() -> None:
     cronjob_key = _env("CRONJOB_ORG_API_KEY", "<key>")
 
     if swing_mode:
-        # ── 스윙 봇 잡 전용 설정 (4h봉 마감 직후 고정 스케줄) ──────────
+        # ── 스윙 봇 잡 전용 설정 (한국 23:00/03:00 고정 스케줄) ──────────
         event_type = SWING_EVENT_TYPE
         job_title = SWING_JOB_TITLE
         workflow_path = SWING_WORKFLOW_PATH
         schedule = _build_swing_schedule()
         poll_minutes = hours_start = hours_end = None
-        job_desc = "스윙 봇 4h봉 모니터 (월~금 18:45/22:45 UTC)"
+        job_desc = "스윙 봇 실시간 모니터 (한국 23:00/03:00 = UTC 14:00/18:00)"
     else:
         # ── ATH DCA 실시간 모니터 잡 (장중 N분 폴링) ──────────────────
         event_type = _env("GITHUB_EVENT_TYPE", "ath-dca-monitor")
