@@ -4,7 +4,9 @@
  SOXL/TQQQ 4시간봉 스윙 봇 — 골드핑거식 전략 (다중 종목 지원)
 ==================================================================
 전략 (유튜브 골드핑거 영상 로직 이식):
-  1. Finnhub 1시간봉 60일 수집 → 장 개장(09:30 ET) 기준 4시간봉 리샘플
+  1. yfinance 1시간봉 60일 수집 → 장 개장(09:30 ET) 기준 4시간봉 리샘플
+     (Finnhub 무료 티어는 봉 데이터 미지원 — /quote만 제공, 2026-08 확인.
+      yfinance 15분 지연은 완성 4h봉 기준 판정이라 시그널 로직에 영향 없음)
   2. 3중 EMA(10/20/50) 정배열 + 거래량 돌파(20봉 평균+1σ) + 최근 5봉 고점 돌파
   3. 변동성 수축 필터: 직전 봉 ATR이 20봉 평균보다 낮은(수축) 상태에서의 돌파만 인정
      (유튜버 영상의 '변동성 수축' 조건 구현 — 2년 백테스트에서 두 종목 성과/MDD 개선)
@@ -16,7 +18,7 @@
   - 종목별 신호 상태는 swing_state.json에 영속화 — 중복 BUY/SELL 알림 방지
   - TICKERS 환경변수로 종목 목록 변경 가능 (콤마 구분, 기본: TQQQ,SOXL)
 
-Dependencies: pandas, requests (requirements.txt에 포함)
+Dependencies: pandas, requests, yfinance (requirements.txt에 포함)
 실행: python3 swing_bot.py
 ==================================================================
 """
@@ -24,20 +26,15 @@ import json
 import os
 import shutil
 import tempfile
-import time
 
 import pandas as pd
 import requests
+import yfinance as yf
 
 # ==========================================
 # [사용자 설정 영역]
 # ==========================================
-# GitHub Actions 시크릿은 공백/줄바꿈을 자동 제거하지 않아(원문 보존),
-# 붙여넣기 시 앞뒤 공백이 함께 저장되면 키가 거부된다(403/401).
-# 원본을 먼저 보관해 진단에 쓰고, 실제 사용은 strip()으로 보정한 값만 쓴다.
-_RAW_FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY", "YOUR_FINNHUB_API_KEY")
-FINNHUB_API_KEY = _RAW_FINNHUB_API_KEY.strip()
-_API_KEY_HAD_WHITESPACE = bool(_RAW_FINNHUB_API_KEY) and _RAW_FINNHUB_API_KEY != FINNHUB_API_KEY
+# 데이터 소스: yfinance (Finnhub 무료 티어는 /stock/candle 봉 데이터 미지원 — 2026-08 확인)
 DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK", "YOUR_DISCORD_WEBHOOK")
 DISCORD_USER_ID = os.getenv("DISCORD_USER_ID", "YOUR_DISCORD_USER_ID")
 # 다중 종목: TICKERS 환경변수로 변경 가능 (콤마 구분, 기본 TQQQ+SOXL)
@@ -124,7 +121,6 @@ STATE_PATH = os.path.join(
 SIGNALS_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "swing_signals.jsonl"
 )
-REQUEST_TIMEOUT = 15  # Finnhub API 타임아웃(초)
 SESSION_TZ = "America/New_York"  # 거래 세션 타임존
 SESSION_OPEN = pd.Timedelta(hours=9, minutes=30)  # 장 개장 시각 → 4h 버킷 기준
 MIN_4H_BARS = 51  # EMA50 워밍업 + 첫 신호 스캔용 최소 4시간봉 수
@@ -145,80 +141,32 @@ def session_resample_origin(df_1h):
   return first.normalize() + SESSION_OPEN
 
 
-def _mask_api_key(api_key):
-  """API 키 상태를 로그용으로 마스킹 — 키 전체를 노출하지 않고 상태만 알려준다.
+def fetch_yfinance_hourly_data(ticker):
+  """yfinance 1시간봉 수집 (최근 60일) — 스윙 봇 데이터 소스.
 
-  - 비어 있음: 시크릿이 빈 값/미설정 (GitHub Actions에서 키가 안 넘어온 상태)
-  - 기본값 placeholder: 코드 기본값 그대로 (환경변수 미설정)
-  - 설정됨: 마지막 4자리만 노출 — 값 자체는 비밀로 유지
+  Finnhub 무료 티어는 /quote(현재가)·profile2만 제공하고 /stock/candle(봉)은
+  403("You don't have access to this resource.")으로 거부한다 (2026-08 확인).
+  yfinance는 15분 지연이지만 봇은 완성 4h봉(확정 종가) 기준으로만 판정하므로
+  시그널 로직에 영향이 없다. 오류 시 빈 DataFrame 반환 — 호출부가 생략 처리.
   """
-  if not api_key:
-    return "(비어 있음 — 시크릿 미설정/빈 값)"
-  if api_key == "YOUR_FINNHUB_API_KEY":
-    return "(기본값 placeholder — 환경변수 미설정)"
-  if len(api_key) <= 4:  # 극단적 짧은 값 방어 — 마지막 4자리 노출 시 키 전체가 드러남
-    return "(설정됨)"
-  return f"(설정됨 …{api_key[-4:]})"
-
-
-def fetch_finnhub_hourly_data(ticker, api_key):
-  """Finnhub 1시간봉 수집 (최근 60일) — 타임아웃·재시도·오류 방어 포함"""
-  end_time = int(time.time())
-  start_time = end_time - (60 * 24 * 60 * 60)  # 60일 전
-
-  url = (
-      f"https://finnhub.io/api/v1/stock/candle?symbol={ticker}"
-      f"&resolution=60&from={start_time}&to={end_time}&token={api_key}"
-  )
-  for attempt in range(3):
-    try:
-      response = requests.get(url, timeout=REQUEST_TIMEOUT)
-      if response.status_code == 429:  # 무료 티어 요청 한도 초과 → 백오프 후 재시도
-        print(f"[{ticker}] [경고] Finnhub 요청 한도(429) 초과 — 백오프 후 재시도")
-        time.sleep(2 ** (attempt + 1))
-        continue
-      if response.status_code in (401, 403):
-        # 인증/권한 오류 — 재시도해도 해결되지 않으므로 즉시 종료.
-        # Finnhub는 응답 본문에 실제 거부 사유({"error": ...})를 담아 오는데,
-        # 상태 코드만 출력하면 원인을 알 수 없어 본문도 함께 남긴다.
-        reason = ""
-        try:
-          body = response.json()
-          reason = body.get("error", "") if isinstance(body, dict) else ""
-        except ValueError:
-          pass
-        hint = (
-            "API 키가 잘못됨 — GitHub Actions 시크릿(FINNHUB_API_KEY) 값 확인"
-            if response.status_code == 401
-            else "API 키 접근 거부 — 키 재발급 또는 Finnhub 계정 상태(정지·요금제) 확인"
-        )
-        detail = f" | 서버 메시지: {reason}" if reason else ""
-        print(f"[{ticker}] [오류] Finnhub {response.status_code}: {hint}{detail}")
-        return pd.DataFrame()
-      if response.status_code >= 400:  # 기타 오류 — 재시도 의미 없음, 즉시 종료
-        print(f"[{ticker}] [오류] Finnhub 응답 {response.status_code}")
-        return pd.DataFrame()
-      response.raise_for_status()
-      data = response.json()
-      if data.get("s") != "ok":
-        # API가 명시적으로 거부(no_data 등) — 재시도 의미 없음
-        print(f"[{ticker}] [오류] 데이터 로드 실패: {data.get('s')}")
-        return pd.DataFrame()
-      return pd.DataFrame({
-          "Open": data["o"],
-          "High": data["h"],
-          "Low": data["l"],
-          "Close": data["c"],
-          "Volume": data["v"],
-      }, index=pd.to_datetime(data["t"], unit="s", utc=True)
-            .tz_convert("America/New_York"))
-    except (requests.RequestException, ValueError) as exc:
-      if attempt == 2:
-        print(f"[{ticker}] [오류] Finnhub 요청 실패: {exc}")
-      else:
-        time.sleep(2 ** attempt)  # 일시적 오류(타임아웃/연결)만 백오프 재시도
-  print(f"[{ticker}] [오류] Finnhub 데이터 수집 실패 (3회 시도 후 종료)")
-  return pd.DataFrame()
+  try:
+    df = yf.download(
+        ticker, period="60d", interval="1h", progress=False, auto_adjust=True
+    )
+    if df.empty:
+      print(f"[{ticker}] [오류] yfinance 데이터 없음")
+      return pd.DataFrame()
+    # yf.download는 단일 종목도 MultiIndex 컬럼(('Open','TQQQ')...)을 반환한다.
+    # build_4h_frame의 agg({컬럼명: ...})가 키로 쓰므로 1레벨로 평탄화한다.
+    if isinstance(df.columns, pd.MultiIndex):
+      df.columns = df.columns.get_level_values(0)
+    df = df[["Open", "High", "Low", "Close", "Volume"]].dropna()
+    if df.index.tz is None:
+      df.index = df.index.tz_localize("America/New_York")
+    return df
+  except Exception as exc:
+    print(f"[{ticker}] [오류] yfinance 수집 실패: {exc}")
+    return pd.DataFrame()
 
 
 def send_discord_alert(message):
@@ -521,18 +469,14 @@ def analyze_ticker(ticker, df_4h, state):
 
 
 def run_swing_strategy():
-  # 시작 진단: 키가 실제로 전달됐는지(마스킹) — 403/401 발생 시 원인 파악 1순위 단서
-  print(f"[설정] Finnhub API 키 상태: {_mask_api_key(FINNHUB_API_KEY)}")
-  if _API_KEY_HAD_WHITESPACE:
-    print("[경고] FINNHUB_API_KEY에 앞뒤 공백/줄바꿈이 포함되어 있었습니다 — 자동 제거했습니다.")
-    print("        GitHub 시크릿도 깔끔하게 다시 저장하면 영구 해결됩니다.")
+  print("[설정] 데이터 소스: yfinance (1시간봉, 15분 지연 — 완성 4h봉 기준이라 무관)")
   print(f"[설정] 대상 종목: {', '.join(TICKERS)}")
   state = load_state()
   changed = False
 
   for ticker in TICKERS:
     try:
-      df_1h = fetch_finnhub_hourly_data(ticker, FINNHUB_API_KEY)
+      df_1h = fetch_yfinance_hourly_data(ticker)
       if df_1h.empty:
         continue
 
