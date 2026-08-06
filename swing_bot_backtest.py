@@ -59,36 +59,65 @@ DEFAULT_PERIOD = "2y"  # yfinance 1시간봉 최대 조회 기간
 AUTO_ADJUST = False
 
 
+from datetime import datetime, timedelta
+
 def load_bars(ticker, tf, period=DEFAULT_PERIOD):
-  """타임프레임별 OHLCV 로드. tf: '1h'|'2h'|'4h'|'6h'|'1D'"""
-  if tf == "1D":
-    d = yf.download(ticker, period=period, interval="1d", progress=False, auto_adjust=AUTO_ADJUST)
-    # yfinance는 단일-티커 호출 시 컬럼이 단일 레벨(str), 멀티-티커 시 MultiIndex를 반환할 수 있음
-    if isinstance(d.columns, pd.MultiIndex):
-      d.columns = d.columns.get_level_values(0)
-    # 인덱스 타임존 정규화: UTC(naive) -> SESSION_TZ
-    if d.index.tz is None:
+  """타임프레임별 OHLCV 로드. tf: '1h'|'2h'|'4h'|'6h'|'1D'
+
+  If a long period (e.g., '3y') is requested for intraday intervals, yfinance limits 1h requests
+  to ~730 days. To support longer ranges we fetch in 730-day chunks and concatenate.
+  """
+  def _normalize_df(df):
+    if isinstance(df.columns, pd.MultiIndex):
+      df.columns = df.columns.get_level_values(0)
+    if df.index.tz is None:
       try:
-        d = d.tz_localize("UTC").tz_convert(SESSION_TZ)
+        df = df.tz_localize("UTC").tz_convert(SESSION_TZ)
       except Exception:
         pass
     else:
-      d = d.tz_convert(SESSION_TZ)
-    return d[["Open", "High", "Low", "Close", "Volume"]].dropna()
+      df = df.tz_convert(SESSION_TZ)
+    return df[["Open", "High", "Low", "Close", "Volume"]].dropna()
 
-  h = yf.download(ticker, period=period, interval="1h", progress=False, auto_adjust=AUTO_ADJUST)
-  if isinstance(h.columns, pd.MultiIndex):
-    h.columns = h.columns.get_level_values(0)
-  h = h[["Open", "High", "Low", "Close", "Volume"]].dropna()
-  # 타임존 정규화: yfinance는 보통 naive(로컬) 또는 UTC이므로 UTC로 로컬라이즈 후 ET로 변환
-  if h.index.tz is None:
-    try:
-      h = h.tz_localize("UTC").tz_convert(SESSION_TZ)
-    except Exception:
-      pass
-  else:
-    h = h.tz_convert(SESSION_TZ)
+  if tf == "1D":
+    d = yf.download(ticker, period=period, interval="1d", progress=False, auto_adjust=AUTO_ADJUST)
+    return _normalize_df(d)
+
+  # intraday intervals
   hours = int(tf[:-1])
+  # If period is specified as '<N>y', convert to days
+  if isinstance(period, str) and period.endswith('y') and period[:-1].isdigit():
+    years = int(period[:-1])
+    total_days = years * 365
+  else:
+    # fallback: let yfinance handle (period string like '2y')
+    total_days = None
+
+  if total_days is None or total_days <= 730:
+    h = yf.download(ticker, period=period, interval="1h", progress=False, auto_adjust=AUTO_ADJUST)
+    h = _normalize_df(h)
+  else:
+    # chunk into <=730-day windows
+    end_dt = datetime.now()
+    start_dt = end_dt - timedelta(days=total_days)
+    chunks = []
+    chunk_days = 730
+    cur_start = start_dt
+    while cur_start < end_dt:
+      cur_end = min(cur_start + timedelta(days=chunk_days), end_dt)
+      print(f"Fetching {ticker} {cur_start.date()} to {cur_end.date()}")
+      df_chunk = yf.download(ticker, start=cur_start.date().isoformat(), end=cur_end.date().isoformat(), interval="1h", progress=False, auto_adjust=AUTO_ADJUST)
+      if df_chunk is None or df_chunk.empty:
+        cur_start = cur_end
+        continue
+      df_chunk = _normalize_df(df_chunk)
+      chunks.append(df_chunk)
+      cur_start = cur_end
+    if not chunks:
+      return pd.DataFrame()
+    h = pd.concat(chunks).sort_index()
+    h = h[~h.index.duplicated(keep='first')]
+
   if hours == 1:
     return h
   origin = bot.session_resample_origin(h)
@@ -346,7 +375,24 @@ def main():
   tp_spec, tp_default = parse_tp_spec(args.tp_atr)
   for ticker in [t.strip().upper() for t in args.ticker.split(",") if t.strip()]:
     try:
-      run_ticker(ticker, tf, args.exit, k, args.trigger, args.entry, args.contr_ratio,
+      # 종목별 exit_mode override 적용 (swing_config.json의 EXIT_MODE_BY_TICKER)
+      exit_mode_for_ticker = args.exit
+      k_for_ticker = k
+      trigger_for_ticker = args.trigger
+      _exit_override = getattr(bot, "EXIT_MODE_BY_TICKER", {}).get(ticker)
+      if _exit_override:
+        # mode override
+        exit_mode_for_ticker = _exit_override.get("mode", exit_mode_for_ticker)
+        # k override (if provided and numeric)
+        if "k" in _exit_override and _exit_override["k"] is not None:
+          try:
+            k_for_ticker = float(_exit_override["k"])
+          except Exception:
+            pass
+        # trigger override (optional)
+        if "trigger" in _exit_override and _exit_override["trigger"]:
+          trigger_for_ticker = _exit_override["trigger"]
+      run_ticker(ticker, tf, exit_mode_for_ticker, k_for_ticker, trigger_for_ticker, args.entry, args.contr_ratio,
                  args.period, tp_spec, tp_default)
     except Exception as exc:  # 한 종목 실패가 다른 종목을 막지 않도록
       print(f"[{ticker}] 백테스트 중 오류: {exc}")

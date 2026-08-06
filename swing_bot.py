@@ -58,6 +58,7 @@ def _load_config(path=None):
   defaults = {
       "TAKE_PROFIT_ATR": 3.0,
       "TAKE_PROFIT_ATR_BY_TICKER": {"TQQQ": 1.5, "SOXL": 3.5},
+      "EXIT_MODE_BY_TICKER": {},
       "AUTO_UPDATE": True,
   }
   path = path or CONFIG_PATH
@@ -108,6 +109,31 @@ for _k, _v in _TP_CONFIG.get("TAKE_PROFIT_ATR_BY_TICKER", {}).items():
   _fv = _to_float(_v, None)
   if _fv is not None:
     TAKE_PROFIT_ATR_BY_TICKER[str(_k).upper()] = _fv
+# per-ticker exit mode override: { 'TQQQ': {'mode':'chan','k':3.0}, 'SOXL': {'mode':'ema20'} }
+EXIT_MODE_BY_TICKER = {}
+for _k, _v in _TP_CONFIG.get("EXIT_MODE_BY_TICKER", {}).items():
+  try:
+    # allow either dict or simple string like 'chan' or 'chan:3.0'
+    if isinstance(_v, dict):
+      entry = dict(_v)
+      if "k" in entry:
+        entry["k"] = _to_float(entry["k"], None)
+      entry["mode"] = str(entry.get("mode", "ema20"))
+    elif isinstance(_v, str):
+      parts = _v.split(":")
+      entry = {"mode": parts[0]}
+      if len(parts) > 1:
+        try:
+          entry["k"] = float(parts[1])
+        except Exception:
+          pass
+    else:
+      # unknown format - skip
+      continue
+    EXIT_MODE_BY_TICKER[str(_k).upper()] = entry
+  except Exception:
+    # ignore malformed entries — defensive
+    continue
 # 자동 갱신 스위치: false면 분기 재평가(swing_tp_review.py)가 보고만 하고 승수를
 # 자동 변경하지 않는다 (수동 모드 — 사용자가 swing_config.json을 직접 수정)
 AUTO_UPDATE = _to_bool(_TP_CONFIG.get("AUTO_UPDATE", True))

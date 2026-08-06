@@ -5,5 +5,9 @@
         "TQQQ": 1.5,
         "SOXL": 3.5
     },
+    "EXIT_MODE_BY_TICKER": {
+        "TQQQ": { "mode": "chan", "k": 3.0 },
+        "SOXL": { "mode": "ema20" }
+    },
     "AUTO_UPDATE": false
 }
