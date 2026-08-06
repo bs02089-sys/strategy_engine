@@ -1,0 +1,46 @@
+name: Finnhub Debug (push-trigger)
+
+# Push-triggered debug workflow to run a Finnhub test when a special trigger file is updated.
+# This exists so automation (bots) can push the trigger file and cause a debug run.
+# Use with caution: it only runs when .github/trigger/finnhub_debug_run is modified.
+
+on:
+  push:
+    paths:
+      - '.github/trigger/finnhub_debug_run'
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
+      DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Print env presence (no secret values)
+        run: |
+          if [ -z "$FINNHUB_API_KEY" ]; then echo "FINNHUB_API_KEY is NOT SET"; else echo "FINNHUB_API_KEY is SET"; fi
+          if [ -z "$DISCORD_WEBHOOK" ]; then echo "DISCORD_WEBHOOK is NOT SET"; else echo "DISCORD_WEBHOOK is SET"; fi
+
+      - name: Finnhub test request
+        run: |
+          SYMBOL="TQQQ"
+          FROM=1622505600
+          TO=1622592000
+          URL="https://finnhub.io/api/v1/stock/candle?symbol=${SYMBOL}&resolution=60&from=${FROM}&to=${TO}&token=${FINNHUB_API_KEY}"
+
+          echo "Requesting: $URL"
+          set -o pipefail
+          HTTP_STATUS=$(curl -s -w "%{http_code}" -o response.json "$URL" || echo "000")
+          echo "HTTP status: $HTTP_STATUS"
+          echo "Response body:" && cat response.json || true
+
+      - name: Cleanup
+        if: always()
+        run: |
+          rm -f response.json || true
