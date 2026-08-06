@@ -1997,6 +1997,19 @@ def _build_briefing_lines(now_ny: datetime, cfg: dict) -> list[str]:
 #     → check_ath_dca_signals(alerts_only=True) → 🚨/📡 only, deduped
 #     → Discord webhook (same secrets as the nightly briefing)
 
+def _mask_finnhub_error(exc: Exception, api_key: str) -> str:
+    """requests 예외 메시지에서 Finnhub 키를 마스킹한다.
+
+    requests.HTTPError 등은 요청 URL을 그대로 담아 키(token 파라미터)가
+    로그·sigma_log.txt로 새어나갈 수 있다 — 2026-07-31 실제 유출 사례
+    (f51deda/a75d8a8 커밋)로 확인됨. 키 전체를 마스킹된 형태로 치환한다.
+    """
+    msg = str(exc)
+    if api_key:
+        msg = msg.replace(api_key, f"{api_key[:4]}***{api_key[-4:]}")
+    return msg
+
+
 def _fetch_finnhub_quote(ticker: str, api_key: str) -> float | None:
     """Fetch the real-time current price from Finnhub /quote (free tier).
 
@@ -2013,7 +2026,7 @@ def _fetch_finnhub_quote(ticker: str, api_key: str) -> float | None:
             print(f"✅ Finnhub {ticker}: ${price:.2f}")
             return price
     except Exception as e:
-        print(f"⚠️ Finnhub quote fetch failed for {ticker}: {e}")
+        print(f"⚠️ Finnhub quote fetch failed for {ticker}: {_mask_finnhub_error(e, api_key)}")
     return None
 
 

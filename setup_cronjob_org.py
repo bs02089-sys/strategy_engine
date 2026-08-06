@@ -43,6 +43,7 @@ GitHub Actions의 `dca_ma_strategy.yml`(--ath-monitor 분기)를 실행시킵니
 """
 import base64
 import copy
+import datetime as _dt
 import json
 import os
 import sys
@@ -75,6 +76,28 @@ READONLY_JOB_FIELDS = (
     "sslCertExpiry",
     "someFailed",
 )
+
+# cron-job.org lastStatus 코드 → 사람이 읽는 상태 문구 (공식 문서 기준)
+# 0=미실행, 1=OK(성공), 2~9=실패 사유별
+LAST_STATUS_TEXT = {
+    0: "미실행",
+    1: "성공(OK)",
+    2: "실패(DNS 오류)",
+    3: "실패(호스트 연결 불가)",
+    4: "실패(HTTP 오류 4xx/5xx)",
+    5: "실패(타임아웃)",
+    6: "실패(응답 데이터 과다)",
+    7: "실패(잘못된 URL)",
+    8: "실패(내부 오류)",
+    9: "실패(알 수 없는 이유)",
+}
+
+
+def _fmt_epoch(ts) -> str:
+    """epoch 초 → 'YYYY-MM-DD HH:MM' (시스템 로컬 시간대 — 사용자 PC 기준 KST) 문자열. 없으면 '-'."""
+    if not ts:
+        return "-"
+    return _dt.datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M")
 
 
 def _strip_readonly_fields(job_body: dict) -> None:
@@ -223,10 +246,18 @@ def print_jobs(jobs: list[dict]) -> None:
         return
     print(f"📋 등록된 크론잡 ({len(jobs)}개):")
     for j in jobs:
+        status_code = j.get("lastStatus")
+        status_txt = LAST_STATUS_TEXT.get(status_code, f"알 수 없음({status_code})")
         print(
             f"  - [{j.get('jobId')}] {j.get('title', '(제목 없음)')} "
             f"enabled={j.get('enabled')} → {j.get('url', '')}"
         )
+        print(
+            f"      마지막 실행: {_fmt_epoch(j.get('lastExecution'))} "
+            f"| 상태: {status_txt} "
+            f"| 소요: {j.get('lastDuration', '-')}ms"
+        )
+        print(f"      다음 실행: {_fmt_epoch(j.get('nextExecution'))}")
 
 
 def find_existing_job(jobs: list[dict], dispatches_url: str, job_title: str) -> int | None:
