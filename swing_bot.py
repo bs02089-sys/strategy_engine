@@ -196,8 +196,13 @@ def fetch_finnhub_hourly_data(ticker, api_key):
       response = requests.get(url, timeout=REQUEST_TIMEOUT)
       # 인증/권한 문제는 재시도보다 원인 확인이 필요하므로 별도 처리
       if response.status_code == 403:
-        print(f"[{ticker}] [오류] Finnhub 응답 403: 인증 실패 또는 권한 없음."
-              " FINNHUB_API_KEY(Secrets/Actions env) 값을 확인하세요. Falling back to yfinance.")
+        msg = (f"[{ticker}] [오류] Finnhub 응답 403: 인증 실패 또는 권한 없음. "
+               "FINNHUB_API_KEY(Secrets/Actions env) 값을 확인하세요. Falling back to yfinance.")
+        print(msg)
+        try:
+          send_discord_alert(f"[경고][{ticker}] Finnhub 인증 실패(403). 자동 폴백: yfinance 사용 — 환경변수 FINNHUB_API_KEY를 확인하세요.")
+        except Exception:
+          pass
         break
       if response.status_code == 429:  # 레이트 한도 초과 → 백오프 후 재시도
         time.sleep(2 ** (attempt + 1))
@@ -208,13 +213,23 @@ def fetch_finnhub_hourly_data(ticker, api_key):
       response.raise_for_status()
       data = response.json()
       if data.get("s") != "ok":
-        print(f"[{ticker}] [오류] 데이터 로드 실패: {data.get('s')}. Falling back to yfinance.")
+        msg = f"[{ticker}] [오류] 데이터 로드 실패: {data.get('s')}. Falling back to yfinance."
+        print(msg)
+        try:
+          send_discord_alert(f"[경고][{ticker}] Finnhub 데이터 로드 실패({data.get('s')}). 자동 폴백: yfinance 사용 중.")
+        except Exception:
+          pass
         break
       # 필수 필드 존재 및 비어있지 않은 리스트인지 방어 검사
       required = ("o", "h", "l", "c", "v", "t")
       if not all(k in data and isinstance(data[k], list) and len(data[k]) > 0 for k in required):
         missing = [k for k in required if k not in data or not data.get(k)]
-        print(f"[{ticker}] [오류] Finnhub 응답에 필요한 필드 없음/비어있음: {', '.join(missing)}. Falling back to yfinance.")
+        msg = f"[{ticker}] [오류] Finnhub 응답에 필요한 필드 없음/비어있음: {', '.join(missing)}. Falling back to yfinance."
+        print(msg)
+        try:
+          send_discord_alert(f"[경고][{ticker}] Finnhub 응답에 필요한 필드 없음/비어있음. 자동 폴백: yfinance 사용 중.")
+        except Exception:
+          pass
         break
       idx = pd.to_datetime(data["t"], unit="s", utc=True).tz_convert("America/New_York")
       return pd.DataFrame({
@@ -236,7 +251,12 @@ def fetch_finnhub_hourly_data(ticker, api_key):
     print(f"[{ticker}] [info] Finnhub 실패 — yfinance로 폴백 시도 (1h, 60일)")
     d = yf.download(ticker, period="60d", interval="1h", progress=False, auto_adjust=True)
     if d is None or d.empty:
-      print(f"[{ticker}] [오류] yfinance 반환 데이터 없음 (폴백 실패)")
+      msg = f"[{ticker}] [오류] yfinance 반환 데이터 없음 (폴백 실패)"
+      print(msg)
+      try:
+        send_discord_alert(f"[경고][{ticker}] yfinance 폴백 실패: 데이터 없음")
+      except Exception:
+        pass
       return pd.DataFrame()
     # 칼럼 정규화
     if getattr(d.columns, "nlevels", 1) > 1:
