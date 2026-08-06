@@ -412,11 +412,35 @@ python3 DCA_MA_strategy_flowchart.py
 
 ### `swing_eval.yml` — 스윙 봇 실전 성과 평가 (월간)
 
+
 | 트리거 | 시간 (UTC) | 설명 |
 |--------|------------|------|
 | 예약 실행 | 매월 1일 09:00 | 월간 실전 신호 성과 요약을 Discord로 전송 |
 | 수동 실행 | 사용자 요청 시 | workflow_dispatch 수동 실행 (언제든 평가) |
 
+
+### `manual_eval.yml` — 수동 평가 (권장: 수동 실행 유지)
+
+이 저장소의 `manual_eval.yml`은 사용자의 기존 습관(로컬 실행 대신 GitHub Actions에서 수동으로 평가 실행)을 해치지 않도록 설계된 dispatch-only 워크플로우입니다.
+
+요약
+- 트리거 방식: workflow_dispatch (수동 실행 전용 — 스케줄 없음)
+- 입력값:
+  - mode: `dry` (기본, 결과 출력만) 또는 `save` (swing_performance.json을 --save로 갱신하고 변경이 있으면 PR 생성)
+  - since: 평가 시작 기간 (`all`, `3m`, `1y` 등)
+- 동작:
+  - `dry`: `python swing_bot_eval.py --since <since>` 를 실행하여 결과를 로그에 출력합니다(파일 변경 없음).
+  - `save`: `python swing_bot_eval.py --save --since <since>` 를 실행하고, 변경된 `swing_performance.json`이 있으면 자동으로 PR을 생성합니다(직접 main에 푸시하지 않음).
+
+권장 사용법
+1. 처음 실행은 mode=`dry`로 하여 출력과 로그(의존성 문제, 에러 등)를 확인하세요.
+2. 결과가 정상이라면 mode=`save`로 실행해 PR을 생성하고 변경 내용을 리뷰 후 머지하세요.
+
+운영상 유의사항
+- `save` 모드는 자동으로 저장·PR 생성하므로 로컬에서 활성화하지 마십시오(의도치 않은 커밋 방지).
+- 로컬에서 수동으로 평가하려면 기존대로 `python3 swing_bot_eval.py --since 3m` 등으로 실행하면 됩니다.
+
+(워크플로우 파일 경로: `.github/workflows/manual_eval.yml`)
 ### `swing_tp_review.yml` — TP 승수 분기 재평가 (3개월)
 
 | 트리거 | 시간 (UTC) | 설명 |
