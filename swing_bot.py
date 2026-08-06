@@ -29,6 +29,14 @@ import argparse
 
 import pandas as pd
 import requests
+import subprocess
+import sys
+
+# 자동 실전 성과 평가 트리거: 환경변수 AUTO_RUN_EVAL
+# - 'none' (기본) : 실행 안 함
+# - 'dry'          : swing_bot_eval.py를 호출(출력만, 저장/커밋 불가)
+# - 'save'         : swing_bot_eval.py --save --since all (성과 스냅샷 저장) — DRY_RUN 모드에서는 자동 저장하지 않음
+AUTO_RUN_EVAL = os.getenv("AUTO_RUN_EVAL", "none").strip().lower()
 
 # ==========================================
 # [사용자 설정 영역]
@@ -313,6 +321,27 @@ def log_signal(ticker, event, signal_time, price):
   try:
     with open(SIGNALS_PATH, "a", encoding="utf-8") as f:
       f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    # 신호 기록 성공 시(append 완료) — 옵션에 따라 실전 성과 평가(swing_bot_eval.py)를 트리거
+    try:
+      mode = AUTO_RUN_EVAL
+      # DRY_RUN 중에는 자동 저장 모드('save') 비허용 — 안전장치
+      if DRY_RUN and mode == "save":
+        mode = "dry"
+      if mode in ("dry", "save"):
+        eval_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "swing_bot_eval.py")
+        cmd = [sys.executable, eval_script]
+        if mode == "save":
+          cmd += ["--save", "--since", "all"]
+        # 비차단 실행: 표준 출력/에러를 로그로 버리기(실제 환경에선 파일로 리디렉션해도 좋음)
+        try:
+          # Windows/Unix 모두 동작하도록 간단한 Popen 사용 — 부모 프로세스에 블로킹 영향 없음
+          subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+          print(f"[info] auto-eval triggered (mode={mode})")
+        except Exception as exc:
+          print(f"[경고] auto-eval 실행 실패: {exc}")
+    except Exception:
+      # auto-eval 관련 어떤 문제도 신호 기록 실패로 이어지지 않도록 무시
+      pass
   except OSError as exc:
     print(f"[{ticker}] [오류] 신호 저널 기록 실패: {exc}")
 
