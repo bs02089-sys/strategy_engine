@@ -150,3 +150,37 @@ cfg2 = copy.deepcopy(cfg); cfg2["TRIGGER_2"] = "-50%"
 r = run_backtest_ath_dca(df, entry_multiplier=load_entry_multiplier("TQQQ"),
                          ticker="TQQQ", ath_dca_config=cfg2, initial_cash=150_000)
 ```
+
+---
+
+## 2026-08-06 업데이트 — 추가 실험 및 문서 정리 요약
+
+- 실행 및 실험 개요
+  - 백테스트 및 TP/TF 그리드 실험을 통해 Dipsik 권장 TP 값을 검증함.
+  - 실험 환경: WSL(Ubuntu) 내 기존 Python 가상환경, yfinance 데이터 소스(분할/배당 조정), 각종 스윕은 5년/10년 구간으로 재현 확인.
+  - 실험 산출물(대량 .out, grid_results 등)은 사용자의 요청으로 로컬에서 정리(삭제)되어 현재는 보관되지 않음. 필요한 경우 재실행으로 복원 가능.
+
+- 핵심 결과 (TP 최적화 요약)
+  - TQQQ: TAKE_PROFIT = entry_ATR × 1.5  (백테스트: 5년 기준 13회 체결 → 연 2.6회)
+  - SOXL: TAKE_PROFIT = entry_ATR × 3.5  (백테스트: 5년 기준 36회 체결 → 연 7.2회)
+  - 위 값은 사용자의 거래 빈도 목표(종목별 월 1회)를 기준으로 현실적으로 수용 가능한 값으로 수렴한 결과이며, 4시간 TF 설계 철학을 유지한 상태에서 결정됨.
+
+- 전략 코드 변경 요약 (참고)
+  - swing_bot.py: 런타임 방어적 수정(응답 검증, 원자적 상태저장, DRY_RUN 처리, Discord 예외 처리 등)
+  - swing_bot_backtest.py: yfinance 내성(칼럼·타임존 정규화, 청크 페치), --regime-tf 및 --allow-first-entry 옵션 추가, REGIME_OK 및 FORCE_ENTRY_FIRST 플래그 도입
+  - 실험용 보조 스크립트 및 결과 파일들은 사용자의 승인으로 삭제(커밋 포함)
+
+- 문서(본 파일) 상태 판단
+  - TRIGGER_OPTIMIZATION_SUMMARY.md의 기존 분석(트리거 임계값 권고: TQQQ -50%, SOXL -70%)는 2026-08-01 기준의 분석 결과를 잘 담고 있음.
+  - 다만 2026-08-06에 수행한 TP 최적화(위 TAKE_PROFIT ATR 배수) 결과와 실험 산출물 정리 기록을 추가함으로써 시점 최신화 필요 — 이 업데이트를 통해 파일이 최신 상태가 되었습니다.
+
+- 추가 권장 조치
+  1. swing_config.json에 위 TP 최적값(종목별 TAKE_PROFIT_ATR_BY_TICKER)을 반영하려면 사용자의 최종 승인 필요
+  2. 운영 이전 DRY_RUN 모니터링(권장: 1~4주)을 권장 — 실제 트리거 발생 빈도 및 브리핑 포맷 확인
+  3. 원시 실험 로그(복원 필요 시)를 저장해야 하는 경우, 정리 전 백업을 요청하면 원복 가능
+
+- 변경 이력(간단)
+  - branch: agents/swing-bot-bug-validation
+  - 주요 커밋: 방어적 수정 및 백테스트 하딩 + 실험 산출물 정리(삭제)
+
+(끝)
