@@ -258,6 +258,7 @@ def default_ticker_state():
       "last_sell": None,
       "entry_price": None,
       "entry_atr": None,
+      "hh": None,
   }
 
 
@@ -471,19 +472,106 @@ def analyze_ticker(ticker, df_4h, state):
         print(f"[{ticker}] [오류] Discord 알림 전송 실패: {exc}")
       return
 
-    # 0-2) 20EMA 이탈 — TP 미도달 시의 손절/추세 청산
-    if is_sell_signal:
+    # 종목별 exit_mode override 적용 (swing_config.json의 EXIT_MODE_BY_TICKER)
+    _exit_override = EXIT_MODE_BY_TICKER.get(ticker, {})
+    exit_mode_for_ticker = _exit_override.get("mode", "ema20")
+    k_for_ticker = _to_float(_exit_override.get("k", None), None) or (2.5 if exit_mode_for_ticker == "chan" else 2.0)
+    trigger_for_ticker = _exit_override.get("trigger", "close")
+
+    # hh(진입 이후 최고가) 갱신 — trailing 채널(chan) 용도
+    try:
+      state_hh = state.get("hh")
+      latest_high = float(latest.get("High", current_close))
+      if state_hh is None:
+        state["hh"] = latest_high
+      else:
+        state["hh"] = max(state_hh, latest_high)
+    except Exception:
+      state.setdefault("hh", None)
+
+    # 0-1) 익절(TP) 우선: ema20 청산용으로만 적용 (백테스트와 동일 정책 유지)
+    if (exit_mode_for_ticker == "ema20"
+        and entry_price is not None
+        and entry_atr is not None
+        and TAKE_PROFIT_ATR > 0
+        and (TAKE_PROFIT_ATR_BY_TICKER.get(ticker, TAKE_PROFIT_ATR)) > 0
+        and current_close >= entry_price + (TAKE_PROFIT_ATR_BY_TICKER.get(ticker, TAKE_PROFIT_ATR)) * entry_atr):
       msg = (
-          f"⚠️⚠️⚠️ **[{ticker}] 4시간봉 스윙 매도(SELL) 시그널 포착!**\n"
+          f"✅✅✅ **[{ticker}] 4시간봉 스윙 익절(TAKE PROFIT) 시그널 포착!**\n"
           f"- 시간: {time_str}\n"
           f"- 가격: ${current_close:.2f}\n"
-          f"- 상태: 20 EMA 이탈 (익절 목표 미도달) — 보유 포지션 정리\n"
+          f"- 상태: 진입가 ${entry_price:.2f} + {TAKE_PROFIT_ATR_BY_TICKER.get(ticker, TAKE_PROFIT_ATR):g}×ATR 목표 도달"
+          " — 수익 확정 청산\n"
           f"- 💡 지금 깨어나셔서 매도 주문을 직접 실행해 주세요 (자동 매매 없음)"
       )
       state.update({"state": "WAITING", "last_sell": time_str})
       log_signal(ticker, "SELL", df_4h.index[-1], current_close)
       try:
         send_discord_alert(msg)
+      except requests.RequestException as exc:
+        print(f"[{ticker}] [오류] Discord 알림 전송 실패: {exc}")
+      return
+
+    # 0-2) per-ticker exit mode 처리
+    do_exit = False
+    exit_msg = None
+    if exit_mode_for_ticker == "ema20":
+      if current_close < latest["EMA_20"]:
+        do_exit = True
+        exit_msg = (
+            f"⚠️⚠️⚠️ **[{ticker}] 4시간봉 스윙 매도(SELL) 시그널 포착!**\n"
+            f"- 시간: {time_str}\n"
+            f"- 가격: ${current_close:.2f}\n"
+            f"- 상태: 20 EMA 이탈 (익절 목표 미도달) — 보유 포지션 정리\n"
+            f"- 💡 지금 깨어나셔서 매도 주문을 직접 실행해 주세요 (자동 매매 없음)"
+        )
+    elif exit_mode_for_ticker == "chan":
+      # trailing channel: hh - k * ATR
+      try:
+        hh_val = float(state.get("hh", latest.get("High", current_close)))
+        trail = hh_val - k_for_ticker * float(latest.get("ATR", 0))
+        if trigger_for_ticker == "intra":
+          if latest.get("Low", current_close) <= trail:
+            do_exit = True
+            exit_price = max(trail, latest.get("Low", current_close))
+            exit_msg = (
+                f"⚠️[{ticker}] Chan trailing stop hit (intra) — trail={trail:.2f}, low={latest.get('Low', current_close):.2f}\n"
+                f"- 시간: {time_str}\n- 가격: ${exit_price:.2f}"
+            )
+        else:
+          if current_close < trail:
+            do_exit = True
+            exit_msg = (
+                f"⚠️[{ticker}] Chan trailing stop (close) breached — trail={trail:.2f}\n"
+                f"- 시간: {time_str}\n- 가격: ${current_close:.2f}"
+            )
+      except Exception:
+        pass
+    elif exit_mode_for_ticker == "stop":
+      try:
+        stop_price = entry_price - k_for_ticker * entry_atr
+        if trigger_for_ticker == "intra":
+          if latest.get("Low", current_close) <= stop_price:
+            do_exit = True
+            exit_msg = (
+                f"⚠️[{ticker}] Stop price hit (intra) — stop={stop_price:.2f}, low={latest.get('Low', current_close):.2f}\n"
+                f"- 시간: {time_str}\n- 가격: ${stop_price:.2f}"
+            )
+        else:
+          if current_close < stop_price:
+            do_exit = True
+            exit_msg = (
+                f"⚠️[{ticker}] Stop price breached (close) — stop={stop_price:.2f}\n"
+                f"- 시간: {time_str}\n- 가격: ${current_close:.2f}"
+            )
+      except Exception:
+        pass
+
+    if do_exit:
+      state.update({"state": "WAITING", "last_sell": time_str, "hh": None})
+      log_signal(ticker, "SELL", df_4h.index[-1], current_close)
+      try:
+        send_discord_alert(exit_msg or f"[{ticker}] SELL signal")
       except requests.RequestException as exc:
         print(f"[{ticker}] [오류] Discord 알림 전송 실패: {exc}")
       return
@@ -521,6 +609,7 @@ def analyze_ticker(ticker, df_4h, state):
           "last_buy": time_str,
           "entry_price": float(current_close),
           "entry_atr": float(latest["ATR"]),
+          "hh": float(latest.get("High", current_close)),
       })
       log_signal(ticker, "BUY", df_4h.index[-1], current_close)
       try:
