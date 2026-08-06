@@ -57,7 +57,7 @@ jobs:
           set -o pipefail
           python swing_bot.py 2>&1 | tee swing_log.txt
 
-      - name: Show log on failure
+      - name: 실패 시 로그 표시 (Show log on failure)
         if: failure()
         run: cat swing_log.txt
 
