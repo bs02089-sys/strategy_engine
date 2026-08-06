@@ -33,7 +33,7 @@
 7. MA 레짐 필터 — 종가×MA 크로스 기반 추세 필터 (LOC 모드: 전량 청산/재진입 신호)
 8. 로테이션 포지션 만기 관리
 9. 종합 브리핑을 **Discord**로 전송
-10. 장중 실시간 ATH DCA 알림 (cron-job.org + Finnhub, `--ath-monitor`)
+10. 장중 실시간 ATH DCA 알림 (cron-job.org → GitHub Actions, `--ath-monitor`)
 
 ---
 
@@ -97,7 +97,7 @@
 ### 7️⃣ 장중 실시간 ATH DCA 알림 (--ath-monitor)
 - GitHub Actions `schedule` 크론은 best-effort라 피크 시간대에 수 분~수 시간 지연될 수 있음
 - **cron-job.org**(정확한 N분 알람)가 `repository_dispatch` 이벤트를 발사 → 워크플로우가 `--ath-monitor` 분기로 즉시 실행
-- **Finnhub** 실시간 가격으로 🚨 트리거 / 📡 임박(5%p)만 전송 (중복 제거: 갭이 1.0%p 이상 좁혀질 때만 재알림)
+- yfinance 종가 기준으로 🚨 트리거 / 📡 임박(5%p)만 전송 (중복 제거: 갭이 1.0%p 이상 좁혀질 때만 재알림). Finnhub 키 의존 제거 (2026-08)
 - 설정 자동화: `setup_cronjob_org.py` (생성 / --list / --test-dispatch / --update-pat / --update-schedule)
 - 상세 가이드: `REALTIME_ALERT_SETUP.md`
 
@@ -133,7 +133,7 @@
 │  8. 비상 모드 종료 평가 + 대기 모니터                             │
 │  9. 브리핑 작성 → Discord 전송                                  │
 │  10. 월간 Ping (매월 1일)                                        │
-│  (--ath-monitor: Finnhub 실시간 가격 → 🚨/📡 알림만 전송)        │
+│  (--ath-monitor: yfinance 종가 → 🚨/📡 알림만 전송)            │
 └──────┬──────────────┬──────────────┬──────────────┬──────────────┘
        │              │              │              │
        ▼              ▼              ▼              ▼
@@ -513,7 +513,6 @@ python3 setup_swing_cron.py --remove    # 이 스크립트가 설치한 항목�
 |------|------|
 | `DISCORD_WEBHOOK` | Discord Webhook 주소 |
 | `DISCORD_USER_ID` | Discord 사용자 ID (멘션용) |
-| `FINNHUB_API_KEY` | Finnhub API 키 — 실시간 가격 조회 (`--ath-monitor`용, 없으면 yfinance 종가 폴링) |
 
 ---
 

@@ -36,7 +36,6 @@
   - MarketStageSystem.py → market_state.json (바닥 단계 정보)
   - bear_market_signals.py → signal_report.json (시장 리스크 점수)
   - cron-job.org → repository_dispatch (실시간 알림 발사)
-  - Finnhub → /quote 실시간 가격 (FINNHUB_API_KEY)
 """
 
 # =============================================================================
@@ -183,12 +182,12 @@
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │  [6] ATH 하락분할 DCA 신호 확인 ⭐신규⭐                                    │
 │                                                                              │
-│  check_ath_dca_signals(cfg, realtime_prices=None, alerts_only=False)         │
+│  check_ath_dca_signals(alerts_only=False)                                   │
 │  └─ 각 포지션 ATH_DCA.ENABLED 확인                                           │
 │     ├─ 비활성화 → 다음 포지션                                                │
 │     ├─ 활성화 → yfinance 1년 데이터 다운로드                                 │
 │     │  ├─ ATH 계산 (Close 기준, expanding max)                              │
-│     │  ├─ 현재 하락률(DD) 계산 (realtime_prices 있으면 Finnhub 실시간가 우선) │
+│     │  ├─ 현재 하락률(DD) 계산 (yfinance 종가 기준)                          │
 │     │  └─ 각 TRIGGER_N 평가 (1차/2차/3차...)                                 │
 │     │     ├─ DD ≥ 임계값 → 🚨 매수 신호! + ATH_DCA_USED_SPLITS 기록         │
 │     │     ├─ DD < 임계값 but 5%p 이내 → 📡 임박 알림 (가격 $ 포함)          │
@@ -200,7 +199,7 @@
 │                                                                              │
 │  ⭐실시간 모드 (--ath-monitor):                                              │
 │  run_ath_dca_monitor()                                                       │
-│  ├─ Finnhub /quote로 실시간 가격 수집 (realtime_prices 오버라이드)           │
+│  ├─ yfinance 종가 기준 (Finnhub 키 불필요 — 2026-08 키 로직 제거)           │
 │  ├─ check_ath_dca_signals(alerts_only=True) → 🚨/📡만, 상태 줄 생략           │
 │  └─ 트리거/임박만 Discord 전송 (스팸 방지 dedup)                              │
 └──────────────────────────────────┬───────────────────────────────────────────┘
@@ -314,18 +313,18 @@ DCA_MA_strategy.py (직접 실행)
 │   └── _next_trigger_line()                   → 📡 다음 비상 트리거 (가격 $ 포함)
 │       └── _ath_info()                        → ATH/MDD + next_trigger/next_price
 │
-├── check_ath_dca_signals(cfg, realtime_prices=None, alerts_only=False)
+├── check_ath_dca_signals(alerts_only=False)
 │   ├── _parse_ath_trigger()                   (-30% → 0.30)
 │   ├── yfinance 1년 데이터 다운로드
 │   ├── ATH (expanding max) 계산
-│   ├── realtime_prices → Finnhub 실시간가 오버라이드
+│   ├── 현재가 = yfinance 종가 (Finnhub 오버라이드 제거 — 2026-08)
 │   ├── 각 TRIGGER_N 평가 (alerts_only: 📡 갭 1.0%p dedup)
 │   └── ATH_DCA_USED_SPLITS / CYCLE_ATH 관리
 │
 ├── _send_discord()                            → Discord Webhook
 │
 ├── run_ath_dca_monitor()                      ⭐실시간 모드 (--ath-monitor)
-│   ├── _fetch_finnhub_quote(ticker, key)      ← Finnhub /quote (실패 시 yfinance 종가)
+│   ├── yfinance 종가 기준 (Finnhub 키 불필요 — 2026-08 키 로직 제거)
 │   ├── check_ath_dca_signals(alerts_only=True)
 │   ├── _check_ma_filter() → 크로스 알림      ← MA 레짐 크로스 (LOC 모드만, 1회 dedup)
 │   └── 🚨/📡/🔄 알림만 Discord 전송
@@ -475,7 +474,6 @@ jobs:
     env:
       DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
       DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
-      FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

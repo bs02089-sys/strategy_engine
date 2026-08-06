@@ -593,7 +593,6 @@ def _compute_ath_dca_config_fingerprint(ath_dca: dict) -> str:
 
 
 def check_ath_dca_signals(cfg: dict,
-                          realtime_prices: dict | None = None,
                           alerts_only: bool = False) -> list[str]:
     """
     Evaluate ATH drawdown DCA triggers for every position that has
@@ -621,14 +620,17 @@ def check_ath_dca_signals(cfg: dict,
     State is persisted via pos["ATH_DCA_USED_SPLITS"] (caller must
     save the config after this function returns).
 
-    Optional parameters (used by the realtime --ath-monitor mode):
-      - realtime_prices: {ticker: current_price} overrides the yfinance
-        last-close so drawdown is measured against live prices (Finnhub).
+    Optional parameter (used by the realtime --ath-monitor mode):
       - alerts_only: emit ONLY actionable alerts (🚨 trigger / 📡 imminent
         within 5%p) and suppress recurring status lines. Imminent alerts
         are deduplicated via pos["ATH_DCA_IMMINENT_SENT"] so frequent
         polls don't spam — a warning re-sends only when the gap narrows
         by >= 1.0%p since the previous alert.
+
+    Note: prices come from yfinance last close only (Finnhub realtime
+    override removed 2026-08 — free tier /quote kept failing on the
+    account and the key was leaked to chat/history, so it was dropped
+    entirely rather than risk further exposure).
     """
     messages = []
     positions = cfg.get("POSITIONS", {})
@@ -688,10 +690,6 @@ def check_ath_dca_signals(cfg: dict,
             if len(closes) < 20:
                 continue
             current_price = float(closes.iloc[-1])
-            # Realtime mode: prefer live price (Finnhub) over the yfinance
-            # last-close so intraday trigger/imminent events fire now.
-            if realtime_prices and ticker in realtime_prices:
-                current_price = float(realtime_prices[ticker])
             rolling_ath_val = float(closes.expanding().max().iloc[-1])
         except Exception as exc:
             messages.append(f"  ⚠️ {ticker} ATH_DCA data fetch failed: {exc}")
@@ -1993,41 +1991,9 @@ def _build_briefing_lines(now_ny: datetime, cfg: dict) -> list[str]:
 #   cron-job.org (exact N-min alarm)
 #     → POST /repos/{owner}/{repo}/dispatches  (event_type: ath-dca-monitor)
 #     → workflow runs: python DCA_MA_strategy.py --ath-monitor
-#     → Finnhub /quote realtime price override (fallback: yfinance close)
 #     → check_ath_dca_signals(alerts_only=True) → 🚨/📡 only, deduped
 #     → Discord webhook (same secrets as the nightly briefing)
-
-def _mask_finnhub_error(exc: Exception, api_key: str) -> str:
-    """requests 예외 메시지에서 Finnhub 키를 마스킹한다.
-
-    requests.HTTPError 등은 요청 URL을 그대로 담아 키(token 파라미터)가
-    로그·sigma_log.txt로 새어나갈 수 있다 — 2026-07-31 실제 유출 사례
-    (f51deda/a75d8a8 커밋)로 확인됨. 키 전체를 마스킹된 형태로 치환한다.
-    """
-    msg = str(exc)
-    if api_key:
-        msg = msg.replace(api_key, f"{api_key[:4]}***{api_key[-4:]}")
-    return msg
-
-
-def _fetch_finnhub_quote(ticker: str, api_key: str) -> float | None:
-    """Fetch the real-time current price from Finnhub /quote (free tier).
-
-    Returns None on failure so the monitor falls back to yfinance's last
-    close rather than aborting the whole poll.
-    """
-    url = f"https://finnhub.io/api/v1/quote?symbol={ticker}&token={api_key}"
-    try:
-        resp = requests.get(url, timeout=10)
-        resp.raise_for_status()
-        data = resp.json()
-        price = _safe_float(data.get("c"))  # "c" = current price
-        if price is not None and price > 0:
-            print(f"✅ Finnhub {ticker}: ${price:.2f}")
-            return price
-    except Exception as e:
-        print(f"⚠️ Finnhub quote fetch failed for {ticker}: {_mask_finnhub_error(e, api_key)}")
-    return None
+#     → 가격은 yfinance 종가 기준 (Finnhub 키 제거 — 2026-08, 무료 티어 봉 미지원 + 키 유출 방지)
 
 
 def run_ath_dca_monitor() -> None:
@@ -2050,28 +2016,10 @@ def run_ath_dca_monitor() -> None:
     cfg = load_portfolio()
     webhook, user_id = resolve_discord_config(cfg)
 
-    # Realtime price override via Finnhub. Env-var ONLY on purpose — the
-    # config file is committed to the repo, so a key stored there would
-    # leak into git history. Set FINNHUB_API_KEY as a GitHub Actions secret
-    # (and locally via export).
-    # GitHub 시크릿은 공백/줄바꿈을 자동 제거하지 않아 strip()으로 보정한다
-    # (붙여넣기 시 딸려 들어간 공백이 키를 401/403으로 거부시킬 수 있음)
-    api_key = os.environ.get("FINNHUB_API_KEY", "").strip()
-    realtime_prices: dict[str, float] = {}
-    if api_key:
-        for ticker, pos in cfg.get("POSITIONS", {}).items():
-            ath_dca = pos.get("ATH_DCA", {})
-            if ath_dca.get("ENABLED", False):
-                price = _fetch_finnhub_quote(ticker, api_key)
-                if price is not None:
-                    realtime_prices[ticker] = price
-    else:
-        print("⚠️ FINNHUB_API_KEY not set — using yfinance last close (may lag intraday).")
-
     # Only alerts (🚨 trigger / 📡 imminent); suppress status lines.
-    messages = check_ath_dca_signals(
-        cfg, realtime_prices=realtime_prices or None, alerts_only=True
-    )
+    # 가격은 yfinance 종가 기준 — Finnhub 키 의존 제거 (2026-08: 무료 티어
+    # 봉 데이터 미지원 확인 + 키 유출 방지 차원에서 실시간 오버라이드 삭제).
+    messages = check_ath_dca_signals(cfg, alerts_only=True)
 
     # Recovery re-entry wait monitor (⏳) — once per business day. The
     # countdown only rolls over on business days, so dedupe via

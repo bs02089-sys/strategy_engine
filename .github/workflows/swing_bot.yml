@@ -25,7 +25,8 @@ jobs:
     permissions:
       contents: write
     env:
-      FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
+      # FINNHUB_API_KEY 시크릿 참조 제거 (2026-08) — 스윙 봇은 yfinance 전환 완료,
+      # 삭제된 시크릿 참조 시 워크플로우가 실패하므로 반드시 함께 제거해야 함
       DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
       DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
 

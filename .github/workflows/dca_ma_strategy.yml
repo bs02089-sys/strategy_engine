@@ -20,7 +20,8 @@ jobs:
     env:
       DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
       DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
-      FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
+      # FINNHUB_API_KEY 시크릿 참조 제거 (2026-08) — Finnhub 키 로직 전면 삭제,
+      # 삭제된 시크릿 참조 시 워크플로우가 실패하므로 반드시 함께 제거해야 함
 
     steps:
       - name: Checkout repository

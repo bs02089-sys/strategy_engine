@@ -1,4 +1,4 @@
-# 🚨 ATH DCA 실시간 알림 설정 가이드 (cron-job.org + Finnhub + Discord)
+# 🚨 ATH DCA 실시간 알림 설정 가이드 (cron-job.org + GitHub Actions + Discord)
 
 GitHub Actions의 `schedule` 크론은 **best-effort(최선 노력)** 방식이라 피크 시간대에
 수 분~수 시간 지연되거나 드물게 누락될 수 있습니다. 그래서 장중 트리거(TRIGGER_1/2/3)
@@ -14,7 +14,7 @@ cron-job.org (정확한 N분 알람)
 GitHub Actions (repository_dispatch 트리거 — schedule 지연 없음)
    │ python3 DCA_MA_strategy.py --ath-monitor
    ▼
-Finnhub /quote (실시간 가격)  ←── FINNHUB_API_KEY (선택, 없으면 yfinance 종가)
+yfinance 종가 (15분 지연 — Finnhub 키 불필요, 2026-08 키 로직 전면 제거)
    ▼
 check_ath_dca_signals(alerts_only=True) → 🚨 트리거 / 📡 임박만, 중복 제거
    ▼
@@ -30,7 +30,6 @@ Discord 웹훅 (기존 DISCORD_WEBHOOK / DISCORD_USER_ID 사용)
 | GitHub 저장소 | 있음 | 워크플로우 실행 |
 | GitHub PAT (Personal Access Token) | **새로 발급 필요** | cron-job.org가 GitHub API 호출용 |
 | Discord 웹훅 + 사용자 ID | 이미 사용 중 | 알림 전송 (`DISCORD_WEBHOOK`, `DISCORD_USER_ID`) |
-| Finnhub API 키 | 있다고 하셨음 | 실시간 가격 조회 (선택 — 없어도 동작) |
 
 ---
 
@@ -42,10 +41,9 @@ Discord 웹훅 (기존 DISCORD_WEBHOOK / DISCORD_USER_ID 사용)
 |---|---|
 | `DISCORD_WEBHOOK` | (이미 등록되어 있다면 유지) |
 | `DISCORD_USER_ID` | (이미 등록되어 있다면 유지) |
-| `FINNHUB_API_KEY` | Finnhub 무료 키 (60회/분 제한 — 충분) |
 
-`FINNHUB_API_KEY`를 등록하지 않으면 yfinance 마지막 종가로 폴링하므로
-장중 급락 감지가 다소 늦어질 수 있습니다. **등록을 권장합니다.**
+> 참고: `FINNHUB_API_KEY`는 **2026-08 제거됨** — yfinance 종가 기준으로
+> 동작하므로 더 이상 필요하지 않습니다 (시크릿 삭제 상태 유지).
 
 ---
 
@@ -167,12 +165,11 @@ python3 setup_cronjob_org.py --update-schedule
 - `.github/workflows/dca_ma_strategy.yml`
   - `repository_dispatch: types: [ath-dca-monitor]` 추가 → cron-job.org 호출 시 즉시 실행
   - `concurrency` 그룹으로 야간 브리핑과 실시간 폴링이 동시에 돌지 않게 직렬화
-  - `FINNHUB_API_KEY` 시크릿을 환경변수로 주입
   - dispatch 이벤트면 `python3 DCA_MA_strategy.py --ath-monitor`, 아니면 기존 야간 브리핑
 
 - `DCA_MA_strategy.py`
-  - `check_ath_dca_signals(cfg, realtime_prices, alerts_only=True)`:
-    - `realtime_prices`: Finnhub 실시간 가격으로 현재가 오버라이드 (ATH는 1년 일봉 유지)
+  - `check_ath_dca_signals(alerts_only=True)`:
+    - 가격은 **yfinance 종가** 기준 (Finnhub 실시간 오버라이드는 2026-08 제거)
     - `alerts_only=True`: 🚨 트리거/📡 임박(+/🔄 설정변경) 메시지만 생성, 상태/요약 줄 생략
     - 임박 메시지 중복 방지: `ATH_DCA_IMMINENT_SENT`에 (split → gap) 저장,
       **갭이 1.0%p 이상 좁혀질 때만** 다시 알림 → 폴링마다 스팸 방지
@@ -191,7 +188,6 @@ python3 setup_cronjob_org.py --update-schedule
 
 ### 로컬 테스트 (옵션)
 ```bash
-export FINNHUB_API_KEY=xxxx
 export DISCORD_WEBHOOK=https://discord.com/api/webhooks/...
 export DISCORD_USER_ID=123456789
 python3 DCA_MA_strategy.py --ath-monitor
@@ -210,8 +206,9 @@ python3 DCA_MA_strategy.py --ath-monitor
 
 - GitHub Actions 스케줄은 60일간 저장소 활동이 없으면 자동 비활성화됩니다.
   실시간 폴링 자체가 커밋을 만들어내므로 자연히 해결됩니다.
-- `FINNHUB_API_KEY`가 없으면 yfinance 종가 기준이라 장중 1~5분 지연이 아닌
-  "다음 종가까지 대기"가 될 수 있습니다. 키를 넣는 게 핵심입니다.
+- 가격은 **yfinance 종가 기준 (15분 지연)** — Finnhub 키 로직이 2026-08 전면
+  제거되었습니다 (무료 티어 봉 데이터 미지원 확인 + 키 유출 방지). 장중 급락
+  감지가 실시간 대비 다소 늦을 수 있지만, 매매가 수동이라 실질 영향은 없습니다.
 - 트리거가 발동된 split은 `ATH_DCA_USED_SPLITS`에 저장되어 재발동되지 않으며,
   신규 ATH 갱신 시 사이클이 재시작되면 다시 알림이 갑니다.
 - **임박(📡) 알림 중복 규칙**: 한 번 임박 알림을 보내면 갭이 직전 알림 대비
