@@ -125,13 +125,25 @@ def pair_trades(records, ticker):
 
 
 def fetch_current_price(ticker):
-  """현재가 조회 (yfinance) — 미청산 포지션 평가용. 실패 시 None."""
+  """현재가 조회 (yfinance) — 미청산 포지션 평가용. 실패 시 None.
+
+  yfinance는 때때로 MultiIndex 칼럼을 반환하거나(예: ('Close', 'Adj Close'))
+  단일 레벨 칼럼을 반환합니다. 칼럼 구조를 안전하게 정규화하고, 데이터
+  프레임이 비어있으면 None을 반환하도록 합니다.
+  """
   try:
     import yfinance as yf
     d = yf.download(ticker, period="5d", interval="1d",
                     progress=False, auto_adjust=True)
-    d.columns = [c[0] for c in d.columns]
-    return float(d["Close"].dropna().iloc[-1])
+    # 칼럼 정규화: MultiIndex인 경우 첫 번째 레벨을 사용, 아니면 그대로 사용
+    if getattr(d.columns, "nlevels", 1) > 1:
+      d.columns = [c[0] for c in d.columns]
+    else:
+      d.columns = list(d.columns)
+    closes = d.get("Close")
+    if closes is None or closes.dropna().empty:
+      raise ValueError("no close data")
+    return float(closes.dropna().iloc[-1])
   except Exception as exc:
     print(f"[경고] {ticker} 현재가 조회 실패: {exc}")
     return None
