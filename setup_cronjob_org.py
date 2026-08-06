@@ -296,6 +296,7 @@ def main() -> None:
     update_pat_mode = "--update-pat" in sys.argv
     update_schedule_mode = "--update-schedule" in sys.argv
     swing_mode = "--swing" in sys.argv
+    mode_flag = " --swing" if swing_mode else ""
 
     owner = _env("GITHUB_OWNER", "<owner>")
     repo = _env("GITHUB_REPO", "<repo>")
@@ -354,7 +355,7 @@ def main() -> None:
         if job_id is None:
             raise SystemExit(
                 f"❌ 갱신할 크론잡을 찾을 수 없습니다: {dispatches_url} "
-                f"(제목: {job_title}). 먼저 `python setup_cronjob_org.py{ ' --swing' if swing_mode else ''}`로 생성하세요."
+                f"(제목: {job_title}). 먼저 `python setup_cronjob_org.py{mode_flag}`로 생성하세요."
             )
 
         # 3) 목록 응답에는 extendedData(헤더)가 없으므로 단일 잡 상세를
@@ -388,7 +389,7 @@ def main() -> None:
         if job_id is None:
             raise SystemExit(
                 f"❌ 갱신할 크론잡을 찾을 수 없습니다: {dispatches_url} "
-                f"(제목: {job_title}). 먼저 `python setup_cronjob_org.py{ ' --swing' if swing_mode else ''}`로 생성하세요."
+                f"(제목: {job_title}). 먼저 `python setup_cronjob_org.py{mode_flag}`로 생성하세요."
             )
 
         # 2) 기존 job 바디를 그대로 가져와 schedule만 교체한다
@@ -420,7 +421,7 @@ def main() -> None:
     if dry_run:
         print(f"🔍 [DRY RUN] 생성될 크론잡 페이로드 ({job_desc}, 시크릿 *** 마스킹):")
         print(json.dumps(_redact_secrets(payload), indent=2, ensure_ascii=False))
-        print(f"\n위 내용이 맞다면 `python setup_cronjob_org.py{' --swing' if swing_mode else ''}`로 실행하세요.")
+        print(f"\n위 내용이 맞다면 `python setup_cronjob_org.py{mode_flag}`로 실행하세요.")
         return
 
     if show_list:
@@ -440,7 +441,8 @@ def main() -> None:
     if dup_id is not None:
         print(f"⚠️ 동일한 크론잡이 이미 존재합니다 (jobId={dup_id}). 생성하지 않았습니다.")
         print("   스케줄 변경 시: `python setup_cronjob_org.py --update-schedule`")
-        print(f"   {f'( --swing) ' if swing_mode else '(POLL_MINUTES/UTC_HOURS 반영) '}— 또는 잡을 삭제 후 재생성.")
+        mode_hint = " --swing" if swing_mode else " (POLL_MINUTES/UTC_HOURS 반영) "
+        print(f"   {mode_hint}— 또는 잡을 삭제 후 재생성.")
         print_jobs(existing)
         return
 
