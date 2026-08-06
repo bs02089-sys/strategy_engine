@@ -2041,7 +2041,9 @@ def run_ath_dca_monitor() -> None:
     # config file is committed to the repo, so a key stored there would
     # leak into git history. Set FINNHUB_API_KEY as a GitHub Actions secret
     # (and locally via export).
-    api_key = os.environ.get("FINNHUB_API_KEY", "")
+    # GitHub 시크릿은 공백/줄바꿈을 자동 제거하지 않아 strip()으로 보정한다
+    # (붙여넣기 시 딸려 들어간 공백이 키를 401/403으로 거부시킬 수 있음)
+    api_key = os.environ.get("FINNHUB_API_KEY", "").strip()
     realtime_prices: dict[str, float] = {}
     if api_key:
         for ticker, pos in cfg.get("POSITIONS", {}).items():

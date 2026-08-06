@@ -32,7 +32,12 @@ import requests
 # ==========================================
 # [사용자 설정 영역]
 # ==========================================
-FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY", "YOUR_FINNHUB_API_KEY")
+# GitHub Actions 시크릿은 공백/줄바꿈을 자동 제거하지 않아(원문 보존),
+# 붙여넣기 시 앞뒤 공백이 함께 저장되면 키가 거부된다(403/401).
+# 원본을 먼저 보관해 진단에 쓰고, 실제 사용은 strip()으로 보정한 값만 쓴다.
+_RAW_FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY", "YOUR_FINNHUB_API_KEY")
+FINNHUB_API_KEY = _RAW_FINNHUB_API_KEY.strip()
+_API_KEY_HAD_WHITESPACE = bool(_RAW_FINNHUB_API_KEY) and _RAW_FINNHUB_API_KEY != FINNHUB_API_KEY
 DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK", "YOUR_DISCORD_WEBHOOK")
 DISCORD_USER_ID = os.getenv("DISCORD_USER_ID", "YOUR_DISCORD_USER_ID")
 # 다중 종목: TICKERS 환경변수로 변경 가능 (콤마 구분, 기본 TQQQ+SOXL)
@@ -140,6 +145,22 @@ def session_resample_origin(df_1h):
   return first.normalize() + SESSION_OPEN
 
 
+def _mask_api_key(api_key):
+  """API 키 상태를 로그용으로 마스킹 — 키 전체를 노출하지 않고 상태만 알려준다.
+
+  - 비어 있음: 시크릿이 빈 값/미설정 (GitHub Actions에서 키가 안 넘어온 상태)
+  - 기본값 placeholder: 코드 기본값 그대로 (환경변수 미설정)
+  - 설정됨: 마지막 4자리만 노출 — 값 자체는 비밀로 유지
+  """
+  if not api_key:
+    return "(비어 있음 — 시크릿 미설정/빈 값)"
+  if api_key == "YOUR_FINNHUB_API_KEY":
+    return "(기본값 placeholder — 환경변수 미설정)"
+  if len(api_key) <= 4:  # 극단적 짧은 값 방어 — 마지막 4자리 노출 시 키 전체가 드러남
+    return "(설정됨)"
+  return f"(설정됨 …{api_key[-4:]})"
+
+
 def fetch_finnhub_hourly_data(ticker, api_key):
   """Finnhub 1시간봉 수집 (최근 60일) — 타임아웃·재시도·오류 방어 포함"""
   end_time = int(time.time())
@@ -153,9 +174,28 @@ def fetch_finnhub_hourly_data(ticker, api_key):
     try:
       response = requests.get(url, timeout=REQUEST_TIMEOUT)
       if response.status_code == 429:  # 무료 티어 요청 한도 초과 → 백오프 후 재시도
+        print(f"[{ticker}] [경고] Finnhub 요청 한도(429) 초과 — 백오프 후 재시도")
         time.sleep(2 ** (attempt + 1))
         continue
-      if response.status_code >= 400:  # 잘못된 키(401) 등 — 재시도 의미 없음, 즉시 종료
+      if response.status_code in (401, 403):
+        # 인증/권한 오류 — 재시도해도 해결되지 않으므로 즉시 종료.
+        # Finnhub는 응답 본문에 실제 거부 사유({"error": ...})를 담아 오는데,
+        # 상태 코드만 출력하면 원인을 알 수 없어 본문도 함께 남긴다.
+        reason = ""
+        try:
+          body = response.json()
+          reason = body.get("error", "") if isinstance(body, dict) else ""
+        except ValueError:
+          pass
+        hint = (
+            "API 키가 잘못됨 — GitHub Actions 시크릿(FINNHUB_API_KEY) 값 확인"
+            if response.status_code == 401
+            else "API 키 접근 거부 — 키 재발급 또는 Finnhub 계정 상태(정지·요금제) 확인"
+        )
+        detail = f" | 서버 메시지: {reason}" if reason else ""
+        print(f"[{ticker}] [오류] Finnhub {response.status_code}: {hint}{detail}")
+        return pd.DataFrame()
+      if response.status_code >= 400:  # 기타 오류 — 재시도 의미 없음, 즉시 종료
         print(f"[{ticker}] [오류] Finnhub 응답 {response.status_code}")
         return pd.DataFrame()
       response.raise_for_status()
@@ -481,6 +521,12 @@ def analyze_ticker(ticker, df_4h, state):
 
 
 def run_swing_strategy():
+  # 시작 진단: 키가 실제로 전달됐는지(마스킹) — 403/401 발생 시 원인 파악 1순위 단서
+  print(f"[설정] Finnhub API 키 상태: {_mask_api_key(FINNHUB_API_KEY)}")
+  if _API_KEY_HAD_WHITESPACE:
+    print("[경고] FINNHUB_API_KEY에 앞뒤 공백/줄바꿈이 포함되어 있었습니다 — 자동 제거했습니다.")
+    print("        GitHub 시크릿도 깔끔하게 다시 저장하면 영구 해결됩니다.")
+  print(f"[설정] 대상 종목: {', '.join(TICKERS)}")
   state = load_state()
   changed = False
 
