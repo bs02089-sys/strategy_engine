@@ -180,7 +180,10 @@ def session_resample_origin(df_1h):
 
 
 def fetch_finnhub_hourly_data(ticker, api_key):
-  """Finnhub 1시간봉 수집 (최근 60일) — 타임아웃·재시도·오류 방어 포함"""
+  """Finnhub 1시간봉 수집 (최근 60일) — 타임아웃·재시도·오류 방어 포함.
+
+  인증 실패(403) 또는 기타 오류 발생 시 yfinance로 안전하게 폴백합니다.
+  """
   end_time = int(time.time())
   start_time = end_time - (60 * 24 * 60 * 60)  # 60일 전
 
@@ -191,23 +194,28 @@ def fetch_finnhub_hourly_data(ticker, api_key):
   for attempt in range(3):
     try:
       response = requests.get(url, timeout=REQUEST_TIMEOUT)
-      if response.status_code == 429:  # 무료 티어 요청 한도 초과 → 백오프 후 재시도
+      # 인증/권한 문제는 재시도보다 원인 확인이 필요하므로 별도 처리
+      if response.status_code == 403:
+        print(f"[{ticker}] [오류] Finnhub 응답 403: 인증 실패 또는 권한 없음."
+              " FINNHUB_API_KEY(Secrets/Actions env) 값을 확인하세요. Falling back to yfinance.")
+        break
+      if response.status_code == 429:  # 레이트 한도 초과 → 백오프 후 재시도
         time.sleep(2 ** (attempt + 1))
         continue
-      if response.status_code >= 400:  # 잘못된 키(401) 등 — 재시도 의미 없음, 즉시 종료
+      if response.status_code >= 400:
         print(f"[{ticker}] [오류] Finnhub 응답 {response.status_code}")
-        return pd.DataFrame()
+        break
       response.raise_for_status()
       data = response.json()
       if data.get("s") != "ok":
-        # API가 명시적으로 거부(no_data 등) — 재시도 의미 없음
-        print(f"[{ticker}] [오류] 데이터 로드 실패: {data.get('s')}")
-        return pd.DataFrame()
+        print(f"[{ticker}] [오류] 데이터 로드 실패: {data.get('s')}. Falling back to yfinance.")
+        break
       # 필수 필드 존재 및 비어있지 않은 리스트인지 방어 검사
       required = ("o", "h", "l", "c", "v", "t")
       if not all(k in data and isinstance(data[k], list) and len(data[k]) > 0 for k in required):
-        print(f"[{ticker}] [오류] Finnhub 응답에 필요한 필드 없음/비어있음: {', '.join([k for k in required if k not in data or not data.get(k)])}")
-        return pd.DataFrame()
+        missing = [k for k in required if k not in data or not data.get(k)]
+        print(f"[{ticker}] [오류] Finnhub 응답에 필요한 필드 없음/비어있음: {', '.join(missing)}. Falling back to yfinance.")
+        break
       idx = pd.to_datetime(data["t"], unit="s", utc=True).tz_convert("America/New_York")
       return pd.DataFrame({
           "Open": data["o"],
@@ -218,11 +226,45 @@ def fetch_finnhub_hourly_data(ticker, api_key):
       }, index=idx)
     except (requests.RequestException, ValueError) as exc:
       if attempt == 2:
-        print(f"[{ticker}] [오류] Finnhub 요청 실패: {exc}")
+        print(f"[{ticker}] [오류] Finnhub 요청 실패: {exc}. Falling back to yfinance.")
       else:
         time.sleep(2 ** attempt)  # 일시적 오류(타임아웃/연결)만 백오프 재시도
-  print(f"[{ticker}] [오류] Finnhub 데이터 수집 실패 (3회 시도 후 종료)")
-  return pd.DataFrame()
+
+  # Finnhub 실패 시 yfinance 폴백 시도
+  try:
+    import yfinance as yf
+    print(f"[{ticker}] [info] Finnhub 실패 — yfinance로 폴백 시도 (1h, 60일)")
+    d = yf.download(ticker, period="60d", interval="1h", progress=False, auto_adjust=True)
+    if d is None or d.empty:
+      print(f"[{ticker}] [오류] yfinance 반환 데이터 없음 (폴백 실패)")
+      return pd.DataFrame()
+    # 칼럼 정규화
+    if getattr(d.columns, "nlevels", 1) > 1:
+      d.columns = [c[0] for c in d.columns]
+    else:
+      d.columns = list(d.columns)
+    # 인덱스 타임존 정규화
+    try:
+      if d.index.tz is None:
+        d.index = d.index.tz_localize("UTC").tz_convert("America/New_York")
+      else:
+        d.index = d.index.tz_convert("America/New_York")
+    except Exception:
+      # 일부 yfinance 환경에서는 이미 ET로 반환될 수 있음 — 무시
+      pass
+    # 필요한 칼럼 보장
+    for col in ("Open", "High", "Low", "Close", "Volume"):
+      if col not in d.columns:
+        d[col] = None
+    # dropna로 미완성/결측 제거
+    df = d[["Open", "High", "Low", "Close", "Volume"]].dropna()
+    if df.empty:
+      print(f"[{ticker}] [오류] yfinance 결과가 비어있음 (폴백 실패)")
+      return pd.DataFrame()
+    return df
+  except Exception as exc:
+    print(f"[{ticker}] [오류] yfinance 폴백 실패: {exc}")
+    return pd.DataFrame()
 
 
 def send_discord_alert(message):
