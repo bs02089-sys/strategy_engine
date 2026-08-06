@@ -55,18 +55,39 @@ import swing_bot as bot  # 세션 정렬 origin 로직 재사용 (swing_bot.py)
 
 SESSION_TZ = bot.SESSION_TZ
 DEFAULT_PERIOD = "2y"  # yfinance 1시간봉 최대 조회 기간
+# yfinance auto_adjust 옵션: 기본 False — 사용자가 보고서 확인 후 결정하도록 기본 비활성화
+AUTO_ADJUST = False
 
 
 def load_bars(ticker, tf, period=DEFAULT_PERIOD):
   """타임프레임별 OHLCV 로드. tf: '1h'|'2h'|'4h'|'6h'|'1D'"""
   if tf == "1D":
-    d = yf.download(ticker, period=period, interval="1d", progress=False, auto_adjust=True)
-    d.columns = [c[0] for c in d.columns]
+    d = yf.download(ticker, period=period, interval="1d", progress=False, auto_adjust=AUTO_ADJUST)
+    # yfinance는 단일-티커 호출 시 컬럼이 단일 레벨(str), 멀티-티커 시 MultiIndex를 반환할 수 있음
+    if isinstance(d.columns, pd.MultiIndex):
+      d.columns = d.columns.get_level_values(0)
+    # 인덱스 타임존 정규화: UTC(naive) -> SESSION_TZ
+    if d.index.tz is None:
+      try:
+        d = d.tz_localize("UTC").tz_convert(SESSION_TZ)
+      except Exception:
+        pass
+    else:
+      d = d.tz_convert(SESSION_TZ)
     return d[["Open", "High", "Low", "Close", "Volume"]].dropna()
 
-  h = yf.download(ticker, period=period, interval="1h", progress=False, auto_adjust=True)
-  h.columns = [c[0] for c in h.columns]
+  h = yf.download(ticker, period=period, interval="1h", progress=False, auto_adjust=AUTO_ADJUST)
+  if isinstance(h.columns, pd.MultiIndex):
+    h.columns = h.columns.get_level_values(0)
   h = h[["Open", "High", "Low", "Close", "Volume"]].dropna()
+  # 타임존 정규화: yfinance는 보통 naive(로컬) 또는 UTC이므로 UTC로 로컬라이즈 후 ET로 변환
+  if h.index.tz is None:
+    try:
+      h = h.tz_localize("UTC").tz_convert(SESSION_TZ)
+    except Exception:
+      pass
+  else:
+    h = h.tz_convert(SESSION_TZ)
   hours = int(tf[:-1])
   if hours == 1:
     return h
@@ -311,7 +332,12 @@ def main():
                       "기본 auto(실전 봇 설정 미러). 공통 float(3.0), 종목별 'TQQQ:1.5,SOXL:3.5', "
                       "0 = 끔 중 선택")
   p.add_argument("--period", default=DEFAULT_PERIOD, help="조회 기간 (기본 2y)")
+  p.add_argument("--auto-adjust", action="store_true", help="yfinance auto_adjust 사용 (기본: False)")
   args = p.parse_args()
+
+  # auto_adjust 전역 설정 반영
+  global AUTO_ADJUST
+  AUTO_ADJUST = bool(args.auto_adjust)
 
   tf = parse_tf(args.tf)
   if args.exit == "ema20" and args.trigger == "intra":

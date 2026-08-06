@@ -25,6 +25,7 @@ import os
 import shutil
 import tempfile
 import time
+import argparse
 
 import pandas as pd
 import requests
@@ -124,6 +125,10 @@ SESSION_TZ = "America/New_York"  # 거래 세션 타임존
 SESSION_OPEN = pd.Timedelta(hours=9, minutes=30)  # 장 개장 시각 → 4h 버킷 기준
 MIN_4H_BARS = 51  # EMA50 워밍업 + 첫 신호 스캔용 최소 4시간봉 수
 
+# 런타임 옵션: --dry-run 모드 (알림 비활성화 및 리포트 생성)
+DRY_RUN = False
+DRY_REPORTS = []  # --dry-run 모드에서 기록할 알림/결과 목록
+
 
 def session_resample_origin(df_1h):
   """장 개장(09:30 ET) 기준 4시간봉 버킷 origin.
@@ -164,14 +169,19 @@ def fetch_finnhub_hourly_data(ticker, api_key):
         # API가 명시적으로 거부(no_data 등) — 재시도 의미 없음
         print(f"[{ticker}] [오류] 데이터 로드 실패: {data.get('s')}")
         return pd.DataFrame()
+      # 필수 필드 존재 및 비어있지 않은 리스트인지 방어 검사
+      required = ("o", "h", "l", "c", "v", "t")
+      if not all(k in data and isinstance(data[k], list) and len(data[k]) > 0 for k in required):
+        print(f"[{ticker}] [오류] Finnhub 응답에 필요한 필드 없음/비어있음: {', '.join([k for k in required if k not in data or not data.get(k)])}")
+        return pd.DataFrame()
+      idx = pd.to_datetime(data["t"], unit="s", utc=True).tz_convert("America/New_York")
       return pd.DataFrame({
           "Open": data["o"],
           "High": data["h"],
           "Low": data["l"],
           "Close": data["c"],
           "Volume": data["v"],
-      }, index=pd.to_datetime(data["t"], unit="s", utc=True)
-            .tz_convert("America/New_York"))
+      }, index=idx)
     except (requests.RequestException, ValueError) as exc:
       if attempt == 2:
         print(f"[{ticker}] [오류] Finnhub 요청 실패: {exc}")
@@ -187,15 +197,31 @@ def send_discord_alert(message):
     print(message)
     return
 
-  # 웨이크업 강화: 멘션을 3회 반복 — 잠든 사이에도 Discord 모바일 알림이
-  # 강하게/여러 번 울리도록 (사용자가 직접 매매를 진행해야 하므로)
-  mention = (
-      " ".join([f"<@{DISCORD_USER_ID}>"] * 3)
-      if DISCORD_USER_ID
-      else ""
-  )
+  # 웨이크업 멘션: 환경변수에 실제 Discord ID가 설정되어 있고 기본 플레이스홀더가 아닐 때만 사용
+  mention = ""
+  if DISCORD_USER_ID and DISCORD_USER_ID != "YOUR_DISCORD_USER_ID":
+    mention = " ".join([f"<@{DISCORD_USER_ID}>"] * 3)
   content = (mention + "\n" + message) if mention else message
-  requests.post(DISCORD_WEBHOOK, json={"content": content}, timeout=10)
+
+  # DRY_RUN 모드에서는 실제 전송을 하지 않고 리포트에 기록
+  if DRY_RUN:
+    print("[dry-run] " + message)
+    try:
+      DRY_REPORTS.append({"time": pd.Timestamp.now(tz=SESSION_TZ).isoformat(), "message": message})
+    except Exception:
+      # 어떤 이유로든 DRY_REPORTS가 사용 불가하면 무시
+      pass
+    return
+
+  try:
+    resp = requests.post(DISCORD_WEBHOOK, json={"content": content}, timeout=10)
+    if not resp.ok:
+      # 호출 실패는 로깅하고 호출자(분석 루틴)가 필요시 예외를 처리하게끔 예외 발생
+      print(f"[오류] Discord webhook 응답 {resp.status_code}: {resp.text}")
+  except requests.RequestException as exc:
+    print(f"[오류] Discord 알림 전송 실패: {exc}")
+    # 호출자(분석)에서 예외를 잡아야 하는 흐름이므로 재발생시킨다
+    raise
 
 
 def default_ticker_state():
@@ -235,7 +261,12 @@ def save_state(state):
     ) as tmp:
       json.dump(state, tmp, ensure_ascii=False, indent=2)
       tmp_path = tmp.name
-    shutil.move(tmp_path, STATE_PATH)
+    # Windows에서 기존 파일 덮어쓰기 안전을 위해 os.replace를 사용
+    try:
+      os.replace(tmp_path, STATE_PATH)
+    except OSError:
+      # 최후에 shutil.move로 시도 (이론상 필요 없음, 안전망)
+      shutil.move(tmp_path, STATE_PATH)
   except OSError:
     print("[오류] 상태 파일 저장 실패 (무시하고 계속)")
 
@@ -480,8 +511,18 @@ def analyze_ticker(ticker, df_4h, state):
     state["state"] = "WAITING"
 
 
-def run_swing_strategy():
+def run_swing_strategy(dry_run=False):
+  """스윙 전략 실행. dry_run=True일 때는 상태 파일을 변경하지 않고 리포트를 생성함."""
+  global DRY_RUN, DRY_REPORTS
+  DRY_RUN = bool(dry_run)
+  DRY_REPORTS = []
+
   state = load_state()
+  # dry-run에서는 원본 상태를 건드리지 않도록 복사본으로 작업
+  if DRY_RUN:
+    import copy
+
+    state = copy.deepcopy(state)
   changed = False
 
   for ticker in TICKERS:
@@ -510,9 +551,32 @@ def run_swing_strategy():
       # 한 종목의 실패가 다른 종목 분석을 막지 않도록 방어
       print(f"[{ticker}] 분석 중 오류 발생: {exc}")
 
-  if changed:
+  # 상태 저장: dry-run이면 실제 파일을 변경하지 않음
+  if changed and not DRY_RUN:
     save_state(state)
+
+  if DRY_RUN:
+    # 리포트 생성 — 현재 상태(메모리)와 dry-report 로그를 함께 덤프
+    report = {
+      "run_time": pd.Timestamp.now(tz=SESSION_TZ).isoformat(),
+      "state": state,
+      "dry_reports": DRY_REPORTS,
+    }
+    report_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "swing_dryrun_report.json")
+    try:
+      with tempfile.NamedTemporaryFile("w", delete=False, suffix=".json", encoding="utf-8") as tmp:
+        json.dump(report, tmp, ensure_ascii=False, indent=2)
+        tmp_path = tmp.name
+      os.replace(tmp_path, report_path)
+      print(f"[dry-run] 리포트 생성됨: {report_path}")
+    except OSError as exc:
+      print(f"[dry-run] 리포트 저장 실패: {exc}")
+
+  return state
 
 
 if __name__ == "__main__":
-  run_swing_strategy()
+  parser = argparse.ArgumentParser(description="4시간봉 스윙 봇 실행기")
+  parser.add_argument("--dry-run", action="store_true", help="알림 전송/상태 저장을 하지 않고 리포트를 생성합니다 (테스트용)")
+  args = parser.parse_args()
+  run_swing_strategy(dry_run=args.dry_run)
