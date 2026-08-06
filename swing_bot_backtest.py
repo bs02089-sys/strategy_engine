@@ -298,7 +298,7 @@ def summarize(ticker, tf, label, trades, eq):
           f"{t[5].days:>5} {t[4]*100:+6.1f}% {t[6]*100:+6.1f}% {t[7]*100:+6.1f}%")
 
 
-def run_ticker(ticker, tf, exit_mode, k, trigger, entry, contr_ratio, period, tp_spec, tp_default):
+def run_ticker(ticker, tf, exit_mode, k, trigger, entry, contr_ratio, period, tp_spec, tp_default, regime_tf=None, allow_first_entry='none'):
   df = load_bars(ticker, tf, period)
   if len(df) < 51:
     print(f"[{ticker}] 데이터 부족({len(df)}봉 < 51) — 분석 생략")
@@ -435,7 +435,7 @@ def main():
         if "trigger" in _exit_override and _exit_override["trigger"]:
           trigger_for_ticker = _exit_override["trigger"]
       run_ticker(ticker, tf, exit_mode_for_ticker, k_for_ticker, trigger_for_ticker, args.entry, args.contr_ratio,
-                 args.period, tp_spec, tp_default)
+                 args.period, tp_spec, tp_default, args.regime_tf, args.allow_first_entry)
     except Exception as exc:  # 한 종목 실패가 다른 종목을 막지 않도록
       print(f"[{ticker}] 백테스트 중 오류: {exc}")
 
