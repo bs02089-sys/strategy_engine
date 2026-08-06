@@ -240,10 +240,19 @@ def backtest(df, exit_mode, k, trigger, entry="none", contr_ratio=1.0, tp_atr=3.
         and bool(row["Vol_Breakout"])
         and close > recent_highs
         and entry_filter_ok(df, i, row, entry, recent_highs, contr_ratio)
+        and bool(row.get("REGIME_OK", True))
     )
     if is_breakout:
       if state == "WAITING":
-        state = "FIRST_FOUND"  # 첫 신호는 필터링 (봇과 동일)
+        # if FORCE_ENTRY_FIRST is set on this row, enter immediately; otherwise use FIRST_FOUND filter
+        if bool(row.get("FORCE_ENTRY_FIRST", False)):
+          state = "READY_FOR_BUY"
+          entry_p, entry_t = close, df.index[i]
+          hh, atr_entry = high, row["ATR"]
+          eq_at_entry = equity
+          mae, mfe = low / entry_p - 1, high / entry_p - 1
+        else:
+          state = "FIRST_FOUND"  # 첫 신호는 필터링 (봇과 동일)
       elif state == "FIRST_FOUND":
         state = "READY_FOR_BUY"  # 두 번째 신호 → 진입
         entry_p, entry_t = close, df.index[i]
@@ -295,6 +304,36 @@ def run_ticker(ticker, tf, exit_mode, k, trigger, entry, contr_ratio, period, tp
     print(f"[{ticker}] 데이터 부족({len(df)}봉 < 51) — 분석 생략")
     return
   df = add_indicators(df)
+  # regime mapping: if regime_tf provided, compute regime alignment and map to entry df
+  if regime_tf and regime_tf != tf:
+    regime_df = load_bars(ticker, regime_tf, period)
+    if len(regime_df) >= 51:
+      regime_df = add_indicators(regime_df)
+      regime_aligned = (regime_df["EMA_10"] > regime_df["EMA_20"]) & (regime_df["EMA_20"] > regime_df["EMA_50"])
+      try:
+        df["REGIME_OK"] = regime_aligned.reindex(df.index, method="ffill").fillna(False).astype(bool)
+      except Exception:
+        df["REGIME_OK"] = True
+    else:
+      df["REGIME_OK"] = True
+  else:
+    df["REGIME_OK"] = True
+
+  # allow-first-entry preprocessing: mark rows where first-entry should be forced
+  # options: 'none' | 'conditional' | 'always'
+  df["FORCE_ENTRY_FIRST"] = False
+  if allow_first_entry and allow_first_entry != 'none':
+    if allow_first_entry == 'always':
+      # force first entry on any breakout candidate (post indicators)
+      df["FORCE_ENTRY_FIRST"] = True
+    else:
+      # conditional: require vol breakout + ATR contraction + ADX>=20
+      df["FORCE_ENTRY_FIRST"] = (
+        df.get("Vol_Breakout", False)
+        & (df.get("ATR", float('inf')) < df.get("ATR_MA20", float('inf')) * 0.9)
+        & (df.get("ADX", 0) >= 20)
+      )
+
   # 종목별 승수 우선 (실전 봇 TAKE_PROFIT_ATR_BY_TICKER 미러)
   tp_atr = tp_spec.get(ticker, tp_default)
   trades, eq = backtest(df, exit_mode, k, trigger, entry, contr_ratio, tp_atr)
@@ -345,6 +384,9 @@ def main():
   p = argparse.ArgumentParser(description="스윙 전략 백테스트 (swing_bot.py 로직 미러)")
   p.add_argument("--ticker", default=",".join(bot.TICKERS), help="종목 (콤마 구분, 기본 TQQQ,SOXL)")
   p.add_argument("--tf", default="4h", help="타임프레임 (1h/2h/4h/6h/1D, 기본 4h)")
+  p.add_argument("--regime-tf", default=None, help="레짐 확인용 TF(예: 4h). 제공하면 해당 TF의 EMA 정배열을 진입 필터로 사용")
+  p.add_argument("--allow-first-entry", default="none", choices=["none","conditional","always"],
+                 help="첫 신호 허용 방식: none(기본, 둘째 신호에서 진입), conditional(볼륨+ATR수축+ADX 확인 시 첫 신호 진입), always(모든 첫 신호 진입)")
   p.add_argument("--exit", default="ema20", choices=["ema20", "chan", "stop"],
                  help="청산 규칙 (기본 ema20 — 현행 봇)")
   p.add_argument("--atr-k", type=float, default=None,
