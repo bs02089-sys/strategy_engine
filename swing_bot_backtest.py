@@ -174,7 +174,7 @@ def entry_filter_ok(df, i, row, entry, recent_highs, contr_ratio=1.0):
   raise ValueError(f"알 수 없는 진입 필터: {entry}")
 
 
-def backtest(df, exit_mode, k, trigger, entry="none", contr_ratio=1.0, tp_atr=3.0):
+def backtest(df, exit_mode, k, trigger, entry="none", contr_ratio=1.0, tp_atr=3.0, regime_aligned=None, allow_first_entry='none'):
   """봇 로직 미러 시뮬레이션.
 
   exit_mode: ema20|chan|stop, trigger: close|intra
@@ -194,7 +194,20 @@ def backtest(df, exit_mode, k, trigger, entry="none", contr_ratio=1.0, tp_atr=3.
     row = df.iloc[i]
     close, high, low = row["Close"], row["High"], row["Low"]
 
-    if entry_p is not None:  # 보유 중: 청산 조건만 평가 (봇의 IN_POSITION과 동일)
+  # check regime alignment at this timestamp (if provided)
+  if regime_aligned is not None:
+    try:
+      if not bool(regime_aligned.iloc[i]):
+        # treat as no-breakout window: skip breakout checks (but still evaluate exits if in position)
+        pass_regime = False
+      else:
+        pass_regime = True
+    except Exception:
+      pass_regime = True
+  else:
+    pass_regime = True
+
+  if entry_p is not None:  # 보유 중: 청산 조건만 평가 (봇의 IN_POSITION과 동일)
       mae = min(mae, low / entry_p - 1)
       mfe = max(mfe, high / entry_p - 1)
       hh = max(hh, high)
@@ -241,9 +254,33 @@ def backtest(df, exit_mode, k, trigger, entry="none", contr_ratio=1.0, tp_atr=3.
         and close > recent_highs
         and entry_filter_ok(df, i, row, entry, recent_highs, contr_ratio)
     )
-    if is_breakout:
+    if is_breakout and pass_regime:
+      # allow_first_entry: 'none'|'conditional'|'always'
       if state == "WAITING":
-        state = "FIRST_FOUND"  # 첫 신호는 필터링 (봇과 동일)
+        if allow_first_entry == 'always':
+          state = "READY_FOR_BUY"
+          entry_p, entry_t = close, df.index[i]
+          hh, atr_entry = high, row["ATR"]
+          eq_at_entry = equity
+          mae, mfe = low / entry_p - 1, high / entry_p - 1
+        elif allow_first_entry == 'conditional':
+          # require strong confirmations for first-entry acceptance
+          cond_vol = bool(row.get("Vol_Breakout", False))
+          try:
+            cond_atr = row.get("ATR", 9999) < row.get("ATR_MA20", 0) * 0.9
+          except Exception:
+            cond_atr = False
+          cond_adx = bool(row.get("ADX", 0) >= 20)
+          if cond_vol and cond_atr and cond_adx:
+            state = "READY_FOR_BUY"
+            entry_p, entry_t = close, df.index[i]
+            hh, atr_entry = high, row["ATR"]
+            eq_at_entry = equity
+            mae, mfe = low / entry_p - 1, high / entry_p - 1
+          else:
+            state = "FIRST_FOUND"
+        else:
+          state = "FIRST_FOUND"  # 첫 신호는 필터링 (봇과 동일)
       elif state == "FIRST_FOUND":
         state = "READY_FOR_BUY"  # 두 번째 신호 → 진입
         entry_p, entry_t = close, df.index[i]
@@ -289,15 +326,37 @@ def summarize(ticker, tf, label, trades, eq):
           f"{t[5].days:>5} {t[4]*100:+6.1f}% {t[6]*100:+6.1f}% {t[7]*100:+6.1f}%")
 
 
-def run_ticker(ticker, tf, exit_mode, k, trigger, entry, contr_ratio, period, tp_spec, tp_default):
+def run_ticker(ticker, tf, exit_mode, k, trigger, entry, contr_ratio, period, tp_spec, tp_default, regime_tf=None, allow_first_entry='none'):
+  # load entry timeframe bars
   df = load_bars(ticker, tf, period)
   if len(df) < 51:
     print(f"[{ticker}] 데이터 부족({len(df)}봉 < 51) — 분석 생략")
     return
   df = add_indicators(df)
+
+  # regime_tf: if provided, require regime (e.g., 4h EMA alignment) to be True at entry times
+  if regime_tf and regime_tf != tf:
+    regime_df = load_bars(ticker, regime_tf, period)
+    if len(regime_df) >= 51:
+      regime_df = add_indicators(regime_df)
+      # regime aligned where EMA_10 > EMA_20 > EMA_50
+      regime_aligned = (regime_df["EMA_10"] > regime_df["EMA_20"]) & (
+          regime_df["EMA_20"] > regime_df["EMA_50"])
+      # map regime alignment to entry df index by forward-fill (nearest past regime bucket)
+      try:
+        aligned_series = regime_aligned.reindex(df.index, method='ffill').fillna(False)
+      except Exception:
+        # fallback: no mapping
+        aligned_series = pd.Series(False, index=df.index)
+    else:
+      aligned_series = pd.Series(False, index=df.index)
+  else:
+    aligned_series = pd.Series(True, index=df.index)
+
   # 종목별 승수 우선 (실전 봇 TAKE_PROFIT_ATR_BY_TICKER 미러)
   tp_atr = tp_spec.get(ticker, tp_default)
-  trades, eq = backtest(df, exit_mode, k, trigger, entry, contr_ratio, tp_atr)
+  trades, eq = backtest(df, exit_mode, k, trigger, entry, contr_ratio, tp_atr,
+                       regime_aligned=aligned_series, allow_first_entry=allow_first_entry)
   label = f"entry={entry}"
   if entry == "contr":
     label += f"(x{contr_ratio:g})"
@@ -306,6 +365,10 @@ def run_ticker(ticker, tf, exit_mode, k, trigger, entry, contr_ratio, period, tp
   label += f"tp={tp_atr:g} " if tp_atr > 0 else ""
   label += f"exit={exit_mode}" + (f" k={k}" if exit_mode != "ema20" else "") \
       + f" trigger={trigger}"
+  if regime_tf and regime_tf != tf:
+    label += f" (regime={regime_tf})"
+  if allow_first_entry and allow_first_entry != 'none':
+    label += f" allow_first={allow_first_entry}"
   summarize(ticker, tf, label, trades, eq)
 
 
@@ -345,6 +408,9 @@ def main():
   p = argparse.ArgumentParser(description="스윙 전략 백테스트 (swing_bot.py 로직 미러)")
   p.add_argument("--ticker", default=",".join(bot.TICKERS), help="종목 (콤마 구분, 기본 TQQQ,SOXL)")
   p.add_argument("--tf", default="4h", help="타임프레임 (1h/2h/4h/6h/1D, 기본 4h)")
+  p.add_argument("--regime-tf", default=None, help="레짐 확인용 TF(예: 4h). 제공하면 해당 TF의 EMA 정배열을 진입 필터로 사용")
+  p.add_argument("--allow-first-entry", default="none", choices=["none","conditional","always"],
+                 help="첫 신호 허용 방식: none(기본, 둘째 신호에서 진입), conditional(볼륨+ATR수축+ADX 확인 시 첫 신호 진입), always(모든 첫 신호 진입)")
   p.add_argument("--exit", default="ema20", choices=["ema20", "chan", "stop"],
                  help="청산 규칙 (기본 ema20 — 현행 봇)")
   p.add_argument("--atr-k", type=float, default=None,
@@ -393,7 +459,7 @@ def main():
         if "trigger" in _exit_override and _exit_override["trigger"]:
           trigger_for_ticker = _exit_override["trigger"]
       run_ticker(ticker, tf, exit_mode_for_ticker, k_for_ticker, trigger_for_ticker, args.entry, args.contr_ratio,
-                 args.period, tp_spec, tp_default)
+                 args.period, tp_spec, tp_default, regime_tf=args.regime_tf, allow_first_entry=args.allow_first_entry)
     except Exception as exc:  # 한 종목 실패가 다른 종목을 막지 않도록
       print(f"[{ticker}] 백테스트 중 오류: {exc}")
 
