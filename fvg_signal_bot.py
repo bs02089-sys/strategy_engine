@@ -20,6 +20,8 @@
      - CHoCH 이전 마지막 스윙 저점 아래에 손절 배치, 익절 = 리스크 × 3.5 (영상 3~4R)
 
   - 알림은 Discord Webhook으로만 전송 — 실제 주문 자동 실행 없음 (수동 매매)
+  - DISCORD_USER_ID 설정 시 알림에 @멘션 3회 포함 — 잠든 사이에도 모바일 알림이
+    강하게/여러 번 울리도록 웨이크업 강화 (스윙 봇과 동일 패턴)
   - 파일 기반 쿨다운(fvg_alerts.json)으로 동일 FVG 중복 알림 방지 — 로컬 크론과
     GitHub Actions(--once 백업)가 git으로 상태를 공유해 프로세스를 넘나드는
     교차 중복 알림도 차단한다 (loop 모드에서도 동일하게 동작)
@@ -45,6 +47,8 @@ import yfinance as yf
 # [사용자 설정 영역]
 # ==========================================
 DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK", "YOUR_DISCORD_WEBHOOK")
+# 웨이크업 멘션: DISCORD_USER_ID 설정 시 시그널 알림에 @멘션 3회 포함 (스윙 봇 패턴)
+DISCORD_USER_ID = os.getenv("DISCORD_USER_ID", "YOUR_DISCORD_USER_ID")
 # 모니터링할 종목 리스트 (3배 레버리지 ETF — 영상의 고변동성 종목과 유사)
 TICKERS = ["TQQQ", "SOXL"]
 
@@ -77,7 +81,16 @@ def send_discord_webhook(message):
   if not DISCORD_WEBHOOK or DISCORD_WEBHOOK == "YOUR_DISCORD_WEBHOOK":
     print(message)
     return
-  payload = {"content": message}
+  # 웨이크업 강화: 멘션을 3회 반복 — 잠든 사이에도 Discord 모바일 알림이 강하게
+  # 울리도록 (사용자가 직접 매매를 진행해야 하므로, 스윙 봇과 동일 패턴).
+  # placeholder("YOUR_...")는 미설정 상태이므로 멘션에서 제외한다.
+  mention = (
+      " ".join([f"<@{DISCORD_USER_ID}>"] * 3)
+      if DISCORD_USER_ID and DISCORD_USER_ID != "YOUR_DISCORD_USER_ID"
+      else ""
+  )
+  content = (mention + "\n" + message) if mention else message
+  payload = {"content": content}
   try:
     response = requests.post(DISCORD_WEBHOOK, json=payload, timeout=10)
     if response.status_code == 204:
