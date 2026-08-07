@@ -412,12 +412,16 @@ python3 setup_fvg_cron.py --remove    # 제거
 평가 리포트를 만듭니다 (CLOSED 포지션만 집계, 수수료/슬리피지 미반영).
 
 ```bash
-python3 fvg_bot_eval.py                 # 전체 평가 리포트 (승률/평균익절·손절/PF/총수익/MDD)
-python3 fvg_bot_eval.py --days 30       # 최근 30일 청산분만
-python3 fvg_bot_eval.py --ticker TQQQ   # 특정 종목만
-python3 fvg_bot_eval.py --path test.json  # 다른 포지션 파일로 테스트
+python3 fvg_bot_eval.py                    # 전체 평가 리포트 (승률/평균익절·손절/PF/총수익/MDD)
+python3 fvg_bot_eval.py --fee 0            # 수수료 미반영 (백테스트와 동일 기준)
+python3 fvg_bot_eval.py --fee 0.0025       # 다른 수수료 (예: 일반 0.25%)
+python3 fvg_bot_eval.py --days 30          # 최근 30일 청산분만
+python3 fvg_bot_eval.py --ticker TQQQ      # 특정 종목만
+python3 fvg_bot_eval.py --path test.json   # 다른 포지션 파일로 테스트
 ```
 
+> - **수수료 반영 (기본)**: 나무멤버스 0.07%가 매수·매도 각각 부과됩니다 (왕복 0.14%).
+>   순수익률 = 청산가×(1−fee) / 진입가×(1+fee) − 1 — `--fee 0`으로 끌 수 있습니다.
 > - 청산 사유 분포(TP 익절 / SL 손절 / DAY_CLOSE 당일 마감)와 종목별 통계 포함.
 > - 미청산(OPEN) 포지션은 평가에서 제외하고 별도로 표시합니다.
 > - 포지션은 **CLOSED 후 45일간 보존**되므로 한 달(20영업일) 단위 평가가 가능합니다.

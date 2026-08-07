@@ -11,11 +11,15 @@ fvg_signal_bot.py가 진입 알림 시 fvg_positions.json에 기록한 포지션
       key = "TICKER|FVG생성시각", value = {ticker, entry, sl, tp, status,
              exit_price, exit_reason(TP/SL/DAY_CLOSE), closed_at, ...}
   - 통계: CLOSED 포지션만 집계 (OPEN은 미청산 상태로 따로 표시)
-  - 손익: (청산가 - 진입가) / 진입가 — 백테스트와 동일, 수수료/슬리피지 미반영
+  - 손익: (청산가 - 진입가) / 진입가 — 백테스트와 동일한 수식에
+    수수료 반영 (--fee, 기본 0.0007 = 나무멤버스 0.07%. 매수·매도 각각 부과 → 왕복 0.14%)
+      순수익 = 청산가×(1-fee) / 진입가×(1+fee) - 1   (--fee 0 = 수수료 미반영, 백테스트 동일)
   - 손실제한/이익실현 % 필드가 있으면 함께 표시 (나무 신규편입 입력값 확인용)
 
 사용 예:
-  python3 fvg_bot_eval.py                       # 전체 평가 리포트
+  python3 fvg_bot_eval.py                       # 전체 평가 리포트 (나무멤버스 0.07% 반영)
+  python3 fvg_bot_eval.py --fee 0               # 수수료 미반영 (백테스트와 동일 기준)
+  python3 fvg_bot_eval.py --fee 0.0025          # 다른 수수료 (예: 일반 0.25%)
   python3 fvg_bot_eval.py --days 30             # 최근 30일 청산분만
   python3 fvg_bot_eval.py --ticker TQQQ         # 특정 종목만
   python3 fvg_bot_eval.py --path 다른경로.json  # 다른 상태 파일 테스트
@@ -32,6 +36,9 @@ from datetime import datetime, timedelta
 POSITIONS_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "fvg_positions.json"
 )
+
+# 수수료 기본값 — 나무멤버스 해외주식 0.07% (매수·매도 각각 부과 → 왕복 0.14%)
+FEE_DEFAULT = 0.0007
 
 # exit_reason 코드 → 한국어 라벨
 REASON_LABEL = {
@@ -63,14 +70,19 @@ def parse_entry_time(p):
     return None
 
 
-def trade_ret(p):
-  """개별 트레이드 수익률 (진입가 대비 청산가). 유효하지 않으면 None."""
+def trade_ret(p, fee=FEE_DEFAULT):
+  """개별 트레이드 순수익률 (진입가 대비 청산가, 수수료 왕복 반영).
+
+  매수 시 수수료(fee)는 진입가에 더해지고, 매도 시 수수료는 청산가에서
+  차감된다 → 순수익률 = 청산가×(1-fee) / 진입가×(1+fee) - 1.
+  fee=0이면 백테스트와 동일한 수수료 미반영 수치. 유효하지 않으면 None.
+  """
   try:
     entry = float(p.get("entry", 0) or 0)
     exit_p = float(p.get("exit_price", 0) or 0)
     if entry <= 0 or exit_p <= 0:
       return None
-    return exit_p / entry - 1
+    return exit_p * (1 - fee) / (entry * (1 + fee)) - 1
   except (TypeError, ValueError):
     return None
 
@@ -79,10 +91,11 @@ def fmt_pct(v, signed=True):
   return f"{v * 100:+.1f}%" if signed else f"{v * 100:.1f}%"
 
 
-def build_report(positions, days=None, ticker=None):
+def build_report(positions, days=None, ticker=None, fee=FEE_DEFAULT):
   """평가 데이터 수집 — 필터(일수/종목) 적용 후 CLOSED 집계.
 
-  반환: dict(rows, stats, mdd, by_reason, by_ticker, open_pos)
+  fee: 매수/매도 각각 부과되는 수수료율 (왕복 적용, 기본 나무멤버스 0.07%).
+  반환: dict(rows, stats, mdd, by_reason, by_ticker, open_pos, fee)
   """
   now = datetime.now()
   closed, open_pos = [], []
@@ -108,7 +121,7 @@ def build_report(positions, days=None, ticker=None):
   # CLOSED 집계 (손익 계산 가능한 항목만)
   rows = []
   for p in closed:
-    ret = trade_ret(p)
+    ret = trade_ret(p, fee)
     if ret is None:
       continue
     rows.append({"pos": p, "ret": ret, "entry_t": parse_entry_time(p)})
@@ -164,14 +177,18 @@ def build_report(positions, days=None, ticker=None):
   return {
       "rows": rows, "stats": stats, "mdd": mdd,
       "by_reason": by_reason, "by_ticker": by_ticker, "open_pos": open_pos,
+      "fee": fee,
   }
 
 
 def print_report(rep, path, days, ticker):
   stats, rows = rep["stats"], rep["rows"]
+  fee = rep["fee"]
+  fee_txt = f"수수료 {fee * 100:.2f}% (왕복 {fee * 2 * 100:.2f}%)" if fee > 0 else "수수료 미반영"
   print(f"\n=== FVG 봇 실전 평가 리포트 ===")
   print(f"출처: {path}  |  " + (f"필터: 최근 {days}일  |  " if days else "")
         + (f"종목: {ticker}  |  " if ticker else "") + f"집계 시각: {datetime.now():%Y-%m-%d %H:%M}")
+  print(f"{fee_txt}")
 
   if not rows:
     print("\n  청산(CLOSED)된 트레이드 없음 — 실전 진입/청산 후 다시 실행하세요.")
@@ -228,7 +245,12 @@ def main():
   p.add_argument("--days", type=int, default=None, help="최근 N일 청산분만 평가")
   p.add_argument("--ticker", default=None, help="특정 종목만 평가 (예: TQQQ)")
   p.add_argument("--path", default=POSITIONS_PATH, help="포지션 파일 경로 (기본 fvg_positions.json)")
+  p.add_argument("--fee", type=float, default=FEE_DEFAULT,
+                 help=f"매수·매도 각각 부과 수수료율 (기본 {FEE_DEFAULT * 100:g}%% = 나무멤버스, --fee 0 = 미반영)")
   args = p.parse_args()
+  if args.fee < 0:
+    print(f"[오류] --fee는 음수일 수 없습니다: {args.fee}")
+    sys.exit(1)
 
   positions = load_positions(args.path)
   if not positions:
@@ -236,7 +258,7 @@ def main():
           "자동으로 쌓입니다.")
     return
 
-  rep = build_report(positions, days=args.days, ticker=args.ticker)
+  rep = build_report(positions, days=args.days, ticker=args.ticker, fee=args.fee)
   print_report(rep, args.path, args.days, args.ticker)
 
 
