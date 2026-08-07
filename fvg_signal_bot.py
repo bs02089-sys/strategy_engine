@@ -431,6 +431,9 @@ def fetch_ltf_data(ticker):
   return _download(ticker, LTF_PERIOD, LTF_INTERVAL)
 
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
 def build_message(signal):
   htf_align = "✅ HTF 존 정렬" if signal["htf_align"] else "HTF 존 미정렬"
   entry = float(signal["entry"])
@@ -460,15 +463,11 @@ def build_message(signal):
   )
 
 
-ALERT_STATE_PATH = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "fvg_alerts.json"
-)
+ALERT_STATE_PATH = os.path.join(BASE_DIR, "fvg_alerts.json")
 ALERT_STATE_PRUNE_HOURS = 48  # 상태 파일 정리 기준 — 2일 지난 항목 제거
 
 # 청산(매도) 알림 — 진입 알림 시 포지션을 기록해 TP/손절/당일 마감을 추적
-POSITIONS_PATH = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "fvg_positions.json"
-)
+POSITIONS_PATH = os.path.join(BASE_DIR, "fvg_positions.json")
 POSITIONS_PRUNE_HOURS = 45 * 24  # CLOSED 상태 정리 기준 (45일 — 실전 평가(fvg_bot_eval.py)를 위해
                                  #   최소 한 달치 트레이드 데이터 보존. 48시간이면 한 달 평가 시 데이터 소멸)
 DAY_CLOSE_ALERT_MINUTE = 15 * 60 + 40  # ET 15:40 — 당일 마감 임박 알림 시각
