@@ -1,0 +1,94 @@
+name: FVG Signal Bot (TQQQ/SOXL)
+
+on:
+  schedule:
+    # 미국 장중 5분 폴링(클라우드 백업) — 로컬 크론(매분)의 백업 역할로,
+    # PC가 꺼져 있어도 GitHub 러너에서 실행된다.
+    # UTC 13~21시(월~금)는 여름(EDT)/겨울(EST) 모두 장중(13:30~21:00 UTC)을
+    # 포함하는 넉넉한 창이며, 봇 내부 in_trading_session이 09:30~15:59 ET를
+    # 정확히 재검증하므로 창 밖 실행은 안전하게 스킵된다.
+    # 주의: GitHub Actions 자체 스케줄은 지연/비활성화 가능성이 있어 정확한
+    # 장중 실시간 폴링이 필요하면 cron-job.org dispatch(아래 repository_dispatch)
+    # 사용을 권장한다 (swing_bot.yml과 동일 패턴).
+    - cron: "*/5 13-21 * * 1-5"
+  repository_dispatch:
+    # cron-job.org가 장중 5분 폴링 발사 시 사용 (선택) — GHA 스케줄 지연 우회.
+    # (설정 예정이라면 setup_cronjob_org.py에 --fvg 모드 추가 필요)
+    types: [fvg-signal]
+  workflow_dispatch:           # 수동 실행 지원 (테스트용)
+
+concurrency:
+  group: fvg-signal            # 실행 직렬화 — 중복 실행 방지
+  cancel-in-progress: false
+
+jobs:
+  run-fvg:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10        # yfinance 수집 지연 시 러너 시간 낭비 방지
+    permissions:
+      contents: write          # fvg_alerts.json 상태 동기화 커밋/푸시용
+    env:
+      DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Sync with latest remote (start from newest alert state)
+        # 체크아웃 직후 최신 원격 알림 상태로 rebase — 로컬 크론이 기록한
+        # 쿨다운 이력을 받아 중복 알림을 방지한다.
+        run: git pull --rebase
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+          cache: pip           # 의존성 캐시 — 실행 시간/분당 소비 절감
+
+      - name: Install dependencies
+        # -q: pip 진행률 바(캐리지 리턴 \r)가 GitHub Actions 로그 뷰어를 깨뜨려
+        #   "로그 표시 실패"/스텝 이름 오표시가 발생 — 조용히 설치해 방지
+        run: |
+          python -m pip install --upgrade pip -q
+          pip install -q -r requirements.txt
+
+      - name: Run FVG Signal Bot (--once)
+        # --once: 1회 스캔 후 종료 (봇이 종목별 장중 여부를 자체 재검증)
+        # tee: Actions 로그에도 표시 + fvg_log.txt 저장 (로그는 커밋하지 않음)
+        run: |
+          set -o pipefail
+          python fvg_signal_bot.py --once 2>&1 | tee fvg_log.txt
+
+      - name: 실패 시 로그 표시 (Show log on failure)
+        if: failure()
+        run: cat fvg_log.txt
+
+      - name: Upload FVG log as artifact
+        # 5분 폴링이라 아티팩트가 하루 200개씩 쌓일 수 있어 보존 기간을 1일로 제한.
+        # GitHub Actions 로그 뷰어가 이모지/한글 로그를 "표시 실패"로 못 불러올 수
+        # 있어, 실행마다 로그를 아티팩트로 보존한다 (디버깅용, 저장소 오염 없음).
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fvg-log
+          path: fvg_log.txt
+          if-no-files-found: ignore
+          retention-days: 1
+
+      - name: Sync alert state and Notify
+        # 알림 상태(fvg_alerts.json)를 커밋/푸시해 로컬 크론과 쿨다운 이력을
+        # 공유한다 (swing_bot.yml의 swing_state.json 패턴과 동일).
+        # 변경 없으면 "No changes to commit" 로그만 남고 종료.
+        # -X theirs: 충돌 시 원격 버전 유지 — 동시 기록 경합 윈도우에서 중복 알림이
+        #   발생할 수 있으나 쿨다운(1h)이 실질 피해를 제한한다 (best-effort 설계).
+        # || true: 일시적 실패(네트워크 등) 시에도 push는 계속 시도해 갱신 유실 방지
+        if: always()
+        run: |
+          git config --global user.name "FVG Signal Bot"
+          git config --global user.email "bot@example.com"
+
+          [ -f fvg_alerts.json ] && git add fvg_alerts.json
+
+          git commit -m "update: fvg-alerts $(date +'%Y-%m-%d')" || echo "No changes to commit"
+          git pull --rebase -X theirs || true
+          git push
