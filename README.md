@@ -164,6 +164,7 @@
 | **TRIGGER_OPTIMIZATION_SUMMARY.md** | ATH_DCA 트리거 최적화 분석 — 바닥 분포 · 후보값 스윕 · 의사결정 근거 |
 | **DUAL_MODE_SUMMARY.md** | 듀얼 모드(LOC ↔ ATH_DCA) 구조 요약 문서 |
 | **REALTIME_ALERT_SETUP.md** | 실시간 ATH DCA 알림 설정 가이드 |
+| **FVG_NAMYU_SETUP.md** | FVG 봇 나무증권 무인 운영 가이드 — 시세포착주문(손절/익절) + MOC 마감 청산 설정법 |
 | ~~MarketStage_config.json~~ | (제거됨 — portfolio_config.json으로 통합) |
 | **sigma_history.csv** | Sigma 갱신 이력 (런타임 자동 생성 — 추적 제외) |
 | **market_state.json** | 시장 단계 상태 정보 (자동 생성) |
@@ -382,7 +383,7 @@ python3 DCA_MA_strategy_flowchart.py
 > - 알림만 전송하며 실제 주문은 자동 실행하지 않습니다 (수동 매매). `DISCORD_USER_ID` 설정 시 멘션 3회.
 > - 중복 알림은 `fvg_alerts.json` 파일 기반 쿨다운(1시간)으로 방지 — 로컬 크론과 git으로 상태 공유.
 > - **청산(매도) 알림**: 진입 알림 시 포지션을 `fvg_positions.json`에 기록 → 이후 익절(TP) 도달·손절(SL) 도달·당일 마감 임박(ET 15:40) 시 매도 알림 자동 전송 (한 봉에 겹치면 손절 우선).
-> - **무인(수면) 운용**: 진입 알림의 ①~④ 체크리스트(진입 지정가/SL/TP/MOC)를 브로커 OCO/브래킷 그룹으로 걸면 청산 자동 처리 — 이후 TP/손절/MOC 알림은 아침에 확인하는 기록용.
+> - **무인(수면) 운용**: 나무증권 기준 — ①진입 지정가 + ②③시세포착주문(서버 24시간 감시 손절/익절) + ④MOC(마감 청산)로 자는 동안 청산 자동 처리, 이후 TP/손절/MOC 알림은 아침에 확인하는 기록용. 상세: `FVG_NAMYU_SETUP.md`
 > - 백테스트: `fvg_bot_backtest.py` (5분봉 근사 — **당일 마감 운용이 핵심**, 야간 보유 시 MDD 급증).
 
 ### FVG 봇 배포 — 로컬 크론 (매분, 주력) + GitHub Actions (5분, 백업)
@@ -537,6 +538,7 @@ python3 DCA_MA_strategy.py --signal --discord --all  # TQQQ+SOXL 단일 메시�
 | [TRIGGER_OPTIMIZATION_SUMMARY.md](TRIGGER_OPTIMIZATION_SUMMARY.md) | ATH_DCA 트리거 최적화 분석 — 바닥 분포 · 후보값 스윕 · 의사결정 근거 |
 | [DUAL_MODE_SUMMARY.md](DUAL_MODE_SUMMARY.md) | 듀얼 모드(LOC ↔ ATH_DCA) 시스템 전체 구조 요약 |
 | [REALTIME_ALERT_SETUP.md](REALTIME_ALERT_SETUP.md) | 실시간 ATH DCA 알림 설정 가이드 |
+| [FVG_NAMYU_SETUP.md](FVG_NAMYU_SETUP.md) | FVG 봇 나무증권 무인 운영 가이드 — 시세포착주문 + MOC 설정법 |
 
 ---
 
