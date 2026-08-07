@@ -154,7 +154,7 @@
 | **DCA_MA_strategy.py** | 📌 **통합 완결판** — 실전 엔진(LOC 목표가/ATH DCA/MA 레짐 필터/Discord 브리핑/`--ath-monitor`) + 백테스트 + `--signal` 실시간 신호 |
 | **DCA_MA_strategy_flowchart.py** | 시스템 전체 플로우차트 문서 |
 | **setup_cronjob_org.py** | cron-job.org 실시간 알림 설정 자동화 (생성/--list/--test-dispatch/--update-pat/--update-schedule) |
-| **fvg_signal_bot.py** | 📌 **FVG 반자동 매매 스캐너** — HTF(15분) 추세 필터 + 1분봉 CHoCH/FVG 진입 모델 + 구조 기반 손절, Discord 알림(멘션 3회), 파일 기반 중복 알림 방지 |
+| **fvg_signal_bot.py** | 📌 **FVG 반자동 매매 스캐너** — HTF(15분) 추세 필터 + 1분봉 CHoCH/FVG 진입 모델 + 구조 기반 손절, Discord 알림(멘션 3회), 파일 기반 중복 알림 방지, **청산(매도) 알림**(TP/손절/당일 마감 추적) |
 | **fvg_bot_backtest.py** | FVG 전략 백테스트 — 5분봉 근사(1분봉은 yfinance 7일 한도), 당일 마감/overnight 모드, 승률·MDD·PF 지표 |
 | **setup_fvg_cron.py** | FVG 봇 로컬 크론 설정 자동화 (미국 장중 매분, 설치/--list/--remove/--dry-run) |
 | **fvg_local_cron.sh** | 로컬 크론 래퍼 — ET 장중 확인 + git 알림 상태(fvg_alerts.json) 동기화 후 실행 |
@@ -169,6 +169,7 @@
 | **market_state.json** | 시장 단계 상태 정보 (자동 생성) |
 | **signal_report.json** | 시장 리스크 점수 (자동 생성) |
 | **fvg_alerts.json** | FVG 봇 알림 상태 (자동 생성 — 동일 FVG 중복 알림 방지, 로컬↔GHA 공유) |
+| **fvg_positions.json** | FVG 봇 포지션 상태 (자동 생성 — 진입 기록 → TP/손절/당일 마감 청산 알림 추적, 로컬↔GHA 공유) |
 | **requirements.txt** | Python 의존성 패키지 목록 |
 
 ---
@@ -380,13 +381,14 @@ python3 DCA_MA_strategy_flowchart.py
 > - 1분봉 CHoCH → FVG 중간점 풀백 진입 모델 + HTF(15분) 추세 필터 (유튜브 Craig Percoo 전략).
 > - 알림만 전송하며 실제 주문은 자동 실행하지 않습니다 (수동 매매). `DISCORD_USER_ID` 설정 시 멘션 3회.
 > - 중복 알림은 `fvg_alerts.json` 파일 기반 쿨다운(1시간)으로 방지 — 로컬 크론과 git으로 상태 공유.
+> - **청산(매도) 알림**: 진입 알림 시 포지션을 `fvg_positions.json`에 기록 → 이후 익절(TP) 도달·손절(SL) 도달·당일 마감 임박(ET 15:40) 시 매도 알림 자동 전송 (한 봉에 겹치면 손절 우선).
 > - 백테스트: `fvg_bot_backtest.py` (5분봉 근사 — **당일 마감 운용이 핵심**, 야간 보유 시 MDD 급증).
 
 ### FVG 봇 배포 — 로컬 크론 (매분, 주력) + GitHub Actions (5분, 백업)
 
 1분봉 전략은 신호가 분 단위로 생기고 사라지므로 **로컬 PC에서 매분 실행**이 주력이고,
 PC가 꺼져 있어도 GitHub Actions 백업(`fvg_signal.yml`, 장중 5분 폴링)이 이어받습니다.
-두 경로는 `fvg_alerts.json`을 git으로 공유해 중복 알림을 차단합니다. 실제 매매는
+두 경로는 `fvg_alerts.json`(알림 쿨다운)·`fvg_positions.json`(포지션 추적)을 git으로 공유해 중복 알림을 차단합니다. 실제 매매는
 알림을 받은 사용자가 직접 실행합니다 (자동 주문 없음).
 
 ```bash

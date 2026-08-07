@@ -22,6 +22,9 @@
      - 5분봉 근사 백테스트(60일)에서 당일 마감 모델은 수익(PF 2.0, MDD -2.3%)인 반면
        overnight 보유는 레버리지 ETF 야간 갭에 구조 손절이 깨져 손실(SOXL -14.8%)
        → 진입 후 당일 장 마감(15:55~16:00 ET) 전 미해결 시 청산 권장 (알림 메시지에 포함)
+  5. 청산(매도) 알림 — 진입 알림 시 포지션을 fvg_positions.json에 기록하고, 이후
+     익절(TP) 도달·손절(SL) 도달·당일 마감 임박(ET 15:40) 시 매도 알림 자동 전송
+     (영상 청산 로직: 익절 = 리스크 × 3.5 / 손절 = 구조 저점 아래 + 백테스트 결론: 당일 마감)
 
   - 알림은 Discord Webhook으로만 전송 — 실제 주문 자동 실행 없음 (수동 매매)
   - DISCORD_USER_ID 설정 시 알림에 @멘션 3회 포함 — 잠든 사이에도 모바일 알림이
@@ -82,10 +85,15 @@ HTF_CACHE_SECONDS = 900       # HTF(15분봉) 재수집 주기 — API 부하 �
 
 
 def send_discord_webhook(message):
-  """디스코드 채널로 메시지를 전송하는 함수 (웹훅 미설정 시 stdout 출력)"""
+  """디스코드 채널로 메시지를 전송 (웹훅 미설정 시 stdout 출력).
+
+  반환: 실제 Discord 전송 성공 여부(True/False). 웹훅 미설정(로컬 크론처럼
+  알림 불필요 경로)이면 False를 반환해, 호출 측이 포지션 기록/쿨다운을
+  건너뛰도록 한다 — 미전송 알림이 쿨다운을 선점해 GHA 알림을 막는 문제 방지.
+  """
   if not DISCORD_WEBHOOK or DISCORD_WEBHOOK == "YOUR_DISCORD_WEBHOOK":
     print(message)
-    return
+    return False
   # 웨이크업 강화: 멘션을 3회 반복 — 잠든 사이에도 Discord 모바일 알림이 강하게
   # 울리도록 (사용자가 직접 매매를 진행해야 하므로).
   # placeholder("YOUR_...")는 미설정 상태이므로 멘션에서 제외한다.
@@ -100,10 +108,11 @@ def send_discord_webhook(message):
     response = requests.post(DISCORD_WEBHOOK, json=payload, timeout=10)
     if response.status_code == 204:
       print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 알림 전송 성공")
-    else:
-      print(f"전송 실패: {response.status_code}, {response.text}")
+      return True
+    print(f"전송 실패: {response.status_code}, {response.text}")
   except Exception as e:
     print(f"웹훅 전송 중 에러 발생: {e}")
+  return False
 
 
 def in_trading_session(ts):
@@ -441,6 +450,13 @@ ALERT_STATE_PATH = os.path.join(
 )
 ALERT_STATE_PRUNE_HOURS = 48  # 상태 파일 정리 기준 — 2일 지난 항목 제거
 
+# 청산(매도) 알림 — 진입 알림 시 포지션을 기록해 TP/손절/당일 마감을 추적
+POSITIONS_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "fvg_positions.json"
+)
+POSITIONS_PRUNE_HOURS = 48  # CLOSED 상태 정리 기준 (2일)
+DAY_CLOSE_ALERT_MINUTE = 15 * 60 + 40  # ET 15:40 — 당일 마감 임박 알림 시각
+
 
 def _load_alert_state():
   """알림 상태(fvg_alerts.json) 로드 — 없거나 손상 시 빈 dict 반환.
@@ -491,6 +507,122 @@ def send_test_alert():
   send_discord_webhook(msg)
 
 
+def _load_positions():
+  """포지션 상태(fvg_positions.json) 로드 — 없거나 손상 시 빈 dict 반환.
+
+  key = "TICKER|FVG생성시각", value = {ticker, entry, sl, tp, status: OPEN/CLOSED}.
+  로컬 크론과 GitHub Actions가 git으로 공유해 청산(매도) 알림도 교차 중복 없이
+  한 번만 발송한다 (진입 알림의 fvg_alerts.json과 동일 패턴).
+  """
+  try:
+    with open(POSITIONS_PATH, "r", encoding="utf-8") as f:
+      return json.load(f)
+  except (OSError, json.JSONDecodeError):
+    return {}
+
+
+def _save_positions(positions):
+  """포지션 상태를 fvg_positions.json에 원자적 저장 — CLOSED 2일 후 정리."""
+  cutoff = time.time() - POSITIONS_PRUNE_HOURS * 3600
+  positions = {
+      k: v for k, v in positions.items()
+      if v.get("status") != "CLOSED" or (v.get("closed_at") or 0) >= cutoff
+  }
+  try:
+    with tempfile.NamedTemporaryFile(
+        "w", delete=False, suffix=".json", encoding="utf-8"
+    ) as tmp:
+      json.dump(positions, tmp, ensure_ascii=False, indent=2)
+      tmp_path = tmp.name
+    shutil.move(tmp_path, POSITIONS_PATH)
+  except OSError:
+    print("[경고] 포지션 상태 파일 저장 실패 (무시하고 계속)")
+
+
+def record_position(ticker, signal):
+  """진입 알림 발송 시 포지션 스냅샷 생성 — 이후 청산(TP/손절/당일 마감) 추적용."""
+  return {
+      "ticker": ticker,
+      "fvg_time": str(signal["fvg_time"]),
+      "entry_time": str(signal["time"]),
+      "entry": float(signal["entry"]),
+      "sl": float(signal["stop_loss"]),
+      "tp": float(signal["take_profit"]),
+      "status": "OPEN",
+  }
+
+
+def build_exit_message(pos, exit_price, reason):
+  """청산(매도) 알림 메시지 — 영상 청산 로직 + 백테스트 결론(당일 마감) 안내."""
+  heads = {
+      "TP": "✅ **익절(TP) 도달 — 매도(청산) 알림**",
+      "SL": "🛑 **손절(SL) 도달 — 매도(청산) 알림**",
+      "DAY_CLOSE": "⏰ **당일 마감 — 매도(청산) 알림**",
+  }
+  notes = {
+      "TP": "목표 익절가 도달 — 수익 확정",
+      "SL": "구조 저점 아래 손절 체결",
+      "DAY_CLOSE": "장 마감 전 미해결 — 야간 갭 리스크 회피",
+  }
+  # .get() 방어 — 손상/수동 편집 항목이 있어도 청산 알림 경로가 크래시하지 않도록
+  ticker = pos.get("ticker", "?")
+  entry = float(pos.get("entry", 0) or 0)
+  pnl = exit_price / entry - 1 if entry > 0 else 0.0
+  return (
+      f"{heads[reason]} `{ticker}`\n"
+      f"• **진입가 (FVG 중간점):** `{entry:.2f}`\n"
+      f"• **청산가:** `{exit_price:.2f}` ({notes[reason]})\n"
+      f"• **손익:** `{pnl * 100:+.1f}%`\n"
+      f"• 진입: `{pos.get('entry_time', '?')}`"
+  )
+
+
+def check_exit_alerts(ticker, df_ltf, positions, now_et=None):
+  """개방 포지션의 청산 조건(TP/손절/당일 마감) 확인 → 알림 전송 + CLOSED 처리.
+
+  영상 청산 로직(익절 = 리스크 × 3.5 / 손절 = 구조 저점 아래)을 자동 추적하고,
+  백테스트 결론대로 당일 마감(ET 15:40 이후) 임박 시 미해결 포지션을 정리한다.
+  한 봉에 손절/익절이 겹치면 손절 우선 (보수적). 반환: 청산 알림 발송 수.
+  """
+  open_pos = [
+      p for p in positions.values()
+      if p.get("ticker") == ticker and p.get("status") == "OPEN"
+  ]
+  if not open_pos:
+    return 0
+  bar = df_ltf.iloc[-1]
+  high, low, close = bar["High"], bar["Low"], bar["Close"]
+  if now_et is None:
+    now_et = pd.Timestamp.now(tz=df_ltf.index.tz)
+  now_min = now_et.hour * 60 + now_et.minute
+  day_close_near = now_min >= DAY_CLOSE_ALERT_MINUTE
+
+  sent = 0
+  for p in open_pos:
+    sl, tp = p.get("sl"), p.get("tp")
+    if sl is None or tp is None:
+      continue  # 손상/수동 편집 항목 — 건너뛰고 종목 전체 분석을 막지 않음
+    exit_p, reason = None, None
+    if low <= sl:
+      exit_p, reason = sl, "SL"
+    elif high >= tp:
+      exit_p, reason = tp, "TP"
+    elif day_close_near:
+      exit_p, reason = float(close), "DAY_CLOSE"
+    if exit_p is None:
+      continue
+    p.update({
+        "status": "CLOSED", "exit_price": exit_p,
+        "exit_reason": reason, "closed_at": time.time(),
+    })
+    send_discord_webhook(build_exit_message(p, exit_p, reason))
+    entry = float(p.get("entry", 0) or 0)
+    pnl = exit_p / entry - 1 if entry > 0 else 0.0
+    print(f"[{ticker}] 청산 알림: {reason} @ {exit_p:.2f} (손익 {pnl:+.2%})")
+    sent += 1
+  return sent
+
+
 def run_strategy():
   print(
       f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
@@ -499,6 +631,9 @@ def run_strategy():
   # 파일 기반 알림 상태 — --once(로컬 크론/GHA)와 loop 모드가 동일하게 공유
   alert_state = _load_alert_state()
   alerted_any = False
+  # 포지션 상태 — 진입 알림 시 기록, 청산(TP/손절/당일 마감) 알림에 사용
+  positions = _load_positions()
+  positions_changed = False
   for idx, ticker in enumerate(TICKERS):
     if idx > 0:
       time.sleep(1.5)  # yfinance 레이트 리밋 완화 — 종목별 요청 분산
@@ -511,11 +646,17 @@ def run_strategy():
         print(f"[{ticker}] 장중 세션 아님 — 스킵 (마지막 봉: {df_ltf.index[-1]})")
         continue
 
+      # ① 청산(매도) 확인 — 1분봉만 필요하므로 HTF 수집 실패와 무관하게 실행
+      #    (당일 마감 임박 시 HTF 장애로 청산 알림이 밀리지 않도록 먼저 처리)
+      if check_exit_alerts(ticker, df_ltf, positions):
+        positions_changed = True
+
       df_htf = fetch_htf_data(ticker)
       if df_htf is None or df_htf.empty:
         print(f"[{ticker}] 15분봉 데이터 부족 — 분석 생략")
         continue
 
+      # ② 진입 신호 스캔
       signal = build_long_signal(df_ltf, df_htf)
       if signal is None:
         print(f"[{ticker}] 조건 부합 시그널 없음")
@@ -528,9 +669,16 @@ def run_strategy():
         print(f"[{ticker}] 동일 FVG 재알림 쿨다운 중 — 중복 방지")
         continue
 
-      send_discord_webhook(build_message(signal))
-      alert_state[key] = time.time()
-      alerted_any = True
+      # 알림 실제 전달 성공 시에만 포지션 기록 + 쿨다운 설정 — 미전송(웹훅 미설정/
+      # 실패)이면 기록하지 않아 (1) 유령 포지션의 청산 알림(유저가 모르는 트레이드),
+      # (2) 미전송 알림이 쿨다운을 선점해 GHA 알림을 차단하는 문제를 방지한다.
+      if send_discord_webhook(build_message(signal)):
+        positions[key] = record_position(ticker, signal)
+        positions_changed = True
+        alert_state[key] = time.time()
+        alerted_any = True
+      else:
+        print(f"[{ticker}] 알림 미전송 — 포지션/쿨다운 기록 생략 (다음 실행에서 재시도)")
 
     except Exception as e:
       # 한 종목의 실패가 다른 종목 분석을 막지 않도록 방어
@@ -538,6 +686,8 @@ def run_strategy():
 
   if alerted_any:
     _save_alert_state(alert_state)
+  if positions_changed:
+    _save_positions(positions)
 
 
 def main():

@@ -38,7 +38,9 @@ Not lazy about: input validation at trust boundaries, error handling that preven
 - **신호 시스템**: 브리핑의 ▶ 실행 액션 라인은 신호이며 실제 체결은 사용자 수동 매매 — 엔진은 주문을 자동 실행하지 않는다.
 - **보조 신호 봇**: `fvg_signal_bot.py` — FVG(공정가치 갭) 1분봉 진입 모델 + HTF(15분) 추세 필터,
   구조 기반 손절. 로컬 크론(장중 매분) 주력 + GHA 백업(장중 5분 폴링), `fvg_alerts.json`으로
-  중복 알림 방지. 알림만 전송 — 주문 자동 실행 없음. 백테스트: `fvg_bot_backtest.py`.
+  중복 알림 방지. **청산(매도) 알림**: 진입 시 포지션을 `fvg_positions.json`에 기록, 이후
+  TP/손절/당일 마감(ET 15:40) 시 매도 알림 자동 전송. 알림만 전송 — 주문 자동 실행 없음.
+  백테스트: `fvg_bot_backtest.py`.
 
 ### 제거된 기능 — 재도입 금지
 - **전고점 50% 청산 (peak sell)**: 2026-08-03 제거. 백테스트 전용으로만 존재했고 실전 엔진에서는 실행되지 않았다.

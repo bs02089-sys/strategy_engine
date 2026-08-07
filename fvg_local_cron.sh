@@ -63,11 +63,12 @@ fi
 "$PY" fvg_signal_bot.py --once >> "$LOG" 2>&1
 echo "[$(date '+%F %T')] 완료 exit=$?" >> "$LOG"
 
-# ── 5) 알림 상태 원격 동기화: fvg_alerts.json commit + push ───────
-#    새 알림이 기록된 경우에만 커밋/푸시한다 (변경 없으면 no-op).
+# ── 5) 알림 상태 원격 동기화: fvg_alerts.json/fvg_positions.json commit + push ──
+#    새 알림/포지션이 기록된 경우에만 커밋/푸시한다 (변경 없으면 no-op).
 #    best-effort: 자격증명이 없으면 실패 로그만 남기고 크론은 계속된다.
-if [ -e fvg_alerts.json ]; then
-  git add -- fvg_alerts.json
+if [ -e fvg_alerts.json ] || [ -e fvg_positions.json ]; then
+  [ -e fvg_alerts.json ] && git add -- fvg_alerts.json
+  [ -e fvg_positions.json ] && git add -- fvg_positions.json
   if ! git diff --cached --quiet; then
     git -c user.name="FVG Local" -c user.email="local@example.com" \
         commit -m "update: fvg-alerts $(date '+%F %T')" >> "$LOG" 2>&1 || \
