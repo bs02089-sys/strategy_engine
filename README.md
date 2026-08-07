@@ -154,16 +154,13 @@
 | **DCA_MA_strategy.py** | 📌 **통합 완결판** — 실전 엔진(LOC 목표가/ATH DCA/MA 레짐 필터/Discord 브리핑/`--ath-monitor`) + 백테스트 + `--signal` 실시간 신호 |
 | **DCA_MA_strategy_flowchart.py** | 시스템 전체 플로우차트 문서 |
 | **setup_cronjob_org.py** | cron-job.org 실시간 알림 설정 자동화 (생성/--list/--test-dispatch/--update-pat/--update-schedule) |
-| **setup_swing_cron.py** | 스윙 평가 로컬 크론 설정 자동화 (설치/--list/--remove/--dry-run) — 봇 신호 감지는 cron-job.org가 담당 |
-| **swing_local_cron.sh** | 로컬 크론 래퍼 — git 동기화 후 평가 실행 (setup_swing_cron.py가 설치) |
+| **fvg_signal_bot.py** | 📌 **FVG 반자동 매매 스캐너** — HTF(15분) 추세 필터 + 1분봉 CHoCH/FVG 진입 모델 + 구조 기반 손절, Discord 알림(멘션 3회), 파일 기반 중복 알림 방지 |
+| **fvg_bot_backtest.py** | FVG 전략 백테스트 — 5분봉 근사(1분봉은 yfinance 7일 한도), 당일 마감/overnight 모드, 승률·MDD·PF 지표 |
+| **setup_fvg_cron.py** | FVG 봇 로컬 크론 설정 자동화 (미국 장중 매분, 설치/--list/--remove/--dry-run) |
+| **fvg_local_cron.sh** | 로컬 크론 래퍼 — ET 장중 확인 + git 알림 상태(fvg_alerts.json) 동기화 후 실행 |
 | **MarketStageSystem.py** | 독립적인 시장 단계 시스템 — 바닥 단계 감지 |
 | **bear_market_signals.py** | 약세장 신호 분석 시스템 |
-| **swing_bot.py** | 골드핑거식 4시간봉 스윙 봇 — TQQQ/SOXL 다중 종목, 첫 신호 필터링, 종목별 익절(TQQQ 1.5×ATR/SOXL 3.5×ATR), Discord 알림 |
-| **swing_bot_eval.py** | 스윙 봇 실전 성과 평가 — 신호 저널(swing_signals.jsonl) 기반 월간 성과 보고 |
-| **swing_bot_backtest.py** | 스윙 전략 백테스트 — 타임프레임(1h~1D)·익절/청산 규칙(TP/20EMA/ATR)별 성과 비교 (독립 실행) |
-| **swing_tp_review.py** | TP 승수 분기 재평가 — 실전 신호 vs 백테스트 교차검증, 유지/조정 권고 보고 (자동 변경 없음) |
 | **portfolio_config.json** | 📌 **포트폴리오 설정** — 포지션, Sigma, DCA 파라미터, 모드 상태 |
-| **swing_config.json** | 📌 **스윙 봇 TP(익절) 승수 설정** — `TAKE_PROFIT_ATR` + 종목별 승수 + `AUTO_UPDATE` (분기 재평가가 조건부로 자동 갱신) |
 | **TRIGGER_OPTIMIZATION_SUMMARY.md** | ATH_DCA 트리거 최적화 분석 — 바닥 분포 · 후보값 스윕 · 의사결정 근거 |
 | **DUAL_MODE_SUMMARY.md** | 듀얼 모드(LOC ↔ ATH_DCA) 구조 요약 문서 |
 | **REALTIME_ALERT_SETUP.md** | 실시간 ATH DCA 알림 설정 가이드 |
@@ -171,9 +168,7 @@
 | **sigma_history.csv** | Sigma 갱신 이력 (런타임 자동 생성 — 추적 제외) |
 | **market_state.json** | 시장 단계 상태 정보 (자동 생성) |
 | **signal_report.json** | 시장 리스크 점수 (자동 생성) |
-| **swing_state.json** | 스윙 봇 종목별 신호 상태 (자동 생성 — 중복 알림 방지) |
-| **swing_signals.jsonl** | 스윙 봇 BUY/SELL 신호 이벤트 저널 (자동 생성 — 성과 평가용, 커밋되어 누적) |
-| **swing_performance.json** | 스윙 봇 월간 성과 스냅샷 (자동 생성 — 평가 시 누적 저장, 커밋되어 반영) |
+| **fvg_alerts.json** | FVG 봇 알림 상태 (자동 생성 — 동일 FVG 중복 알림 방지, 로컬↔GHA 공유) |
 | **requirements.txt** | Python 의존성 패키지 목록 |
 
 ---
@@ -375,137 +370,36 @@ python3 DCA_MA_strategy_flowchart.py
 |--------|------------|------|
 | 예약 실행 | 매일 23:14 (월~금) | 바닥 단계 추적 |
 
-### `swing_bot.yml` — 4시간봉 스윙 봇 (TQQQ/SOXL)
+### `fvg_signal.yml` — FVG 신호 봇 (TQQQ/SOXL, 클라우드 백업)
 
 | 트리거 | 시간 (UTC) | 설명 |
 |--------|------------|------|
-| 예약 실행 | 장중 15분 폴링 (13:00~22:00, 월~금) | 미국 장중 실시간 스윙 신호 확인 — 4h봉 마감 즉시 Discord 알림 |
-| 수동 실행 | 사용자 요청 시 | workflow_dispatch 수동 실행 |
+| 예약 실행 | 장중 5분 폴링 (13:00~21:00, 월~금) | 로컬 크론(매분)의 클라우드 백업 — PC가 꺼져 있어도 실행 |
+| 수동 실행 | 사용자 요청 시 | workflow_dispatch 수동 실행 (테스트) |
 
-> - 3중 EMA(10/20/50) 정배열 + 거래량 돌파 + 최근 5봉 고점 돌파로 BUY/SELL 신호를 냅니다.
-> - **변동성 수축 필터**: 직전 봉 ATR이 20봉 평균보다 낮은(수축) 상태에서의 돌파만 신호로 인정
->   (유튜버 영상의 '변동성 수축' 조건 구현 — 2년 백테스트에서 두 종목 성과/MDD 개선 확인)
-> - 하락 후 **첫 번째 신호는 필터링**(매수 스킵)하고 두 번째 신호에서만 매수합니다.
-> - **익절(TP)**: 보유 중 종가가 진입가 + TP 승수×진입 ATR에 도달하면 수익 확정 청산 신호를
->   보냅니다. 20EMA 이탈까지 버티면 최대 이익의 ~90%를 반납하는 약점(2년 백테스트 MFE 반납
->   90%)을 보완 — 익절 추가 시 총수익 개선·MDD 축소 확인.
->   **종목별 승수** (`swing_config.json`의 `TAKE_PROFIT_ATR_BY_TICKER`, 2년 스윙 백테스트 최적값):
->   - **TQQQ = 1.5×ATR** — 빡센 익절, contr 기준 +15.3%/-1.1% MDD
->   - **SOXL = 3.5×ATR** — 느슨한 익절, contr 기준 +18.6%/-10.2% MDD
->   - 미등록 종목은 `TAKE_PROFIT_ATR`(기본 3.0) 사용. 비활성화: `TAKE_PROFIT_ATR=0`.
->   - 승수는 코드가 아닌 **`swing_config.json`에서 관리** — 코드 수정 없이 값을 바꿔 커밋하면
->     적용됩니다 (환경변수 `TAKE_PROFIT_ATR`이 설정되면 그 값이 우선).
->   TP 미도달 시의 손절/추세 청산은 기존 20EMA 이탈이 담당.
-> - 종목별 상태는 `swing_state.json`에 영속화 — 동일 신호의 중복 BUY/SELL 알림이 없습니다.
-> - 알림만 전송하며 실제 주문은 자동 실행하지 않습니다 (수동 매매). 종목 변경: `TICKERS` 환경변수.
-> - BUY/SELL 신호는 `swing_signals.jsonl`에 가격과 함께 누적 기록 — 월간 성과 평가의 입력.
-> - 과거 성과 검증: `swing_bot_backtest.py` (별도 파일 — 실전 봇과 분리)
->   ```bash
->   python3 swing_bot_backtest.py                                 # TQQQ+SOXL, 4h, 20EMA + TP(봇 설정 미러)
->   python3 swing_bot_backtest.py --tp-atr 0                      # 익절 비활성화 (20EMA 단독)
->   python3 swing_bot_backtest.py --tp-atr 3.0                    # 공통 승수로 재정의
->   python3 swing_bot_backtest.py --ticker TQQQ --exit chan --atr-k 2.5 --trigger intra
->   python3 swing_bot_backtest.py --ticker SOXL --tf 1D           # 일봉 비교
->   ```
->   옵션: `--tf 1h/2h/4h/6h/1D` · `--tp-atr auto/공통N/'TQQQ:1.5,...'` · `--exit ema20/chan/stop` · `--trigger close/intra` · `--period`
-> - 실전 성과 평가: `swing_bot_eval.py` (아래 [실전 성과 평가](#-실전-성과-평가) 참고)
+> - 1분봉 CHoCH → FVG 중간점 풀백 진입 모델 + HTF(15분) 추세 필터 (유튜브 Craig Percoo 전략).
+> - 알림만 전송하며 실제 주문은 자동 실행하지 않습니다 (수동 매매). `DISCORD_USER_ID` 설정 시 멘션 3회.
+> - 중복 알림은 `fvg_alerts.json` 파일 기반 쿨다운(1시간)으로 방지 — 로컬 크론과 git으로 상태 공유.
+> - 백테스트: `fvg_bot_backtest.py` (5분봉 근사 — **당일 마감 운용이 핵심**, 야간 보유 시 MDD 급증).
 
-### `swing_eval.yml` — 스윙 봇 실전 성과 평가 (월간)
+### FVG 봇 배포 — 로컬 크론 (매분, 주력) + GitHub Actions (5분, 백업)
 
-| 트리거 | 시간 (UTC) | 설명 |
-|--------|------------|------|
-| 예약 실행 | 매월 1일 09:00 | 월간 실전 신호 성과 요약을 Discord로 전송 |
-| 수동 실행 | 사용자 요청 시 | workflow_dispatch 수동 실행 (언제든 평가) |
-
-### `swing_tp_review.yml` — TP 승수 분기 재평가 (3개월)
-
-| 트리거 | 시간 (UTC) | 설명 |
-|--------|------------|------|
-| 예약 실행 | 1/4/7/10월 1일 09:00 | TP 승수 재평가 보고서를 Discord로 전송 |
-| 수동 실행 | 사용자 요청 시 | workflow_dispatch 수동 실행 (언제든 재평가) |
-
-> - **익절(TP) 승수가 여전히 합리적인지 분기마다 자동 재평가**합니다.
-> - 종목당 청산 트레이드가 `--min-trades`(기본 5) 미만이면 "표본 부족 — 현행 승수 유지 권장"
->   보고 후 종료합니다 (과적합 방지).
-> - 표본이 충분하면 **실전 성과(승률/평균수익/총수익) vs 백테스트 기대**를 비교하고,
->   실전 평균수익이 기대의 50% 미만이면 승수 재검토(ADJUST)를 권고합니다.
-> - 백테스트 TP 스윕(0~5×ATR)을 재실행해 최적 승수와 현재 승수의 차이도 참고로 제시합니다.
-> - **조건부 자동 적용**: 표본 충분 + 실전 성과가 백테스트 기대 대비 저조(ADJUST)일 때만,
->   스윕 최적 승수를 `swing_config.json`에 **자동 반영**하고 워크플로우가 자동 커밋합니다.
->   - 변경 근거(실전 vs 기대 수치)가 Discord 보고서에 포함되어 추적 가능합니다.
->   - 스윕 최적이 현행과 같거나 개선 폭이 1%p 미만이면 변경하지 않습니다 (잡음 방지).
->   - `swing_config.json`의 `AUTO_UPDATE`를 `false`로 바꾸면 **자동 적용 OFF** —
->     보고만 하고 승수는 수동으로 바꿉니다 (잠금 모드).
-> - 로컬 실행: `python3 swing_tp_review.py [--min-trades N] [--discord]`
-
-> - `swing_bot.py`가 누적한 `swing_signals.jsonl`(BUY/SELL 이벤트 저널)을 읽어
->   승률·평균수익/손실·총수익·MDD·PF·보유기간·미청산 포지션을 산출합니다.
-> - 미청산 포지션은 yfinance 현재가로 mark-to-market 하며, 실제 체결가가 신호가와
->   다른 경우 저널의 `price`를 직접 수정해 보정할 수 있습니다.
-> - **자동 반영**: `--save` 실행 시 결과가 `swing_performance.json`에 월별 스냅샷으로
->   누적 저장되고, 워크플로우가 커밋·푸시합니다 — 같은 달 재실행 시 해당 월만 갱신,
->   월 단위 이력은 보존됩니다.
-> - 로컬 실행: `python3 swing_bot_eval.py [--ticker TQQQ] [--since 3m] [--no-mark] [--discord] [--save]`
-
-### 신호 감지: cron-job.org → GitHub Actions (봇) + 로컬 크론 (평가)
-
-**봇 신호 감지는 클라우드에서 실행**하여 이 PC가 꺼져 있어도 동작합니다. 실제 매매는
+1분봉 전략은 신호가 분 단위로 생기고 사라지므로 **로컬 PC에서 매분 실행**이 주력이고,
+PC가 꺼져 있어도 GitHub Actions 백업(`fvg_signal.yml`, 장중 5분 폴링)이 이어받습니다.
+두 경로는 `fvg_alerts.json`을 git으로 공유해 중복 알림을 차단합니다. 실제 매매는
 알림을 받은 사용자가 직접 실행합니다 (자동 주문 없음).
 
-#### 1) 봇: cron-job.org 잡 생성 (권장 — PC 상태와 무관)
-
-`setup_cronjob_org.py --swing`이 미국 장중 **15분 간격 폴링**(월~금, 기본 **UTC
-13:00~22:00**)으로 `repository_dispatch(swing-bot)`를 발사하는 크론잡을 만듭니다.
-신호는 **완성 4h봉 기준**이므로, 봉이 닫히는 순간(첫 봉 13:30 ET / 장 마감 봉
-16:00 ET)을 놓치지 않고 **15분 이내에 감지해 즉시 Discord로 알림**합니다
-(부분-봉 방어가 진행 중인 봉은 제외). 하루 2회 고정 실행 방식은 봉 마감 후 최대
-18시간 지연이 있어, 실시간 매매 타이밍에 맞추려면 폴링이 필요합니다.
-GitHub Actions 자체 스케줄 크론은 best-effort라 지연/비활성화될 수 있어,
-정확한 시각 알림으로 우회합니다.
-
 ```bash
-# .env 또는 환경변수 필요: CRONJOB_ORG_API_KEY, GITHUB_PAT, GITHUB_OWNER, GITHUB_REPO
-export CRONJOB_ORG_API_KEY=xxx
-# (기존 ATH DCA 모니터와 동일한 키 사용 — 자세한 절차는 REALTIME_ALERT_SETUP.md)
-
-python3 setup_cronjob_org.py --swing --dry-run   # 페이로드 미리보기
-python3 setup_cronjob_org.py --swing             # 스윙 봇 크론잡 생성
-python3 setup_cronjob_org.py --swing --test-dispatch  # 테스트 발사 (워크플로우 실행)
-python3 setup_cronjob_org.py --list              # 등록된 잡 목록
+python3 setup_fvg_cron.py --dry-run   # 설치될 크론 라인 미리보기
+python3 setup_fvg_cron.py             # 설치 (미국 장중 매분, KST 22~06시 월~토)
+python3 setup_fvg_cron.py --list      # 현재 crontab 목록
+python3 setup_fvg_cron.py --remove    # 제거
 ```
 
-- 신호 감지 시각 (봉 마감 직후, 폴링 15분 이내): 첫 4h봉 13:30 ET ≈ 한국
-  새벽 02:30(여름)/03:30(겨울), 장 마감 봉 16:00 ET ≈ 한국 05:00(여름)/06:00(겨울).
-- **알림 스팸 없음**: 상태 머신(`swing_state.json`)이 중복 BUY/SELL 알림을
-  차단하므로, 15분 폴링이라도 Discord 발송은 신호 상태가 전환될 때만 일어납니다.
-- 폴링 간격/시간대 변경: `SWING_POLL_MINUTES`(기본 15)·`SWING_UTC_HOURS_START`(기본 13)·
-  `SWING_UTC_HOURS_END`(기본 22) 환경변수 후 `setup_cronjob_org.py --swing --update-schedule`.
-- `swing_bot.yml`은 `repository_dispatch(swing-bot)` 트리거를 이미 지원합니다 (코드 푸시 후
-  사용). 기존 `schedule` 크론은 보조 수단으로 유지됩니다 — schedule(`*/15 13-22 * * 1-5`)과
-  dispatch(동일 스케줄)가 병행 실행될 수 있지만, 상태 머신이 중복 BUY/SELL 알림을 차단합니다.
-
-#### 2) 평가: 로컬 크론 (매일 08:00 KST)
-
-```bash
-python3 setup_swing_cron.py --dry-run   # 설치될 크론 라인 미리보기
-python3 setup_swing_cron.py             # 설치 (기존 크론 보존, 중복 방지)
-python3 setup_swing_cron.py --list      # 현재 crontab 목록
-python3 setup_swing_cron.py --remove    # 이 스크립트가 설치한 항목만 제거
-```
-
-| 항목 | 시간 (KST) | 설명 |
-|------|------------|------|
-| 평가 (swing_local_cron.sh eval) | 매일 08:00 | `swing_bot_eval.py --save --since all --discord` — 성과 스냅샷 저장 + Discord 전송 |
-
-> - 래퍼는 실행 전 `git pull --rebase -X theirs`로 GHA가 커밋한 최신 상태/저널을 동기화하고,
->   실행 로그는 `swing_local.log`에 기록됩니다 (`.gitignore`로 커밋 제외).
-> - **원격 완전 동기화**: 평가 후 `swing_state.json`/`swing_signals.jsonl`/`swing_performance.json`
->   만 commit + push합니다 (best-effort — HTTPS 자격증명이 없으면 `swing_local.log`에 실패
->   안내만 남기고 크론은 계속 실행). 자격증명 설정: `git config --global credential.helper store`
->   후 1회 push로 토큰 저장.
-> - **웨이크업 강화**: BUY/SELL 알림 메시지에 멘션 3회 + "지금 깨어나서 직접 실행" 안내가
->   포함되어, Discord 모바일 알림이 잠든 사이에도 강하게 울립니다 (Discord 앱에서 해당 서버
->   알림을 "모든 메시지 + 소리"로 설정 권장).
+> - 로컬 래퍼(`fvg_local_cron.sh`)가 ET 장중을 1차 확인 → 장중 밖엔 파이썬 실행 없음 (이중 방어).
+> - GitHub Actions는 `secrets.DISCORD_WEBHOOK`/`DISCORD_USER_ID`로 알림을 보냅니다 (로컬 .env와 무관).
+> - 장중 알림은 Discord 멘션 3회 포함 — 잠든 사이에도 모바일 알림이 울립니다.
+> - **당일 마감 운용**: 진입 후 당일 15:55 ET까지 미해결 시 청산 권장 (백테스트 근거 — 야간 보유 시 MDD 급증).
 
 ### 환경 변수 (GitHub Secrets)
 

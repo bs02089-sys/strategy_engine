@@ -36,6 +36,9 @@ Not lazy about: input validation at trust boundaries, error handling that preven
 - **현재 전략 규칙**: LOC ↔ ATH_DCA 듀얼 모드 · MA 레짐 필터(LOC 모드 한정) · ATH 하락분할 DCA(3분할, 3차 = Stage 5 바닥) ·
   비상 모드 종료(RECOVERY_REENTRY: 미사용 분할 ≥1 + 30영업일 + DD ≤ TRIGGER_1×50% + MA20>MA60).
 - **신호 시스템**: 브리핑의 ▶ 실행 액션 라인은 신호이며 실제 체결은 사용자 수동 매매 — 엔진은 주문을 자동 실행하지 않는다.
+- **보조 신호 봇**: `fvg_signal_bot.py` — FVG(공정가치 갭) 1분봉 진입 모델 + HTF(15분) 추세 필터,
+  구조 기반 손절. 로컬 크론(장중 매분) 주력 + GHA 백업(장중 5분 폴링), `fvg_alerts.json`으로
+  중복 알림 방지. 알림만 전송 — 주문 자동 실행 없음. 백테스트: `fvg_bot_backtest.py`.
 
 ### 제거된 기능 — 재도입 금지
 - **전고점 50% 청산 (peak sell)**: 2026-08-03 제거. 백테스트 전용으로만 존재했고 실전 엔진에서는 실행되지 않았다.
@@ -45,6 +48,11 @@ Not lazy about: input validation at trust boundaries, error handling that preven
   (`openprice_trading.py` + `openprice_bot.yml` + `setup_cronjob_org.py --openprice` 모드).
   백테스트 결과 2시간 내 1:1 목표 도달률 3~4%·미청산(EXP) 70%로 사용자가 실전 채택을 포기해
   관련 파일·README 문서를 모두 삭제함. 다시 추가하거나 문서에 언급하지 말 것.
+- **스윙 봇 (swing)**: 2026-08-07 제거. 4시간봉 3중 EMA + 변동성 수축 전략(`swing_bot.py`)과
+  성과 평가(`swing_bot_eval.py`)·백테스트(`swing_bot_backtest.py`)·TP 분기 재평가(`swing_tp_review.py`),
+  GHA 워크플로우 3개(`swing_bot.yml`/`swing_eval.yml`/`swing_tp_review.yml`), 로컬 크론(평가),
+  cron-job.org 잡을 모두 삭제 — FVG 봇과의 백테스트 비교 후 알림 빈도·MDD 측면에서 FVG 유지로
+  결정. 다시 추가하거나 문서에 언급하지 말 것.
 - **Finnhub API 키 로직**: 2026-08-06 제거. 무료 티어가 `/stock/candle`(봉) 데이터를 지원하지
   않아(403) 스윙 봇은 yfinance 전환, ATH DCA 실시간 모니터도 Finnhub `/quote` 오버라이드
   (`_fetch_finnhub_quote`/`realtime_prices` 파라미터)와 `FINNHUB_API_KEY` 시크릿 참조를 전면 삭제.

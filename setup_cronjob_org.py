@@ -24,22 +24,11 @@ GitHub Actions의 `dca_ma_strategy.yml`(--ath-monitor 분기)를 실행시킵니
 
 사용법:
   python setup_cronjob_org.py              # ATH DCA 실시간 모니터 잡 생성 (기본)
-  python setup_cronjob_org.py --swing      # 스윙 봇 잡 생성 (미국 장중 15분 폴링, 월~금)
   python setup_cronjob_org.py --dry-run    # 페이로드만 출력 (API 미호출, 시크릿 마스킹)
   python setup_cronjob_org.py --list       # 기존 잡 목록 조회
   python setup_cronjob_org.py --test-dispatch  # 테스트 dispatch 1회 발사 (워크플로우 실행)
   python setup_cronjob_org.py --update-pat # 크론잡에 저장된 GITHUB_PAT를 새 토큰으로 갱신
   python setup_cronjob_org.py --update-schedule  # 크론잡 폴링 간격 갱신 (POLL_MINUTES/UTC_HOURS 반영)
-
-스윙 봇 잡 (--swing):
-  - 이벤트: repository_dispatch(event_type: swing-bot) → swing_bot.yml 실행
-  - 스케줄: 미국 장중 15분 간격 폴링 (기본 UTC 13~22시, 월~금) — 신호는 완성
-    4h봉 기준이므로 봉이 닫히는 순간(첫 봉 13:30 ET / 장 마감 봉 16:00 ET)을
-    놓치지 않고 15분 이내 감지해 실시간 알림한다. 상태 머신(swing_state.json)이
-    중복 BUY/SELL 알림을 차단하므로 폴링 빈도와 무관하게 스팸이 없다.
-  - 선택 환경변수: SWING_POLL_MINUTES(기본 15), SWING_UTC_HOURS_START(기본 13),
-    SWING_UTC_HOURS_END(기본 22) — 변경 후 `--swing --update-schedule`로 반영
-  - 관련 스크립트: setup_swing_cron.py (로컬 크론 — 평가 전용)
 """
 import base64
 import copy
@@ -60,11 +49,6 @@ except ImportError:
 CRONJOB_API_BASE = "https://api.cron-job.org"
 GITHUB_API_BASE = "https://api.github.com"
 WORKFLOW_PATH = ".github/workflows/dca_ma_strategy.yml"
-
-# 스윙 봇 잡 전용 설정
-SWING_WORKFLOW_PATH = ".github/workflows/swing_bot.yml"
-SWING_EVENT_TYPE = "swing-bot"
-SWING_JOB_TITLE = "Swing Bot 4h bar monitor"
 
 # cron-job.org jobDetails에 포함된 응답 전용(읽기 전용) 필드 — PATCH 시 제거해야 400을 피한다
 READONLY_JOB_FIELDS = (
@@ -141,17 +125,6 @@ def _build_schedule(poll_minutes: int, hours_start: int, hours_end: int) -> dict
     }
 
 
-def _build_swing_schedule(poll_minutes: int, hours_start: int, hours_end: int) -> dict:
-    """스윙 봇 전용 스케줄: 미국 장중 poll_minutes 분 간격 폴링, 월~금.
-
-    신호는 완성 4h봉 기준이라 봉이 닫히는 순간(첫 봉 13:30 ET / 장 마감 봉
-    16:00 ET)을 놓치지 않도록 장중 내내 자주 실행한다. 기본 UTC 13~22시는
-    미국 장중(09:30~16:00 ET)을 여름/겨울 모두 포함하며, 상태 머신이 중복
-    알림을 차단하므로 BUY/SELL Discord 발송은 신호 전환 시에만 일어난다.
-    """
-    return _build_schedule(poll_minutes, hours_start, hours_end)
-
-
 def _build_job_payload(cfg: dict) -> dict:
     """cron-job.org PUT /jobs 페이로드 생성."""
     return {
@@ -188,8 +161,7 @@ def verify_github(owner: str, repo: str, pat: str, event_type: str,
     """부작용 없는 GitHub 검증: PAT 인증 + 워크플로우 트리거 존재 확인.
 
     dispatch를 실제로 발사하지 않습니다(발사는 --test-dispatch 전용).
-    workflow_path: 검증할 워크플로우 파일 (기본 dca_ma_strategy.yml,
-    --swing 모드에선 swing_bot.yml).
+    workflow_path: 검증할 워크플로우 파일 (기본 dca_ma_strategy.yml).
     """
     headers = _github_headers(pat)
 
@@ -326,39 +298,26 @@ def main() -> None:
     test_mode = "--test-dispatch" in sys.argv
     update_pat_mode = "--update-pat" in sys.argv
     update_schedule_mode = "--update-schedule" in sys.argv
-    swing_mode = "--swing" in sys.argv
-    mode_flag = " --swing" if swing_mode else ""
 
     owner = _env("GITHUB_OWNER", "<owner>")
     repo = _env("GITHUB_REPO", "<repo>")
     pat = _env("GITHUB_PAT", "<pat>")
     cronjob_key = _env("CRONJOB_ORG_API_KEY", "<key>")
 
-    if swing_mode:
-        # ── 스윙 봇 잡 전용 설정 (미국 장중 15분 폴링) ────────────────
-        event_type = SWING_EVENT_TYPE
-        job_title = SWING_JOB_TITLE
-        workflow_path = SWING_WORKFLOW_PATH
-        poll_minutes = int(_env("SWING_POLL_MINUTES", "15"))
-        hours_start = int(_env("SWING_UTC_HOURS_START", "13"))
-        hours_end = int(_env("SWING_UTC_HOURS_END", "22"))
-        schedule = _build_swing_schedule(poll_minutes, hours_start, hours_end)
-        job_desc = f"스윙 봇 실시간 모니터 (장중 매 {poll_minutes}분, UTC {hours_start}~{hours_end}시)"
-    else:
-        # ── ATH DCA 실시간 모니터 잡 (장중 N분 폴링) ──────────────────
-        event_type = _env("GITHUB_EVENT_TYPE", "ath-dca-monitor")
-        poll_minutes = int(_env("POLL_MINUTES", "10"))
-        hours_start = int(_env("UTC_HOURS_START", "13"))
-        hours_end = int(_env("UTC_HOURS_END", "21"))
-        job_title = _env("JOB_TITLE", "ATH DCA realtime monitor")
-        workflow_path = WORKFLOW_PATH
-        schedule = _build_schedule(poll_minutes, hours_start, hours_end)
-        job_desc = f"장중 매 {poll_minutes}분 ATH DCA 실시간 알림"
+    # ── ATH DCA 실시간 모니터 잡 (장중 N분 폴링) ──────────────────────
+    event_type = _env("GITHUB_EVENT_TYPE", "ath-dca-monitor")
+    poll_minutes = int(_env("POLL_MINUTES", "10"))
+    hours_start = int(_env("UTC_HOURS_START", "13"))
+    hours_end = int(_env("UTC_HOURS_END", "21"))
+    job_title = _env("JOB_TITLE", "ATH DCA realtime monitor")
+    workflow_path = WORKFLOW_PATH
+    schedule = _build_schedule(poll_minutes, hours_start, hours_end)
+    job_desc = f"장중 매 {poll_minutes}분 ATH DCA 실시간 알림"
 
     if not (5 <= poll_minutes <= 60 and 60 % poll_minutes == 0):
-        raise SystemExit("❌ POLL_MINUTES/SWING_POLL_MINUTES는 60의 약수여야 합니다 (예: 5, 6, 10, 12, 15, 20, 30).")
+        raise SystemExit("❌ POLL_MINUTES는 60의 약수여야 합니다 (예: 5, 6, 10, 12, 15, 20, 30).")
     if hours_start > hours_end:
-        raise SystemExit("❌ UTC_HOURS_START/SWING_UTC_HOURS_START는 END보다 작거나 같아야 합니다.")
+        raise SystemExit("❌ UTC_HOURS_START는 END보다 작거나 같아야 합니다.")
 
     if test_mode:
         for key in ("GITHUB_PAT", "GITHUB_OWNER", "GITHUB_REPO"):
@@ -386,7 +345,7 @@ def main() -> None:
         if job_id is None:
             raise SystemExit(
                 f"❌ 갱신할 크론잡을 찾을 수 없습니다: {dispatches_url} "
-                f"(제목: {job_title}). 먼저 `python setup_cronjob_org.py{mode_flag}`로 생성하세요."
+                f"(제목: {job_title}). 먼저 `python setup_cronjob_org.py`로 생성하세요."
             )
 
         # 3) 목록 응답에는 extendedData(헤더)가 없으므로 단일 잡 상세를
@@ -420,7 +379,7 @@ def main() -> None:
         if job_id is None:
             raise SystemExit(
                 f"❌ 갱신할 크론잡을 찾을 수 없습니다: {dispatches_url} "
-                f"(제목: {job_title}). 먼저 `python setup_cronjob_org.py{mode_flag}`로 생성하세요."
+                f"(제목: {job_title}). 먼저 `python setup_cronjob_org.py`로 생성하세요."
             )
 
         # 2) 기존 job 바디를 그대로 가져와 schedule만 교체한다
@@ -452,7 +411,7 @@ def main() -> None:
     if dry_run:
         print(f"🔍 [DRY RUN] 생성될 크론잡 페이로드 ({job_desc}, 시크릿 *** 마스킹):")
         print(json.dumps(_redact_secrets(payload), indent=2, ensure_ascii=False))
-        print(f"\n위 내용이 맞다면 `python setup_cronjob_org.py{mode_flag}`로 실행하세요.")
+        print("\n위 내용이 맞다면 `python setup_cronjob_org.py`로 실행하세요.")
         return
 
     if show_list:
@@ -472,8 +431,7 @@ def main() -> None:
     if dup_id is not None:
         print(f"⚠️ 동일한 크론잡이 이미 존재합니다 (jobId={dup_id}). 생성하지 않았습니다.")
         print("   스케줄 변경 시: `python setup_cronjob_org.py --update-schedule`")
-        mode_hint = " --swing" if swing_mode else " (POLL_MINUTES/UTC_HOURS 반영) "
-        print(f"   {mode_hint}— 또는 잡을 삭제 후 재생성.")
+        print("   (POLL_MINUTES/UTC_HOURS 반영) — 또는 잡을 삭제 후 재생성.")
         print_jobs(existing)
         return
 

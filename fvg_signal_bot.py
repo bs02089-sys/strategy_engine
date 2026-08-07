@@ -18,10 +18,14 @@
      - ⚠️ "가격이 그냥 통과해버린 FVG는 진입 존이 아님" → 채워진(하단 이탈) 박스 제외
   3. 구조 기반 손절 (영상: "stop loss underneath the last low on that trend")
      - CHoCH 이전 마지막 스윙 저점 아래에 손절 배치, 익절 = 리스크 × 3.5 (영상 3~4R)
+  4. 데이 트레이딩 운용 (백테스트 근거 — fvg_bot_backtest.py)
+     - 5분봉 근사 백테스트(60일)에서 당일 마감 모델은 수익(PF 2.0, MDD -2.3%)인 반면
+       overnight 보유는 레버리지 ETF 야간 갭에 구조 손절이 깨져 손실(SOXL -14.8%)
+       → 진입 후 당일 장 마감(15:55~16:00 ET) 전 미해결 시 청산 권장 (알림 메시지에 포함)
 
   - 알림은 Discord Webhook으로만 전송 — 실제 주문 자동 실행 없음 (수동 매매)
   - DISCORD_USER_ID 설정 시 알림에 @멘션 3회 포함 — 잠든 사이에도 모바일 알림이
-    강하게/여러 번 울리도록 웨이크업 강화 (스윙 봇과 동일 패턴)
+    강하게/여러 번 울리도록 웨이크업 강화 (멘션 3회 패턴)
   - 파일 기반 쿨다운(fvg_alerts.json)으로 동일 FVG 중복 알림 방지 — 로컬 크론과
     GitHub Actions(--once 백업)가 git으로 상태를 공유해 프로세스를 넘나드는
     교차 중복 알림도 차단한다 (loop 모드에서도 동일하게 동작)
@@ -47,7 +51,7 @@ import yfinance as yf
 # [사용자 설정 영역]
 # ==========================================
 DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK", "YOUR_DISCORD_WEBHOOK")
-# 웨이크업 멘션: DISCORD_USER_ID 설정 시 시그널 알림에 @멘션 3회 포함 (스윙 봇 패턴)
+# 웨이크업 멘션: DISCORD_USER_ID 설정 시 시그널 알림에 @멘션 3회 포함 (멘션 3회 패턴)
 DISCORD_USER_ID = os.getenv("DISCORD_USER_ID", "YOUR_DISCORD_USER_ID")
 # 모니터링할 종목 리스트 (3배 레버리지 ETF — 영상의 고변동성 종목과 유사)
 TICKERS = ["TQQQ", "SOXL"]
@@ -82,7 +86,7 @@ def send_discord_webhook(message):
     print(message)
     return
   # 웨이크업 강화: 멘션을 3회 반복 — 잠든 사이에도 Discord 모바일 알림이 강하게
-  # 울리도록 (사용자가 직접 매매를 진행해야 하므로, 스윙 봇과 동일 패턴).
+  # 울리도록 (사용자가 직접 매매를 진행해야 하므로).
   # placeholder("YOUR_...")는 미설정 상태이므로 멘션에서 제외한다.
   mention = (
       " ".join([f"<@{DISCORD_USER_ID}>"] * 3)
@@ -389,7 +393,7 @@ _htf_cache = {}  # ticker -> (수집 시각, df) — HTF 데이터 15분 캐시
 
 
 def _drop_incomplete_htf_bar(df):
-  """진행 중인(미완성) 마지막 15분봉 제외 — 구조 판별은 완성 봉 기준 (swing_bot.py와 동일 방침)."""
+  """진행 중인(미완성) 마지막 15분봉 제외 — 구조 판별은 완성 봉 기준 (룩어헤드 방지)."""
   if df.index.tz is not None:
     last_end = df.index[-1] + pd.Timedelta(minutes=15)
     if last_end > pd.Timestamp.now(tz=df.index.tz):
@@ -425,7 +429,9 @@ def build_message(signal):
       f"• **목표 익절가 (Take Profit):** `{signal['take_profit']:.2f}` 🎯\n"
       f"• **손익비 (RR):** `{signal['risk_reward_ratio']}`\n\n"
       f"👉 1분봉 CHoCH → FVG 중간점 풀백 진입 모델입니다. "
-      f"중간점 지정가 진입 후 구조 저점 아래 손절을 배치하세요!"
+      f"중간점 지정가 진입 후 구조 저점 아래 손절을 배치하세요!\n"
+      f"⏰ **데이 모델: 장 마감 전(15:55~16:00 ET) 미해결 시 청산 권장** "
+      f"(야간 보유는 갭 리스크 — 백테스트 근거)"
   )
 
 
@@ -453,7 +459,7 @@ def _load_alert_state():
 def _save_alert_state(state):
   """알림 상태를 fvg_alerts.json에 원자적(atomic) 저장 — 2일 지난 항목 정리.
 
-  tempfile+shutil.move로 크래시 시 파일 손상 방지 (swing_bot.py와 동일 방식).
+  tempfile+shutil.move로 크래시 시 파일 손상 방지 (원자적 저장).
   """
   cutoff = time.time() - ALERT_STATE_PRUNE_HOURS * 3600
   state = {k: v for k, v in state.items() if v >= cutoff}

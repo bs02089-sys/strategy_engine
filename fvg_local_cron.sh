@@ -6,9 +6,8 @@
 #   - 래퍼에서 ET 장중을 1차 확인(TZ=America/New_York) → 장중 밖에는 파이썬을
 #     실행하지 않아 yfinance 요청을 아낀다. 봇 내부 in_trading_session이
 #     마지막 봉 기준으로 2차 재검증한다 (이중 방어).
-#   - 알림 상태(fvg_alerts.json)를 git으로 원격 동기화 — GitHub Actions 백업과
-#     같은 쿨다운 이력을 공유해 교차 중복 알림을 차단한다 (swing_local_cron.sh
-#     패턴). commit/push는 best-effort — 실패해도 봇 실행은 계속된다.
+#   - 알림 상태(fvg_alerts.json)를 git으로 원격 동기화 — GitHub Actions 백업과    # 같은 쿨다운 이력을 공유해 교차 중복 알림을 차단한다. commit/push는
+    # best-effort — 실패해도 봇 실행은 계속된다.
 #   - .env 파일이 있으면 DISCORD_WEBHOOK/DISCORD_USER_ID 등 자동 로드
 #   - 로그: fvg_local.log 에 기록 (커밋 대상 아님 — .gitignore)
 #   - 수동 실행: ./fvg_local_cron.sh

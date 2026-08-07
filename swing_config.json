@@ -1,9 +1,0 @@
-{
-    "_comment": "스윙 봇 익절(TP) 승수 설정 — 분기 재평가(swing_tp_review.py)가 조건부로 자동 갱신합니다. AUTO_UPDATE=false 로 바꾸면 자동 적용을 끄고 보고만 합니다(수동 모드). TAKE_PROFIT_ATR=0 이면 전체 익절 비활성화(종목별 설정도 무시). 환경변수 TAKE_PROFIT_ATR이 설정되면 그 값이 우선합니다.",
-    "TAKE_PROFIT_ATR": 3.0,
-    "TAKE_PROFIT_ATR_BY_TICKER": {
-        "TQQQ": 1.5,
-        "SOXL": 3.5
-    },
-    "AUTO_UPDATE": true
-}

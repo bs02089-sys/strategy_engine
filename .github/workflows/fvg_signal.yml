@@ -9,7 +9,7 @@ on:
     # 정확히 재검증하므로 창 밖 실행은 안전하게 스킵된다.
     # 주의: GitHub Actions 자체 스케줄은 지연/비활성화 가능성이 있어 정확한
     # 장중 실시간 폴링이 필요하면 cron-job.org dispatch(아래 repository_dispatch)
-    # 사용을 권장한다 (swing_bot.yml과 동일 패턴).
+    # 사용을 권장한다.
     - cron: "*/5 13-21 * * 1-5"
   repository_dispatch:
     # cron-job.org가 장중 5분 폴링 발사 시 사용 (선택) — GHA 스케줄 지연 우회.
@@ -78,7 +78,7 @@ jobs:
 
       - name: Sync alert state and Notify
         # 알림 상태(fvg_alerts.json)를 커밋/푸시해 로컬 크론과 쿨다운 이력을
-        # 공유한다 (swing_bot.yml의 swing_state.json 패턴과 동일).
+        # 공유한다.
         # 변경 없으면 "No changes to commit" 로그만 남고 종료.
         # -X theirs: 충돌 시 원격 버전 유지 — 동시 기록 경합 윈도우에서 중복 알림이
         #   발생할 수 있으나 쿨다운(1h)이 실질 피해를 제한한다 (best-effort 설계).
