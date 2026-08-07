@@ -28,6 +28,13 @@ fvg_signal_bot.py가 진입 알림 시 fvg_positions.json에 기록한 포지션
   python3 fvg_bot_eval.py --monthly             # 월간 요약 (월별 승률/총수익/PF/MDD)
   python3 fvg_bot_eval.py --monthly --days 45   # 최근 45일만 월별로 집계
   python3 fvg_bot_eval.py --weekly --discord    # 주간 요약을 Discord로 전송
+  python3 fvg_bot_eval.py --monthly-trigger     # 20영업일 경과 시 월간 요약 자동 전송 (GHA 아침 트리거)
+
+월간 자동 트리거 (--monthly-trigger):
+  - 첫 트레이드일부터 20영업일(월~금 평일) 경과 시점에 월간 요약을 Discord로 전송
+  - 이후 직전 전송일부터 다시 20영업일 경과할 때마다 주기 전송 (대략 한 달 주기)
+  - 마지막 전송일은 fvg_eval_state.json에 기록 (로컬↔GHA git 공유, 중복 전송 방지)
+  - 전송 성공 시에만 상태 갱신 — 웹훅 미설정 시 상태 불변 (재실행 안전)
 
 Discord 전송:
   - 표준 라이브러리(urllib)만 사용 — 의존성 설치 불필요 (GHA에서 바로 실행)
@@ -46,6 +53,13 @@ from datetime import datetime, timedelta
 POSITIONS_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "fvg_positions.json"
 )
+
+# 월간 자동 트리거 상태 파일 — 마지막 전송일 기록 (로컬↔GHA git 공유)
+EVAL_STATE_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "fvg_eval_state.json"
+)
+# 트리거 기준 — 20영업일(평일) = 트레이딩 기준 대략 한 달 (공휴일 미차감 근사)
+MONTHLY_TRIGGER_DAYS = 20
 
 # 수수료 기본값 — 나무멤버스 해외주식 0.07% (매수·매도 각각 부과 → 왕복 0.14%)
 FEE_DEFAULT = 0.0007
@@ -379,6 +393,95 @@ def print_report(rep, path, days, ticker):
             f"TP {float(p.get('tp', 0)):.2f})")
 
 
+def weekdays_between(d1, d2):
+  """d1(포함)부터 d2(미포함)까지의 평일(월~금) 수 — 영업일 근사.
+
+  공휴일(NYSE 휴장일)은 차감하지 않는 근사치 — 개인 평가용 트리거로 충분.
+  """
+  days = 0
+  d = d1
+  while d < d2:
+    if d.weekday() < 5:
+      days += 1
+    d += timedelta(days=1)
+  return days
+
+
+def _load_state(path):
+  """트리거 상태(fvg_eval_state.json) 로드 — 없거나 손상 시 빈 dict."""
+  try:
+    with open(path, "r", encoding="utf-8") as f:
+      data = json.load(f)
+    return data if isinstance(data, dict) else {}
+  except (OSError, json.JSONDecodeError):
+    return {}
+
+
+def _save_state(path, state):
+  """트리거 상태를 원자적(atomic) 저장 — 크래시 시 파일 손상 방지."""
+  try:
+    import tempfile
+    import shutil
+    with tempfile.NamedTemporaryFile(
+        "w", delete=False, suffix=".json", encoding="utf-8"
+    ) as tmp:
+      json.dump(state, tmp, ensure_ascii=False, indent=2)
+      tmp_path = tmp.name
+    shutil.move(tmp_path, path)
+  except OSError:
+    print("[경고] 트리거 상태 파일 저장 실패 (무시하고 계속)")
+
+
+def monthly_trigger_due(positions, last_sent, today=None):
+  """월간 요약 전송 조건 판정 — 첫 트레이드/직전 전송 기준 20영업일 경과 시 True.
+
+  - 기준일: 마지막 전송일(last_sent)이 있으면 그 날, 없으면 첫 트레이드 진입일
+  - 기준일부터 오늘까지 20영업일(평일) 이상 지났으면 전송 대상
+  - 트레이드가 하나도 없으면 False (아직 평가 데이터 없음)
+  """
+  first_trade = None
+  for p in positions.values():
+    t = parse_entry_time(p)
+    if t is None:
+      continue
+    t = t.replace(tzinfo=None) if t.tzinfo else t
+    if first_trade is None or t < first_trade:
+      first_trade = t
+  if first_trade is None:
+    return False
+  now = today or datetime.now()
+  today_d = now.date() if hasattr(now, "date") else now  # datetime/date 둘 다 허용
+  base = None
+  if last_sent:
+    try:
+      base = datetime.strptime(last_sent, "%Y-%m-%d").date()
+    except ValueError:
+      base = None  # 손상된 상태 값(수동 편집 등) → 첫 트레이드 기준으로 폴백
+  if base is None:
+    base = first_trade.date()
+  return weekdays_between(base, today_d) >= MONTHLY_TRIGGER_DAYS
+
+
+def run_monthly_trigger(positions, state_path, fee):
+  """20영업일 경과 시 월간 요약을 Discord로 전송 — 성공 시에만 상태 갱신.
+
+  반환: True(전송 성공) / False(미전송 — 대기 또는 웹훅 미설정).
+  """
+  state = _load_state(state_path)
+  last_sent = state.get("monthly_last_sent")
+  if not monthly_trigger_due(positions, last_sent):
+    print(f"[트리거] 아직 {MONTHLY_TRIGGER_DAYS}영업일 경과 전 — 월간 요약 대기 중")
+    return False
+  rep = build_report(positions, fee=fee)
+  if not send_discord_webhook(build_period_discord_message(rep, "monthly", None, None)):
+    print("[트리거] 웹훅 미설정/실패 — 상태 미갱신 (재실행 시 재시도)")
+    return False
+  state["monthly_last_sent"] = datetime.now().strftime("%Y-%m-%d")
+  _save_state(state_path, state)
+  print(f"[트리거] 월간 요약 전송 완료 — 다음 트리거는 {MONTHLY_TRIGGER_DAYS}영업일 후")
+  return True
+
+
 def send_discord_webhook(message):
   """Discord 웹훅으로 메시지 전송 (표준 라이브러리 urllib만 사용).
 
@@ -476,11 +579,15 @@ def main():
                  help=f"매수·매도 각각 부과 수수료율 (기본 {FEE_DEFAULT * 100:g}%% = 나무멤버스, --fee 0 = 미반영)")
   p.add_argument("--discord", action="store_true",
                  help="리포트를 Discord 웹훅으로 전송 (GHA 아침 자동화용, 의존성 불필요)")
+  p.add_argument("--state", default=EVAL_STATE_PATH,
+                 help="트리거 상태 파일 경로 (기본 fvg_eval_state.json)")
   period = p.add_mutually_exclusive_group()
   period.add_argument("--weekly", action="store_true",
                       help="주간 요약 리포트 (주별 승률/총수익/PF/MDD)")
   period.add_argument("--monthly", action="store_true",
                       help="월간 요약 리포트 (월별 승률/총수익/PF/MDD)")
+  period.add_argument("--monthly-trigger", action="store_true",
+                      help="20영업일 경과 시 월간 요약 자동 전송 (상태 파일로 중복 방지, GHA 아침 트리거)")
   args = p.parse_args()
   if args.fee < 0:
     print(f"[오류] --fee는 음수일 수 없습니다: {args.fee}")
@@ -499,6 +606,10 @@ def main():
       return
     print("[안내] 포지션 기록이 없습니다 — 실전 진입 알림이 발생하면 fvg_positions.json에 "
           "자동으로 쌓입니다.")
+    return
+
+  if args.monthly_trigger:
+    run_monthly_trigger(positions, args.state, args.fee)
     return
 
   rep = build_report(positions, days=args.days, ticker=args.ticker, fee=args.fee)
