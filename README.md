@@ -156,6 +156,7 @@
 | **setup_cronjob_org.py** | cron-job.org 실시간 알림 설정 자동화 (생성/--list/--test-dispatch/--update-pat/--update-schedule) |
 | **fvg_signal_bot.py** | 📌 **FVG 반자동 매매 스캐너** — HTF(15분) 추세 필터 + 1분봉 CHoCH/FVG 진입 모델 + 구조 기반 손절, Discord 알림(멘션 3회), 파일 기반 중복 알림 방지, **청산(매도) 알림**(TP/손절/당일 마감 추적) |
 | **fvg_bot_backtest.py** | FVG 전략 백테스트 — 5분봉 근사(1분봉은 yfinance 7일 한도), 당일 마감/overnight 모드, 승률·MDD·PF 지표 |
+| **fvg_bot_eval.py** | FVG 봇 **실전 평가** — fvg_positions.json 기반 승률/평균익절·손절/PF/총수익/MDD/청산 사유(TP·SL·마감) 분포 리포트 (종목·기간 필터) |
 | **setup_fvg_cron.py** | FVG 봇 로컬 크론 설정 자동화 (미국 장중 매분, 설치/--list/--remove/--dry-run) |
 | **fvg_local_cron.sh** | 로컬 크론 래퍼 — ET 장중 확인 + git 알림 상태(fvg_alerts.json) 동기화 후 실행 |
 | **MarketStageSystem.py** | 독립적인 시장 단계 시스템 — 바닥 단계 감지 |
@@ -170,7 +171,7 @@
 | **market_state.json** | 시장 단계 상태 정보 (자동 생성) |
 | **signal_report.json** | 시장 리스크 점수 (자동 생성) |
 | **fvg_alerts.json** | FVG 봇 알림 상태 (자동 생성 — 동일 FVG 중복 알림 방지, 로컬↔GHA 공유) |
-| **fvg_positions.json** | FVG 봇 포지션 상태 (자동 생성 — 진입 기록 → TP/손절/당일 마감 청산 알림 추적, 로컬↔GHA 공유) |
+| **fvg_positions.json** | FVG 봇 포지션 상태 (자동 생성 — 진입 기록 → TP/손절/당일 마감 청산 알림 추적, 로컬↔GHA 공유, CLOSED 45일 보존 → `fvg_bot_eval.py` 평가용) |
 | **requirements.txt** | Python 의존성 패키지 목록 |
 
 ---
@@ -404,6 +405,22 @@ python3 setup_fvg_cron.py --remove    # 제거
 > - GitHub Actions는 `secrets.DISCORD_WEBHOOK`/`DISCORD_USER_ID`로 알림을 보냅니다 (로컬 .env와 무관).
 > - 장중 알림은 Discord 멘션 3회 포함 — 잠든 사이에도 모바일 알림이 울립니다.
 > - **당일 마감 운용**: 진입 후 당일 15:55 ET까지 미해결 시 청산 권장 (백테스트 근거 — 야간 보유 시 MDD 급증).
+
+### 실전 평가 (fvg_bot_eval.py)
+
+진입 알림마다 `fvg_positions.json`에 자동 기록되는 실전 데이터를 읽어 백테스트와 동일한 양식으로
+평가 리포트를 만듭니다 (CLOSED 포지션만 집계, 수수료/슬리피지 미반영).
+
+```bash
+python3 fvg_bot_eval.py                 # 전체 평가 리포트 (승률/평균익절·손절/PF/총수익/MDD)
+python3 fvg_bot_eval.py --days 30       # 최근 30일 청산분만
+python3 fvg_bot_eval.py --ticker TQQQ   # 특정 종목만
+python3 fvg_bot_eval.py --path test.json  # 다른 포지션 파일로 테스트
+```
+
+> - 청산 사유 분포(TP 익절 / SL 손절 / DAY_CLOSE 당일 마감)와 종목별 통계 포함.
+> - 미청산(OPEN) 포지션은 평가에서 제외하고 별도로 표시합니다.
+> - 포지션은 **CLOSED 후 45일간 보존**되므로 한 달(20영업일) 단위 평가가 가능합니다.
 
 ### 환경 변수 (GitHub Secrets)
 

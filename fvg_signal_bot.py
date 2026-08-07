@@ -469,7 +469,8 @@ ALERT_STATE_PRUNE_HOURS = 48  # 상태 파일 정리 기준 — 2일 지난 항�
 POSITIONS_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "fvg_positions.json"
 )
-POSITIONS_PRUNE_HOURS = 48  # CLOSED 상태 정리 기준 (2일)
+POSITIONS_PRUNE_HOURS = 45 * 24  # CLOSED 상태 정리 기준 (45일 — 실전 평가(fvg_bot_eval.py)를 위해
+                                 #   최소 한 달치 트레이드 데이터 보존. 48시간이면 한 달 평가 시 데이터 소멸)
 DAY_CLOSE_ALERT_MINUTE = 15 * 60 + 40  # ET 15:40 — 당일 마감 임박 알림 시각
 
 
@@ -525,9 +526,11 @@ def send_test_alert():
 def _load_positions():
   """포지션 상태(fvg_positions.json) 로드 — 없거나 손상 시 빈 dict 반환.
 
-  key = "TICKER|FVG생성시각", value = {ticker, entry, sl, tp, status: OPEN/CLOSED}.
+  key = "TICKER|FVG생성시각", value = {ticker, entry, sl, tp, status: OPEN/CLOSED,
+  exit_price, exit_reason(TP/SL/DAY_CLOSE), closed_at}.
   로컬 크론과 GitHub Actions가 git으로 공유해 청산(매도) 알림도 교차 중복 없이
   한 번만 발송한다 (진입 알림의 fvg_alerts.json과 동일 패턴).
+  CLOSED 포지션은 45일간 보존 — fvg_bot_eval.py로 한 달치 실전 성과 평가 가능.
   """
   try:
     with open(POSITIONS_PATH, "r", encoding="utf-8") as f:
@@ -537,7 +540,7 @@ def _load_positions():
 
 
 def _save_positions(positions):
-  """포지션 상태를 fvg_positions.json에 원자적 저장 — CLOSED 2일 후 정리."""
+  """포지션 상태를 fvg_positions.json에 원자적 저장 — CLOSED 45일 후 정리 (평가 데이터 보존)."""
   cutoff = time.time() - POSITIONS_PRUNE_HOURS * 3600
   positions = {
       k: v for k, v in positions.items()
