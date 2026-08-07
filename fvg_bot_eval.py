@@ -28,12 +28,12 @@ fvg_signal_bot.py가 진입 알림 시 fvg_positions.json에 기록한 포지션
   python3 fvg_bot_eval.py --monthly             # 월간 요약 (월별 승률/총수익/PF/MDD)
   python3 fvg_bot_eval.py --monthly --days 45   # 최근 45일만 월별로 집계
   python3 fvg_bot_eval.py --weekly --discord    # 주간 요약을 Discord로 전송
-  python3 fvg_bot_eval.py --monthly-trigger     # 20영업일 경과 시 월간 요약 자동 전송 (GHA 아침 트리거)
+  python3 fvg_bot_eval.py --monthly-trigger     # 매월 1일 월간 요약 자동 전송 (GHA 아침 트리거)
 
 월간 자동 트리거 (--monthly-trigger):
-  - 첫 트레이드일부터 20영업일(월~금 평일) 경과 시점에 월간 요약을 Discord로 전송
-  - 이후 직전 전송일부터 다시 20영업일 경과할 때마다 주기 전송 (대략 한 달 주기)
-  - 마지막 전송일은 fvg_eval_state.json에 기록 (로컬↔GHA git 공유, 중복 전송 방지)
+  - 캘린더 월 기준 — 첫 트레이드가 있던 달의 다음 달 1일부터, 매월 1일 첫 실행 시
+    월간 요약을 Discord로 전송 (한국 시간 KST 기준 새 달 진입 감지)
+  - 마지막 전송 월은 fvg_eval_state.json에 기록 (로컬↔GHA git 공유, 중복 전송 방지)
   - 전송 성공 시에만 상태 갱신 — 웹훅 미설정 시 상태 불변 (재실행 안전)
 
 Discord 전송:
@@ -48,7 +48,7 @@ import argparse
 import json
 import os
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 POSITIONS_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "fvg_positions.json"
@@ -58,8 +58,7 @@ POSITIONS_PATH = os.path.join(
 EVAL_STATE_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "fvg_eval_state.json"
 )
-# 트리거 기준 — 20영업일(평일) = 트레이딩 기준 대략 한 달 (공휴일 미차감 근사)
-MONTHLY_TRIGGER_DAYS = 20
+# 트리거 기준 — 캘린더 월(매월 1일 첫 실행)마다 월간 요약 전송
 
 # 수수료 기본값 — 나무멤버스 해외주식 0.07% (매수·매도 각각 부과 → 왕복 0.14%)
 FEE_DEFAULT = 0.0007
@@ -393,18 +392,26 @@ def print_report(rep, path, days, ticker):
             f"TP {float(p.get('tp', 0)):.2f})")
 
 
-def weekdays_between(d1, d2):
-  """d1(포함)부터 d2(미포함)까지의 평일(월~금) 수 — 영업일 근사.
+def _kst_today():
+  """한국 시간(UTC+9, 고정 — 한국은 서머타임 없음) 기준 오늘.
 
-  공휴일(NYSE 휴장일)은 차감하지 않는 근사치 — 개인 평가용 트리거로 충분.
+  '매월 1일 아침(KST)' 판정 기준 — 워크플로우가 23:00 UTC(=익일 08:00 KST)에
+  도는 시점에도 KST 날짜로 새 달 진입을 정확히 감지한다.
   """
-  days = 0
-  d = d1
-  while d < d2:
-    if d.weekday() < 5:
-      days += 1
-    d += timedelta(days=1)
-  return days
+  return (datetime.now(timezone.utc) + timedelta(hours=9)).date()
+
+
+def _month_key(s):
+  """상태 값 → 'YYYY-MM' — 날짜(YYYY-MM-DD) 또는 월(YYYY-MM) 형식 모두 허용.
+
+  구버전 상태(전송일 날짜)와 신버전(전송 월)을 함께 처리하는 하위 호환용.
+  """
+  for fmt in ("%Y-%m-%d", "%Y-%m"):
+    try:
+      return datetime.strptime(s, fmt).strftime("%Y-%m")
+    except ValueError:
+      continue
+  return None
 
 
 def _load_state(path):
@@ -433,11 +440,12 @@ def _save_state(path, state):
 
 
 def monthly_trigger_due(positions, last_sent, today=None):
-  """월간 요약 전송 조건 판정 — 첫 트레이드/직전 전송 기준 20영업일 경과 시 True.
+  """월간 요약 전송 조건 판정 — 캘린더 월 기준(매월 1일 첫 실행) 시 True.
 
-  - 기준일: 마지막 전송일(last_sent)이 있으면 그 날, 없으면 첫 트레이드 진입일
-  - 기준일부터 오늘까지 20영업일(평일) 이상 지났으면 전송 대상
+  - 전송 대상: 이번 달(KST)이 직전 전송 월과 달라진 첫 실행
+    (첫 전송은 첫 트레이드가 있던 달의 다음 달 1일부터)
   - 트레이드가 하나도 없으면 False (아직 평가 데이터 없음)
+  - 손상된 상태 값은 첫 트레이드 달 기준으로 폴백
   """
   first_trade = None
   for p in positions.values():
@@ -449,36 +457,35 @@ def monthly_trigger_due(positions, last_sent, today=None):
       first_trade = t
   if first_trade is None:
     return False
-  now = today or datetime.now()
+  now = today or _kst_today()
   today_d = now.date() if hasattr(now, "date") else now  # datetime/date 둘 다 허용
-  base = None
-  if last_sent:
-    try:
-      base = datetime.strptime(last_sent, "%Y-%m-%d").date()
-    except ValueError:
-      base = None  # 손상된 상태 값(수동 편집 등) → 첫 트레이드 기준으로 폴백
-  if base is None:
-    base = first_trade.date()
-  return weekdays_between(base, today_d) >= MONTHLY_TRIGGER_DAYS
+  cur_month = today_d.strftime("%Y-%m")
+  # 첫 트레이드 기준은 ET(진입 시각), 전송 판정은 KST — 월 단위 비교라 경계
+  # 근처(월말~월초 9시간)에서만 달라질 수 있어 실질 영향 없음
+  first_month = first_trade.date().strftime("%Y-%m")
+  sent_month = _month_key(last_sent) if last_sent else None
+  if sent_month is None:  # 미전송 또는 손상 값 → 첫 트레이드 달 기준
+    return cur_month != first_month
+  return cur_month != sent_month
 
 
 def run_monthly_trigger(positions, state_path, fee):
-  """20영업일 경과 시 월간 요약을 Discord로 전송 — 성공 시에만 상태 갱신.
+  """캘린더 월(매월 1일) 기준으로 월간 요약을 Discord로 전송 — 성공 시에만 상태 갱신.
 
   반환: True(전송 성공) / False(미전송 — 대기 또는 웹훅 미설정).
   """
   state = _load_state(state_path)
   last_sent = state.get("monthly_last_sent")
   if not monthly_trigger_due(positions, last_sent):
-    print(f"[트리거] 아직 {MONTHLY_TRIGGER_DAYS}영업일 경과 전 — 월간 요약 대기 중")
+    print("[트리거] 아직 새 달 진입 전 — 월간 요약 대기 중 (매월 1일 전송)")
     return False
   rep = build_report(positions, fee=fee)
   if not send_discord_webhook(build_period_discord_message(rep, "monthly", None, None)):
     print("[트리거] 웹훅 미설정/실패 — 상태 미갱신 (재실행 시 재시도)")
     return False
-  state["monthly_last_sent"] = datetime.now().strftime("%Y-%m-%d")
+  state["monthly_last_sent"] = _kst_today().strftime("%Y-%m")
   _save_state(state_path, state)
-  print(f"[트리거] 월간 요약 전송 완료 — 다음 트리거는 {MONTHLY_TRIGGER_DAYS}영업일 후")
+  print("[트리거] 월간 요약 전송 완료 — 다음 트리거는 다음 달 1일")
   return True
 
 
@@ -587,7 +594,7 @@ def main():
   period.add_argument("--monthly", action="store_true",
                       help="월간 요약 리포트 (월별 승률/총수익/PF/MDD)")
   period.add_argument("--monthly-trigger", action="store_true",
-                      help="20영업일 경과 시 월간 요약 자동 전송 (상태 파일로 중복 방지, GHA 아침 트리거)")
+                      help="매월 1일 월간 요약 자동 전송 (상태 파일로 중복 방지, GHA 아침 트리거)")
   args = p.parse_args()
   if args.fee < 0:
     print(f"[오류] --fee는 음수일 수 없습니다: {args.fee}")

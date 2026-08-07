@@ -172,7 +172,7 @@
 | **signal_report.json** | 시장 리스크 점수 (자동 생성) |
 | **fvg_alerts.json** | FVG 봇 알림 상태 (자동 생성 — 동일 FVG 중복 알림 방지, 로컬↔GHA 공유) |
 | **fvg_positions.json** | FVG 봇 포지션 상태 (자동 생성 — 진입 기록 → TP/손절/당일 마감 청산 알림 추적, 로컬↔GHA 공유, CLOSED 45일 보존 → `fvg_bot_eval.py` 평가용) |
-| **fvg_eval_state.json** | 월간 트리거 상태 (자동 생성 — 마지막 월간 요약 전송일, 로컬↔GHA 공유, 중복 전송 방지) |
+| **fvg_eval_state.json** | 월간 트리거 상태 (자동 생성 — 마지막 월간 요약 전송 월, 로컬↔GHA 공유, 중복 전송 방지) |
 | **requirements.txt** | Python 의존성 패키지 목록 |
 
 ---
@@ -436,16 +436,17 @@ python3 fvg_bot_eval.py --weekly       # 주간(ISO 주)별 승률/총수익/PF/
 python3 fvg_bot_eval.py --monthly      # 월별 승률/총수익/PF/MDD
 python3 fvg_bot_eval.py --monthly --days 45   # 최근 45일만 월별 집계
 python3 fvg_bot_eval.py --weekly --discord    # Discord로 전송
-python3 fvg_bot_eval.py --monthly-trigger     # 20영업일 경과 시 월간 요약 자동 전송
+python3 fvg_bot_eval.py --monthly-trigger     # 매월 1일 월간 요약 자동 전송
 ```
 
 > - 기간별 표 + 전체 합계 행으로 구성 (수수료 기본 반영, `--ticker`/`--days`/`--fee` 조합 가능).
 
 **월간 자동 트리거 (`--monthly-trigger`)** — 아침 워크플로우가 매일 확인:
 
-- **첫 트레이드일부터 20영업일(월~금 평일) 경과** 시 월간 요약을 Discord로 자동 전송
-- 이후 **직전 전송일부터 다시 20영업일 경과할 때마다** 주기 전송 (대략 한 달 주기)
-- 마지막 전송일은 `fvg_eval_state.json`에 기록 → 로컬↔GHA git 공유로 중복 전송 방지
+- **캘린더 월 기준**: 첫 트레이드가 있던 달의 다음 달 1일부터, **매월 1일 첫 실행 시**
+  월간 요약을 Discord로 자동 전송 (한국 시간 기준 새 달 진입 감지)
+- 마지막 전송 월은 `fvg_eval_state.json`에 기록 → 로컬↔GHA git 공유로 중복 전송 방지
+  (한 달에 한 번만 전송 — 1일이 주말이면 다음 영업일 아침에 전송)
 - 전송 성공 시에만 상태 갱신 — 웹훅 실패 시 다음 실행에서 재시도
 
 ### `fvg_eval.yml` — 실전 평가 아침 리포트 (Discord 자동 전송)
@@ -460,8 +461,8 @@ python3 fvg_bot_eval.py --monthly-trigger     # 20영업일 경과 시 월간 �
 > - 내용: 승률/평균익절·손절/PF/총수익/MDD + 청산 사유 분포 + 종목별 + 최근 10건 트레이드
 >   (Discord 2000자 제한 내 요약 — 전체는 로컬 `python3 fvg_bot_eval.py`로 확인).
 > - 수수료(나무멤버스 0.07% 왕복) 기본 반영. 의존성 설치 없이 표준 라이브러리로 동작.
-> - **월간 자동 트리거**: 같은 실행에서 `--monthly-trigger`로 첫 트레이드일부터 20영업일
->   경과 시 월간 요약을 추가 전송 (상태는 `fvg_eval_state.json`에 기록 후 커밋/푸시).
+> - **월간 자동 트리거**: 같은 실행에서 `--monthly-trigger`로 매월 1일(한국 시간) 월간
+>   요약을 추가 전송 (상태는 `fvg_eval_state.json`에 기록 후 커밋/푸시).
 
 ### 환경 변수 (GitHub Secrets)
 
