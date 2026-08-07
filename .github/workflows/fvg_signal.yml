@@ -16,6 +16,11 @@ on:
     # (설정 예정이라면 setup_cronjob_org.py에 --fvg 모드 추가 필요)
     types: [fvg-signal]
   workflow_dispatch:           # 수동 실행 지원 (테스트용)
+    inputs:
+      test_alert:              # true → 시그널과 무관하게 Discord 테스트 멘션 발송
+        description: 'Discord 테스트 멘션 발송 (전송 경로 검증)'
+        type: boolean
+        default: false
 
 concurrency:
   group: fvg-signal            # 실행 직렬화 — 중복 실행 방지
@@ -53,12 +58,18 @@ jobs:
           python -m pip install --upgrade pip -q
           pip install -q -r requirements.txt
 
-      - name: Run FVG Signal Bot (--once)
+      - name: Run FVG Signal Bot (--once / --test-alert)
         # --once: 1회 스캔 후 종료 (봇이 종목별 장중 여부를 자체 재검증)
+        # --test-alert: workflow_dispatch 입력이 켜져 있으면 시그널과 무관하게
+        #   Discord 테스트 멘션 발송 (전송 경로 검증 — 장 마감에도 실행 가능)
         # tee: Actions 로그에도 표시 + fvg_log.txt 저장 (로그는 커밋하지 않음)
         run: |
           set -o pipefail
-          python fvg_signal_bot.py --once 2>&1 | tee fvg_log.txt
+          if [[ "${{ github.event.inputs.test_alert }}" == "true" ]]; then
+            python fvg_signal_bot.py --test-alert 2>&1 | tee fvg_log.txt
+          else
+            python fvg_signal_bot.py --once 2>&1 | tee fvg_log.txt
+          fi
 
       - name: 실패 시 로그 표시 (Show log on failure)
         if: failure()

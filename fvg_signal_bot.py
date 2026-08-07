@@ -31,6 +31,7 @@
     교차 중복 알림도 차단한다 (loop 모드에서도 동일하게 동작)
   - HTF(15분봉) 데이터는 15분 캐시 — 실행 간 불필요한 재다운로드 방지
   - 실행: python3 fvg_signal_bot.py [--once]  (--once = 1회 스캔 후 종료)
+          python3 fvg_signal_bot.py [--test-alert]  (Discord 웹훅+멘션 경로 검증용 테스트 발송)
 
 Dependencies: pandas, requests, yfinance (requirements.txt에 포함)
 ==================================================================
@@ -474,6 +475,22 @@ def _save_alert_state(state):
     print("[경고] 알림 상태 파일 저장 실패 (무시하고 계속)")
 
 
+def send_test_alert():
+  """Discord 웹훅 + @멘션 전송 경로 검증용 테스트 알림 (--test-alert).
+
+  실제 시그널과 무관하게 테스트 메시지를 1건 보낸다. 웹훅이 미설정인 로컬에서는
+  메시지를 stdout으로 출력해 구성만 확인한다. GitHub Actions workflow_dispatch의
+  test_alert 입력으로 실행하면 시크릿 기반 실제 전송을 즉시 검증할 수 있다 —
+  이 메시지가 도착하면 실전 시그널도 동일 경로(멘션 3회 포함)로 전달된다.
+  """
+  msg = (
+      "🧪 **FVG 봇 테스트 알림** — Discord 웹훅 + @멘션 경로 점검\n"
+      "이 메시지가 보이면 실전 시그널 알림도 동일 경로로 도착합니다. "
+      "(자동 매매 없음 — 실제 주문은 직접 실행)"
+  )
+  send_discord_webhook(msg)
+
+
 def run_strategy():
   print(
       f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
@@ -524,6 +541,9 @@ def run_strategy():
 
 
 def main():
+  if "--test-alert" in sys.argv:
+    send_test_alert()
+    return
   if "--once" in sys.argv:
     run_strategy()
     return
