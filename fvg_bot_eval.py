@@ -23,6 +23,12 @@ fvg_signal_bot.py가 진입 알림 시 fvg_positions.json에 기록한 포지션
   python3 fvg_bot_eval.py --days 30             # 최근 30일 청산분만
   python3 fvg_bot_eval.py --ticker TQQQ         # 특정 종목만
   python3 fvg_bot_eval.py --path 다른경로.json  # 다른 상태 파일 테스트
+  python3 fvg_bot_eval.py --discord             # 리포트를 Discord 웹훅으로 전송 (아침 자동화)
+
+Discord 전송:
+  - 표준 라이브러리(urllib)만 사용 — 의존성 설치 불필요 (GHA에서 바로 실행)
+  - 메시지는 Discord 2000자 제한 안에 요약(통계/분포/종목별/최근 10건)으로 구성
+  - 웹훅 미설정(환경변수 DISCORD_WEBHOOK 없음) 시 stdout 출력으로 동작 확인
 
 Dependencies: 없음 (표준 라이브러리만)
 ==================================================================
@@ -240,6 +246,94 @@ def print_report(rep, path, days, ticker):
             f"TP {float(p.get('tp', 0)):.2f})")
 
 
+def send_discord_webhook(message):
+  """Discord 웹훅으로 메시지 전송 (표준 라이브러리 urllib만 사용).
+
+  의존성(requests 등) 없이 동작해 GHA에서 pip install 없이 바로 실행된다.
+  웹훅 미설정 시 stdout 출력 후 False 반환 (동작 확인용).
+  """
+  webhook = os.getenv("DISCORD_WEBHOOK", "")
+  if not webhook or webhook == "YOUR_DISCORD_WEBHOOK":
+    print(message)
+    return False
+  import urllib.request
+  payload = json.dumps({"content": message}).encode("utf-8")
+  req = urllib.request.Request(
+      webhook, data=payload,
+      headers={"Content-Type": "application/json"}, method="POST")
+  try:
+    with urllib.request.urlopen(req, timeout=10) as resp:
+      if resp.status == 204:  # Discord 웹훅 정상 응답
+        print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] 알림 전송 성공")
+        return True
+      print(f"전송 실패: HTTP {resp.status}")
+  except Exception as exc:
+    print(f"웹훅 전송 중 에러 발생: {exc}")
+  return False
+
+
+def build_discord_message(rep, days, ticker):
+  """Discord용 요약 메시지 — 2000자 제한 안에 통계/분포/종목별/최근 트레이드.
+
+  콘솔 리포트(print_report)의 전체 트레이드 표 대신 최근 10건만 포함해
+  아침 알림이 길어지지 않게 한다. 전체 보기는 로컬 실행으로 대체.
+  """
+  stats, rows = rep["stats"], rep["rows"]
+  fee = rep["fee"]
+  fee_txt = f"수수료 {fee * 100:.2f}% 반영" if fee > 0 else "수수료 미반영"
+  pf_txt = f"{stats['pf']:.1f}" if stats["pf"] != float("inf") else "∞"
+  head = f"📊 **FVG 봇 실전 평가 리포트**"
+  meta = f"`{datetime.now():%Y-%m-%d %H:%M}` | {fee_txt}" + (
+      f" | 최근 {days}일" if days else ""
+  ) + (f" | {ticker}" if ticker else "")
+
+  if not rows:
+    msg = f"{head}\n{meta}\n\n청산된 트레이드 없음 — 실전 진입/청산 후 리포트가 쌓입니다."
+    if rep["open_pos"]:
+      msg += f"\n(미청산 OPEN {len(rep['open_pos'])}건 — 평가 제외)"
+    return msg
+
+  lines = [head, meta, "",
+           f"**트레이드 {stats['n']}회 | 승률 {stats['win_rate']:.0f}% | "
+           f"평균 {fmt_pct(stats['avg'])} | 총수익 {fmt_pct(stats['total'])} | "
+           f"MDD {rep['mdd'] * 100:.1f}%**",
+           f"평균익절 {fmt_pct(stats['avg_win'])} | 평균손절 {fmt_pct(stats['avg_loss'])} | "
+           f"최대손실 {fmt_pct(stats['max_loss'])} | PF {pf_txt}", "", "[청산 사유 분포]"]
+  for reason in sorted(rep["by_reason"], key=lambda k: -rep["by_reason"][k]["n"]):
+    r = rep["by_reason"][reason]
+    avg = sum(r["rets"]) / len(r["rets"])
+    lines.append(f"· {REASON_LABEL.get(reason, reason)} {r['n']}회 "
+                 f"({r['n'] / stats['n'] * 100:.0f}%) 평균 {fmt_pct(avg)}")
+  if len(rep["by_ticker"]) > 1:
+    lines.append("")
+    lines.append("[종목별]")
+    for t in sorted(rep["by_ticker"], key=lambda k: -rep["by_ticker"][k]["n"]):
+      r = rep["by_ticker"][t]
+      avg = sum(r["rets"]) / len(r["rets"])
+      lines.append(f"· {t} {r['n']}회 | 승률 "
+                   f"{sum(1 for x in r['rets'] if x > 0) / len(r['rets']) * 100:.0f}% | "
+                   f"합계 {fmt_pct(sum(r['rets']))}")
+  lines.append("")
+  lines.append("[최근 트레이드]")
+  for r in list(reversed(rows[-10:])):
+    p = r["pos"]
+    t_in = (r["entry_t"] or datetime.min).strftime("%m-%d %H:%M")
+    reason = REASON_LABEL.get(p.get("exit_reason", "?"), p.get("exit_reason", "?"))
+    lines.append(f"· {t_in} {reason} {r['ret'] * 100:+.1f}% "
+                 f"({p.get('ticker', '?')} {float(p.get('entry', 0)):.2f}→"
+                 f"{float(p.get('exit_price', 0)):.2f})")
+  if len(rows) > 10:
+    lines.append(f"· … 나머지 {len(rows) - 10}건 (전체: python3 fvg_bot_eval.py)")
+  if rep["open_pos"]:
+    lines.append("")
+    lines.append(f"미청산 OPEN {len(rep['open_pos'])}건 — 평가 제외")
+
+  msg = "\n".join(lines)
+  if len(msg) > 1950:  # Discord 2000자 하드 리밋 안전장치
+    msg = msg[:1950] + "\n… (길이 제한으로 생략 — 전체: python3 fvg_bot_eval.py)"
+  return msg
+
+
 def main():
   p = argparse.ArgumentParser(description="FVG 봇 실전 평가 (fvg_positions.json)")
   p.add_argument("--days", type=int, default=None, help="최근 N일 청산분만 평가")
@@ -247,6 +341,8 @@ def main():
   p.add_argument("--path", default=POSITIONS_PATH, help="포지션 파일 경로 (기본 fvg_positions.json)")
   p.add_argument("--fee", type=float, default=FEE_DEFAULT,
                  help=f"매수·매도 각각 부과 수수료율 (기본 {FEE_DEFAULT * 100:g}%% = 나무멤버스, --fee 0 = 미반영)")
+  p.add_argument("--discord", action="store_true",
+                 help="리포트를 Discord 웹훅으로 전송 (GHA 아침 자동화용, 의존성 불필요)")
   args = p.parse_args()
   if args.fee < 0:
     print(f"[오류] --fee는 음수일 수 없습니다: {args.fee}")
@@ -254,11 +350,23 @@ def main():
 
   positions = load_positions(args.path)
   if not positions:
+    if args.discord:
+      # 빈 상태라도 한 줄 전송 — 아침 파이프라인이 살아있음을 확인하는 alive-check
+      send_discord_webhook(
+          "📊 **FVG 봇 실전 평가 리포트**\n"
+          f"`{datetime.now():%Y-%m-%d %H:%M}` | 수수료 {args.fee * 100:.2f}% 반영\n\n"
+          "아직 포지션 기록이 없습니다 — 실전 진입 알림이 발생하면 "
+          "fvg_positions.json에 자동으로 쌓여 아침 리포트가 시작됩니다."
+      )
+      return
     print("[안내] 포지션 기록이 없습니다 — 실전 진입 알림이 발생하면 fvg_positions.json에 "
           "자동으로 쌓입니다.")
     return
 
   rep = build_report(positions, days=args.days, ticker=args.ticker, fee=args.fee)
+  if args.discord:
+    send_discord_webhook(build_discord_message(rep, args.days, args.ticker))
+    return
   print_report(rep, args.path, args.days, args.ticker)
 
 

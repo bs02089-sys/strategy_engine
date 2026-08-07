@@ -1,0 +1,38 @@
+name: FVG Eval Report (Discord)
+
+on:
+  schedule:
+    # 한국 아침 08:00(KST) = UTC 23:00(전일) — 미국 장 마감(16:00 ET = 20:00 UTC)
+    # 이후 전일 청산 결과가 fvg_positions.json에 확정되므로, 아침에 어제 하루의
+    # 성과(승률/PF/총수익/MDD/청산 분포)를 요약 전송한다.
+    # 월~금(UTC) = 화~토 아침 KST — 주말(일/월 아침)엔 전송 없음.
+    - cron: "0 23 * * 1-5"
+  workflow_dispatch:           # 수동 실행 지원 (테스트용)
+
+concurrency:
+  group: fvg-eval              # 실행 직렬화 — 중복 실행 방지
+  cancel-in-progress: false
+
+jobs:
+  eval-report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+
+    steps:
+      - name: Checkout repository
+        # fvg_positions.json은 fvg_signal.yml(5분 폴링)이 매 실행마다 커밋하므로
+        # 체크아웃으로 최신 실전 기록을 받아온다 (로컬 크론 기록도 git 동기화됨).
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+
+      # fvg_bot_eval.py는 표준 라이브러리(urllib)만 사용 — pip install 불필요 (빠른 실행)
+      - name: Run eval report and send to Discord (--discord)
+        # 수수료 기본값(나무멤버스 0.07% 왕복) 자동 반영.
+        # --discord: 리포트 요약(통계/분포/종목별/최근 10건)을 Discord로 전송.
+        run: python fvg_bot_eval.py --discord
