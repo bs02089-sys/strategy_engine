@@ -24,6 +24,10 @@ fvg_signal_bot.py가 진입 알림 시 fvg_positions.json에 기록한 포지션
   python3 fvg_bot_eval.py --ticker TQQQ         # 특정 종목만
   python3 fvg_bot_eval.py --path 다른경로.json  # 다른 상태 파일 테스트
   python3 fvg_bot_eval.py --discord             # 리포트를 Discord 웹훅으로 전송 (아침 자동화)
+  python3 fvg_bot_eval.py --weekly              # 주간 요약 (주별 승률/총수익/PF/MDD)
+  python3 fvg_bot_eval.py --monthly             # 월간 요약 (월별 승률/총수익/PF/MDD)
+  python3 fvg_bot_eval.py --monthly --days 45   # 최근 45일만 월별로 집계
+  python3 fvg_bot_eval.py --weekly --discord    # 주간 요약을 Discord로 전송
 
 Discord 전송:
   - 표준 라이브러리(urllib)만 사용 — 의존성 설치 불필요 (GHA에서 바로 실행)
@@ -187,6 +191,135 @@ def build_report(positions, days=None, ticker=None, fee=FEE_DEFAULT):
   }
 
 
+PERIOD_LABEL = {"weekly": "주간", "monthly": "월간"}
+
+
+def period_bucket(rows, mode):
+  """트레이드를 주간(ISO)/월간 단위로 묶기 — 최신순 [(key, label, rets)] 반환.
+
+  진입 시각 기준 그룹핑 (타임존은 제거해 비교 통일). 주간은 ISO 주(월~일),
+  월간은 연-월. 시각이 없는 항목(손상)은 기간 집계에서 제외.
+  """
+  buckets = {}
+  for r in rows:
+    t = r["entry_t"]
+    if t is None:
+      continue
+    t = t.replace(tzinfo=None) if t.tzinfo else t
+    if mode == "weekly":
+      iso = t.isocalendar()
+      key, label = f"{iso[0]}-W{iso[1]:02d}", f"{iso[0]}년 {iso[1]:02d}주"
+    else:
+      key, label = f"{t.year:04d}-{t.month:02d}", f"{t.year}년 {t.month:02d}월"
+    buckets.setdefault(key, {"label": label, "rets": []})
+    buckets[key]["rets"].append(r["ret"])  # rows가 시간순이므로 내부도 시간순
+  ordered = sorted(buckets.items(), key=lambda kv: kv[0], reverse=True)  # 최신순
+  return [(key, meta["label"], meta["rets"]) for key, meta in ordered]
+
+
+def bucket_stats(rets):
+  """기간별 트레이드 묶음의 통계 — 거래수/승률/총수익/PF/MDD."""
+  n = len(rets)
+  wins = sum(1 for x in rets if x > 0)
+  total = sum(rets)
+  loss_sum = abs(sum(x for x in rets if x <= 0))
+  pf = ((total + loss_sum) / loss_sum) if loss_sum > 0 \
+      else (float("inf") if wins else 0.0)
+  eq, peak, mdd = 1.0, 1.0, 0.0
+  for x in rets:
+    eq *= (1 + x)
+    peak = max(peak, eq)
+    mdd = min(mdd, eq / peak - 1)
+  return {
+      "n": n,
+      "win_rate": wins / n * 100 if n else 0.0,
+      "total": total,
+      "pf": pf,
+      "mdd": mdd,
+  }
+
+
+def build_period(rep, mode):
+  """기간별 집계 구성 — (items=[(key,label,stats)] 최신순, overall=전체합계).
+
+  overall은 전체 트레이드를 시간순으로 집계해 일일 리포트(stats/MDD)와 수치를
+  일치시킨다 (버킷 연결 순서가 아니라 실제 청산 순서 기준).
+  """
+  items = []
+  for key, label, rets in period_bucket(rep["rows"], mode):
+    items.append((key, label, bucket_stats(rets)))
+  rows = rep["rows"]
+  overall = bucket_stats([r["ret"] for r in rows]) if rows else {
+      "n": 0, "win_rate": 0.0, "total": 0.0, "pf": 0.0, "mdd": 0.0}
+  return items, overall
+
+
+def print_period_report(rep, mode, path, days, ticker):
+  """주간/월간 요약 리포트 (콘솔) — 기간별 표 + 전체 합계."""
+  label = PERIOD_LABEL[mode]
+  items, overall = build_period(rep, mode)
+  fee = rep["fee"]
+  fee_txt = f"수수료 {fee * 100:.2f}% (왕복 {fee * 2 * 100:.2f}%)" if fee > 0 else "수수료 미반영"
+  print(f"\n=== FVG 봇 {label} 요약 리포트 ===")
+  print(f"출처: {path}  |  " + (f"필터: 최근 {days}일  |  " if days else "")
+        + (f"종목: {ticker}  |  " if ticker else "") + f"집계 시각: {datetime.now():%Y-%m-%d %H:%M}")
+  print(f"{fee_txt}")
+
+  if not items:
+    print("\n  청산(CLOSED)된 트레이드 없음 — 실전 진입/청산 후 다시 실행하세요.")
+    if rep["open_pos"]:
+      print(f"  (현재 미청산 OPEN {len(rep['open_pos'])}건 — 아직 평가 대상 아님)")
+    return
+
+  print(f"\n  {'기간':<10} {'트레이드':>4} {'승률':>5} {'총수익':>7} {'PF':>5} {'MDD':>7}")
+  for _, l, st in items:
+    pf_txt = f"{st['pf']:.1f}" if st["pf"] != float("inf") else "∞"
+    print(f"  {l:<10} {st['n']:>4} {st['win_rate']:>4.0f}% "
+          f"{fmt_pct(st['total']):>7} {pf_txt:>5} {st['mdd'] * 100:>6.1f}%")
+  pf_txt = f"{overall['pf']:.1f}" if overall["pf"] != float("inf") else "∞"
+  print(f"  {'──────':<10} {'────':>4} {'────':>5} {'───────':>7} {'───':>5} {'──────':>7}")
+  print(f"  {'합계':<10} {overall['n']:>4} {overall['win_rate']:>4.0f}% "
+        f"{fmt_pct(overall['total']):>7} {pf_txt:>5} {overall['mdd'] * 100:>6.1f}%")
+  if rep["open_pos"]:
+    print(f"\n  (미청산 OPEN {len(rep['open_pos'])}건 — 평가 제외)")
+
+
+def build_period_discord_message(rep, mode, days, ticker):
+  """주간/월간 요약의 Discord 메시지 — 기간별 한 줄 + 전체 합계 (2000자 내)."""
+  label = PERIOD_LABEL[mode]
+  items, overall = build_period(rep, mode)
+  fee = rep["fee"]
+  fee_txt = f"수수료 {fee * 100:.2f}% 반영" if fee > 0 else "수수료 미반영"
+  head = f"📊 **FVG 봇 {label} 요약 리포트**"
+  meta = f"`{datetime.now():%Y-%m-%d %H:%M}` | {fee_txt}" + (
+      f" | 최근 {days}일" if days else ""
+  ) + (f" | {ticker}" if ticker else "")
+
+  if not items:
+    msg = f"{head}\n{meta}\n\n청산된 트레이드 없음 — 실전 진입/청산 후 요약이 쌓입니다."
+    if rep["open_pos"]:
+      msg += f"\n(미청산 OPEN {len(rep['open_pos'])}건 — 평가 제외)"
+    return msg
+
+  lines = [head, meta, ""]
+  for _, l, st in items:
+    pf_txt = f"{st['pf']:.1f}" if st["pf"] != float("inf") else "∞"
+    lines.append(f"· {l} {st['n']}회 | 승률 {st['win_rate']:.0f}% | "
+                 f"총수익 {fmt_pct(st['total'])} | PF {pf_txt} | MDD {st['mdd'] * 100:.1f}%")
+  pf_txt = f"{overall['pf']:.1f}" if overall["pf"] != float("inf") else "∞"
+  lines.append(f"· **합계 {overall['n']}회 | 승률 {overall['win_rate']:.0f}% | "
+               f"총수익 {fmt_pct(overall['total'])} | PF {pf_txt} | "
+               f"MDD {overall['mdd'] * 100:.1f}%**")
+  if rep["open_pos"]:
+    lines.append("")
+    lines.append(f"미청산 OPEN {len(rep['open_pos'])}건 — 평가 제외")
+
+  msg = "\n".join(lines)
+  if len(msg) > 1950:  # Discord 2000자 하드 리밋 안전장치
+    msg = msg[:1950] + "\n… (길이 제한으로 생략 — 전체: python3 fvg_bot_eval.py)"
+  return msg
+
+
 def print_report(rep, path, days, ticker):
   stats, rows = rep["stats"], rep["rows"]
   fee = rep["fee"]
@@ -343,6 +476,11 @@ def main():
                  help=f"매수·매도 각각 부과 수수료율 (기본 {FEE_DEFAULT * 100:g}%% = 나무멤버스, --fee 0 = 미반영)")
   p.add_argument("--discord", action="store_true",
                  help="리포트를 Discord 웹훅으로 전송 (GHA 아침 자동화용, 의존성 불필요)")
+  period = p.add_mutually_exclusive_group()
+  period.add_argument("--weekly", action="store_true",
+                      help="주간 요약 리포트 (주별 승률/총수익/PF/MDD)")
+  period.add_argument("--monthly", action="store_true",
+                      help="월간 요약 리포트 (월별 승률/총수익/PF/MDD)")
   args = p.parse_args()
   if args.fee < 0:
     print(f"[오류] --fee는 음수일 수 없습니다: {args.fee}")
@@ -364,6 +502,14 @@ def main():
     return
 
   rep = build_report(positions, days=args.days, ticker=args.ticker, fee=args.fee)
+  if args.weekly or args.monthly:
+    mode = "weekly" if args.weekly else "monthly"
+    if args.discord:
+      send_discord_webhook(
+          build_period_discord_message(rep, mode, args.days, args.ticker))
+    else:
+      print_period_report(rep, mode, args.path, args.days, args.ticker)
+    return
   if args.discord:
     send_discord_webhook(build_discord_message(rep, args.days, args.ticker))
     return

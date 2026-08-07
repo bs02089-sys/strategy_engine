@@ -428,6 +428,17 @@ python3 fvg_bot_eval.py --path test.json   # 다른 포지션 파일로 테스�
 > - `--discord`: 리포트 요약을 Discord로 전송 (아침 자동화 — 표준 라이브러리만 사용,
 >   의존성 설치 불필요). `DISCORD_WEBHOOK` 미설정 시 stdout 출력으로 확인.
 
+**주간/월간 요약 리포트** — 한 달 뒤 평가 시점에 기간별 성과를 종합 정리:
+
+```bash
+python3 fvg_bot_eval.py --weekly       # 주간(ISO 주)별 승률/총수익/PF/MDD
+python3 fvg_bot_eval.py --monthly      # 월별 승률/총수익/PF/MDD
+python3 fvg_bot_eval.py --monthly --days 45   # 최근 45일만 월별 집계
+python3 fvg_bot_eval.py --weekly --discord    # Discord로 전송
+```
+
+> - 기간별 표 + 전체 합계 행으로 구성 (수수료 기본 반영, `--ticker`/`--days`/`--fee` 조합 가능).
+
 ### `fvg_eval.yml` — 실전 평가 아침 리포트 (Discord 자동 전송)
 
 | 트리거 | 시간 (UTC) | 설명 |
