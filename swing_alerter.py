@@ -200,9 +200,9 @@ def compute_ticker(ticker: str, pos: dict, cfg: dict) -> dict:
 
     # 계산기 — 목표 매도 시 예상 손익
     buy_price = pos.get("BUY_PRICE")
-    shares = pos.get("SHARES", 0)
+    shares = pos.get("SHARES") or 0   # null/미입력 시 0 처리 (모니터링 전용 포지션)
     exp_profit = exp_roi = None
-    if buy_price and sell_target:
+    if buy_price and sell_target and shares > 0:
         exp_profit = (sell_target - float(buy_price)) * float(shares)
         exp_roi = (sell_target / float(buy_price) - 1.0) * 100.0
 
