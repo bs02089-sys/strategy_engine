@@ -16,19 +16,22 @@ GitHub Actions의 `dca_ma_strategy.yml`(--ath-monitor 분기)를 실행시킵니
   GITHUB_REPO           저장소 이름 (예: strategy_engine)
 
 선택 환경변수 (기본값 사용 가능):
-  GITHUB_EVENT_TYPE     기본값: ath-dca-monitor
-  POLL_MINUTES          기본값: 10  (장중 폴링 간격, 5/10/15 권장)
+  GITHUB_EVENT_TYPE     기본값: ath-dca-monitor (--fvg면 fvg-signal)
+  POLL_MINUTES          기본값: 10 (--fvg면 5 — FVG는 1분봉 전략이라 5분 폴링 권장)
   UTC_HOURS_START       기본값: 13  (UTC, 장중 포함 09:00~17:00 ET 근처)
   UTC_HOURS_END         기본값: 21  (UTC)
-  JOB_TITLE             기본값: "ATH DCA realtime monitor"
+  JOB_TITLE             기본값: "ATH DCA realtime monitor" (--fvg면 "FVG Signal Bot poll (5m)")
 
 사용법:
   python setup_cronjob_org.py              # ATH DCA 실시간 모니터 잡 생성 (기본)
+  python setup_cronjob_org.py --fvg        # FVG 시그널 봇 폴링 잡 생성 (장중 5분 — fvg_signal.yml)
   python setup_cronjob_org.py --dry-run    # 페이로드만 출력 (API 미호출, 시크릿 마스킹)
   python setup_cronjob_org.py --list       # 기존 잡 목록 조회
-  python setup_cronjob_org.py --test-dispatch  # 테스트 dispatch 1회 발사 (워크플로우 실행)
+  python setup_cronjob_org.py --test-dispatch  # 테스트 dispatch 1회 발사 (ATH DCA 워크플로우)
+  python setup_cronjob_org.py --fvg --test-dispatch  # 테스트 dispatch 1회 (FVG 워크플로우)
   python setup_cronjob_org.py --update-pat # 크론잡에 저장된 GITHUB_PAT를 새 토큰으로 갱신
   python setup_cronjob_org.py --update-schedule  # 크론잡 폴링 간격 갱신 (POLL_MINUTES/UTC_HOURS 반영)
+  # --fvg 잡은 --fvg를 함께 붙여서 사용: python setup_cronjob_org.py --fvg --update-schedule
 """
 import base64
 import copy
@@ -304,15 +307,39 @@ def main() -> None:
     pat = _env("GITHUB_PAT", "<pat>")
     cronjob_key = _env("CRONJOB_ORG_API_KEY", "<key>")
 
-    # ── ATH DCA 실시간 모니터 잡 (장중 N분 폴링) ──────────────────────
-    event_type = _env("GITHUB_EVENT_TYPE", "ath-dca-monitor")
-    poll_minutes = int(_env("POLL_MINUTES", "10"))
+    # ── 대상 잡 분기: ATH DCA 실시간 모니터(기본) / FVG 시그널 봇(--fvg) ──
+    fvg_mode = "--fvg" in sys.argv
+    if fvg_mode:
+        # FVG 봇 백업 폴링 — fvg_signal.yml의 repository_dispatch(fvg-signal)를
+        # cron-job.org가 5분 간격으로 발사해 GHA schedule 지연을 우회한다.
+        workflow_path = ".github/workflows/fvg_signal.yml"
+        default_event_type = "fvg-signal"
+        default_poll = "5"
+        default_title = "FVG Signal Bot poll (5m)"
+        job_desc_tpl = "장중 매 {m}분 FVG 시그널 봇 폴링 (GHA schedule 지연 우회)"
+    else:
+        workflow_path = WORKFLOW_PATH
+        default_event_type = "ath-dca-monitor"
+        default_poll = "10"
+        default_title = "ATH DCA realtime monitor"
+        job_desc_tpl = "장중 매 {m}분 ATH DCA 실시간 알림"
+
+    event_type = _env("GITHUB_EVENT_TYPE", default_event_type)
+    poll_minutes = int(_env("POLL_MINUTES", default_poll))
     hours_start = int(_env("UTC_HOURS_START", "13"))
     hours_end = int(_env("UTC_HOURS_END", "21"))
-    job_title = _env("JOB_TITLE", "ATH DCA realtime monitor")
-    workflow_path = WORKFLOW_PATH
+    job_title = _env("JOB_TITLE", default_title)
     schedule = _build_schedule(poll_minutes, hours_start, hours_end)
-    job_desc = f"장중 매 {poll_minutes}분 ATH DCA 실시간 알림"
+    job_desc = job_desc_tpl.format(m=poll_minutes)
+
+    # 환경변수 오버라이드가 모드 기본값과 불일치하면 경고 (예: .env에 ATH용 값이
+    # 있는 채로 --fvg 실행 → "FVG 제목 + ath-dca-monitor 이벤트" 잡 생성 방지).
+    if fvg_mode:
+        if _env("GITHUB_EVENT_TYPE") and event_type != default_event_type:
+            print(f"⚠️ GITHUB_EVENT_TYPE={event_type}이(가) --fvg 기본값({default_event_type})과 다릅니다.")
+            print("   의도한 값이 아니라면 .env의 GITHUB_EVENT_TYPE을 확인하세요.")
+        if _env("JOB_TITLE") and job_title != default_title:
+            print(f"⚠️ JOB_TITLE={job_title}이(가) --fvg 기본값({default_title})과 다릅니다.")
 
     if not (5 <= poll_minutes <= 60 and 60 % poll_minutes == 0):
         raise SystemExit("❌ POLL_MINUTES는 60의 약수여야 합니다 (예: 5, 6, 10, 12, 15, 20, 30).")
@@ -345,7 +372,8 @@ def main() -> None:
         if job_id is None:
             raise SystemExit(
                 f"❌ 갱신할 크론잡을 찾을 수 없습니다: {dispatches_url} "
-                f"(제목: {job_title}). 먼저 `python setup_cronjob_org.py`로 생성하세요."
+                f"(제목: {job_title}). 먼저 생성하세요 — ATH DCA 잡: `python setup_cronjob_org.py`, "
+                "FVG 잡: `python setup_cronjob_org.py --fvg`"
             )
 
         # 3) 목록 응답에는 extendedData(헤더)가 없으므로 단일 잡 상세를
@@ -379,7 +407,8 @@ def main() -> None:
         if job_id is None:
             raise SystemExit(
                 f"❌ 갱신할 크론잡을 찾을 수 없습니다: {dispatches_url} "
-                f"(제목: {job_title}). 먼저 `python setup_cronjob_org.py`로 생성하세요."
+                f"(제목: {job_title}). 먼저 생성하세요 — ATH DCA 잡: `python setup_cronjob_org.py`, "
+                "FVG 잡: `python setup_cronjob_org.py --fvg`"
             )
 
         # 2) 기존 job 바디를 그대로 가져와 schedule만 교체한다

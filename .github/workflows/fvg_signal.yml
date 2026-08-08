@@ -13,7 +13,7 @@ on:
     - cron: "*/5 13-21 * * 1-5"
   repository_dispatch:
     # cron-job.org가 장중 5분 폴링 발사 시 사용 (선택) — GHA 스케줄 지연 우회.
-    # (설정 예정이라면 setup_cronjob_org.py에 --fvg 모드 추가 필요)
+    # 설정: python3 setup_cronjob_org.py --fvg (장중 5분 크론잡 생성)
     types: [fvg-signal]
   workflow_dispatch:           # 수동 실행 지원 (테스트용)
     inputs:

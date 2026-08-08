@@ -339,12 +339,21 @@ export GITHUB_PAT=xxx            # GitHub PAT (Contents: Read and write)
 export GITHUB_OWNER=bs02089-sys
 export GITHUB_REPO=strategy_engine
 
+# ATH DCA 실시간 모니터 (기본 — 장중 10분)
 python3 setup_cronjob_org.py --dry-run          # 생성 전 미리보기
 python3 setup_cronjob_org.py                    # 실제 생성 (장중 10분 간격 기본)
+
+# FVG 시그널 봇 폴링 (--fvg — 장중 5분, GHA schedule 지연 우회)
+python3 setup_cronjob_org.py --fvg --dry-run    # FVG 잡 미리보기
+python3 setup_cronjob_org.py --fvg              # FVG 잡 생성
+
+# 공통 관리
 python3 setup_cronjob_org.py --list             # 등록된 잡 목록
-python3 setup_cronjob_org.py --test-dispatch    # 테스트 dispatch 1회
+python3 setup_cronjob_org.py --test-dispatch    # 테스트 dispatch 1회 (ATH DCA 워크플로우)
+python3 setup_cronjob_org.py --fvg --test-dispatch  # FVG 워크플로우 테스트 1회
 python3 setup_cronjob_org.py --update-pat       # 크론잡에 저장된 PAT 갱신 (토큰 재발급 시)
 python3 setup_cronjob_org.py --update-schedule  # 폴링 간격 갱신 (POLL_MINUTES/UTC_HOURS 반영)
+python3 setup_cronjob_org.py --fvg --update-schedule  # FVG 잡 간격 갱신
 ```
 
 ### 백테스트 실행 (MA 레짐 전략)
@@ -401,6 +410,10 @@ python3 DCA_MA_strategy_flowchart.py
 
 > - 1분봉 CHoCH → FVG 중간점 풀백 진입 모델 + HTF(15분) 추세 필터 (유튜브 Craig Percoo 전략).
 > - 알림만 전송하며 실제 주문은 자동 실행하지 않습니다 (수동 매매). `DISCORD_USER_ID` 설정 시 멘션 3회.
+> - **cron-job.org 5분 폴링 (선택)**: GHA 스케줄은 best-effort라 지연될 수 있어, 더 정확한
+>   클라우드 폴링을 원하면 `python3 setup_cronjob_org.py --fvg`로 크론잡을 만들면
+>   `repository_dispatch(fvg-signal)`가 장중 5분마다 이 워크플로우를 실행합니다
+>   (로컬 크론 매분 + cron-job.org 5분 + GHA 스케줄 5분의 3중 구조).
 > - **시초가 창 필터**: 진입 알림은 개장 후 2시간(ET 09:30~11:30) 안에서만 발송 — 창 밖
 >   (한국 심야~새벽)에는 진입 신호를 스킵해 잠든 사이 알림/주문 입력 부담을 제거. 청산
 >   (TP/손절/당일 마감) 알림은 창과 무관하게 장중 내내 동작 (자동 청산 기록). 창 설정:
