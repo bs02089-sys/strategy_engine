@@ -82,8 +82,10 @@ jobs:
           git config --global user.name "Swing Bot"
           git config --global user.email "bot@example.com"
 
-          # 브랜치 전환 시 워킹트리에서 사라지므로 임시 저장
+          # 브랜치 전환 시 워킹트리에서 사라지므로 임시 저장 (대시보드 + PWA 파일)
           cp swing_dashboard.html /tmp/swing_dash.html
+          cp swing_manifest.webmanifest /tmp/swing_manifest.webmanifest
+          cp swing_icon.png /tmp/swing_icon.png
 
           # 기존 gh-pages 가 있으면 그 위에, 없으면 main 기준 빈 브랜치로 생성
           git fetch origin gh-pages:refs/remotes/origin/gh-pages 2>/dev/null || true
@@ -94,9 +96,11 @@ jobs:
             git rm -rf --quiet . 2>/dev/null || true
           fi
 
-          # 대시보드를 index.html 로 배포 (사이트 루트에서 바로 열림)
+          # 대시보드를 index.html 로 배포 (사이트 루트에서 바로 열림) + PWA 파일
           cp /tmp/swing_dash.html index.html
-          git add index.html
+          cp /tmp/swing_manifest.webmanifest manifest.webmanifest
+          cp /tmp/swing_icon.png swing_icon.png
+          git add index.html manifest.webmanifest swing_icon.png
           if git diff --quiet --cached origin/gh-pages >/dev/null 2>&1; then
             echo "변경 없음 — 배포 생략"
           else

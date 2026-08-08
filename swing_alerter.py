@@ -515,6 +515,14 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#0b0e14">
 <meta http-equiv="refresh" content="300">
+<!-- PWA: 홈 화면 추가(앱처럼 설치) 지원 -->
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" href="swing_icon.png">
+<link rel="apple-touch-icon" href="swing_icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="스윙 알리미">
+<meta name="mobile-web-app-capable" content="yes">
 <title>스윙 투자 알리미</title>
 <style>{_CSS}</style>
 </head>
@@ -552,6 +560,13 @@ def write_dashboard(statuses: list[dict], cfg: dict, path: str) -> None:
 # ═══════════════════════════════════════════════════════════
 
 _LAST_COMPUTE: dict = {"ts": 0.0, "statuses": None, "cfg": None}
+
+# --serve 에서 함께 제공하는 정적 파일 (URL → (content_type, 로컬 파일명))
+# 배포(gh-pages)에서는 manifest.webmanifest 로 이름이 바뀌므로 로컬 파일명을 별도 지정
+_STATIC_FILES = {
+    "/manifest.webmanifest": ("application/manifest+json; charset=utf-8", "swing_manifest.webmanifest"),
+    "/swing_icon.png": ("image/png", "swing_icon.png"),
+}
 
 
 def _compute_all(cfg: dict, force: bool = False) -> list[dict]:
@@ -591,6 +606,18 @@ class _DashboardHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):  # noqa: N802
+        # PWA 정적 파일 (매니페스트/아이콘) 서빙
+        sf = _STATIC_FILES.get(self.path.split("?", 1)[0])
+        if sf and os.path.isfile(sf[1]):
+            with open(sf[1], "rb") as f:
+                body = f.read()
+            self.send_response(200)
+            self.send_header("Content-Type", sf[0])
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         cfg = load_config()
         statuses = _compute_all(cfg)
         if self.path.startswith("/api/status"):
