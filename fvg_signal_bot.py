@@ -108,6 +108,12 @@ ENTRY_WINDOW_DEFAULT = {"ENABLED": True, "START": "09:30", "END": "11:30"}
 # 자정을 넘는 구간(예: 22:00~06:00)도 지원한다.
 EXIT_ALERT_QUIET_HOURS_DEFAULT = {"ENABLED": True, "START": "00:00", "END": "07:00"}
 
+# 프로젝트 루트 경로 — 설정 파일 경로(CONFIG_PATH)는 파일 상단에서 정의해
+# 아래의 load_config_section 등 공통 헬퍼가 어떤 시점에 호출돼도 안전하게
+# 참조하도록 한다.
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+CONFIG_PATH = os.path.join(BASE_DIR, "portfolio_config.json")
+
 
 def send_discord_webhook(message, mention=True):
   """디스코드 채널로 메시지를 전송 (웹훅 미설정 시 stdout 출력).
@@ -160,16 +166,24 @@ def in_trading_session(ts):
 
 
 def _parse_time_str(time_str, default_minutes):
-  """'HH:MM' 형식의 시간 문자열을 총 분(minutes) 단위로 변환 (공통 헬퍼)."""
+  """'HH:MM' 형식의 시간 문자열을 총 분(minutes) 단위로 변환 (공통 헬퍼).
+
+  반환: (minutes, 파싱 성공 여부). 손상값(비 'HH:MM' 문자열 등)은
+  (default_minutes, False)를 반환해 호출 측이 기본 시간대(fail-safe)로
+  폴백하도록 한다.
+  """
   try:
     h, m = map(int, time_str.split(":"))
-    return h * 60 + m
-  except (ValueError, AttributeError):
-    return default_minutes
+    return h * 60 + m, True
+  except (ValueError, AttributeError, TypeError):
+    return default_minutes, False
 
 
 def load_config_section(section_name, default_dict):
-  """portfolio_config.json에서 특정 설정 섹션을 안전하게 로드하는 공통 헬퍼."""
+  """portfolio_config.json에서 특정 설정 섹션을 안전하게 로드하는 공통 헬퍼.
+
+  설정이 없거나 손상되면 default_dict(기본 보호값)를 그대로 반환한다.
+  """
   try:
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
       cfg = json.load(f)
@@ -180,74 +194,82 @@ def load_config_section(section_name, default_dict):
 
 
 def load_entry_window():
-  """portfolio_config.json의 FVG.ENTRY_WINDOW 설정 로드 — 시초가 창 (ET, 24h 형식)."""
+  """portfolio_config.json의 FVG.ENTRY_WINDOW 설정 로드 — 시초가 창 (ET, 24h 형식).
+
+  진입 알림 허용 시간대. 설정이 없거나 손상 시 기본값(09:30~11:30, 개장 후 2시간)으로
+  안전하게 동작한다. 기본값이 곧 기본 보호이므로 설정 실패로 필터가 풀리지 않는다.
+  """
   return load_config_section("ENTRY_WINDOW", ENTRY_WINDOW_DEFAULT)
 
 
 def in_entry_window(ts, window=None):
-  """마지막 1분봉 시각이 시초가 창(진입 허용 시간대)에 해당하는지."""
+  """마지막 1분봉 시각이 시초가 창(진입 허용 시간대)에 해당하는지.
+
+  개장 직후(시초가) 시간대 개념을 진입 알림에 적용 — 창 밖(한국 심야~새벽)에는
+  진입 신호를 스킵해 잠든 사이 알림/주문 입력 부담을 없앤다. 청산(매도) 알림은
+  이 필터와 무관하게 장중 내내 동작한다. 타임존 정보가 없으면 필터 생략.
+  """
   if ts.tzinfo is None:
     return True
   if window is None:
     window = load_entry_window()
   if not window.get("ENABLED", True):
     return True
-  
-  start_str = window.get("START", ENTRY_WINDOW_DEFAULT["START"])
-  end_str = window.get("END", ENTRY_WINDOW_DEFAULT["END"])
-  
-  # 파싱 실패 시 기본값 보호 적용
-  try:
-    sh, sm = map(int, start_str.split(":"))
-    eh, em = map(int, end_str.split(":"))
-    start_min = sh * 60 + sm
-    end_min = eh * 60 + em
-  except (ValueError, KeyError, AttributeError):
+
+  # 손상값은 차단 해제 대신 기본 창으로 폴백 — 설정 실수로 필터가 풀려
+  # 심야 진입 알림을 받는 사태를 방지 (fail-safe, '기본값이 곧 기본 보호').
+  start_min, start_ok = _parse_time_str(window.get("START"), 9 * 60 + 30)
+  end_min, end_ok = _parse_time_str(window.get("END"), 11 * 60 + 30)
+  if not (start_ok and end_ok):
     print(
         f"[경고] ENTRY_WINDOW 설정 오류 — 기본 시초가 창 적용 "
         f"({ENTRY_WINDOW_DEFAULT['START']}~{ENTRY_WINDOW_DEFAULT['END']})"
     )
-    start_min = _parse_time_str(ENTRY_WINDOW_DEFAULT["START"], 9 * 60 + 30)
-    end_min = _parse_time_str(ENTRY_WINDOW_DEFAULT["END"], 11 * 60 + 30)
 
   minutes = ts.hour * 60 + ts.minute
   return start_min <= minutes < end_min
 
 
 def load_quiet_hours():
-  """portfolio_config.json의 FVG.EXIT_ALERT_QUIET_HOURS 설정 로드 — 청산 알림 무음 시간대."""
+  """portfolio_config.json의 FVG.EXIT_ALERT_QUIET_HOURS 설정 로드 — 청산 알림 무음 시간대.
+
+  밤~새벽(한국 시간)에는 청산(TP/손절/당일 마감) 알림을 @멘션 없이 조용히 보낸다.
+  설정이 없거나 손상 시 기본값(00:00~07:00 KST)으로 안전하게 동작한다.
+  """
   return load_config_section("EXIT_ALERT_QUIET_HOURS", EXIT_ALERT_QUIET_HOURS_DEFAULT)
 
 
 def in_quiet_hours(quiet=None, now=None):
-  """현재 시각이 청산 알림 무음 시간대(KST)에 해당하는지."""
+  """현재 시각이 청산 알림 무음 시간대(KST)에 해당하는지.
+
+  진입 알림과 달리 청산 알림은 밤~새벽에도 자동 체결되므로, 이 시간대에는
+  @멘션 없이 메시지만 보낸다 (아침에 확인하는 기록). 자정을 넘는 구간
+  (예: 22:00~06:00)도 지원한다. now 인자는 테스트용 오버라이드.
+  """
   if quiet is None:
     quiet = load_quiet_hours()
   if not quiet.get("ENABLED", True):
     return False
 
-  start_str = quiet.get("START", EXIT_ALERT_QUIET_HOURS_DEFAULT["START"])
-  end_str = quiet.get("END", EXIT_ALERT_QUIET_HOURS_DEFAULT["END"])
-
-  try:
-    sh, sm = map(int, start_str.split(":"))
-    eh, em = map(int, end_str.split(":"))
-    start = sh * 60 + sm
-    end = eh * 60 + em
-  except (ValueError, KeyError, AttributeError):
+  # 손상값은 해제 대신 기본값으로 폴백 — 설정 실수로 무음이 풀리는 사태 방지.
+  start, start_ok = _parse_time_str(quiet.get("START"), 0)
+  end, end_ok = _parse_time_str(quiet.get("END"), 7 * 60)
+  if not (start_ok and end_ok):
     print(
         f"[경고] EXIT_ALERT_QUIET_HOURS 설정 오류 — 기본 무음 시간대 적용 "
         f"({EXIT_ALERT_QUIET_HOURS_DEFAULT['START']}~{EXIT_ALERT_QUIET_HOURS_DEFAULT['END']})"
     )
-    start = _parse_time_str(EXIT_ALERT_QUIET_HOURS_DEFAULT["START"], 0)
-    end = _parse_time_str(EXIT_ALERT_QUIET_HOURS_DEFAULT["END"], 7 * 60)
 
   if now is None:
+    # 한국은 서머타임 없음 → 고정 UTC+9 (fvg_bot_eval._kst_today와 동일 패턴).
+    # pandas/tzdata 의존 없이 표준 라이브러리만 사용 — tzdata 부재 환경에서도
+    # 청산 알림 경로가 크래시하지 않도록 한다. now 인자는 테스트용 오버라이드.
     now = datetime.now(timezone(timedelta(hours=9)))
   minutes = now.hour * 60 + now.minute
 
   if start <= end:
     return start <= minutes < end
+  # 자정을 넘는 구간 (예: 22:00~06:00) — 시작 이후 or 종료 이전
   return minutes >= start or minutes < end
 
 
@@ -302,6 +324,7 @@ def analyze_htf_trend(df):
       if last_high is None:
         last_high = s
       elif s["price"] > last_high["price"]:
+        # 상승 고점 돌파 — 하락장이었다면 반전(CHoCH_UP), 아니면 추세 지속(BOS_UP)
         last_event = "CHoCH_UP" if direction == "down" else "BOS_UP"
         direction = "up"
         last_high = s
@@ -311,6 +334,7 @@ def analyze_htf_trend(df):
       if last_low is None:
         last_low = s
       elif s["price"] < last_low["price"]:
+        # 하락 저점 돌파 — 상승장이었다면 반전(CHoCH_DOWN), 아니면 추세 지속(BOS_DOWN)
         last_event = "CHoCH_DOWN" if direction == "up" else "BOS_DOWN"
         direction = "down"
         last_low = s
@@ -325,7 +349,12 @@ def analyze_htf_trend(df):
 
 
 def find_bullish_fvgs(df):
-  """상승 FVG 탐지 — 3개 캔들 시퀀스에서 c1의 고점 < c3의 저점 (영상 정의)."""
+  """상승 FVG 탐지 — 3개 캔들 시퀀스에서 c1의 고점 < c3의 저점 (영상 정의).
+
+  노이즈 방지: 가격 대비 최소 높이(0.05%) 미만 갭 제외. 연속 임펄스로 겹치는
+  박스는 허용하되, 진입 후보 선정(build_long_signal)에서 신선도·CHoCH 연관성·
+  모멘텀(상단 돌파 후 되돌림) 검증으로 걸러낸다.
+  """
   high = df["High"].to_numpy()
   low = df["Low"].to_numpy()
   fvgs = []
@@ -350,9 +379,13 @@ def find_bullish_fvgs(df):
 def find_bullish_choch(df, swings):
   """1분봉 상승 CHoCH(캐릭터 변화) 탐지 — 영상 진입 모델 Step 1.
 
-  [Phase 1 수정 완료]
-  - 이전 고점을 비교할 때 `next(...)` 대신 `max(..., key=lambda p: p["idx"])`를 사용하여
-    “가장 최근의 이전 고점”을 정확히 기준으로 삼도록 개선.
+  정의: 하락 구조(이전 고점보다 낮은 고점) 후, 종가가 그 스윙 고점 위로 마감.
+  반환: dict(break_idx, high_price, low_price) — 가장 최근 CHoCH
+    - high_price: 돌파된 스윙 고점
+    - low_price: 그 고점 직전 마지막 스윙 저점 (구조 기반 손절 기준)
+  [Phase 1 수정] 이전 고점 비교 기준을 '가장 최근의 이전 고점'(max by idx)으로 변경
+  — 기존 next()는 첫/오래된 이전 고점을 기준으로 비교해 유효한 낮은 고점 반전
+  신호를 잘못 걸러내던 버그를 수정.
   """
   highs = [s for s in swings if s["kind"] == "high"]
   lows = [s for s in swings if s["kind"] == "low"]
@@ -384,6 +417,8 @@ def find_bullish_choch(df, swings):
     if last_low is None:
       continue
 
+    # 영상 Step 1 "higher high after a lower low": 낮은 고점 직전의 최근 두 저점이
+    # 하락 구조(저점 하락)여야 반전 CHoCH로 인정 — 상승 추세 내 풀백 돌파는 BOS(추세 지속)
     lows_before = [l for l in lows if l["idx"] < h["idx"]]
     if (
         len(lows_before) >= 2
@@ -402,7 +437,10 @@ def find_bullish_choch(df, swings):
 
 
 def fvg_aligned_with_htf(fvg, htf_fvgs):
-  """1분봉 FVG 박스가 최근 HTF(15분) 상승 FVG 존과 겹치는지 (참고 정보용)."""
+  """1분봉 FVG 박스가 최근 HTF(15분) 상승 FVG 존과 겹치는지 (참고 정보용).
+
+  영상 예제: 1분봉 CHoCH가 15분봉 FVG 존에서 반응하며 시작 — 고품질 셋업의 신호.
+  """
   for g in htf_fvgs:
     if fvg["bottom"] <= g["top"] and fvg["top"] >= g["bottom"]:
       return True
@@ -410,23 +448,32 @@ def fvg_aligned_with_htf(fvg, htf_fvgs):
 
 
 def build_long_signal(df_ltf, df_htf):
-  """1분봉 롱 진입 모델: HTF 추세 필터 → CHoCH → FVG → 풀백 → 구조 손절."""
+  """1분봉 롱 진입 모델: HTF 추세 필터 → CHoCH → FVG → 풀백 → 구조 손절.
+
+  모든 조건 충족 시 시그널 dict 반환, 아니면 None. (영상 3단계 진입 모델)
+  """
   if df_ltf is None or df_htf is None or len(df_ltf) < MIN_LTF_BARS:
     return None
 
+  # ① HTF(15분) 추세 필터 — 상승장일 때만 롱 허용
   htf = analyze_htf_trend(df_htf)
   if htf["direction"] != "up":
     return None
+  # 보수 가드: 최근 확정 구조 저점 아래로 종가 이탈 = CHoCH 직전 상황, 스킵
   if (
       htf["last_low_price"] is not None
       and df_htf["Close"].iloc[-1] < htf["last_low_price"]
   ):
     return None
 
+  # ② Step 1: 1분봉 CHoCH
   swings = find_swings(df_ltf)
   choch = find_bullish_choch(df_ltf, swings)
   if choch is None:
     return None
+  # 구조 연속성: CHoCH 이후 현재까지 CHoCH 저점을 이탈한 적이 없어야 함.
+  # 중간에 구조 반전(저점 이탈)이 있었다면 오래된 CHoCH와 최근 FVG의 잘못된
+  # 페어링을 방지하고 시그널을 무효화한다 (손절 과대화 방지).
   if df_ltf["Low"].iloc[choch["break_idx"]:].min() < choch["low_price"]:
     return None
 
@@ -517,10 +564,6 @@ def fetch_htf_data(ticker):
 
 def fetch_ltf_data(ticker):
   return _download(ticker, LTF_PERIOD, LTF_INTERVAL)
-
-
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CONFIG_PATH = os.path.join(BASE_DIR, "portfolio_config.json")
 
 
 def build_message(signal):
