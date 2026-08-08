@@ -86,6 +86,8 @@ jobs:
           cp swing_dashboard.html /tmp/swing_dash.html
           cp swing_manifest.webmanifest /tmp/swing_manifest.webmanifest
           cp swing_icon.png /tmp/swing_icon.png
+          cp swing_icon_192.png /tmp/swing_icon_192.png
+          cp sw.js /tmp/sw.js
 
           # 기존 gh-pages 가 있으면 그 위에, 없으면 main 기준 빈 브랜치로 생성
           git fetch origin gh-pages:refs/remotes/origin/gh-pages 2>/dev/null || true
@@ -100,7 +102,9 @@ jobs:
           cp /tmp/swing_dash.html index.html
           cp /tmp/swing_manifest.webmanifest manifest.webmanifest
           cp /tmp/swing_icon.png swing_icon.png
-          git add index.html manifest.webmanifest swing_icon.png
+          cp /tmp/swing_icon_192.png swing_icon_192.png
+          cp /tmp/sw.js sw.js
+          git add index.html manifest.webmanifest swing_icon.png swing_icon_192.png sw.js
           if git diff --quiet --cached origin/gh-pages >/dev/null 2>&1; then
             echo "변경 없음 — 배포 생략"
           else

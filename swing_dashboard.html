@@ -14,6 +14,11 @@
 <meta name="apple-mobile-web-app-title" content="스윙 알리미">
 <meta name="mobile-web-app-capable" content="yes">
 <title>스윙 투자 알리미</title>
+
+<script>
+if ('serviceWorker' in navigator) { navigator.serviceWorker.register('sw.js'); }
+</script>
+
 <style>
 :root{
   --bg:#0b0e14; --card:#141a26; --border:#20293b; --text:#e6edf3; --muted:#8b949e;
@@ -73,7 +78,7 @@ footer{color:#4b5563;font-size:11px;text-align:center;margin-top:8px;line-height
 <body>
 <header>
   <h1>📈 스윙 투자 알리미</h1>
-  <div class="sub">업데이트 2026-08-08 21:56 · 종가 기준 2026-08-08 08:56 (미국)<span class="pages">· <a href="https://bs02089-sys.github.io/strategy_engine/" target="_blank" rel="noopener">🌐 라이브 열기</a></span></div>
+  <div class="sub">업데이트 2026-08-08 22:20 · 종가 기준 2026-08-08 09:20 (미국)<span class="pages">· <a href="https://bs02089-sys.github.io/strategy_engine/" target="_blank" rel="noopener">🌐 라이브 열기</a></span></div>
   <div class="chips">
     <span class="chip gray">🚨 매도 알람 0</span>
     <span class="chip green">🟢 매수 구간 1</span>

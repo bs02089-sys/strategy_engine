@@ -10,6 +10,12 @@
     "theme_color": "#0b0e14",
     "icons": [
         {
+            "src": "swing_icon_192.png",
+            "sizes": "192x192",
+            "type": "image/png",
+            "purpose": "any"
+        },
+        {
             "src": "swing_icon.png",
             "sizes": "512x512",
             "type": "image/png",
