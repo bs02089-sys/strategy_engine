@@ -17,8 +17,13 @@
             "SELL_ALARM_SENT": false,
             "SELL_IMMINENT_SENT": false,
             "ZONE_ALERTS": {
-                "hit": [],
-                "imminent": []
+                "hit": [
+                    5,
+                    10
+                ],
+                "imminent": [
+                    15
+                ]
             }
         }
     }
