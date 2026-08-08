@@ -6,7 +6,6 @@
 전략: "This Boring Strategy Made Me $53,478 In A Month" (Craig Percoo)
   https://youtu.be/kngWJvQNrgQ
   시장 구조(break of structure / change of character) + 모멘텀(FVG) 2축 전략.
-
 영상 로직 → 코드 구현 매핑:
   1. HTF(15분봉) 시장 구조 분석 (analyze_htf_trend)
      - BOS/CHoCH 기반 추세 방향 판별 — 상승장일 때만 롱 시그널 허용
