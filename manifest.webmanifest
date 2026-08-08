@@ -1,0 +1,25 @@
+{
+    "name": "스윙 투자 알리미",
+    "short_name": "스윙 알리미",
+    "description": "MDD 구간 매수 / 스윙 목표 매도 시점 알리미 대시보드",
+    "start_url": "/strategy_engine/",
+    "scope": "/strategy_engine/",
+    "display": "standalone",
+    "orientation": "portrait",
+    "background_color": "#0b0e14",
+    "theme_color": "#0b0e14",
+    "icons": [
+        {
+            "src": "swing_icon.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "any"
+        },
+        {
+            "src": "swing_icon.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "maskable"
+        }
+    ]
+}
