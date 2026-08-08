@@ -275,6 +275,24 @@ pandas_market_calendars  # NYSE 휴장일 계산
 | `ATH_DCA_ENTERED_ON` | 비상 모드 진입일 — 비상 모드 유지 클럭 기준 (자동 기록) |
 | `ROTATION_EXIT_DAYS` | ROTATION_3M 만기 영업일 수 |
 
+#### FVG 봇 설정
+
+| 항목 | 설명 |
+|------|------|
+| `FVG.ENTRY_WINDOW` | FVG **진입 알림 허용 시간대** (ET, `HH:MM` 24h 형식) — `ENABLED`/`START`/`END` |
+| `FVG.ENTRY_WINDOW.ENABLED` | `true`면 시초가 창 필터 활성 (기본 `true`) |
+| `FVG.ENTRY_WINDOW.START` | 창 시작 시각 (기본 `"09:30"` = 개장) |
+| `FVG.ENTRY_WINDOW.END` | 창 종료 시각 (기본 `"11:30"` = 개장 후 2시간) |
+| `FVG.EXIT_ALERT_QUIET_HOURS` | 청산 알림 **무음 시간대** (KST, `HH:MM` 24h 형식) — `ENABLED`/`START`/`END` |
+| `FVG.EXIT_ALERT_QUIET_HOURS.ENABLED` | `true`면 무음 시간대 활성 (기본 `true`) |
+| `FVG.EXIT_ALERT_QUIET_HOURS.START` | 무음 시작 시각 (기본 `"00:00"` KST) |
+| `FVG.EXIT_ALERT_QUIET_HOURS.END` | 무음 종료 시각 (기본 `"07:00"` KST — 자정을 넘는 구간도 지원) |
+
+> 시초가 창 밖에는 **진입 알림만** 차단됩니다. 청산(TP/손절/당일 마감) 알림은 창과
+> 무관하게 장중 내내 동작하므로 자동 청산 기록을 놓치지 않습니다. 단, **무음 시간대
+> (KST 밤~새벽)에는 청산 알림이 @멘션 없이 조용히 전송**됩니다 — 알림 자체는 계속
+> 발송되며(아침 기록용), 멘션만 빠집니다.
+
 ### LOC 목표가 계산식
 
 ```
@@ -374,7 +392,7 @@ python3 DCA_MA_strategy_flowchart.py
 |--------|------------|------|
 | 예약 실행 | 매일 23:14 (월~금) | 바닥 단계 추적 |
 
-### `fvg_signal.yml` — FVG 신호 봇 (TQQQ/SOXL, 클라우드 백업)
+### `fvg_signal.yml` — FVG 신호 봇 (TQQQ, 클라우드 백업)
 
 | 트리거 | 시간 (UTC) | 설명 |
 |--------|------------|------|
@@ -383,10 +401,20 @@ python3 DCA_MA_strategy_flowchart.py
 
 > - 1분봉 CHoCH → FVG 중간점 풀백 진입 모델 + HTF(15분) 추세 필터 (유튜브 Craig Percoo 전략).
 > - 알림만 전송하며 실제 주문은 자동 실행하지 않습니다 (수동 매매). `DISCORD_USER_ID` 설정 시 멘션 3회.
+> - **시초가 창 필터**: 진입 알림은 개장 후 2시간(ET 09:30~11:30) 안에서만 발송 — 창 밖
+>   (한국 심야~새벽)에는 진입 신호를 스킵해 잠든 사이 알림/주문 입력 부담을 제거. 청산
+>   (TP/손절/당일 마감) 알림은 창과 무관하게 장중 내내 동작 (자동 청산 기록). 창 설정:
+>   `portfolio_config.json` → `FVG.ENTRY_WINDOW` (ENABLED/START/END).
+> - **청산 알림 무음 시간대**: 밤~새벽(한국 시간, 기본 00:00~07:00)에는 청산 알림이
+>   @멘션 없이 조용히 전송됩니다 (잠을 깨우지 않는 아침 기록 — 알림 자체는 계속 발송).
+>   설정: `portfolio_config.json` → `FVG.EXIT_ALERT_QUIET_HOURS` (ENABLED/START/END, KST).
 > - 중복 알림은 `fvg_alerts.json` 파일 기반 쿨다운(1시간)으로 방지 — 로컬 크론과 git으로 상태 공유.
 > - **청산(매도) 알림**: 진입 알림 시 포지션을 `fvg_positions.json`에 기록 → 이후 익절(TP) 도달·손절(SL) 도달·당일 마감 임박(ET 15:40) 시 매도 알림 자동 전송 (한 봉에 겹치면 손절 우선).
 > - **무인(수면) 운용**: 나무증권 기준 주문 3건 — ①시세포착주문 신규편입(손실제한+이익실현 % 동시 등록, 매수 체결 순간 서버 감시 자동 시작 — 바이&셀은 손절 없음으로 제외) + ②지정가 매수(FVG 중간점) + ③MOC(마감 경매 자동 청산)로 자는 동안 청산 자동 처리, 이후 TP/손절/MOC 알림은 아침에 확인하는 기록용. 상세: `FVG_NAMYU_SETUP.md`
+> - **시초가 창 필터로 진입 시점이 한국 저녁으로 제한**: 진입 알림은 개장 후 2시간(KST 저녁~밤) 안에만 오므로, 알림을 받고 주문을 거는 행위가 잠자는 시간에 발생하지 않습니다.
 > - 백테스트: `fvg_bot_backtest.py` (5분봉 근사 — **당일 마감 운용이 핵심**, 야간 보유 시 MDD 급증).
+>   **시초가 창(ET 09:30~11:30, `FVG.ENTRY_WINDOW` 기준) 내/외 진입 성과 비교** 포함 —
+>   창 필터가 성과에 미치는 영향을 과거 데이터로 확인.
 
 ### FVG 봇 배포 — 로컬 크론 (매분, 주력) + GitHub Actions (5분, 백업)
 
@@ -404,7 +432,8 @@ python3 setup_fvg_cron.py --remove    # 제거
 
 > - 로컬 래퍼(`fvg_local_cron.sh`)가 ET 장중을 1차 확인 → 장중 밖엔 파이썬 실행 없음 (이중 방어).
 > - GitHub Actions는 `secrets.DISCORD_WEBHOOK`/`DISCORD_USER_ID`로 알림을 보냅니다 (로컬 .env와 무관).
-> - 장중 알림은 Discord 멘션 3회 포함 — 잠든 사이에도 모바일 알림이 울립니다.
+> - 진입 알림은 시초가 창(개장 후 2시간 = KST 저녁~밤) 안에서만 발송되며 Discord 멘션
+>   3회 포함 — 이후 TP/손절/MOC 청산 알림은 아침에 확인하는 기록용입니다.
 > - **당일 마감 운용**: 진입 후 당일 15:55 ET까지 미해결 시 청산 권장 (백테스트 근거 — 야간 보유 시 MDD 급증).
 
 ### 실전 평가 (fvg_bot_eval.py)
@@ -424,6 +453,10 @@ python3 fvg_bot_eval.py --path test.json   # 다른 포지션 파일로 테스�
 > - **수수료 반영 (기본)**: 나무멤버스 0.07%가 매수·매도 각각 부과됩니다 (왕복 0.14%).
 >   순수익률 = 청산가×(1−fee) / 진입가×(1+fee) − 1 — `--fee 0`으로 끌 수 있습니다.
 > - 청산 사유 분포(TP 익절 / SL 손절 / DAY_CLOSE 당일 마감)와 종목별 통계 포함.
+> - **시초가 창 진입 비교**: 창 내(기본 ET 09:30~11:30, `portfolio_config.json` →
+>   `FVG.ENTRY_WINDOW` 기준) 진입 vs 창 외 진입 포지션의 승률/평균/합계를 나란히
+>   비교 표시 — 시초가 창 필터의 실전 성과 영향을 확인. 타임존 없는 과거 기록은
+>   분류 불가로 별도 집계.
 > - 미청산(OPEN) 포지션은 평가에서 제외하고 별도로 표시합니다.
 > - 포지션은 **CLOSED 후 45일간 보존**되므로 한 달(20영업일) 단위 평가가 가능합니다.
 > - `--discord`: 리포트 요약을 Discord로 전송 (아침 자동화 — 표준 라이브러리만 사용,
