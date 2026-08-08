@@ -13,6 +13,8 @@
     - 기본: 당일 장중 해결 못 하면 장 마감 종가로 정리 (데이 트레이딩 모델)
     - --overnight: SL/TP 도달까지 다음 날 보유 허용
   - 지표: 승률/평균/총수익/MDD/PF/최대손실/MAE/MFE (프로젝트 백테스트 표준 양식)
+  - 시초가 창 진입 비교 — 창 내(portfolio_config.json > FVG > ENTRY_WINDOW, 기본
+    ET 09:30~11:30) 진입 vs 창 외 진입 트레이드의 승률/평균/합계/PF를 나란히 출력
   - HTF(기본 1시간봉)는 미완성 봉 제외 — 미래 정보 유출 방지 (실전 봇과 동일 방침)
 
 모델링 유의점:
@@ -21,7 +23,7 @@
   - 신호는 최근 60일(5분봉 한도)만 — 장기 경기순환/레짐 편향이 있을 수 있다.
 
 사용 예:
-  python3 fvg_bot_backtest.py                       # TQQQ+SOXL, 5m+1h HTF, 60일
+  python3 fvg_bot_backtest.py                       # TQQQ, 5m+1h HTF, 60일 (실전 봇과 동일 종목)
   python3 fvg_bot_backtest.py --ticker TQQQ --rr 2.0
   python3 fvg_bot_backtest.py --overnight           # 익일 보유 허용
   python3 fvg_bot_backtest.py --ltf 15m --days 60   # 더 느린 근사
@@ -150,6 +152,26 @@ def backtest(df_ltf, df_htf, rr, overnight, htf_minutes):
   return trades, np.array(eq)
 
 
+def classify_entry_window(ts, window):
+  """진입 시각을 시초가 창(ET 벽시각) 안/밖으로 분류 — 'in'/'out'.
+
+  백테스트 분석이므로 ENABLED는 무시하고 START/END 시각 경계만 사용한다
+  (fvg_bot_eval.py의 실전 분류와 동일 의미). naive 시각은 창 외로 취급.
+  """
+  if ts.tzinfo is None:
+    return "out"
+  try:
+    sh, sm = map(int, window["START"].split(":"))
+    eh, em = map(int, window["END"].split(":"))
+  except (ValueError, KeyError, AttributeError):
+    sh, sm = map(int, bot.ENTRY_WINDOW_DEFAULT["START"].split(":"))
+    eh, em = map(int, bot.ENTRY_WINDOW_DEFAULT["END"].split(":"))
+  minutes = ts.hour * 60 + ts.minute
+  start = sh * 60 + sm
+  end = eh * 60 + em
+  return "in" if start <= minutes < end else "out"
+
+
 def summarize(ticker, label, trades, eq, ltf_minutes):
   print(f"\n[{ticker}] {label}")
   if not trades:
@@ -173,6 +195,24 @@ def summarize(ticker, label, trades, eq, ltf_minutes):
           f"(최대 이익의 {giveback:.0f}% 반납)")
   else:
     print(f"  참고: MFE 평균 {mfe_avg:+.1f}% vs 실현 평균 {ret_avg:+.1f}% (손실 구간)")
+
+  # 시초가 창 진입 vs 창 외 진입 성과 비교 (portfolio_config.json FVG.ENTRY_WINDOW)
+  window = bot.load_entry_window()
+  groups = {"in": [], "out": []}
+  for t in trades:
+    groups[classify_entry_window(t[0], window)].append(t[4])
+  print(f"\n  [시초가 창 진입 비교] (기준 {window['START']}~{window['END']} ET)")
+  for name, key in (("창 내 진입", "in"), ("창 외 진입", "out")):
+    arr = np.array(groups[key])
+    if not len(arr):
+      print(f"    {name:<6} 0회")
+      continue
+    wins = arr[arr > 0]
+    losses = arr[arr <= 0]
+    pf = wins.sum() / abs(losses.sum()) if len(losses) else float("inf")
+    print(f"    {name:<6} {len(arr):>3}회 | 승률 {len(wins) / len(arr) * 100:.0f}% | "
+          f"평균 {arr.mean() * 100:+.1f}% | 합계 {arr.sum() * 100:+.1f}% | PF {pf:.1f}")
+
   print(f"  {'진입':>16} {'청산':>16} {'보유h':>5} {'수익':>7} {'MAE':>7} {'MFE':>7}")
   for t in trades:
     print(f"  {t[0].strftime('%y-%m-%d %H:%M'):>16} {t[2].strftime('%y-%m-%d %H:%M'):>16} "
@@ -212,7 +252,7 @@ def parse_tf(s):
 
 def main():
   p = argparse.ArgumentParser(description="FVG 전략 백테스트 (fvg_signal_bot.py 로직 미러)")
-  p.add_argument("--ticker", default="TQQQ,SOXL", help="종목 (콤마 구분, 기본 TQQQ,SOXL)")
+  p.add_argument("--ticker", default="TQQQ", help="종목 (콤마 구분, 기본 TQQQ — 실전 봇 단일 종목) — 과거 SOXL 비교는 --ticker SOXL")
   p.add_argument("--ltf", default="5m", help="진입 타임프레임 (5m/15m, 기본 5m — yfinance 1m은 8일 한도)")
   p.add_argument("--htf", default="1h", help="HTF 추세 필터 타임프레임 (기본 1h)")
   p.add_argument("--days", type=int, default=60, help="조회 기간(일, 기본 60 — 5m 최대)")

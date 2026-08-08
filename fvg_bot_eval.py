@@ -15,6 +15,9 @@ fvg_signal_bot.py가 진입 알림 시 fvg_positions.json에 기록한 포지션
     수수료 반영 (--fee, 기본 0.0007 = 나무멤버스 0.07%. 매수·매도 각각 부과 → 왕복 0.14%)
       순수익 = 청산가×(1-fee) / 진입가×(1+fee) - 1   (--fee 0 = 수수료 미반영, 백테스트 동일)
   - 손실제한/이익실현 % 필드가 있으면 함께 표시 (나무 신규편입 입력값 확인용)
+  - 시초가 창 진입 비교 — 창 내(portfolio_config.json > FVG > ENTRY_WINDOW, 기본
+    ET 09:30~11:30) 진입 vs 창 외 진입 포지션의 승률/평균/합계 비교 표시
+    (시초가 창 필터의 실전 성과 영향을 데이터로 확인)
 
 사용 예:
   python3 fvg_bot_eval.py                       # 전체 평가 리포트 (나무멤버스 0.07% 반영)
@@ -70,6 +73,14 @@ REASON_LABEL = {
     "DAY_CLOSE": "당일 마감",
 }
 
+# 시초가 창 (진입 시간대 분류) — portfolio_config.json > FVG > ENTRY_WINDOW (ET 시각)
+# fvg_signal_bot.py에도 같은 로더가 있지만, 이 파일은 표준 라이브러리 전용이라
+# pandas/yfinance를 끌어들이는 fvg_signal_bot을 import할 수 없다 — 의도적 중복.
+CONFIG_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "portfolio_config.json"
+)
+ENTRY_WINDOW_DEFAULT = {"ENABLED": True, "START": "09:30", "END": "11:30"}
+
 
 def load_positions(path):
   """fvg_positions.json 로드 — 없거나 손상 시 빈 dict 반환 (크래시 방지)."""
@@ -112,6 +123,85 @@ def trade_ret(p, fee=FEE_DEFAULT):
 
 def fmt_pct(v, signed=True):
   return f"{v * 100:+.1f}%" if signed else f"{v * 100:.1f}%"
+
+
+def load_entry_window():
+  """portfolio_config.json의 FVG.ENTRY_WINDOW 설정 로드 — 시초가 창 (ET, HH:MM).
+
+  '창 내/창 외 진입' 분류 기준. 없거나 손상 시 기본값(09:30~11:30)으로 동작
+  (fvg_signal_bot.py와 동일한 폴백).
+  """
+  default = dict(ENTRY_WINDOW_DEFAULT)
+  try:
+    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+      cfg = json.load(f)
+    w = (cfg.get("FVG") or {}).get("ENTRY_WINDOW") or {}
+    return {**default, **{k: v for k, v in w.items() if k in default}}
+  except (OSError, json.JSONDecodeError, AttributeError):
+    return default
+
+
+def classify_entry_window(t, window):
+  """진입 시각을 시초가 창(ET 벽시각) 안/밖으로 분류 — 'in'/'out' 반환.
+
+  naive 시각(타임존 없음)이거나 파싱 불가(진입 시각 누락)면 None 반환 (분류 제외).
+  ET가 아닌 타임존 기록은 America/New_York로 변환해 벽시각 비교. 설정값이
+  망가졌으면 기본 창(09:30~11:30)으로 폴백.
+  """
+  if t is None or t.tzinfo is None:
+    return None
+  try:
+    sh, sm = map(int, window["START"].split(":"))
+    eh, em = map(int, window["END"].split(":"))
+  except (ValueError, KeyError, AttributeError):
+    sh, sm = map(int, ENTRY_WINDOW_DEFAULT["START"].split(":"))
+    eh, em = map(int, ENTRY_WINDOW_DEFAULT["END"].split(":"))
+  try:
+    from zoneinfo import ZoneInfo
+    et = t.astimezone(ZoneInfo("America/New_York"))
+  except Exception:
+    # zoneinfo 불가 환경 폴백: 오프셋이 ET(-4/-5)와 일치하는 기록만 벽시각 사용
+    if t.utcoffset() not in (timedelta(hours=-4), timedelta(hours=-5)):
+      return None
+    et = t
+  minutes = et.hour * 60 + et.minute
+  start = sh * 60 + sm
+  end = eh * 60 + em
+  return "in" if start <= minutes < end else "out"
+
+
+def build_window_compare(rows, window):
+  """시초가 창 진입 vs 창 외 진입 성과 비교 — 승률/평균/합계.
+
+  rows: build_report의 rows (ret 포함). 반환:
+    {"label": "09:30~11:30 ET", "in": stats, "out": stats, "na": 분류 불가 수}
+  stats = {n, win_rate, avg, total} — naive/누락 진입 시각은 na로 집계.
+  """
+  groups = {"in": [], "out": []}
+  na = 0
+  for r in rows:
+    bucket = classify_entry_window(r["entry_t"], window)
+    if bucket is None:
+      na += 1
+    else:
+      groups[bucket].append(r["ret"])
+
+  def _stats(rets):
+    st = bucket_stats(rets)  # n/승률/합계 재사용 (기간 집계와 동일 산식)
+    n = st["n"]
+    return {
+        "n": n,
+        "win_rate": st["win_rate"],
+        "avg": st["total"] / n if n else 0.0,
+        "total": st["total"],
+    }
+
+  return {
+      "label": f"{window['START']}~{window['END']} ET",
+      "in": _stats(groups["in"]),
+      "out": _stats(groups["out"]),
+      "na": na,
+  }
 
 
 def build_report(positions, days=None, ticker=None, fee=FEE_DEFAULT):
@@ -197,10 +287,13 @@ def build_report(positions, days=None, ticker=None, fee=FEE_DEFAULT):
     by_ticker[t]["n"] += 1
     by_ticker[t]["rets"].append(r["ret"])
 
+  # 시초가 창 진입 vs 창 외 진입 비교 (분류 기준: portfolio_config.json FVG.ENTRY_WINDOW)
+  by_window = build_window_compare(rows, load_entry_window())
+
   return {
       "rows": rows, "stats": stats, "mdd": mdd,
       "by_reason": by_reason, "by_ticker": by_ticker, "open_pos": open_pos,
-      "fee": fee,
+      "by_window": by_window, "fee": fee,
   }
 
 
@@ -372,6 +465,22 @@ def print_report(rep, path, days, ticker):
       print(f"    {t:<6} {r['n']:>3}회 | 승률 "
             f"{sum(1 for x in r['rets'] if x > 0) / len(r['rets']) * 100:.0f}% | "
             f"평균 {fmt_pct(avg)} | 합계 {fmt_pct(sum(r['rets']))}")
+
+  # 시초가 창 진입 비교
+  bw = rep["by_window"]
+  print(f"\n  [시초가 창 진입 비교] (기준 {bw['label']})")
+  if bw["in"]["n"] == 0 and bw["out"]["n"] == 0:
+    print(f"    (진입 시각 분류 불가 {bw['na']}건 — 타임존 없는 기록)")
+  else:
+    for label, key in (("창 내 진입", "in"), ("창 외 진입", "out")):
+      s = bw[key]
+      if s["n"] == 0:
+        print(f"    {label:<6} 0회")
+        continue
+      print(f"    {label:<6} {s['n']:>3}회 | 승률 {s['win_rate']:.0f}% | "
+            f"평균 {fmt_pct(s['avg'])} | 합계 {fmt_pct(s['total'])}")
+    if bw["na"]:
+      print(f"    (진입 시각 분류 불가 {bw['na']}건 — 타임존 없는 기록)")
 
   # 개별 트레이드
   print(f"\n  {'진입':>16} {'청산':>16} {'종목':>5} {'사유':<8} {'수익':>7} {'진입가':>8} {'청산가':>8}")
@@ -556,6 +665,21 @@ def build_discord_message(rep, days, ticker):
       lines.append(f"· {t} {r['n']}회 | 승률 "
                    f"{sum(1 for x in r['rets'] if x > 0) / len(r['rets']) * 100:.0f}% | "
                    f"합계 {fmt_pct(sum(r['rets']))}")
+  bw = rep["by_window"]
+  lines.append("")
+  lines.append(f"[시초가 창 진입 비교] (기준 {bw['label']})")
+  if bw["in"]["n"] == 0 and bw["out"]["n"] == 0:
+    lines.append(f"· (진입 시각 분류 불가 {bw['na']}건)")
+  else:
+    for label, key in (("창 내", "in"), ("창 외", "out")):
+      s = bw[key]
+      if s["n"] == 0:
+        lines.append(f"· {label} 진입 0회")
+        continue
+      lines.append(f"· {label} 진입 {s['n']}회 | 승률 {s['win_rate']:.0f}% | "
+                   f"평균 {fmt_pct(s['avg'])} | 합계 {fmt_pct(s['total'])}")
+    if bw["na"]:
+      lines.append(f"· (진입 시각 분류 불가 {bw['na']}건)")
   lines.append("")
   lines.append("[최근 트레이드]")
   for r in list(reversed(rows[-10:])):

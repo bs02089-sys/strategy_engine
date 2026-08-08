@@ -31,8 +31,15 @@
      처리된다 → 이후 TP/손절/MOC 알림은 아침에 확인하는 기록. 상세: FVG_NAMYU_SETUP.md
 
   - 알림은 Discord Webhook으로만 전송 — 실제 주문 자동 실행 없음 (수동 매매)
-  - DISCORD_USER_ID 설정 시 알림에 @멘션 3회 포함 — 잠든 사이에도 모바일 알림이
-    강하게/여러 번 울리도록 웨이크업 강화 (멘션 3회 패턴)
+  - DISCORD_USER_ID 설정 시 알림에 @멘션 3회 포함 — 알림이 강하게/여러 번 울리도록
+    웨이크업 강화 (멘션 3회 패턴)
+  - 시초가 창 필터 — 진입 알림은 개장 후 2시간(ET 09:30~11:30) 안에서만 발송.
+    창 밖(한국 심야~새벽)에는 진입 신호를 스킵해 잠든 사이 알림/주문 입력 부담을
+    없앤다. 창은 portfolio_config.json > FVG > ENTRY_WINDOW 에서 설정(ENABLED/START/END).
+    청산(TP/손절/당일 마감) 알림은 창과 무관하게 장중 내내 동작한다 (자동 청산 기록).
+  - 청산 알림 무음 시간대 — 밤~새벽(한국 시간, 기본 00:00~07:00)에는 청산 알림을
+    @멘션 없이 조용히 전송해 잠을 깨우지 않는다 (알림 자체는 계속 발송 — 아침 기록).
+    설정: portfolio_config.json > FVG > EXIT_ALERT_QUIET_HOURS (ENABLED/START/END, KST).
   - 파일 기반 쿨다운(fvg_alerts.json)으로 동일 FVG 중복 알림 방지 — 로컬 크론과
     GitHub Actions(--once 백업)가 git으로 상태를 공유해 프로세스를 넘나드는
     교차 중복 알림도 차단한다 (loop 모드에서도 동일하게 동작)
@@ -49,7 +56,7 @@ import shutil
 import sys
 import tempfile
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 import requests
@@ -61,8 +68,9 @@ import yfinance as yf
 DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK", "YOUR_DISCORD_WEBHOOK")
 # 웨이크업 멘션: DISCORD_USER_ID 설정 시 시그널 알림에 @멘션 3회 포함 (멘션 3회 패턴)
 DISCORD_USER_ID = os.getenv("DISCORD_USER_ID", "YOUR_DISCORD_USER_ID")
-# 모니터링할 종목 리스트 (3배 레버리지 ETF — 영상의 고변동성 종목과 유사)
-TICKERS = ["TQQQ", "SOXL"]
+# 모니터링할 종목 (단일 TQQQ — 60일 백테스트에서 창 내 진입 효율·승률·MDD 모두
+# SOXL 대비 우위 확인, 2026-08 의사결정. SOXL 제거: 개장 직후 손절 취약 + 신호 빈도 낮음)
+TICKERS = ["TQQQ"]
 
 # 데이터: 15분봉 = HTF 컨텍스트(영상: 2~3일치), 1분봉 = 진입 모델 실행 차트
 HTF_INTERVAL = "15m"
@@ -87,10 +95,26 @@ SCAN_INTERVAL_SECONDS = 60   # 1분봉 기준 스캔 주기
 ALERT_COOLDOWN_SECONDS = 3600  # 동일 FVG 재알림 쿨다운 (1시간)
 HTF_CACHE_SECONDS = 900       # HTF(15분봉) 재수집 주기 — API 부하 절감
 
+# 시초가 창 (진입 알림 허용 시간대) — 기본: 개장 후 2시간(ET 09:30~11:30).
+# portfolio_config.json > FVG > ENTRY_WINDOW 에서 설정 (ENABLED/START/END, ET 24h 형식).
+# 진입 알림만 이 창 안에서 발송 — 잠자는 시간(한국 심야~새벽)의 진입 알림/멘션
+# 웨이크업과 주문 입력 부담을 없앤다. 청산(TP/손절/당일 마감) 알림은 제한 대상이
+# 아니므로 장중 내내 동작한다.
+ENTRY_WINDOW_DEFAULT = {"ENABLED": True, "START": "09:30", "END": "11:30"}
 
-def send_discord_webhook(message):
+# 청산 알림 무음 시간대 — 밤~새벽(한국 시간)에는 청산(TP/손절/당일 마감) 알림을
+# @멘션 없이 조용히 전송한다 (진입 알림과 달리 청산은 브로커가 자동 처리 — 알림은
+# 아침에 확인하는 기록이므로 잠을 깨울 필요가 없다).
+# portfolio_config.json > FVG > EXIT_ALERT_QUIET_HOURS 에서 설정 (ENABLED/START/END, KST 24h).
+# 자정을 넘는 구간(예: 22:00~06:00)도 지원한다.
+EXIT_ALERT_QUIET_HOURS_DEFAULT = {"ENABLED": True, "START": "00:00", "END": "07:00"}
+
+
+def send_discord_webhook(message, mention=True):
   """디스코드 채널로 메시지를 전송 (웹훅 미설정 시 stdout 출력).
 
+  mention=False면 @멘션 없이 메시지만 전송 — 무음 시간대(KST 밤~새벽)의 청산
+  알림에 사용해 잠을 깨우지 않는다 (알림 자체는 계속 발송, 아침 기록용).
   반환: 실제 Discord 전송 성공 여부(True/False). 웹훅 미설정(로컬 크론처럼
   알림 불필요 경로)이면 False를 반환해, 호출 측이 포지션 기록/쿨다운을
   건너뛰도록 한다 — 미전송 알림이 쿨다운을 선점해 GHA 알림을 막는 문제 방지.
@@ -101,12 +125,12 @@ def send_discord_webhook(message):
   # 웨이크업 강화: 멘션을 3회 반복 — 잠든 사이에도 Discord 모바일 알림이 강하게
   # 울리도록 (사용자가 직접 매매를 진행해야 하므로).
   # placeholder("YOUR_...")는 미설정 상태이므로 멘션에서 제외한다.
-  mention = (
+  mention_text = (
       " ".join([f"<@{DISCORD_USER_ID}>"] * 3)
-      if DISCORD_USER_ID and DISCORD_USER_ID != "YOUR_DISCORD_USER_ID"
+      if mention and DISCORD_USER_ID and DISCORD_USER_ID != "YOUR_DISCORD_USER_ID"
       else ""
   )
-  content = (mention + "\n" + message) if mention else message
+  content = (mention_text + "\n" + message) if mention_text else message
   payload = {"content": content}
   try:
     response = requests.post(DISCORD_WEBHOOK, json=payload, timeout=10)
@@ -134,6 +158,103 @@ def in_trading_session(ts):
     return (9 <= ts.hour <= 15) and not (ts.hour == 9 and ts.minute < 30)
   except Exception:
     return True
+
+
+def load_entry_window():
+  """portfolio_config.json의 FVG.ENTRY_WINDOW 설정 로드 — 시초가 창 (ET, 24h 형식).
+
+  진입 알림 허용 시간대. 설정이 없거나 손상 시 기본값(09:30~11:30, 개장 후 2시간)으로
+  안전하게 동작한다. 기본값이 곧 기본 보호이므로 설정 실패로 필터가 풀리지 않는다.
+  """
+  default = dict(ENTRY_WINDOW_DEFAULT)
+  try:
+    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+      cfg = json.load(f)
+    w = (cfg.get("FVG") or {}).get("ENTRY_WINDOW") or {}
+    return {**default, **{k: v for k, v in w.items() if k in default}}
+  except (OSError, json.JSONDecodeError, AttributeError):
+    return default
+
+
+def in_entry_window(ts, window=None):
+  """마지막 1분봉 시각이 시초가 창(진입 허용 시간대)에 해당하는지.
+
+  개장 직후(시초가) 시간대 개념을 진입 알림에 적용 — 창 밖(한국 심야~새벽)에는 진입
+  신호를 스킵해 잠든 사이 알림/주문 입력 부담을 없앤다. 청산(매도) 알림은 이 필터와
+  무관하게 장중 내내 동작한다. 타임존 정보가 없으면 필터 생략.
+  """
+  if ts.tzinfo is None:
+    return True
+  if window is None:
+    window = load_entry_window()
+  if not window.get("ENABLED", True):
+    return True
+  try:
+    sh, sm = map(int, window["START"].split(":"))
+    eh, em = map(int, window["END"].split(":"))
+  except (ValueError, KeyError, AttributeError):
+    # 잘못된 값은 차단 해제 대신 기본 창으로 폴백 — 설정 실수로 필터가 풀려
+    # 심야 진입 알림을 받는 사태를 방지 (fail-safe, '기본값이 곧 기본 보호').
+    print(
+        f"[경고] ENTRY_WINDOW 설정 오류 — 기본 시초가 창 적용 "
+        f"({ENTRY_WINDOW_DEFAULT['START']}~{ENTRY_WINDOW_DEFAULT['END']})"
+    )
+    sh, sm = map(int, ENTRY_WINDOW_DEFAULT["START"].split(":"))
+    eh, em = map(int, ENTRY_WINDOW_DEFAULT["END"].split(":"))
+  minutes = ts.hour * 60 + ts.minute
+  return (sh * 60 + sm) <= minutes < (eh * 60 + em)
+
+
+def load_quiet_hours():
+  """portfolio_config.json의 FVG.EXIT_ALERT_QUIET_HOURS 설정 로드 — 청산 알림 무음 시간대.
+
+  밤~새벽(한국 시간)에는 청산(TP/손절/당일 마감) 알림을 @멘션 없이 조용히 보낸다.
+  설정이 없거나 손상 시 기본값(00:00~07:00 KST)으로 안전하게 동작한다.
+  """
+  default = dict(EXIT_ALERT_QUIET_HOURS_DEFAULT)
+  try:
+    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+      cfg = json.load(f)
+    w = (cfg.get("FVG") or {}).get("EXIT_ALERT_QUIET_HOURS") or {}
+    return {**default, **{k: v for k, v in w.items() if k in default}}
+  except (OSError, json.JSONDecodeError, AttributeError):
+    return default
+
+
+def in_quiet_hours(quiet=None, now=None):
+  """현재 시각이 청산 알림 무음 시간대(KST)에 해당하는지.
+
+  진입 알림과 달리 청산 알림은 밤~새벽에도 자동 체결되므로, 이 시간대에는
+  @멘션 없이 메시지만 보낸다 (아침에 확인하는 기록). 자정을 넘는 구간
+  (예: 22:00~06:00)도 지원한다. now 인자는 테스트용 오버라이드.
+  """
+  if quiet is None:
+    quiet = load_quiet_hours()
+  if not quiet.get("ENABLED", True):
+    return False
+  try:
+    sh, sm = map(int, quiet["START"].split(":"))
+    eh, em = map(int, quiet["END"].split(":"))
+  except (ValueError, KeyError, AttributeError):
+    # 잘못된 값은 해제 대신 기본값으로 폴백 — 설정 실수로 무음이 풀리는 사태 방지.
+    print(
+        f"[경고] EXIT_ALERT_QUIET_HOURS 설정 오류 — 기본 무음 시간대 적용 "
+        f"({EXIT_ALERT_QUIET_HOURS_DEFAULT['START']}~{EXIT_ALERT_QUIET_HOURS_DEFAULT['END']})"
+    )
+    sh, sm = map(int, EXIT_ALERT_QUIET_HOURS_DEFAULT["START"].split(":"))
+    eh, em = map(int, EXIT_ALERT_QUIET_HOURS_DEFAULT["END"].split(":"))
+  if now is None:
+    # 한국은 서머타임 없음 → 고정 UTC+9 (fvg_bot_eval._kst_today와 동일 패턴).
+    # pandas/tzdata 의존 없이 표준 라이브러리만 사용 — tzdata 부재 환경에서도
+    # 청산 알림 경로가 크래시하지 않도록 한다. now 인자는 테스트용 오버라이드.
+    now = datetime.now(timezone(timedelta(hours=9)))
+  minutes = now.hour * 60 + now.minute
+  start = sh * 60 + sm
+  end = eh * 60 + em
+  if start <= end:
+    return start <= minutes < end
+  # 자정을 넘는 구간 (예: 22:00~06:00) — 시작 이후 or 종료 이전
+  return minutes >= start or minutes < end
 
 
 def find_swings(df, left=SWING_LEFT, right=SWING_RIGHT):
@@ -432,6 +553,7 @@ def fetch_ltf_data(ticker):
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+CONFIG_PATH = os.path.join(BASE_DIR, "portfolio_config.json")  # 설정 단일 소스 (시초가 창 등)
 
 
 def build_message(signal):
@@ -594,12 +716,15 @@ def build_exit_message(pos, exit_price, reason):
   )
 
 
-def check_exit_alerts(ticker, df_ltf, positions, now_et=None):
+def check_exit_alerts(ticker, df_ltf, positions, now_et=None, quiet_hours=None):
   """개방 포지션의 청산 조건(TP/손절/당일 마감) 확인 → 알림 전송 + CLOSED 처리.
 
   영상 청산 로직(익절 = 리스크 × 3.5 / 손절 = 구조 저점 아래)을 자동 추적하고,
   백테스트 결론대로 당일 마감(ET 15:40 이후) 임박 시 미해결 포지션을 정리한다.
-  한 봉에 손절/익절이 겹치면 손절 우선 (보수적). 반환: 청산 알림 발송 수.
+  한 봉에 손절/익절이 겹치면 손절 우선 (보수적). 무음 시간대(KST 밤~새벽)에는
+  @멘션 없이 조용히 전송한다 (잠을 깨우지 않는 아침 기록). 전송 실패 시 CLOSED로
+  만들지 않고 OPEN을 유지해 다음 실행에서 재시도한다 (진입 알림 가드와 동일 패턴).
+  반환: 청산 알림 발송 수.
   """
   open_pos = [
       p for p in positions.values()
@@ -607,6 +732,7 @@ def check_exit_alerts(ticker, df_ltf, positions, now_et=None):
   ]
   if not open_pos:
     return 0
+  quiet = in_quiet_hours(quiet_hours)
   bar = df_ltf.iloc[-1]
   high, low, close = bar["High"], bar["Low"], bar["Close"]
   if now_et is None:
@@ -628,15 +754,20 @@ def check_exit_alerts(ticker, df_ltf, positions, now_et=None):
       exit_p, reason = float(close), "DAY_CLOSE"
     if exit_p is None:
       continue
-    p.update({
-        "status": "CLOSED", "exit_price": exit_p,
-        "exit_reason": reason, "closed_at": time.time(),
-    })
-    send_discord_webhook(build_exit_message(p, exit_p, reason))
-    entry = float(p.get("entry", 0) or 0)
-    pnl = exit_p / entry - 1 if entry > 0 else 0.0
-    print(f"[{ticker}] 청산 알림: {reason} @ {exit_p:.2f} (손익 {pnl:+.2%})")
-    sent += 1
+    # 알림 실제 전달 성공 시에만 CLOSED 처리 — 미전송(웹훅 미설정/실패)이면 OPEN으로
+    # 남겨 로컬 크론/GHA 백업의 다음 실행에서 재시도한다 (청산 알림 유실 방지).
+    if send_discord_webhook(build_exit_message(p, exit_p, reason), mention=not quiet):
+      p.update({
+          "status": "CLOSED", "exit_price": exit_p,
+          "exit_reason": reason, "closed_at": time.time(),
+      })
+      entry = float(p.get("entry", 0) or 0)
+      pnl = exit_p / entry - 1 if entry > 0 else 0.0
+      quiet_note = " (무음 시간대 — 멘션 없음)" if quiet else ""
+      print(f"[{ticker}] 청산 알림: {reason} @ {exit_p:.2f} (손익 {pnl:+.2%}){quiet_note}")
+      sent += 1
+    else:
+      print(f"[{ticker}] 청산 알림 미전송 — CLOSED 처리 보류 (다음 실행에서 재시도)")
   return sent
 
 
@@ -651,6 +782,11 @@ def run_strategy():
   # 포지션 상태 — 진입 알림 시 기록, 청산(TP/손절/당일 마감) 알림에 사용
   positions = _load_positions()
   positions_changed = False
+  # 시초가 창 — 진입 알림 허용 시간대 (portfolio_config.json > FVG > ENTRY_WINDOW).
+  # 청산(매도) 알림은 이 창과 무관하게 장중 내내 동작한다.
+  entry_window = load_entry_window()
+  # 청산 알림 무음 시간대 — 밤~새벽(KST)에는 멘션 없이 조용히 전송
+  quiet_hours = load_quiet_hours()
   for idx, ticker in enumerate(TICKERS):
     if idx > 0:
       time.sleep(1.5)  # yfinance 레이트 리밋 완화 — 종목별 요청 분산
@@ -665,15 +801,25 @@ def run_strategy():
 
       # ① 청산(매도) 확인 — 1분봉만 필요하므로 HTF 수집 실패와 무관하게 실행
       #    (당일 마감 임박 시 HTF 장애로 청산 알림이 밀리지 않도록 먼저 처리)
-      if check_exit_alerts(ticker, df_ltf, positions):
+      if check_exit_alerts(ticker, df_ltf, positions, quiet_hours=quiet_hours):
         positions_changed = True
+
+      # ② 진입 신호 스캔 — 시초가 창(진입 허용 시간대) 안에서만 실행.
+      #    청산(①) 알림은 창과 무관하게 장중 내내 동작한다 (자동 청산 기록).
+      #    창 밖에는 HTF 수집도 생략해 yfinance 요청을 아낀다.
+      if not in_entry_window(df_ltf.index[-1], entry_window):
+        print(
+            f"[{ticker}] 시초가 창 밖 — 진입 신호 스킵 "
+            f"(허용 {entry_window['START']}~{entry_window['END']} ET, "
+            f"마지막 봉 {df_ltf.index[-1]})"
+        )
+        continue
 
       df_htf = fetch_htf_data(ticker)
       if df_htf is None or df_htf.empty:
         print(f"[{ticker}] 15분봉 데이터 부족 — 분석 생략")
         continue
 
-      # ② 진입 신호 스캔
       signal = build_long_signal(df_ltf, df_htf)
       if signal is None:
         print(f"[{ticker}] 조건 부합 시그널 없음")
