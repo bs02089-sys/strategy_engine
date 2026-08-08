@@ -36,16 +36,6 @@ Not lazy about: input validation at trust boundaries, error handling that preven
 - **현재 전략 규칙**: LOC ↔ ATH_DCA 듀얼 모드 · MA 레짐 필터(LOC 모드 한정) · ATH 하락분할 DCA(3분할, 3차 = Stage 5 바닥) ·
   비상 모드 종료(RECOVERY_REENTRY: 미사용 분할 ≥1 + 30영업일 + DD ≤ TRIGGER_1×50% + MA20>MA60).
 - **신호 시스템**: 브리핑의 ▶ 실행 액션 라인은 신호이며 실제 체결은 사용자 수동 매매 — 엔진은 주문을 자동 실행하지 않는다.
-- **보조 신호 봇**: `fvg_signal_bot.py` — FVG(공정가치 갭) 1분봉 진입 모델 + HTF(15분) 추세 필터,
-  구조 기반 손절. **모니터링 종목: TQQQ 단일** (2026-08 — 60일 백테스트에서 창 내 효율·승률·MDD가
-  SOXL 대비 우위로 단일화, 창 폭 스윙에서도 2시간이 최적 확인). 로컬 크론(장중 매분) 주력 + GHA
-  백업(장중 5분 폴링), `fvg_alerts.json`으로 중복 알림 방지. **시초가 창 필터**: 진입 알림은 ET 09:30~11:30(개장 후 2시간,
-  `portfolio_config.json` → `FVG.ENTRY_WINDOW` 설정) 안에서만 발송 — 청산(매도) 알림은
-  창과 무관하게 장중 내내 동작. **청산 알림 무음 시간대**: 밤~새벽(KST, 기본 00:00~07:00,
-  `FVG.EXIT_ALERT_QUIET_HOURS` 설정)에는 청산 알림을 @멘션 없이 조용히 전송(알림 자체는
-  계속 발송 — 아침 기록). **청산(매도) 알림**: 진입 시 포지션을 `fvg_positions.json`에
-  기록, 이후 TP/손절/당일 마감(ET 15:40) 시 매도 알림 자동 전송. 알림만 전송 — 주문 자동
-  실행 없음. 백테스트: `fvg_bot_backtest.py`.
 
 ### 제거된 기능 — 재도입 금지
 - **전고점 50% 청산 (peak sell)**: 2026-08-03 제거. 백테스트 전용으로만 존재했고 실전 엔진에서는 실행되지 않았다.
@@ -58,13 +48,22 @@ Not lazy about: input validation at trust boundaries, error handling that preven
 - **스윙 봇 (swing)**: 2026-08-07 제거. 4시간봉 3중 EMA + 변동성 수축 전략(`swing_bot.py`)과
   성과 평가(`swing_bot_eval.py`)·백테스트(`swing_bot_backtest.py`)·TP 분기 재평가(`swing_tp_review.py`),
   GHA 워크플로우 3개(`swing_bot.yml`/`swing_eval.yml`/`swing_tp_review.yml`), 로컬 크론(평가),
-  cron-job.org 잡을 모두 삭제 — FVG 봇과의 백테스트 비교 후 알림 빈도·MDD 측면에서 FVG 유지로
-  결정. 다시 추가하거나 문서에 언급하지 말 것.
+  cron-job.org 잡을 모두 삭제 — 당시 FVG 봇과의 백테스트 비교 후 알림 빈도·MDD 측면에서
+  FVG 유지로 결정했으나, 이후 2026-08-08 FVG 봇 자체도 제거됨(아래). 다시 추가하거나 문서에 언급하지 말 것.
 - **Finnhub API 키 로직**: 2026-08-06 제거. 무료 티어가 `/stock/candle`(봉) 데이터를 지원하지
   않아(403) 스윙 봇은 yfinance 전환, ATH DCA 실시간 모니터도 Finnhub `/quote` 오버라이드
   (`_fetch_finnhub_quote`/`realtime_prices` 파라미터)와 `FINNHUB_API_KEY` 시크릿 참조를 전면 삭제.
   이유: 키가 채팅·git 이력에 노출된 데다 삭제된 시크릿 참조 시 워크플로우가 실패하므로.
   모든 가격 판정은 yfinance(15분 지연) 기준. 다시 추가하거나 시크릿 참조를 부활시키지 말 것.
+- **FVG 봇 (fvg)**: 2026-08-08 제거. 유튜브 FVG/CHoCH 데이 트레이딩 전략 이식 봇(`fvg_signal_bot.py`)과
+  백테스트(`fvg_bot_backtest.py`)·실전 평가(`fvg_bot_eval.py`)·로컬 크론(`setup_fvg_cron.py`/`fvg_local_cron.sh`),
+  GHA 워크플로우(`fvg_signal.yml`/`fvg_eval.yml`), 나무증권 가이드(`FVG_NAMYU_SETUP.md`),
+  cron-job.org 잡(`setup_cronjob_org.py --fvg`), `portfolio_config.json`의 `FVG` 섹션을 모두 삭제.
+  이유: 사용자 주도 백테스트 검증에서 실전 HTF(15분) 기준 창 내 성과가 마이너스·본전으로 확인되어
+  실전 채택을 포기. 단기 데이 트레이딩 전략은 수수료(왕복 0.14%)가 얇은 엣지를 초과하는 구조.
+  ⚠️ cron-job.org 서버의 원격 FVG 잡("FVG Signal Bot poll (5m)")은 코드 삭제만으로 사라지지
+  않으므로 콘솔에서 수동 삭제 필요 (setup_cronjob_org.py는 잡 삭제 기능 없음).
+  다시 추가하거나 문서에 언급하지 말 것.
 
 ### 문서 규율
 - `STRATEGY_RULES.md`는 **순수 규칙만** — 백테스트 근거·성과 수치·미사용 기능 노트를 넣지 않는다.

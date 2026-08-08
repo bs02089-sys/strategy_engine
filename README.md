@@ -154,25 +154,16 @@
 | **DCA_MA_strategy.py** | 📌 **통합 완결판** — 실전 엔진(LOC 목표가/ATH DCA/MA 레짐 필터/Discord 브리핑/`--ath-monitor`) + 백테스트 + `--signal` 실시간 신호 |
 | **DCA_MA_strategy_flowchart.py** | 시스템 전체 플로우차트 문서 |
 | **setup_cronjob_org.py** | cron-job.org 실시간 알림 설정 자동화 (생성/--list/--test-dispatch/--update-pat/--update-schedule) |
-| **fvg_signal_bot.py** | 📌 **FVG 반자동 매매 스캐너** — HTF(15분) 추세 필터 + 1분봉 CHoCH/FVG 진입 모델 + 구조 기반 손절, Discord 알림(멘션 3회), 파일 기반 중복 알림 방지, **청산(매도) 알림**(TP/손절/당일 마감 추적) |
-| **fvg_bot_backtest.py** | FVG 전략 백테스트 — 5분봉 근사(1분봉은 yfinance 7일 한도), 당일 마감/overnight 모드, 승률·MDD·PF 지표, **RR 스윕**(익절 배수 다중 비교표) |
-| **fvg_bot_eval.py** | FVG 봇 **실전 평가** — fvg_positions.json 기반 승률/평균익절·손절/PF/총수익/MDD/청산 사유(TP·SL·마감) 분포 리포트 (종목·기간 필터, `--fee` 수수료 반영, `--discord` 전송) |
-| **setup_fvg_cron.py** | FVG 봇 로컬 크론 설정 자동화 (미국 장중 매분, 설치/--list/--remove/--dry-run) |
-| **fvg_local_cron.sh** | 로컬 크론 래퍼 — ET 장중 확인 + git 알림 상태(fvg_alerts.json) 동기화 후 실행 |
 | **MarketStageSystem.py** | 독립적인 시장 단계 시스템 — 바닥 단계 감지 |
 | **bear_market_signals.py** | 약세장 신호 분석 시스템 |
 | **portfolio_config.json** | 📌 **포트폴리오 설정** — 포지션, Sigma, DCA 파라미터, 모드 상태 |
 | **TRIGGER_OPTIMIZATION_SUMMARY.md** | ATH_DCA 트리거 최적화 분석 — 바닥 분포 · 후보값 스윕 · 의사결정 근거 |
 | **DUAL_MODE_SUMMARY.md** | 듀얼 모드(LOC ↔ ATH_DCA) 구조 요약 문서 |
 | **REALTIME_ALERT_SETUP.md** | 실시간 ATH DCA 알림 설정 가이드 |
-| **FVG_NAMYU_SETUP.md** | FVG 봇 나무증권 무인 운영 가이드 — 시세포착주문(손절/익절) + MOC 마감 청산 설정법 |
 | ~~MarketStage_config.json~~ | (제거됨 — portfolio_config.json으로 통합) |
 | **sigma_history.csv** | Sigma 갱신 이력 (런타임 자동 생성 — 추적 제외) |
 | **market_state.json** | 시장 단계 상태 정보 (자동 생성) |
 | **signal_report.json** | 시장 리스크 점수 (자동 생성) |
-| **fvg_alerts.json** | FVG 봇 알림 상태 (자동 생성 — 동일 FVG 중복 알림 방지, 로컬↔GHA 공유) |
-| **fvg_positions.json** | FVG 봇 포지션 상태 (자동 생성 — 진입 기록 → TP/손절/당일 마감 청산 알림 추적, 로컬↔GHA 공유, CLOSED 120일 보존 → `fvg_bot_eval.py` 분기 평가용) |
-| **fvg_eval_state.json** | 월간 트리거 상태 (자동 생성 — 마지막 월간 요약 전송 월, 로컬↔GHA 공유, 중복 전송 방지) |
 | **requirements.txt** | Python 의존성 패키지 목록 |
 
 ---
@@ -275,24 +266,6 @@ pandas_market_calendars  # NYSE 휴장일 계산
 | `ATH_DCA_ENTERED_ON` | 비상 모드 진입일 — 비상 모드 유지 클럭 기준 (자동 기록) |
 | `ROTATION_EXIT_DAYS` | ROTATION_3M 만기 영업일 수 |
 
-#### FVG 봇 설정
-
-| 항목 | 설명 |
-|------|------|
-| `FVG.ENTRY_WINDOW` | FVG **진입 알림 허용 시간대** (ET, `HH:MM` 24h 형식) — `ENABLED`/`START`/`END` |
-| `FVG.ENTRY_WINDOW.ENABLED` | `true`면 시초가 창 필터 활성 (기본 `true`) |
-| `FVG.ENTRY_WINDOW.START` | 창 시작 시각 (기본 `"09:30"` = 개장) |
-| `FVG.ENTRY_WINDOW.END` | 창 종료 시각 (기본 `"11:30"` = 개장 후 2시간) |
-| `FVG.EXIT_ALERT_QUIET_HOURS` | 청산 알림 **무음 시간대** (KST, `HH:MM` 24h 형식) — `ENABLED`/`START`/`END` |
-| `FVG.EXIT_ALERT_QUIET_HOURS.ENABLED` | `true`면 무음 시간대 활성 (기본 `true`) |
-| `FVG.EXIT_ALERT_QUIET_HOURS.START` | 무음 시작 시각 (기본 `"00:00"` KST) |
-| `FVG.EXIT_ALERT_QUIET_HOURS.END` | 무음 종료 시각 (기본 `"07:00"` KST — 자정을 넘는 구간도 지원) |
-
-> 시초가 창 밖에는 **진입 알림만** 차단됩니다. 청산(TP/손절/당일 마감) 알림은 창과
-> 무관하게 장중 내내 동작하므로 자동 청산 기록을 놓치지 않습니다. 단, **무음 시간대
-> (KST 밤~새벽)에는 청산 알림이 @멘션 없이 조용히 전송**됩니다 — 알림 자체는 계속
-> 발송되며(아침 기록용), 멘션만 빠집니다.
-
 ### LOC 목표가 계산식
 
 ```
@@ -339,21 +312,15 @@ export GITHUB_PAT=xxx            # GitHub PAT (Contents: Read and write)
 export GITHUB_OWNER=bs02089-sys
 export GITHUB_REPO=strategy_engine
 
-# ATH DCA 실시간 모니터 (기본 — 장중 10분)
+# ATH DCA 실시간 모니터 (장중 10분)
 python3 setup_cronjob_org.py --dry-run          # 생성 전 미리보기
 python3 setup_cronjob_org.py                    # 실제 생성 (장중 10분 간격 기본)
 
-# FVG 시그널 봇 폴링 (--fvg — 장중 5분, GHA schedule 지연 우회)
-python3 setup_cronjob_org.py --fvg --dry-run    # FVG 잡 미리보기
-python3 setup_cronjob_org.py --fvg              # FVG 잡 생성
-
 # 공통 관리
 python3 setup_cronjob_org.py --list             # 등록된 잡 목록
-python3 setup_cronjob_org.py --test-dispatch    # 테스트 dispatch 1회 (ATH DCA 워크플로우)
-python3 setup_cronjob_org.py --fvg --test-dispatch  # FVG 워크플로우 테스트 1회
+python3 setup_cronjob_org.py --test-dispatch    # 테스트 dispatch 1회
 python3 setup_cronjob_org.py --update-pat       # 크론잡에 저장된 PAT 갱신 (토큰 재발급 시)
 python3 setup_cronjob_org.py --update-schedule  # 폴링 간격 갱신 (POLL_MINUTES/UTC_HOURS 반영)
-python3 setup_cronjob_org.py --fvg --update-schedule  # FVG 잡 간격 갱신
 ```
 
 ### 백테스트 실행 (MA 레짐 전략)
@@ -400,115 +367,6 @@ python3 DCA_MA_strategy_flowchart.py
 | 트리거 | 시간 (UTC) | 설명 |
 |--------|------------|------|
 | 예약 실행 | 매일 23:14 (월~금) | 바닥 단계 추적 |
-
-### `fvg_signal.yml` — FVG 신호 봇 (TQQQ, 클라우드 백업)
-
-| 트리거 | 시간 (UTC) | 설명 |
-|--------|------------|------|
-| 예약 실행 | 장중 5분 폴링 (13:00~21:00, 월~금) | 로컬 크론(매분)의 클라우드 백업 — PC가 꺼져 있어도 실행 |
-| 수동 실행 | 사용자 요청 시 | workflow_dispatch 수동 실행 (테스트) |
-
-> - 1분봉 CHoCH → FVG 중간점 풀백 진입 모델 + HTF(15분) 추세 필터 (유튜브 Craig Percoo 전략).
-> - 알림만 전송하며 실제 주문은 자동 실행하지 않습니다 (수동 매매). `DISCORD_USER_ID` 설정 시 멘션 3회.
-> - **cron-job.org 5분 폴링 (선택)**: GHA 스케줄은 best-effort라 지연될 수 있어, 더 정확한
->   클라우드 폴링을 원하면 `python3 setup_cronjob_org.py --fvg`로 크론잡을 만들면
->   `repository_dispatch(fvg-signal)`가 장중 5분마다 이 워크플로우를 실행합니다
->   (로컬 크론 매분 + cron-job.org 5분 + GHA 스케줄 5분의 3중 구조).
-> - **시초가 창 필터**: 진입 알림은 개장 후 2시간(ET 09:30~11:30) 안에서만 발송 — 창 밖
->   (한국 심야~새벽)에는 진입 신호를 스킵해 잠든 사이 알림/주문 입력 부담을 제거. 청산
->   (TP/손절/당일 마감) 알림은 창과 무관하게 장중 내내 동작 (자동 청산 기록). 창 설정:
->   `portfolio_config.json` → `FVG.ENTRY_WINDOW` (ENABLED/START/END).
-> - **청산 알림 무음 시간대**: 밤~새벽(한국 시간, 기본 00:00~07:00)에는 청산 알림이
->   @멘션 없이 조용히 전송됩니다 (잠을 깨우지 않는 아침 기록 — 알림 자체는 계속 발송).
->   설정: `portfolio_config.json` → `FVG.EXIT_ALERT_QUIET_HOURS` (ENABLED/START/END, KST).
-> - 중복 알림은 `fvg_alerts.json` 파일 기반 쿨다운(1시간)으로 방지 — 로컬 크론과 git으로 상태 공유.
-> - **청산(매도) 알림**: 진입 알림 시 포지션을 `fvg_positions.json`에 기록 → 이후 익절(TP) 도달·손절(SL) 도달·당일 마감 임박(ET 15:40) 시 매도 알림 자동 전송 (한 봉에 겹치면 손절 우선).
-> - **무인(수면) 운용**: 나무증권 기준 주문 3건 — ①시세포착주문 신규편입(손실제한+이익실현 % 동시 등록, 매수 체결 순간 서버 감시 자동 시작 — 바이&셀은 손절 없음으로 제외) + ②지정가 매수(FVG 중간점) + ③MOC(마감 경매 자동 청산)로 자는 동안 청산 자동 처리, 이후 TP/손절/MOC 알림은 아침에 확인하는 기록용. 상세: `FVG_NAMYU_SETUP.md`
-> - **시초가 창 필터로 진입 시점이 한국 저녁으로 제한**: 진입 알림은 개장 후 2시간(KST 저녁~밤) 안에만 오므로, 알림을 받고 주문을 거는 행위가 잠자는 시간에 발생하지 않습니다.
-> - 백테스트: `fvg_bot_backtest.py` (5분봉 근사 — **당일 마감 운용이 핵심**, 야간 보유 시 MDD 급증).
->   **시초가 창(ET 09:30~11:30, `FVG.ENTRY_WINDOW` 기준) 내/외 진입 성과 비교** 포함 —
->   창 필터가 성과에 미치는 영향을 과거 데이터로 확인.
-
-### FVG 봇 배포 — 로컬 크론 (매분, 주력) + GitHub Actions (5분, 백업)
-
-1분봉 전략은 신호가 분 단위로 생기고 사라지므로 **로컬 PC에서 매분 실행**이 주력이고,
-PC가 꺼져 있어도 GitHub Actions 백업(`fvg_signal.yml`, 장중 5분 폴링)이 이어받습니다.
-두 경로는 `fvg_alerts.json`(알림 쿨다운)·`fvg_positions.json`(포지션 추적)을 git으로 공유해 중복 알림을 차단합니다. 실제 매매는
-알림을 받은 사용자가 직접 실행합니다 (자동 주문 없음).
-
-```bash
-python3 setup_fvg_cron.py --dry-run   # 설치될 크론 라인 미리보기
-python3 setup_fvg_cron.py             # 설치 (미국 장중 매분, KST 22~06시 월~토)
-python3 setup_fvg_cron.py --list      # 현재 crontab 목록
-python3 setup_fvg_cron.py --remove    # 제거
-```
-
-> - 로컬 래퍼(`fvg_local_cron.sh`)가 ET 장중을 1차 확인 → 장중 밖엔 파이썬 실행 없음 (이중 방어).
-> - GitHub Actions는 `secrets.DISCORD_WEBHOOK`/`DISCORD_USER_ID`로 알림을 보냅니다 (로컬 .env와 무관).
-> - 진입 알림은 시초가 창(개장 후 2시간 = KST 저녁~밤) 안에서만 발송되며 Discord 멘션
->   3회 포함 — 이후 TP/손절/MOC 청산 알림은 아침에 확인하는 기록용입니다.
-> - **당일 마감 운용**: 진입 후 당일 15:55 ET까지 미해결 시 청산 권장 (백테스트 근거 — 야간 보유 시 MDD 급증).
-
-### 실전 평가 (fvg_bot_eval.py)
-
-진입 알림마다 `fvg_positions.json`에 자동 기록되는 실전 데이터를 읽어 백테스트와 동일한 양식으로
-평가 리포트를 만듭니다 (CLOSED 포지션만 집계, 수수료/슬리피지 미반영).
-
-```bash
-python3 fvg_bot_eval.py                    # 전체 평가 리포트 (승률/평균익절·손절/PF/총수익/MDD)
-python3 fvg_bot_eval.py --fee 0            # 수수료 미반영 (백테스트와 동일 기준)
-python3 fvg_bot_eval.py --fee 0.0025       # 다른 수수료 (예: 일반 0.25%)
-python3 fvg_bot_eval.py --days 30          # 최근 30일 청산분만
-python3 fvg_bot_eval.py --ticker TQQQ      # 특정 종목만
-python3 fvg_bot_eval.py --path test.json   # 다른 포지션 파일로 테스트
-```
-
-> - **수수료 반영 (기본)**: 나무멤버스 0.07%가 매수·매도 각각 부과됩니다 (왕복 0.14%).
->   순수익률 = 청산가×(1−fee) / 진입가×(1+fee) − 1 — `--fee 0`으로 끌 수 있습니다.
-> - 청산 사유 분포(TP 익절 / SL 손절 / DAY_CLOSE 당일 마감)와 종목별 통계 포함.
-> - **시초가 창 진입 비교**: 창 내(기본 ET 09:30~11:30, `portfolio_config.json` →
->   `FVG.ENTRY_WINDOW` 기준) 진입 vs 창 외 진입 포지션의 승률/평균/합계를 나란히
->   비교 표시 — 시초가 창 필터의 실전 성과 영향을 확인. 타임존 없는 과거 기록은
->   분류 불가로 별도 집계.
-> - 미청산(OPEN) 포지션은 평가에서 제외하고 별도로 표시합니다.
-> - 포지션은 **CLOSED 후 120일간 보존**되므로 분기(3개월) 단위 평가가 가능합니다.
-> - `--discord`: 리포트 요약을 Discord로 전송 (아침 자동화 — 표준 라이브러리만 사용,
->   의존성 설치 불필요). `DISCORD_WEBHOOK` 미설정 시 stdout 출력으로 확인.
-
-**주간/월간 요약 리포트** — 한 달 뒤 평가 시점에 기간별 성과를 종합 정리:
-
-```bash
-python3 fvg_bot_eval.py --weekly       # 주간(ISO 주)별 승률/총수익/PF/MDD
-python3 fvg_bot_eval.py --monthly      # 월별 승률/총수익/PF/MDD
-python3 fvg_bot_eval.py --monthly --days 90   # 최근 90일(분기)만 월별 집계
-python3 fvg_bot_eval.py --weekly --discord    # Discord로 전송
-python3 fvg_bot_eval.py --monthly-trigger     # 매월 1일 월간 요약 자동 전송
-```
-
-> - 기간별 표 + 전체 합계 행으로 구성 (수수료 기본 반영, `--ticker`/`--days`/`--fee` 조합 가능).
-
-**월간 자동 트리거 (`--monthly-trigger`)** — 아침 워크플로우가 매일 확인:
-
-- **캘린더 월 기준**: 첫 트레이드가 있던 달의 다음 달 1일부터, **매월 1일 첫 실행 시**
-  월간 요약을 Discord로 자동 전송 (한국 시간 기준 새 달 진입 감지)
-- 마지막 전송 월은 `fvg_eval_state.json`에 기록 → 로컬↔GHA git 공유로 중복 전송 방지
-  (한 달에 한 번만 전송 — 1일이 주말이면 다음 영업일 아침에 전송)
-- 전송 성공 시에만 상태 갱신 — 웹훅 실패 시 다음 실행에서 재시도
-
-### `fvg_eval.yml` — 실전 평가 아침 리포트 (Discord 자동 전송)
-
-| 트리거 | 시간 (UTC) | 설명 |
-|--------|------------|------|
-| 예약 실행 | 매일 23:00 (월~금) | **한국 아침 08:00** — 전일 청산 결과를 요약 리포트로 Discord 전송 |
-| 수동 실행 | 사용자 요청 시 | workflow_dispatch 수동 실행 (테스트) |
-
-> - 미국 장 마감(16:00 ET = 20:00 UTC) 후 실행되므로 전일 TP/손절/마감 결과가 확정된
->   상태에서 리포트가 나갑니다.
-> - 내용: 승률/평균익절·손절/PF/총수익/MDD + 청산 사유 분포 + 종목별 + 최근 10건 트레이드
->   (Discord 2000자 제한 내 요약 — 전체는 로컬 `python3 fvg_bot_eval.py`로 확인).
-> - 수수료(나무멤버스 0.07% 왕복) 기본 반영. 의존성 설치 없이 표준 라이브러리로 동작.
-> - **월간 자동 트리거**: 같은 실행에서 `--monthly-trigger`로 매월 1일(한국 시간) 월간
->   요약을 추가 전송 (상태는 `fvg_eval_state.json`에 기록 후 커밋/푸시).
 
 ### 환경 변수 (GitHub Secrets)
 
@@ -560,28 +418,6 @@ python3 fvg_bot_eval.py --monthly-trigger     # 매월 1일 월간 요약 자동
 > 단, "기존 DCA 성격 유지"(dca_reset) 방식은 MDD를 줄이되(MA5~30: -1~-21%) 수익까지 같이
 > 줄어듭니다(MA5~30: +9~33%). 즉 **MDD와 수익을 동시에 얻으려면 MA20 + 올인 재진입**이 유일한
 > 답이며, 이는 사실상 "가격-20일선 크로스" 전략에 수렴합니다.
-
-### FVG 전략 백테스트 (`fvg_bot_backtest.py`)
-
-실전 봇(`fvg_signal_bot.py`)의 진입 로직(HTF 추세 필터 → CHoCH → FVG → 풀백 → 구조 손절)을
-그대로 미러링해 과거 성과를 검증합니다. 1분봉은 yfinance가 7~8일만 제공해 통계가 불가능하므로
-**5분봉 근사**(최근 60일)를 기본으로 사용합니다.
-
-```bash
-python3 fvg_bot_backtest.py                              # TQQQ, 5m+1h HTF, 60일, 기본 RR 1:3.5
-python3 fvg_bot_backtest.py --rr 2.0                     # 특정 배수만
-python3 fvg_bot_backtest.py --rr 2.5 3.0 3.5 4.0 4.5 5.0 # RR 스윕 — 손익비 범위 최적화 비교표
-python3 fvg_bot_backtest.py --overnight                  # 익일 보유 허용 (MDD 급증 주의)
-python3 fvg_bot_backtest.py --ltf 15m --days 60          # 더 느린 근사
-python3 fvg_bot_backtest.py --ticker SOXL                # 과거 SOXL 비교
-```
-
-> - **RR 스윕**: `--rr`에 값을 여러 개 주면 데이터는 1회만 내려받고 배수별로 전부
->   재시뮬레이션한 뒤 트레이드 수·승률·평균·총수익·MDD·PF 비교표를 출력합니다.
->   총수익/PF 기준 최적 배수를 함께 표시 — 영상의 3~4R 범위 최적화에 사용.
-> - 당일 마감 모델이 기본(데이 트레이딩) — 야간 보유 시 레버리지 ETF 갭에 구조
->   손절이 깨져 MDD가 급증하므로 주의.
-> - 시초가 창(ET 09:30~11:30) 내/외 진입 성과 비교 포함.
 
 ### MA 레짐 전략 (`DCA_MA_strategy.py`)
 
@@ -665,7 +501,6 @@ python3 DCA_MA_strategy.py --signal --discord --all  # TQQQ+SOXL 단일 메시�
 | [TRIGGER_OPTIMIZATION_SUMMARY.md](TRIGGER_OPTIMIZATION_SUMMARY.md) | ATH_DCA 트리거 최적화 분석 — 바닥 분포 · 후보값 스윕 · 의사결정 근거 |
 | [DUAL_MODE_SUMMARY.md](DUAL_MODE_SUMMARY.md) | 듀얼 모드(LOC ↔ ATH_DCA) 시스템 전체 구조 요약 |
 | [REALTIME_ALERT_SETUP.md](REALTIME_ALERT_SETUP.md) | 실시간 ATH DCA 알림 설정 가이드 |
-| [FVG_NAMYU_SETUP.md](FVG_NAMYU_SETUP.md) | FVG 봇 나무증권 무인 운영 가이드 — 시세포착주문 + MOC 설정법 |
 
 ---
 

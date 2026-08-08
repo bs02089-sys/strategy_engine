@@ -138,42 +138,6 @@ python3 setup_cronjob_org.py --update-schedule
 
 ---
 
-## 4-1. FVG 시그널 봇 폴링 (선택 — `--fvg`)
-
-> ATH DCA 실시간 알림과 **같은 cron-job.org dispatch 방식**을 FVG 봇에도 적용합니다.
-> `fvg_signal.yml`에 `repository_dispatch: types: [fvg-signal]`이 이미 정의되어 있어,
-> 아래 크론잡만 만들면 GHA 스케줄 지연 없이 장중 5분 폴링이 동작합니다.
-
-```bash
-# 미리보기 → 생성 → 확인 → 테스트 (환경변수는 위 4번과 동일)
-python3 setup_cronjob_org.py --fvg --dry-run
-python3 setup_cronjob_org.py --fvg
-python3 setup_cronjob_org.py --list
-python3 setup_cronjob_org.py --fvg --test-dispatch
-```
-
-생성되는 잡 (기본값):
-
-| 항목 | 값 |
-|---|---|
-| Title | `FVG Signal Bot poll (5m)` |
-| URL | `https://api.github.com/repos/{owner}/{repo}/dispatches` |
-| Payload | `{"event_type":"fvg-signal"}` |
-| 스케줄 | `*/5 13-21 * * 1-5` (UTC) — `fvg_signal.yml`의 schedule과 동일한 창 |
-| 동작 | dispatch → `fvg_signal_bot.py --once` 1회 스캔 (장중 밖이면 자체 스킵) |
-
-> - 로컬 크론(매분, 주력) + cron-job.org(5분, 정확) + GHA 스케줄(5분, 백업)의
->   **3중 구조**로 PC가 꺼져 있어도 폴링 간격이 보장됩니다.
-> - **실행 중복 참고**: cron-job.org(5분)와 GHA schedule(5분)이 둘 다 돌면 클라우드
->   실행이 2배로 늘지만 `concurrency` 그룹(`fvg-signal`)이 직렬화해 충돌은 없고,
->   공개 저장소라 분(minutes) 비용도 무료입니다. cron-job.org가 주 클라우드 경로면
->   `fvg_signal.yml`의 schedule cron을 줄여(예: `*/10`) 실행량을 절반으로 낮출 수 있습니다.
-> - FVG 잡의 간격/시간대 변경: `POLL_MINUTES`(예: `5`→`10`)·`UTC_HOURS_*` 설정 후
->   `python3 setup_cronjob_org.py --fvg --update-schedule`
-> - PAT 갱신: `python3 setup_cronjob_org.py --fvg --update-pat`
-
----
-
 ## 5. 동작 원리 (코드 측면)
 
 자동화 스크립트가 만드는 크론잡 설정값 (cron-job.org REST API):

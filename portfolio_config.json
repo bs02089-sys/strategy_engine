@@ -100,17 +100,5 @@
         "HOLD_DURATION_DAYS": 252,
         "DEFAULT_LOOKBACK_DAYS": 365
     },
-    "FVG": {
-        "ENTRY_WINDOW": {
-            "ENABLED": true,
-            "START": "09:30",
-            "END": "11:30"
-        },
-        "EXIT_ALERT_QUIET_HOURS": {
-            "ENABLED": true,
-            "START": "00:00",
-            "END": "07:00"
-        }
-    },
     "LAST_MONTHLY_PING": "2026-08"
 }
