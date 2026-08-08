@@ -154,6 +154,9 @@
 | **DCA_MA_strategy.py** | 📌 **통합 완결판** — 실전 엔진(LOC 목표가/ATH DCA/MA 레짐 필터/Discord 브리핑/`--ath-monitor`) + 백테스트 + `--signal` 실시간 신호 |
 | **DCA_MA_strategy_flowchart.py** | 시스템 전체 플로우차트 문서 |
 | **setup_cronjob_org.py** | cron-job.org 실시간 알림 설정 자동화 (생성/--list/--test-dispatch/--update-pat/--update-schedule) |
+| **swing_alerter.py** | 🆕 **스윙 투자 알리미** — MDD 구간 매수/매도 알림 + 모바일 대시보드 (유튜브 TQQQ 스윙 전략 재구현) |
+| **swing_config.json** | 스윙 알리미 설정/상태 (단일 파일 — 설정 단일 소스) |
+| **swing_dashboard.html** | 스윙 알리미 모바일 대시보드 (자동 생성) |
 | **MarketStageSystem.py** | 독립적인 시장 단계 시스템 — 바닥 단계 감지 |
 | **bear_market_signals.py** | 약세장 신호 분석 시스템 |
 | **portfolio_config.json** | 📌 **포트폴리오 설정** — 포지션, Sigma, DCA 파라미터, 모드 상태 |
@@ -368,6 +371,14 @@ python3 DCA_MA_strategy_flowchart.py
 |--------|------------|------|
 | 예약 실행 | 매일 23:14 (월~금) | 바닥 단계 추적 |
 
+### `swing_alerter.yml` — 스윙 투자 알리미
+
+| 트리거 | 시간 (UTC) | 설명 |
+|--------|------------|------|
+| 예약 실행 | 매일 23:40 (월~금) | 장 마감 후 스윙 일일 브리핑 + 대시보드 갱신 |
+| repository_dispatch | 장중 N분 (cron-job.org) | `--monitor` 실시간 알림 (매수 구간 도달/임박/매도) |
+| 수동 실행 | 사용자 요청 시 | workflow_dispatch 수동 실행 |
+
 ### 환경 변수 (GitHub Secrets)
 
 | 변수 | 설명 |
@@ -461,6 +472,88 @@ python3 DCA_MA_strategy.py --signal --discord --all  # TQQQ+SOXL 단일 메시�
 - 레짐/크로스 상태는 `MA_FILTER_STATE`에 자동 기록 — 크로스 알림은 1회만 발송
 - 일일 브리핑의 `• 📉 **MA{n} 레짐:**` 라인과 실시간 모니터(`--ath-monitor`)의 🚨/💰/🔄 크로스
   알림으로 확인 가능
+
+---
+
+## 📈 스윙 투자 알리미 (swing_alerter.py)
+
+유튜브 **"TQQQ 스윙 투자 전략 / 스윙 투자 계산기&매수 매도 시점 알리미"** (구글
+스프레드시트)의 로직을 자체 엔진으로 재구현한 도구입니다. 스마트폰에서 확인할 수 있는
+모바일 대시보드와 Discord 알림을 함께 제공합니다.
+
+### 전략 규칙 (스프레드시트 기준)
+
+- **매수**: 역대 최고가(ATH) 대비 MDD 5% 단위 구간(-5% ~ -95%)에 현재가가 도달하면
+  해당 구간이 '매수' 상태가 됩니다.
+- **매도**: 매수 시점의 전고가(`ATH_AT_BUY`) 대비 스윙 목표(기본 -10%) 회복 시 매도
+  알람 (예: 전고가 $140 → 목표 $126).
+- **계산기**: `BUY_PRICE` × `SHARES` → 목표 매도 시 예상 수익금/수익률 자동 계산.
+
+### 설정 (swing_config.json — 단일 파일)
+
+```json
+{
+    "ENABLED": true,
+    "REFERENCE_HIGH": "ATH",
+    "MDD_START_PCT": 5, "MDD_END_PCT": 95, "MDD_STEP_PCT": 5,
+    "SWING_TARGET_PCT": -10,
+    "IMMINENT_GAP_PCT": 5,
+    "POSITIONS": {
+        "TQQQ": {
+            "ENABLED": true, "LABEL": "TQQQ (예시)",
+            "BUY_PRICE": 107.0, "SHARES": 100, "ATH_AT_BUY": 140.0
+        }
+    }
+}
+```
+
+- `POSITIONS` 에 티커를 추가/수정하면 자유롭게 여러 종목을 모니터링합니다.
+- 알림 플래그(`ZONE_ALERTS`, `SELL_ALARM_SENT`)는 엔진이 자동 관리합니다. 실제 매수 후
+  새 포지션을 기록했으면 `python3 swing_alerter.py --reset TICKER` 로 초기화하세요.
+- 첫 실행 또는 `--reset` 직후 첫 모니터링에서는 **현재 도달된 모든 매수 구간이 한 번에**
+  알림으로 옵니다 (현재 상태 스냅샷). 이후에는 새로 도달하는 구간/임박/매도만 알립니다.
+- 기준가는 기본 `ATH`(역대 최고가)이며 **최근 액면분할 이후 원시 종가 기준**으로 계산해
+  증권사 화면과 일치합니다.
+
+### 실행 방법
+
+```bash
+python3 swing_alerter.py                    # 상태 출력 + 대시보드 HTML 저장
+python3 swing_alerter.py --discord          # + Discord 일일 브리핑 발송
+python3 swing_alerter.py --monitor          # 실시간 모니터 (변경분 알림만)
+python3 swing_alerter.py --serve 8080       # 스마트폰 대시보드 서버 (같은 Wi-Fi)
+python3 swing_alerter.py --reset TQQQ       # 알림 플래그 초기화 (새 포지션 진입 후)
+```
+
+### 실시간 알림 (cron-job.org)
+
+기존 `setup_cronjob_org.py` 로 스윙 전용 잡을 생성합니다:
+
+```bash
+export GITHUB_EVENT_TYPE=swing-monitor
+export GITHUB_WORKFLOW_PATH=.github/workflows/swing_alerter.yml
+export JOB_TITLE="Swing alerter realtime monitor"
+python3 setup_cronjob_org.py   # CRONJOB_ORG_API_KEY/GITHUB_PAT/GITHUB_OWNER/GITHUB_REPO 필요
+```
+
+### 모바일 대시보드 GitHub Pages 배포 (스마트폰 어디서나 접속)
+
+`swing_alerter.yml` 이 일일 실행 시 대시보드를 **`gh-pages` 브랜치에 `index.html` 로
+자동 배포**합니다 (장중 실시간 폴링 dispatch 에서는 배포하지 않아 배포 횟수를 아낌).
+
+**1회성 설정 (약 1분):**
+
+1. 변경 사항을 push 한 뒤, 워크플로우가 `gh-pages` 브랜치를 만들 때까지 대기
+   (매일 23:40 UTC 자동 실행, 또는 Actions 탭에서 수동 실행 `workflow_dispatch`).
+2. 저장소 **Settings → Pages** 에서:
+   - Source: **Deploy from a branch**
+   - Branch: `gh-pages` / `/(root)` → **Save**
+3. 배포 후 주소: **`https://bs02089-sys.github.io/strategy_engine/`**
+   (`swing_config.json` 의 `PAGES_URL` 에 반영 — 대시보드 상단에 🌐 라이브 링크 표시)
+
+> 참고: Pages 대시보드는 **매일 갱신되는 스냅샷**입니다 (장 마감 후 데이터). 장중
+> 실시간 알림(매수 구간 도달/임박/매도)은 Discord 푸시가 담당하므로, Pages 는
+> 스마트폰에서 상태 확인용으로 사용하세요.
 
 ---
 

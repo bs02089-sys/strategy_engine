@@ -1,0 +1,25 @@
+{
+    "ENABLED": true,
+    "REFERENCE_HIGH": "ATH",
+    "MDD_START_PCT": 5,
+    "MDD_END_PCT": 95,
+    "MDD_STEP_PCT": 5,
+    "SWING_TARGET_PCT": -10,
+    "IMMINENT_GAP_PCT": 5,
+    "PAGES_URL": "https://bs02089-sys.github.io/strategy_engine/",
+    "POSITIONS": {
+        "TQQQ": {
+            "ENABLED": true,
+            "LABEL": "TQQQ (예시)",
+            "BUY_PRICE": 107.0,
+            "SHARES": 100,
+            "ATH_AT_BUY": 140.0,
+            "SELL_ALARM_SENT": false,
+            "SELL_IMMINENT_SENT": false,
+            "ZONE_ALERTS": {
+                "hit": [],
+                "imminent": []
+            }
+        }
+    }
+}
