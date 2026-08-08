@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 ==================================================================
- FVG(공정가치 갭) 반자동 매매 스캐너 — 유튜브 전략 이식
+  FVG(공정가치 갭) 반자동 매매 스캐너 — 유튜브 전략 이식
 ==================================================================
 전략: "This Boring Strategy Made Me $53,478 In A Month" (Craig Percoo)
   https://youtu.be/kngWJvQNrgQ
@@ -44,7 +44,7 @@
     교차 중복 알림도 차단한다 (loop 모드에서도 동일하게 동작)
   - HTF(15분봉) 데이터는 15분 캐시 — 실행 간 불필요한 재다운로드 방지
   - 실행: python3 fvg_signal_bot.py [--once]  (--once = 1회 스캔 후 종료)
-          python3 fvg_signal_bot.py [--test-alert]  (Discord 웹훅+멘션 경로 검증용 테스트 발송)
+           python3 fvg_signal_bot.py [--test-alert]  (Discord 웹훅+멘션 경로 검증용 테스트 발송)
 
 Dependencies: pandas, requests, yfinance (requirements.txt에 포함)
 ==================================================================
@@ -92,7 +92,7 @@ MAX_CHOCH_FVG_GAP_BARS = 45  # CHoCH 돌파 후 45분 이내 생성된 FVG만 ("
 # 실행 설정
 SCAN_INTERVAL_SECONDS = 60   # 1분봉 기준 스캔 주기
 ALERT_COOLDOWN_SECONDS = 3600  # 동일 FVG 재알림 쿨다운 (1시간)
-HTF_CACHE_SECONDS = 900       # HTF(15분봉) 재수집 주기 — API 부하 절감
+HTF_CACHE_SECONDS = 900      # HTF(15분봉) 재수집 주기 — API 부하 절감
 
 # 시초가 창 (진입 알림 허용 시간대) — 기본: 개장 후 2시간(ET 09:30~11:30).
 # portfolio_config.json > FVG > ENTRY_WINDOW 에서 설정 (ENABLED/START/END, ET 24h 형식).
@@ -159,100 +159,95 @@ def in_trading_session(ts):
     return True
 
 
-def load_entry_window():
-  """portfolio_config.json의 FVG.ENTRY_WINDOW 설정 로드 — 시초가 창 (ET, 24h 형식).
+def _parse_time_str(time_str, default_minutes):
+  """'HH:MM' 형식의 시간 문자열을 총 분(minutes) 단위로 변환 (공통 헬퍼)."""
+  try:
+    h, m = map(int, time_str.split(":"))
+    return h * 60 + m
+  except (ValueError, AttributeError):
+    return default_minutes
 
-  진입 알림 허용 시간대. 설정이 없거나 손상 시 기본값(09:30~11:30, 개장 후 2시간)으로
-  안전하게 동작한다. 기본값이 곧 기본 보호이므로 설정 실패로 필터가 풀리지 않는다.
-  """
-  default = dict(ENTRY_WINDOW_DEFAULT)
+
+def load_config_section(section_name, default_dict):
+  """portfolio_config.json에서 특정 설정 섹션을 안전하게 로드하는 공통 헬퍼."""
   try:
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
       cfg = json.load(f)
-    w = (cfg.get("FVG") or {}).get("ENTRY_WINDOW") or {}
-    return {**default, **{k: v for k, v in w.items() if k in default}}
+    w = (cfg.get("FVG") or {}).get(section_name) or {}
+    return {**default_dict, **{k: v for k, v in w.items() if k in default_dict}}
   except (OSError, json.JSONDecodeError, AttributeError):
-    return default
+    return default_dict
+
+
+def load_entry_window():
+  """portfolio_config.json의 FVG.ENTRY_WINDOW 설정 로드 — 시초가 창 (ET, 24h 형식)."""
+  return load_config_section("ENTRY_WINDOW", ENTRY_WINDOW_DEFAULT)
 
 
 def in_entry_window(ts, window=None):
-  """마지막 1분봉 시각이 시초가 창(진입 허용 시간대)에 해당하는지.
-
-  개장 직후(시초가) 시간대 개념을 진입 알림에 적용 — 창 밖(한국 심야~새벽)에는 진입
-  신호를 스킵해 잠든 사이 알림/주문 입력 부담을 없앤다. 청산(매도) 알림은 이 필터와
-  무관하게 장중 내내 동작한다. 타임존 정보가 없으면 필터 생략.
-  """
+  """마지막 1분봉 시각이 시초가 창(진입 허용 시간대)에 해당하는지."""
   if ts.tzinfo is None:
     return True
   if window is None:
     window = load_entry_window()
   if not window.get("ENABLED", True):
     return True
+  
+  start_str = window.get("START", ENTRY_WINDOW_DEFAULT["START"])
+  end_str = window.get("END", ENTRY_WINDOW_DEFAULT["END"])
+  
+  # 파싱 실패 시 기본값 보호 적용
   try:
-    sh, sm = map(int, window["START"].split(":"))
-    eh, em = map(int, window["END"].split(":"))
+    sh, sm = map(int, start_str.split(":"))
+    eh, em = map(int, end_str.split(":"))
+    start_min = sh * 60 + sm
+    end_min = eh * 60 + em
   except (ValueError, KeyError, AttributeError):
-    # 잘못된 값은 차단 해제 대신 기본 창으로 폴백 — 설정 실수로 필터가 풀려
-    # 심야 진입 알림을 받는 사태를 방지 (fail-safe, '기본값이 곧 기본 보호').
     print(
         f"[경고] ENTRY_WINDOW 설정 오류 — 기본 시초가 창 적용 "
         f"({ENTRY_WINDOW_DEFAULT['START']}~{ENTRY_WINDOW_DEFAULT['END']})"
     )
-    sh, sm = map(int, ENTRY_WINDOW_DEFAULT["START"].split(":"))
-    eh, em = map(int, ENTRY_WINDOW_DEFAULT["END"].split(":"))
+    start_min = _parse_time_str(ENTRY_WINDOW_DEFAULT["START"], 9 * 60 + 30)
+    end_min = _parse_time_str(ENTRY_WINDOW_DEFAULT["END"], 11 * 60 + 30)
+
   minutes = ts.hour * 60 + ts.minute
-  return (sh * 60 + sm) <= minutes < (eh * 60 + em)
+  return start_min <= minutes < end_min
 
 
 def load_quiet_hours():
-  """portfolio_config.json의 FVG.EXIT_ALERT_QUIET_HOURS 설정 로드 — 청산 알림 무음 시간대.
-
-  밤~새벽(한국 시간)에는 청산(TP/손절/당일 마감) 알림을 @멘션 없이 조용히 보낸다.
-  설정이 없거나 손상 시 기본값(00:00~07:00 KST)으로 안전하게 동작한다.
-  """
-  default = dict(EXIT_ALERT_QUIET_HOURS_DEFAULT)
-  try:
-    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-      cfg = json.load(f)
-    w = (cfg.get("FVG") or {}).get("EXIT_ALERT_QUIET_HOURS") or {}
-    return {**default, **{k: v for k, v in w.items() if k in default}}
-  except (OSError, json.JSONDecodeError, AttributeError):
-    return default
+  """portfolio_config.json의 FVG.EXIT_ALERT_QUIET_HOURS 설정 로드 — 청산 알림 무음 시간대."""
+  return load_config_section("EXIT_ALERT_QUIET_HOURS", EXIT_ALERT_QUIET_HOURS_DEFAULT)
 
 
 def in_quiet_hours(quiet=None, now=None):
-  """현재 시각이 청산 알림 무음 시간대(KST)에 해당하는지.
-
-  진입 알림과 달리 청산 알림은 밤~새벽에도 자동 체결되므로, 이 시간대에는
-  @멘션 없이 메시지만 보낸다 (아침에 확인하는 기록). 자정을 넘는 구간
-  (예: 22:00~06:00)도 지원한다. now 인자는 테스트용 오버라이드.
-  """
+  """현재 시각이 청산 알림 무음 시간대(KST)에 해당하는지."""
   if quiet is None:
     quiet = load_quiet_hours()
   if not quiet.get("ENABLED", True):
     return False
+
+  start_str = quiet.get("START", EXIT_ALERT_QUIET_HOURS_DEFAULT["START"])
+  end_str = quiet.get("END", EXIT_ALERT_QUIET_HOURS_DEFAULT["END"])
+
   try:
-    sh, sm = map(int, quiet["START"].split(":"))
-    eh, em = map(int, quiet["END"].split(":"))
+    sh, sm = map(int, start_str.split(":"))
+    eh, em = map(int, end_str.split(":"))
+    start = sh * 60 + sm
+    end = eh * 60 + em
   except (ValueError, KeyError, AttributeError):
-    # 잘못된 값은 해제 대신 기본값으로 폴백 — 설정 실수로 무음이 풀리는 사태 방지.
     print(
         f"[경고] EXIT_ALERT_QUIET_HOURS 설정 오류 — 기본 무음 시간대 적용 "
         f"({EXIT_ALERT_QUIET_HOURS_DEFAULT['START']}~{EXIT_ALERT_QUIET_HOURS_DEFAULT['END']})"
     )
-    sh, sm = map(int, EXIT_ALERT_QUIET_HOURS_DEFAULT["START"].split(":"))
-    eh, em = map(int, EXIT_ALERT_QUIET_HOURS_DEFAULT["END"].split(":"))
+    start = _parse_time_str(EXIT_ALERT_QUIET_HOURS_DEFAULT["START"], 0)
+    end = _parse_time_str(EXIT_ALERT_QUIET_HOURS_DEFAULT["END"], 7 * 60)
+
   if now is None:
-    # 한국은 서머타임 없음 → 고정 UTC+9 (fvg_bot_eval._kst_today와 동일 패턴).
-    # pandas/tzdata 의존 없이 표준 라이브러리만 사용 — tzdata 부재 환경에서도
-    # 청산 알림 경로가 크래시하지 않도록 한다. now 인자는 테스트용 오버라이드.
     now = datetime.now(timezone(timedelta(hours=9)))
   minutes = now.hour * 60 + now.minute
-  start = sh * 60 + sm
-  end = eh * 60 + em
+
   if start <= end:
     return start <= minutes < end
-  # 자정을 넘는 구간 (예: 22:00~06:00) — 시작 이후 or 종료 이전
   return minutes >= start or minutes < end
 
 
@@ -307,7 +302,6 @@ def analyze_htf_trend(df):
       if last_high is None:
         last_high = s
       elif s["price"] > last_high["price"]:
-        # 상승 고점 돌파 — 하락장이었다면 반전(CHoCH_UP), 아니면 추세 지속(BOS_UP)
         last_event = "CHoCH_UP" if direction == "down" else "BOS_UP"
         direction = "up"
         last_high = s
@@ -317,7 +311,6 @@ def analyze_htf_trend(df):
       if last_low is None:
         last_low = s
       elif s["price"] < last_low["price"]:
-        # 하락 저점 돌파 — 상승장이었다면 반전(CHoCH_DOWN), 아니면 추세 지속(BOS_DOWN)
         last_event = "CHoCH_DOWN" if direction == "up" else "BOS_DOWN"
         direction = "down"
         last_low = s
@@ -332,12 +325,7 @@ def analyze_htf_trend(df):
 
 
 def find_bullish_fvgs(df):
-  """상승 FVG 탐지 — 3개 캔들 시퀀스에서 c1의 고점 < c3의 저점 (영상 정의).
-
-  노이즈 방지: 가격 대비 최소 높이(0.05%) 미만 갭 제외. 연속 임펄스로 겹치는
-  박스는 허용하되, 진입 후보 선정(find_bullish_choch 연계)에서 신선도·CHoCH
-  연관성·모멘텀(상단 돌파 후 되돌림) 검증으로 걸러낸다.
-  """
+  """상승 FVG 탐지 — 3개 캔들 시퀀스에서 c1의 고점 < c3의 저점 (영상 정의)."""
   high = df["High"].to_numpy()
   low = df["Low"].to_numpy()
   fvgs = []
@@ -362,10 +350,9 @@ def find_bullish_fvgs(df):
 def find_bullish_choch(df, swings):
   """1분봉 상승 CHoCH(캐릭터 변화) 탐지 — 영상 진입 모델 Step 1.
 
-  정의: 하락 구조(이전 고점보다 낮은 고점) 후, 종가가 그 스윙 고점 위로 마감.
-  반환: dict(break_idx, high_idx, high_price, low_price) — 가장 최근 CHoCH
-    - high_price: 돌파된 스윙 고점
-    - low_price: 그 고점 직전 마지막 스윙 저점 (구조 기반 손절 기준)
+  [Phase 1 수정 완료]
+  - 이전 고점을 비교할 때 `next(...)` 대신 `max(..., key=lambda p: p["idx"])`를 사용하여
+    “가장 최근의 이전 고점”을 정확히 기준으로 삼도록 개선.
   """
   highs = [s for s in swings if s["kind"] == "high"]
   lows = [s for s in swings if s["kind"] == "low"]
@@ -375,9 +362,13 @@ def find_bullish_choch(df, swings):
   closes = df["Close"].to_numpy()
   best = None
   for h in highs:
-    # CHoCH는 '낮은 고점'을 돌파하는 반전 — 이전 고점보다 높으면 BOS(추세 지속)라 제외
-    prev_high = next((p for p in highs if p["idx"] < h["idx"]), None)
-    if prev_high is None or h["price"] >= prev_high["price"]:
+    # 가장 최근의 이전 고점(h보다 인덱스가 작은 고점 중 가장 큰 인덱스)을 정확히 탐색
+    older_highs = [p for p in highs if p["idx"] < h["idx"]]
+    if not older_highs:
+      continue
+    prev_high = max(older_highs, key=lambda p: p["idx"])
+
+    if h["price"] >= prev_high["price"]:
       continue
 
     # h 이후 종가가 h의 고점 위로 마감한 첫 봉 = CHoCH 확정 지점
@@ -393,8 +384,6 @@ def find_bullish_choch(df, swings):
     if last_low is None:
       continue
 
-    # 영상 Step 1 "higher high after a lower low": 낮은 고점 직전의 최근 두 저점이
-    # 하락 구조(저점 하락)여야 반전 CHoCH로 인정 — 상승 추세 내 풀백 돌파는 BOS(추세 지속)
     lows_before = [l for l in lows if l["idx"] < h["idx"]]
     if (
         len(lows_before) >= 2
@@ -413,10 +402,7 @@ def find_bullish_choch(df, swings):
 
 
 def fvg_aligned_with_htf(fvg, htf_fvgs):
-  """1분봉 FVG 박스가 최근 HTF(15분) 상승 FVG 존과 겹치는지 (참고 정보용).
-
-  영상 예제: 1분봉 CHoCH가 15분봉 FVG 존에서 반응하며 시작 — 고품질 셋업의 신호.
-  """
+  """1분봉 FVG 박스가 최근 HTF(15분) 상승 FVG 존과 겹치는지 (참고 정보용)."""
   for g in htf_fvgs:
     if fvg["bottom"] <= g["top"] and fvg["top"] >= g["bottom"]:
       return True
@@ -424,52 +410,37 @@ def fvg_aligned_with_htf(fvg, htf_fvgs):
 
 
 def build_long_signal(df_ltf, df_htf):
-  """1분봉 롱 진입 모델: HTF 추세 필터 → CHoCH → FVG → 풀백 → 구조 손절.
-
-  모든 조건 충족 시 시그널 dict 반환, 아니면 None. (영상 3단계 진입 모델)
-  """
+  """1분봉 롱 진입 모델: HTF 추세 필터 → CHoCH → FVG → 풀백 → 구조 손절."""
   if df_ltf is None or df_htf is None or len(df_ltf) < MIN_LTF_BARS:
     return None
 
-  # ① HTF(15분) 추세 필터 — 상승장일 때만 롱 허용
   htf = analyze_htf_trend(df_htf)
   if htf["direction"] != "up":
     return None
-  # 보수 가드: 최근 확정 구조 저점 아래로 종가 이탈 = CHoCH 직전 상황, 스킵
   if (
       htf["last_low_price"] is not None
       and df_htf["Close"].iloc[-1] < htf["last_low_price"]
   ):
     return None
 
-  # ② Step 1: 1분봉 CHoCH
   swings = find_swings(df_ltf)
   choch = find_bullish_choch(df_ltf, swings)
   if choch is None:
     return None
-  # 구조 연속성: CHoCH 이후 현재까지 CHoCH 저점을 이탈한 적이 없어야 함.
-  # 중간에 구조 반전(저점 이탈)이 있었다면 오래된 CHoCH와 최근 FVG의 잘못된
-  # 페어링을 방지하고 시그널을 무효화한다 (손절 과대화 방지).
   if df_ltf["Low"].iloc[choch["break_idx"]:].min() < choch["low_price"]:
     return None
 
-  # ③ Step 2: CHoCH 돌파가 남긴 최근 FVG ("FVG produced inside that change of character")
   candidate = None
   for f in reversed(find_bullish_fvgs(df_ltf)):
     if f["c3_idx"] < choch["break_idx"]:
-      continue  # CHoCH 이전에 생성된 FVG는 무관
+      continue
     if f["c3_idx"] - choch["break_idx"] > MAX_CHOCH_FVG_GAP_BARS:
-      continue  # CHoCH와 너무 동떨어진 FVG
+      continue
     if len(df_ltf) - f["c3_idx"] > MAX_FVG_AGE_BARS:
-      continue  # 오래된 FVG (신선도)
-    # 모멘텀 검증: FVG 생성 후 가격이 박스 상단 위로 돌파한 적이 있어야
-    # '돌파 → 되돌림(풀백)' 시퀀스가 성립 (영상: we break out, price retraces into this area)
-    # 주의: 빈 슬라이스(마지막 봉 생성 FVG)는 NaN 비교 우회가 되므로 명시적으로 배제
+      continue
     after_high = df_ltf["High"].iloc[f["c3_idx"] + 1:]
     if after_high.empty or after_high.max() <= f["top"]:
       continue
-    # 갭 무결성: 생성 후 어떤 봉의 저점도 하단을 이탈하지 않아야 함
-    # (채워진 갭 = '그냥 통과한 FVG' — 영상 명시 제외 케이스)
     if df_ltf["Low"].iloc[f["c3_idx"] + 1:].min() < f["bottom"]:
       continue
     candidate = f
@@ -481,13 +452,10 @@ def build_long_signal(df_ltf, df_htf):
   entry = fvg["midpoint"]
   bottom, top = fvg["bottom"], fvg["top"]
 
-  # ④ Step 3: 풀백 검증 — 종가가 위에서 FVG 중간점 영역까지 되돌아옴.
-  #    하단(채워진 갭) 이탈 시 제외 — "그냥 통과해버린 FVG는 진입 존이 아님"
   close = df_ltf["Close"].iloc[-1]
   if not (bottom <= close <= entry * (1 + MIDPOINT_TOL)):
     return None
 
-  # ⑤ 구조 기반 손절 — CHoCH 이전 마지막 스윙 저점 아래 (영상: last low on the trend)
   stop_loss = choch["low_price"] - max(0.01, entry * 0.0005)
   risk = entry - stop_loss
   if risk <= 0 or entry <= 0:
@@ -495,7 +463,7 @@ def build_long_signal(df_ltf, df_htf):
   take_profit = entry + risk * RR_TARGET
 
   return {
-      "ticker": None,  # run_strategy에서 채움
+      "ticker": None,
       "time": df_ltf.index[-1],
       "entry": entry,
       "stop_loss": stop_loss,
@@ -523,11 +491,11 @@ def _download(ticker, period, interval):
     return None
 
 
-_htf_cache = {}  # ticker -> (수집 시각, df) — HTF 데이터 15분 캐시
+_htf_cache = {}
 
 
 def _drop_incomplete_htf_bar(df):
-  """진행 중인(미완성) 마지막 15분봉 제외 — 구조 판별은 완성 봉 기준 (룩어헤드 방지)."""
+  """진행 중인(미완성) 마지막 15분봉 제외."""
   if df.index.tz is not None:
     last_end = df.index[-1] + pd.Timedelta(minutes=15)
     if last_end > pd.Timestamp.now(tz=df.index.tz):
@@ -543,7 +511,7 @@ def fetch_htf_data(ticker):
   df = _download(ticker, HTF_PERIOD, HTF_INTERVAL)
   if df is not None and not df.empty:
     df = _drop_incomplete_htf_bar(df)
-    _htf_cache[ticker] = (now, df)  # 실패(None)는 캐시하지 않음 — 다음 실행에서 재시도
+    _htf_cache[ticker] = (now, df)
   return df
 
 
@@ -552,14 +520,12 @@ def fetch_ltf_data(ticker):
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CONFIG_PATH = os.path.join(BASE_DIR, "portfolio_config.json")  # 설정 단일 소스 (시초가 창 등)
+CONFIG_PATH = os.path.join(BASE_DIR, "portfolio_config.json")
 
 
 def build_message(signal):
   htf_align = "✅ HTF 존 정렬" if signal["htf_align"] else "HTF 존 미정렬"
   entry = float(signal["entry"])
-  # 나무 신규편입은 수익률(%) 방식 — 절대 가격을 진입가 대비 %로 환산
-  # (손실제한 = (손절가-진입가)/진입가 → 음수, 이익실현 = (익절가-진입가)/진입가 → 양수)
   sl_pct = (float(signal["stop_loss"]) - entry) / entry * 100 if entry > 0 else 0.0
   tp_pct = (float(signal["take_profit"]) - entry) / entry * 100 if entry > 0 else 0.0
   return (
@@ -572,9 +538,9 @@ def build_message(signal):
       f"• **목표 익절가 (Take Profit):** `{signal['take_profit']:.2f}` 🎯\n"
       f"• **손익비 (RR):** `{signal['risk_reward_ratio']}`\n\n"
       f"📋 **나무증권 주문 체크리스트** (주문 3건)\n"
-      f"  ① 신규편입 — 손절+익절 한 등록 (매수 체결 시 감시 자동 시작):\n"
-      f"     · 손실제한: `{sl_pct:.2f}%` (SL `{signal['stop_loss']:.2f}`) 🛑\n"
-      f"     · 이익실현: `{tp_pct:+.2f}%` (TP `{signal['take_profit']:.2f}`) 🎯\n"
+      f"  ① 신규편입 — 손절+익실현 % 등록 (매수 체결 시 감시 자동 시작):\n"
+      f"    · 손실제한: `{sl_pct:.2f}%` (SL `{signal['stop_loss']:.2f}`) 🛑\n"
+      f"    · 이익실현: `{tp_pct:+.2f}%` (TP `{signal['take_profit']:.2f}`) 🎯\n"
       f"  ② 지정가 매수: `{signal['entry']:.2f}` (중간점)\n"
       f"  ③ MOC 매도 **ON** — 미체결 시 16:00 마감 경매 자동 청산\n\n"
       f"👉 ①은 시세포착주문 > 신규편입 — 매수가 체결되는 순간 서버가 감시를 시작해 "
@@ -585,23 +551,13 @@ def build_message(signal):
 
 
 ALERT_STATE_PATH = os.path.join(BASE_DIR, "fvg_alerts.json")
-ALERT_STATE_PRUNE_HOURS = 48  # 상태 파일 정리 기준 — 2일 지난 항목 제거
-
-# 청산(매도) 알림 — 진입 알림 시 포지션을 기록해 TP/손절/당일 마감을 추적
+ALERT_STATE_PRUNE_HOURS = 48
 POSITIONS_PATH = os.path.join(BASE_DIR, "fvg_positions.json")
-POSITIONS_PRUNE_HOURS = 120 * 24  # CLOSED 상태 정리 기준 (120일 — 실전 평가(fvg_bot_eval.py)로
-                                  #   분기(3개월) 단위 검증을 위해 3개월 + 버퍼 보존. 45일이면
-                                  #   3개월 시점 평가 시 초반 트레이드가 이미 삭제됨)
-DAY_CLOSE_ALERT_MINUTE = 15 * 60 + 40  # ET 15:40 — 당일 마감 임박 알림 시각
+POSITIONS_PRUNE_HOURS = 120 * 24
+DAY_CLOSE_ALERT_MINUTE = 15 * 60 + 40
 
 
 def _load_alert_state():
-  """알림 상태(fvg_alerts.json) 로드 — 없거나 손상 시 빈 dict 반환.
-
-  key = "TICKER|FVG생성시각(ISO)", value = 마지막 알림 epoch 초.
-  로컬 크론과 GitHub Actions(--once)가 이 파일을 git으로 공유해
-  프로세스를 넘나드는 중복 알림을 차단한다.
-  """
   try:
     with open(ALERT_STATE_PATH, "r", encoding="utf-8") as f:
       data = json.load(f)
@@ -611,10 +567,6 @@ def _load_alert_state():
 
 
 def _save_alert_state(state):
-  """알림 상태를 fvg_alerts.json에 원자적(atomic) 저장 — 2일 지난 항목 정리.
-
-  tempfile+shutil.move로 크래시 시 파일 손상 방지 (원자적 저장).
-  """
   cutoff = time.time() - ALERT_STATE_PRUNE_HOURS * 3600
   state = {k: v for k, v in state.items() if v >= cutoff}
   try:
@@ -629,13 +581,6 @@ def _save_alert_state(state):
 
 
 def send_test_alert():
-  """Discord 웹훅 + @멘션 전송 경로 검증용 테스트 알림 (--test-alert).
-
-  실제 시그널과 무관하게 테스트 메시지를 1건 보낸다. 웹훅이 미설정인 로컬에서는
-  메시지를 stdout으로 출력해 구성만 확인한다. GitHub Actions workflow_dispatch의
-  test_alert 입력으로 실행하면 시크릿 기반 실제 전송을 즉시 검증할 수 있다 —
-  이 메시지가 도착하면 실전 시그널도 동일 경로(멘션 3회 포함)로 전달된다.
-  """
   msg = (
       "🧪 **FVG 봇 테스트 알림** — Discord 웹훅 + @멘션 경로 점검\n"
       "이 메시지가 보이면 실전 시그널 알림도 동일 경로로 도착합니다. "
@@ -645,14 +590,6 @@ def send_test_alert():
 
 
 def _load_positions():
-  """포지션 상태(fvg_positions.json) 로드 — 없거나 손상 시 빈 dict 반환.
-
-  key = "TICKER|FVG생성시각", value = {ticker, entry, sl, tp, status: OPEN/CLOSED,
-  exit_price, exit_reason(TP/SL/DAY_CLOSE), closed_at}.
-  로컬 크론과 GitHub Actions가 git으로 공유해 청산(매도) 알림도 교차 중복 없이
-  한 번만 발송한다 (진입 알림의 fvg_alerts.json과 동일 패턴).
-  CLOSED 포지션은 120일간 보존 — fvg_bot_eval.py로 분기(3개월) 단위 실전 성과 평가 가능.
-  """
   try:
     with open(POSITIONS_PATH, "r", encoding="utf-8") as f:
       return json.load(f)
@@ -661,7 +598,6 @@ def _load_positions():
 
 
 def _save_positions(positions):
-  """포지션 상태를 fvg_positions.json에 원자적 저장 — CLOSED 120일 후 정리 (평가 데이터 보존)."""
   cutoff = time.time() - POSITIONS_PRUNE_HOURS * 3600
   positions = {
       k: v for k, v in positions.items()
@@ -679,7 +615,6 @@ def _save_positions(positions):
 
 
 def record_position(ticker, signal):
-  """진입 알림 발송 시 포지션 스냅샷 생성 — 이후 청산(TP/손절/당일 마감) 추적용."""
   return {
       "ticker": ticker,
       "fvg_time": str(signal["fvg_time"]),
@@ -692,7 +627,6 @@ def record_position(ticker, signal):
 
 
 def build_exit_message(pos, exit_price, reason):
-  """청산(매도) 알림 메시지 — 영상 청산 로직 + 백테스트 결론(당일 마감) 안내."""
   heads = {
       "TP": "✅ **익절(TP) 도달 — 매도(청산) 알림**",
       "SL": "🛑 **손절(SL) 도달 — 매도(청산) 알림**",
@@ -703,7 +637,6 @@ def build_exit_message(pos, exit_price, reason):
       "SL": "구조 저점 아래 손절 체결",
       "DAY_CLOSE": "15:40 기준가 — MOC(16:00 마감 경매) 걸려 있으면 자동 청산, 아니면 직접 청산",
   }
-  # .get() 방어 — 손상/수동 편집 항목이 있어도 청산 알림 경로가 크래시하지 않도록
   ticker = pos.get("ticker", "?")
   entry = float(pos.get("entry", 0) or 0)
   pnl = exit_price / entry - 1 if entry > 0 else 0.0
@@ -717,15 +650,6 @@ def build_exit_message(pos, exit_price, reason):
 
 
 def check_exit_alerts(ticker, df_ltf, positions, now_et=None, quiet_hours=None):
-  """개방 포지션의 청산 조건(TP/손절/당일 마감) 확인 → 알림 전송 + CLOSED 처리.
-
-  영상 청산 로직(익절 = 리스크 × 3.5 / 손절 = 구조 저점 아래)을 자동 추적하고,
-  백테스트 결론대로 당일 마감(ET 15:40 이후) 임박 시 미해결 포지션을 정리한다.
-  한 봉에 손절/익절이 겹치면 손절 우선 (보수적). 무음 시간대(KST 밤~새벽)에는
-  @멘션 없이 조용히 전송한다 (잠을 깨우지 않는 아침 기록). 전송 실패 시 CLOSED로
-  만들지 않고 OPEN을 유지해 다음 실행에서 재시도한다 (진입 알림 가드와 동일 패턴).
-  반환: 청산 알림 발송 수.
-  """
   open_pos = [
       p for p in positions.values()
       if p.get("ticker") == ticker and p.get("status") == "OPEN"
@@ -744,7 +668,7 @@ def check_exit_alerts(ticker, df_ltf, positions, now_et=None, quiet_hours=None):
   for p in open_pos:
     sl, tp = p.get("sl"), p.get("tp")
     if sl is None or tp is None:
-      continue  # 손상/수동 편집 항목 — 건너뛰고 종목 전체 분석을 막지 않음
+      continue
     exit_p, reason = None, None
     if low <= sl:
       exit_p, reason = sl, "SL"
@@ -754,8 +678,6 @@ def check_exit_alerts(ticker, df_ltf, positions, now_et=None, quiet_hours=None):
       exit_p, reason = float(close), "DAY_CLOSE"
     if exit_p is None:
       continue
-    # 알림 실제 전달 성공 시에만 CLOSED 처리 — 미전송(웹훅 미설정/실패)이면 OPEN으로
-    # 남겨 로컬 크론/GHA 백업의 다음 실행에서 재시도한다 (청산 알림 유실 방지).
     if send_discord_webhook(build_exit_message(p, exit_p, reason), mention=not quiet):
       p.update({
           "status": "CLOSED", "exit_price": exit_p,
@@ -776,20 +698,15 @@ def run_strategy():
       f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
       "FVG 전략 스캐너 실행 중... (HTF 15분 추세 필터 + 1분봉 CHoCH/FVG 진입 모델)"
   )
-  # 파일 기반 알림 상태 — --once(로컬 크론/GHA)와 loop 모드가 동일하게 공유
   alert_state = _load_alert_state()
   alerted_any = False
-  # 포지션 상태 — 진입 알림 시 기록, 청산(TP/손절/당일 마감) 알림에 사용
   positions = _load_positions()
   positions_changed = False
-  # 시초가 창 — 진입 알림 허용 시간대 (portfolio_config.json > FVG > ENTRY_WINDOW).
-  # 청산(매도) 알림은 이 창과 무관하게 장중 내내 동작한다.
   entry_window = load_entry_window()
-  # 청산 알림 무음 시간대 — 밤~새벽(KST)에는 멘션 없이 조용히 전송
   quiet_hours = load_quiet_hours()
   for idx, ticker in enumerate(TICKERS):
     if idx > 0:
-      time.sleep(1.5)  # yfinance 레이트 리밋 완화 — 종목별 요청 분산
+      time.sleep(1.5)
     try:
       df_ltf = fetch_ltf_data(ticker)
       if df_ltf is None or len(df_ltf) < MIN_LTF_BARS:
@@ -799,14 +716,9 @@ def run_strategy():
         print(f"[{ticker}] 장중 세션 아님 — 스킵 (마지막 봉: {df_ltf.index[-1]})")
         continue
 
-      # ① 청산(매도) 확인 — 1분봉만 필요하므로 HTF 수집 실패와 무관하게 실행
-      #    (당일 마감 임박 시 HTF 장애로 청산 알림이 밀리지 않도록 먼저 처리)
       if check_exit_alerts(ticker, df_ltf, positions, quiet_hours=quiet_hours):
         positions_changed = True
 
-      # ② 진입 신호 스캔 — 시초가 창(진입 허용 시간대) 안에서만 실행.
-      #    청산(①) 알림은 창과 무관하게 장중 내내 동작한다 (자동 청산 기록).
-      #    창 밖에는 HTF 수집도 생략해 yfinance 요청을 아낀다.
       if not in_entry_window(df_ltf.index[-1], entry_window):
         print(
             f"[{ticker}] 시초가 창 밖 — 진입 신호 스킵 "
@@ -832,9 +744,6 @@ def run_strategy():
         print(f"[{ticker}] 동일 FVG 재알림 쿨다운 중 — 중복 방지")
         continue
 
-      # 알림 실제 전달 성공 시에만 포지션 기록 + 쿨다운 설정 — 미전송(웹훅 미설정/
-      # 실패)이면 기록하지 않아 (1) 유령 포지션의 청산 알림(유저가 모르는 트레이드),
-      # (2) 미전송 알림이 쿨다운을 선점해 GHA 알림을 차단하는 문제를 방지한다.
       if send_discord_webhook(build_message(signal)):
         positions[key] = record_position(ticker, signal)
         positions_changed = True
@@ -844,7 +753,6 @@ def run_strategy():
         print(f"[{ticker}] 알림 미전송 — 포지션/쿨다운 기록 생략 (다음 실행에서 재시도)")
 
     except Exception as e:
-      # 한 종목의 실패가 다른 종목 분석을 막지 않도록 방어
       print(f"[{ticker}] 분석 중 오류 발생: {e}")
 
   if alerted_any:
