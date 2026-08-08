@@ -31,7 +31,7 @@
             "LABEL": "SOXL (3x 반도체)",
             "BUY_PRICE": null,
             "SHARES": null,
-            "ATH_AT_BUY": null,
+            "ATH_AT_BUY": 300.77,
             "SELL_ALARM_SENT": false,
             "SELL_IMMINENT_SENT": false,
             "ZONE_ALERTS": {
