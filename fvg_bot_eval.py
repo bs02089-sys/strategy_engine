@@ -29,7 +29,7 @@ fvg_signal_bot.py가 진입 알림 시 fvg_positions.json에 기록한 포지션
   python3 fvg_bot_eval.py --discord             # 리포트를 Discord 웹훅으로 전송 (아침 자동화)
   python3 fvg_bot_eval.py --weekly              # 주간 요약 (주별 승률/총수익/PF/MDD)
   python3 fvg_bot_eval.py --monthly             # 월간 요약 (월별 승률/총수익/PF/MDD)
-  python3 fvg_bot_eval.py --monthly --days 45   # 최근 45일만 월별로 집계
+  python3 fvg_bot_eval.py --monthly --days 90   # 최근 90일(분기)만 월별로 집계
   python3 fvg_bot_eval.py --weekly --discord    # 주간 요약을 Discord로 전송
   python3 fvg_bot_eval.py --monthly-trigger     # 매월 1일 월간 요약 자동 전송 (GHA 아침 트리거)
 

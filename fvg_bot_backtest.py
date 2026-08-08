@@ -12,6 +12,8 @@
   - 청산: 손절(구조 저점 아래) 우선 — 익절 = 리스크 × RR (기본 3.5, 영상 3~4R)
     - 기본: 당일 장중 해결 못 하면 장 마감 종가로 정리 (데이 트레이딩 모델)
     - --overnight: SL/TP 도달까지 다음 날 보유 허용
+  - RR 스윕 (손익비 범위 최적화): --rr에 값을 여러 개 주면 데이터는 1회만 내려받고
+    배수별로 전부 재시뮬레이션해 비교표를 출력 (영상 3~4R 구간 포함 후보값 탐색)
   - 지표: 승률/평균/총수익/MDD/PF/최대손실/MAE/MFE (프로젝트 백테스트 표준 양식)
   - 시초가 창 진입 비교 — 창 내(portfolio_config.json > FVG > ENTRY_WINDOW, 기본
     ET 09:30~11:30) 진입 vs 창 외 진입 트레이드의 승률/평균/합계/PF를 나란히 출력
@@ -25,6 +27,7 @@
 사용 예:
   python3 fvg_bot_backtest.py                       # TQQQ, 5m+1h HTF, 60일 (실전 봇과 동일 종목)
   python3 fvg_bot_backtest.py --ticker TQQQ --rr 2.0
+  python3 fvg_bot_backtest.py --rr 2.5 3.0 3.5 4.0 4.5 5.0  # RR 스윕 — 배수별 비교표
   python3 fvg_bot_backtest.py --overnight           # 익일 보유 허용
   python3 fvg_bot_backtest.py --ltf 15m --days 60   # 더 느린 근사
 ==================================================================
@@ -81,6 +84,7 @@ def backtest(df_ltf, df_htf, rr, overnight, htf_minutes):
 
   반환: trades = [(진입t, 진입p, 청산t, 청산p, 수익률, 보유봉수, MAE, MFE)], eq = 지분곡선
   """
+  bot.RR_TARGET = rr  # build_long_signal의 익절 배수 — 인자로 받은 rr로 재시뮬레이션
   trades, eq = [], []
   equity = 1.0
   entry_p = entry_t = entry_idx = sl = tp = entry_date = None
@@ -172,29 +176,45 @@ def classify_entry_window(ts, window):
   return "in" if start <= minutes < end else "out"
 
 
-def summarize(ticker, label, trades, eq, ltf_minutes):
-  print(f"\n[{ticker}] {label}")
-  if not trades:
-    print("  신호 없음 (조회 기간 내 진입 조건 미충족)")
-    return
+def compute_metrics(trades, eq):
+  """트레이드/지분곡선 → 요약 지표 dict — 개별 요약·RR 스윕 비교 공용."""
   rets = np.array([t[4] for t in trades])
   wins, losses = rets[rets > 0], rets[rets <= 0]
   cum = eq[-1] / eq[0] - 1
   dd = (eq / np.maximum.accumulate(eq) - 1).min() * 100
   pf = wins.sum() / abs(losses.sum()) if len(losses) else float("inf")
-  hold_hours = np.array([t[5] * ltf_minutes / 60 for t in trades])
-  mfe_avg, ret_avg = np.mean([t[7] for t in trades]) * 100, rets.mean() * 100
+  return {
+      "n": len(trades),
+      "wr": len(wins) / len(rets) * 100 if len(rets) else 0.0,
+      "avg": rets.mean() * 100 if len(rets) else 0.0,
+      "total": cum * 100,
+      "mdd": dd,
+      "pf": pf,
+      "rets": rets,
+      "wins": wins,
+      "losses": losses,
+      "mfe_avg": np.mean([t[7] for t in trades]) * 100 if trades else 0.0,
+  }
 
-  print(f"  트레이드 {len(trades)}회 | 승률 {len(wins) / len(rets) * 100:.0f}% | "
-        f"평균 {ret_avg:+.1f}% | 총수익 {cum * 100:+.1f}% | MDD {dd:.1f}%")
-  print(f"  평균손실 {losses.mean() * 100:+.1f}% | 최대손실 {rets.min() * 100:+.1f}% | "
-        f"PF {pf:.1f} | 평균보유 {hold_hours.mean():.1f}시간")
-  if mfe_avg > 0 and ret_avg >= 0:
-    giveback = 100 * (1 - ret_avg / mfe_avg)
-    print(f"  참고: MFE 평균 {mfe_avg:+.1f}% vs 실현 평균 {ret_avg:+.1f}% "
+
+def summarize(ticker, label, trades, eq, ltf_minutes):
+  print(f"\n[{ticker}] {label}")
+  if not trades:
+    print("  신호 없음 (조회 기간 내 진입 조건 미충족)")
+    return
+  m = compute_metrics(trades, eq)
+  hold_hours = np.array([t[5] * ltf_minutes / 60 for t in trades])
+
+  print(f"  트레이드 {m['n']}회 | 승률 {m['wr']:.0f}% | "
+        f"평균 {m['avg']:+.1f}% | 총수익 {m['total']:+.1f}% | MDD {m['mdd']:.1f}%")
+  print(f"  평균손실 {m['losses'].mean() * 100:+.1f}% | 최대손실 {m['rets'].min() * 100:+.1f}% | "
+        f"PF {m['pf']:.1f} | 평균보유 {hold_hours.mean():.1f}시간")
+  if m["mfe_avg"] > 0 and m["avg"] >= 0:
+    giveback = 100 * (1 - m["avg"] / m["mfe_avg"])
+    print(f"  참고: MFE 평균 {m['mfe_avg']:+.1f}% vs 실현 평균 {m['avg']:+.1f}% "
           f"(최대 이익의 {giveback:.0f}% 반납)")
   else:
-    print(f"  참고: MFE 평균 {mfe_avg:+.1f}% vs 실현 평균 {ret_avg:+.1f}% (손실 구간)")
+    print(f"  참고: MFE 평균 {m['mfe_avg']:+.1f}% vs 실현 평균 {m['avg']:+.1f}% (손실 구간)")
 
   # 시초가 창 진입 vs 창 외 진입 성과 비교 (portfolio_config.json FVG.ENTRY_WINDOW)
   window = bot.load_entry_window()
@@ -220,17 +240,51 @@ def summarize(ticker, label, trades, eq, ltf_minutes):
           f"{t[7] * 100:+6.1f}%")
 
 
-def run_ticker(ticker, ltf, htf, days, rr, overnight):
+def print_rr_table(ticker, rows):
+  """RR 스윕 비교표 — 총수익/PF 기준 최적 배수 표시 (손익비 범위 최적화)."""
+  print(f"\n[{ticker}] RR 스윕 비교표 (손익비 범위 최적화)")
+  print(f"  {'RR':>6} {'트레이드':>8} {'승률':>6} {'평균':>8} {'총수익':>9} "
+        f"{'MDD':>7} {'PF':>6}")
+  valid = [(rr, m) for rr, m in rows if m is not None]
+  if not valid:
+    print("  신호 없음 (조회 기간 내 진입 조건 미충족)")
+    return
+  best_total = max(valid, key=lambda x: x[1]["total"])
+  # max()는 inf(무손실 PF)도 정상 비교 — 별도 가드 불필요
+  best_pf = max(valid, key=lambda x: x[1]["pf"])
+  for rr, m in valid:
+    star = " ◀" if rr in (best_total[0], best_pf[0]) else ""
+    print(f"  1:{rr:<5g} {m['n']:>8} {m['wr']:>5.0f}% {m['avg']:>+7.2f}% "
+          f"{m['total']:>+8.2f}% {m['mdd']:>6.2f}% {m['pf']:>6.2f}{star}")
+  print(f"  → 총수익 최적: 1:{best_total[0]:g} | PF 최적: 1:{best_pf[0]:g}")
+
+
+def run_ticker(ticker, ltf, htf, days, rr_values, overnight):
   ltf_minutes = int(ltf[:-1])
   df_ltf = load_bars(ticker, ltf, days)
   df_htf = load_bars(ticker, htf, days)
   if len(df_ltf) < bot.MIN_LTF_BARS:
     print(f"[{ticker}] 데이터 부족({len(df_ltf)}봉 < {bot.MIN_LTF_BARS}) — 분석 생략")
     return
-  trades, eq = backtest(df_ltf, df_htf, rr, overnight, tf_to_minutes(htf))
-  label = (f"FVG {ltf}+{htf} HTF, {days}일, RR 1:{rr:g}, "
-           + ("overnight" if overnight else "당일 마감"))
-  summarize(ticker, label, trades, eq, ltf_minutes)
+  sweep = len(rr_values) > 1
+  rows = []
+  for rr in rr_values:
+    trades, eq = backtest(df_ltf, df_htf, rr, overnight, tf_to_minutes(htf))
+    label = (f"FVG {ltf}+{htf} HTF, {days}일, RR 1:{rr:g}, "
+             + ("overnight" if overnight else "당일 마감"))
+    if sweep:
+      m = compute_metrics(trades, eq) if trades else None
+      rows.append((rr, m))
+      if m is None:
+        print(f"\n[{ticker}] RR 1:{rr:g} — 신호 없음")
+      else:
+        print(f"  RR 1:{rr:g} → 트레이드 {m['n']}회 | 승률 {m['wr']:.0f}% | "
+              f"평균 {m['avg']:+.2f}% | 총수익 {m['total']:+.2f}% | "
+              f"MDD {m['mdd']:.2f}% | PF {m['pf']:.2f}")
+    else:
+      summarize(ticker, label, trades, eq, ltf_minutes)
+  if sweep:
+    print_rr_table(ticker, rows)
 
 
 def tf_to_minutes(s):
@@ -256,20 +310,25 @@ def main():
   p.add_argument("--ltf", default="5m", help="진입 타임프레임 (5m/15m, 기본 5m — yfinance 1m은 8일 한도)")
   p.add_argument("--htf", default="1h", help="HTF 추세 필터 타임프레임 (기본 1h)")
   p.add_argument("--days", type=int, default=60, help="조회 기간(일, 기본 60 — 5m 최대)")
-  p.add_argument("--rr", type=float, default=bot.RR_TARGET,
-                 help=f"익절 배수 (기본 {bot.RR_TARGET:g} — 영상 3~4R)")
+  p.add_argument("--rr", nargs="*", type=float, default=None,
+                 help="익절 배수 — 값 1개면 단일 백테스트, 여러 개면 RR 스윕(비교표) 출력. "
+                      f"기본: 실전 봇 값 {bot.RR_TARGET:g} (영상 3~4R)")
   p.add_argument("--overnight", action="store_true",
                  help="당일 해결 안 되면 익일까지 보유 허용 (기본: 당일 마감 정리)")
   args = p.parse_args()
 
   ltf = parse_tf(args.ltf)
   scale_constants(int(ltf[:-1]))
-  bot.RR_TARGET = args.rr
-  print(f"[설정] LTF={ltf} HTF={args.htf} 조회={args.days}일 RR=1:{args.rr:g} "
+  rr_values = args.rr if args.rr else [bot.RR_TARGET]
+  if any(r <= 0 for r in rr_values):
+    raise SystemExit("[오류] RR(익절 배수)은 0보다 커야 합니다 (예: --rr 2.5 3.0 3.5)")
+  rr_desc = (" ".join(f"1:{r:g}" for r in rr_values) if len(rr_values) > 1
+             else f"1:{rr_values[0]:g}")
+  print(f"[설정] LTF={ltf} HTF={args.htf} 조회={args.days}일 RR={rr_desc} "
         f"모드={'overnight' if args.overnight else '당일 마감'}")
   for ticker in [t.strip().upper() for t in args.ticker.split(",") if t.strip()]:
     try:
-      run_ticker(ticker, ltf, args.htf, args.days, args.rr, args.overnight)
+      run_ticker(ticker, ltf, args.htf, args.days, rr_values, args.overnight)
     except Exception as exc:  # 한 종목 실패가 다른 종목을 막지 않도록
       print(f"[{ticker}] 백테스트 중 오류: {exc}")
 

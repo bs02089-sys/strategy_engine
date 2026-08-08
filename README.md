@@ -155,7 +155,7 @@
 | **DCA_MA_strategy_flowchart.py** | 시스템 전체 플로우차트 문서 |
 | **setup_cronjob_org.py** | cron-job.org 실시간 알림 설정 자동화 (생성/--list/--test-dispatch/--update-pat/--update-schedule) |
 | **fvg_signal_bot.py** | 📌 **FVG 반자동 매매 스캐너** — HTF(15분) 추세 필터 + 1분봉 CHoCH/FVG 진입 모델 + 구조 기반 손절, Discord 알림(멘션 3회), 파일 기반 중복 알림 방지, **청산(매도) 알림**(TP/손절/당일 마감 추적) |
-| **fvg_bot_backtest.py** | FVG 전략 백테스트 — 5분봉 근사(1분봉은 yfinance 7일 한도), 당일 마감/overnight 모드, 승률·MDD·PF 지표 |
+| **fvg_bot_backtest.py** | FVG 전략 백테스트 — 5분봉 근사(1분봉은 yfinance 7일 한도), 당일 마감/overnight 모드, 승률·MDD·PF 지표, **RR 스윕**(익절 배수 다중 비교표) |
 | **fvg_bot_eval.py** | FVG 봇 **실전 평가** — fvg_positions.json 기반 승률/평균익절·손절/PF/총수익/MDD/청산 사유(TP·SL·마감) 분포 리포트 (종목·기간 필터, `--fee` 수수료 반영, `--discord` 전송) |
 | **setup_fvg_cron.py** | FVG 봇 로컬 크론 설정 자동화 (미국 장중 매분, 설치/--list/--remove/--dry-run) |
 | **fvg_local_cron.sh** | 로컬 크론 래퍼 — ET 장중 확인 + git 알림 상태(fvg_alerts.json) 동기화 후 실행 |
@@ -171,7 +171,7 @@
 | **market_state.json** | 시장 단계 상태 정보 (자동 생성) |
 | **signal_report.json** | 시장 리스크 점수 (자동 생성) |
 | **fvg_alerts.json** | FVG 봇 알림 상태 (자동 생성 — 동일 FVG 중복 알림 방지, 로컬↔GHA 공유) |
-| **fvg_positions.json** | FVG 봇 포지션 상태 (자동 생성 — 진입 기록 → TP/손절/당일 마감 청산 알림 추적, 로컬↔GHA 공유, CLOSED 45일 보존 → `fvg_bot_eval.py` 평가용) |
+| **fvg_positions.json** | FVG 봇 포지션 상태 (자동 생성 — 진입 기록 → TP/손절/당일 마감 청산 알림 추적, 로컬↔GHA 공유, CLOSED 120일 보존 → `fvg_bot_eval.py` 분기 평가용) |
 | **fvg_eval_state.json** | 월간 트리거 상태 (자동 생성 — 마지막 월간 요약 전송 월, 로컬↔GHA 공유, 중복 전송 방지) |
 | **requirements.txt** | Python 의존성 패키지 목록 |
 
@@ -471,7 +471,7 @@ python3 fvg_bot_eval.py --path test.json   # 다른 포지션 파일로 테스�
 >   비교 표시 — 시초가 창 필터의 실전 성과 영향을 확인. 타임존 없는 과거 기록은
 >   분류 불가로 별도 집계.
 > - 미청산(OPEN) 포지션은 평가에서 제외하고 별도로 표시합니다.
-> - 포지션은 **CLOSED 후 45일간 보존**되므로 한 달(20영업일) 단위 평가가 가능합니다.
+> - 포지션은 **CLOSED 후 120일간 보존**되므로 분기(3개월) 단위 평가가 가능합니다.
 > - `--discord`: 리포트 요약을 Discord로 전송 (아침 자동화 — 표준 라이브러리만 사용,
 >   의존성 설치 불필요). `DISCORD_WEBHOOK` 미설정 시 stdout 출력으로 확인.
 
@@ -480,7 +480,7 @@ python3 fvg_bot_eval.py --path test.json   # 다른 포지션 파일로 테스�
 ```bash
 python3 fvg_bot_eval.py --weekly       # 주간(ISO 주)별 승률/총수익/PF/MDD
 python3 fvg_bot_eval.py --monthly      # 월별 승률/총수익/PF/MDD
-python3 fvg_bot_eval.py --monthly --days 45   # 최근 45일만 월별 집계
+python3 fvg_bot_eval.py --monthly --days 90   # 최근 90일(분기)만 월별 집계
 python3 fvg_bot_eval.py --weekly --discord    # Discord로 전송
 python3 fvg_bot_eval.py --monthly-trigger     # 매월 1일 월간 요약 자동 전송
 ```
@@ -560,6 +560,28 @@ python3 fvg_bot_eval.py --monthly-trigger     # 매월 1일 월간 요약 자동
 > 단, "기존 DCA 성격 유지"(dca_reset) 방식은 MDD를 줄이되(MA5~30: -1~-21%) 수익까지 같이
 > 줄어듭니다(MA5~30: +9~33%). 즉 **MDD와 수익을 동시에 얻으려면 MA20 + 올인 재진입**이 유일한
 > 답이며, 이는 사실상 "가격-20일선 크로스" 전략에 수렴합니다.
+
+### FVG 전략 백테스트 (`fvg_bot_backtest.py`)
+
+실전 봇(`fvg_signal_bot.py`)의 진입 로직(HTF 추세 필터 → CHoCH → FVG → 풀백 → 구조 손절)을
+그대로 미러링해 과거 성과를 검증합니다. 1분봉은 yfinance가 7~8일만 제공해 통계가 불가능하므로
+**5분봉 근사**(최근 60일)를 기본으로 사용합니다.
+
+```bash
+python3 fvg_bot_backtest.py                              # TQQQ, 5m+1h HTF, 60일, 기본 RR 1:3.5
+python3 fvg_bot_backtest.py --rr 2.0                     # 특정 배수만
+python3 fvg_bot_backtest.py --rr 2.5 3.0 3.5 4.0 4.5 5.0 # RR 스윕 — 손익비 범위 최적화 비교표
+python3 fvg_bot_backtest.py --overnight                  # 익일 보유 허용 (MDD 급증 주의)
+python3 fvg_bot_backtest.py --ltf 15m --days 60          # 더 느린 근사
+python3 fvg_bot_backtest.py --ticker SOXL                # 과거 SOXL 비교
+```
+
+> - **RR 스윕**: `--rr`에 값을 여러 개 주면 데이터는 1회만 내려받고 배수별로 전부
+>   재시뮬레이션한 뒤 트레이드 수·승률·평균·총수익·MDD·PF 비교표를 출력합니다.
+>   총수익/PF 기준 최적 배수를 함께 표시 — 영상의 3~4R 범위 최적화에 사용.
+> - 당일 마감 모델이 기본(데이 트레이딩) — 야간 보유 시 레버리지 ETF 갭에 구조
+>   손절이 깨져 MDD가 급증하므로 주의.
+> - 시초가 창(ET 09:30~11:30) 내/외 진입 성과 비교 포함.
 
 ### MA 레짐 전략 (`DCA_MA_strategy.py`)
 
