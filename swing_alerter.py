@@ -503,8 +503,9 @@ header .sub{color:var(--muted);font-size:13px;margin-top:4px}
 .meta{color:var(--muted);font-size:13px}
 .meta .dd{font-size:13px}
 .info{background:#0f1420;border:1px solid var(--border);border-radius:12px;
-  padding:10px 12px;margin-top:12px;font-size:14px;line-height:1.7}
+  padding:10px 12px;margin-top:12px;font-size:22px;line-height:1.7}
 .info b{color:var(--text)}
+.info .dd{font-size:22px}   /* 전고가 대비 하락률(▼) — 전고가 줄과 동일 크기 */
 .ladder{margin-top:14px}
 .lvl{display:grid;grid-template-columns:52px 1fr 1.4fr 60px;gap:8px;
   align-items:center;padding:7px 0;border-bottom:1px solid #1a2231;font-size:14px}
@@ -529,7 +530,7 @@ footer{color:#4b5563;font-size:12px;text-align:center;margin-top:8px;line-height
 .plan-row{display:flex;align-items:center;gap:8px;margin-bottom:8px}
 .plan-row label{font-size:13px;color:var(--muted);width:112px;flex-shrink:0}
 .plan-buy-input{flex:1;min-width:0;background:#1c2533;border:1px solid var(--border);border-radius:8px;
-  color:var(--text);font-size:15px;font-weight:700;padding:7px 10px;font-family:ui-monospace,Menlo,Consolas,monospace}
+  color:var(--text);font-size:22px;font-weight:700;padding:7px 10px;font-family:ui-monospace,Menlo,Consolas,monospace}
 .plan-unit{font-size:13px;color:var(--muted)}
 .plan-pcts{display:flex;gap:6px;flex-wrap:wrap}
 .pct{font-size:13px;font-weight:700;padding:7px 13px;border-radius:999px;
