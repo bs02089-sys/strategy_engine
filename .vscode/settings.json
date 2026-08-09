@@ -6,5 +6,7 @@
     "python.analysis.extraPaths": [
         "./.venv/lib/python3.14/site-packages",
         "//wsl.localhost/Ubuntu/home/bs020/projects/strategy_engine/.venv/lib/python3.14/site-packages"
-    ]
+    ],
+    "python.terminal.activateEnvironment": true,
+    "python.terminal.activateEnvInTriggeredTerminal": true
 }
