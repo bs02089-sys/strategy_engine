@@ -491,7 +491,8 @@ OneSignalDeferred.push(async function(OneSignal) {
       serviceWorkerScope: "./",
     });
     // init 성공 → 구독 상태 반영 + 버튼 활성화
-    const isEnabled = await OneSignal.Notifications.isPushEnabled();
+    // v16(User Model)에서는 isPushEnabled()가 제거됨 → PushSubscription.optedIn 사용
+    const isEnabled = OneSignal.User.PushSubscription.optedIn;
     if (btn) {
       btn.disabled = false;
       btn.textContent = isEnabled ? '🔔 알림 ON' : '🔔 알림 받기';
@@ -502,7 +503,7 @@ OneSignalDeferred.push(async function(OneSignal) {
         } catch (e) {
           // iOS: 홈 화면 추가 전이면 거부됨
         }
-        const on = await OneSignal.Notifications.isPushEnabled();
+        const on = OneSignal.User.PushSubscription.optedIn;
         btn.textContent = on ? '🔔 알림 ON' : '🔔 알림 받기';
         if (on) btn.classList.add('on'); else btn.classList.remove('on');
       });
