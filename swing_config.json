@@ -4,7 +4,7 @@
     "MDD_START_PCT": 5,
     "MDD_END_PCT": 95,
     "MDD_STEP_PCT": 5,
-    "SWING_TARGET_PCT": -10,
+    "SWING_TARGET_PCT": 10,
     "IMMINENT_GAP_PCT": 5,
     "PAGES_URL": "https://bs02089-sys.github.io/strategy_engine/",
     "ONESIGNAL_APP_ID": "fc892714-97d9-457a-b3d6-12d25d93cc48",
@@ -14,7 +14,6 @@
             "LABEL": "TQQQ",
             "BUY_PRICE": null,
             "SHARES": null,
-            "ATH_AT_BUY": 87.22,
             "SELL_ALARM_SENT": false,
             "SELL_IMMINENT_SENT": false,
             "ZONE_ALERTS": {
@@ -27,7 +26,6 @@
             "LABEL": "SOXL",
             "BUY_PRICE": null,
             "SHARES": null,
-            "ATH_AT_BUY": 300.77,
             "SELL_ALARM_SENT": false,
             "SELL_IMMINENT_SENT": false,
             "ZONE_ALERTS": {
