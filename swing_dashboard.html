@@ -19,6 +19,44 @@
 if ('serviceWorker' in navigator) { navigator.serviceWorker.register('sw.js'); }
 </script>
 
+
+<script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
+<script>
+window.OneSignalDeferred = window.OneSignalDeferred || [];
+OneSignalDeferred.push(async function(OneSignal) {
+  await OneSignal.init({
+    appId: "fc892714-97d9-457a-b3d6-12d25d93cc48",
+    serviceWorkerPath: "OneSignalSDKWorker.js",
+    serviceWorkerScope: "./",
+  });
+  // 구독 상태 반영 + 버튼 활성화
+  try {
+    const btn = document.getElementById('push-btn');
+    const isEnabled = await OneSignal.Notifications.isPushEnabled();
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = isEnabled ? '🔔 알림 ON' : '🔔 알림 받기';
+      if (isEnabled) btn.classList.add('on');
+      btn.addEventListener('click', async function() {
+        try {
+          await OneSignal.Notifications.requestPermission();
+        } catch (e) {
+          // iOS: 홈 화면 추가 전이면 거부됨
+        }
+        const on = await OneSignal.Notifications.isPushEnabled();
+        btn.textContent = on ? '🔔 알림 ON' : '🔔 알림 받기';
+        if (on) btn.classList.add('on'); else btn.classList.remove('on');
+      });
+    }
+  } catch (e) {
+    // SDK 초기화 실패 시 버튼 폴백 (설정/네트워크 문제 안내)
+    console.error('OneSignal init 실패:', e);
+    const btn = document.getElementById('push-btn');
+    if (btn) { btn.disabled = true; btn.textContent = '⚠️ 알림 설정 오류'; }
+  }
+});
+</script>
+
 <style>
 :root{
   --bg:#0b0e14; --card:#141a26; --border:#20293b; --text:#e6edf3; --muted:#8b949e;
@@ -41,6 +79,11 @@ header .sub{color:var(--muted);font-size:12px;margin-top:4px}
 .chip.green{background:var(--green-dim);color:var(--green)}
 .chip.red{background:var(--red-dim);color:var(--red)}
 .chip.amber{background:var(--amber-dim);color:var(--amber)}
+.push-btn{font-size:13px;font-weight:700;padding:8px 14px;border-radius:999px;border:1px solid var(--blue);
+  background:var(--blue-dim);color:var(--blue);cursor:pointer;-webkit-tap-highlight-color:transparent}
+.push-btn:active{opacity:.7}
+.push-btn:disabled{opacity:.4;cursor:default}
+.push-btn.on{border-color:var(--green);background:var(--green-dim);color:var(--green)}
 .card{background:var(--card);border:1px solid var(--border);border-radius:16px;
   padding:16px;margin-bottom:16px}
 .row{display:flex;align-items:center;justify-content:space-between;gap:8px}
@@ -78,8 +121,9 @@ footer{color:#4b5563;font-size:11px;text-align:center;margin-top:8px;line-height
 <body>
 <header>
   <h1>📈 스윙 투자 알리미</h1>
-  <div class="sub">업데이트 2026-08-09 01:50 · 종가 기준 2026-08-08 21:50 (미국)<span class="pages">· <a href="https://bs02089-sys.github.io/strategy_engine/" target="_blank" rel="noopener">🌐 라이브 열기</a></span></div>
+  <div class="sub">업데이트 2026-08-09 16:11 · 종가 기준 2026-08-09 03:11 (미국)<span class="pages">· <a href="https://bs02089-sys.github.io/strategy_engine/" target="_blank" rel="noopener">🌐 라이브 열기</a></span></div>
   <div class="chips">
+    <button id="push-btn" class="push-btn" disabled>🔔 알림 받기</button>
     <span class="chip gray">🚨 매도 알람 0</span>
     <span class="chip green">🟢 매수 구간 2</span>
   </div>
