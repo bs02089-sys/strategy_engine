@@ -56,7 +56,7 @@ DEFAULT_CFG = {
     "MDD_START_PCT": 5,             # 매수 구간 시작 (-5%)
     "MDD_END_PCT": 95,              # 매수 구간 종료 (-95%)
     "MDD_STEP_PCT": 5,              # 구간 간격
-    "SWING_TARGET_PCT": 10,         # 스윙 목표 수익률(%) — 매도가 = 매수가 × (1 + 목표/100)
+    "SWING_TARGET_PCT": 10,         # 스윙 목표 수익률(%) — 매도 예정가 = 매수 예정가 × (1 + 목표/100)
     "IMMINENT_GAP_PCT": 5,          # 임박 알림 기준 (구간/매도 목표까지 %p)
     "PAGES_URL": "",               # GitHub Pages 주소 — 설정 시 대시보드에 라이브 링크 표시
     "ONESIGNAL_APP_ID": "",        # OneSignal 웹 푸시 앱 ID (대시보드 SDK 초기화용, 공개값)
@@ -471,7 +471,7 @@ footer{color:#4b5563;font-size:12px;text-align:center;margin-top:8px;line-height
 .pages a:active{opacity:.7}
 .plan{margin-top:14px;background:#0f1420;border:1px solid var(--border);border-radius:12px;padding:12px}
 .plan-row{display:flex;align-items:center;gap:8px;margin-bottom:8px}
-.plan-row label{font-size:13px;color:var(--muted);width:96px;flex-shrink:0}
+.plan-row label{font-size:13px;color:var(--muted);width:112px;flex-shrink:0}
 .plan-buy-input{flex:1;min-width:0;background:#1c2533;border:1px solid var(--border);border-radius:8px;
   color:var(--text);font-size:15px;font-weight:700;padding:7px 10px;font-family:ui-monospace,Menlo,Consolas,monospace}
 .plan-unit{font-size:13px;color:var(--muted)}
@@ -480,9 +480,9 @@ footer{color:#4b5563;font-size:12px;text-align:center;margin-top:8px;line-height
   border:1px solid var(--border);background:#1c2533;color:var(--muted);cursor:pointer;-webkit-tap-highlight-color:transparent}
 .pct.on{border-color:var(--green);background:var(--green-dim);color:var(--green)}
 .pct:active{opacity:.7}
-.plan-out{display:flex;gap:16px;margin-top:6px;flex-wrap:wrap}
-.po{font-size:14px;color:var(--muted)}
-.po b{color:var(--text);font-family:ui-monospace,Menlo,Consolas,monospace;font-size:16px}
+.plan-out{display:flex;align-items:center;gap:8px;margin-top:10px}
+.po{font-size:14px;color:var(--muted);font-weight:600}
+.po b{color:var(--text);font-family:ui-monospace,Menlo,Consolas,monospace;font-size:22px;font-weight:800}
 """
 
 # PWA 서비스 워커 등록 — Chrome '앱 설치' 기준 충족 (통과형 fetch, 캐시 없음)
@@ -562,36 +562,35 @@ OneSignalDeferred.push(async function(OneSignal) {
 """
 
 
-# 매수가(사용자 입력, 없으면 현재가) × (1 + 수익률) → 매도가 자동 계산 (브라우저 localStorage 저장)
+# 매수 예정가(사용자 입력, 없으면 현재가) × (1 + 수익률) → 매도 예정가 자동 계산 (브라우저 localStorage 저장)
 # 매도 상태 칩/카운트는 사용자별 입력 기준으로 항상 재판정 — 서버 설정(BUY_PRICE) 없이도 동작한다.
 _PLAN_JS = """
 <script>
 (function() {
-  // 카드별 저장 키: swing_buy_{TICKER}(매수가) / swing_sell_{TICKER}(수익률)
+  // 카드별 저장 키: swing_buy_{TICKER}(매수 예정가) / swing_sell_{TICKER}(수익률)
   document.querySelectorAll('.card[data-ath]').forEach(function(card) {
     var ticker = card.dataset.ticker;
     var close = parseFloat(card.dataset.close);
     var gapPct = parseFloat(card.dataset.gap) || 5;
     var buyInput = card.querySelector('.plan-buy-input');
     var pctBtns = card.querySelectorAll('.pct');
-    var buyEl = card.querySelector('.plan-buy');
     var sellEl = card.querySelector('.plan-sell');
     var chip = card.querySelector('[data-sell-chip]');
 
-    // 저장값 로드 (기본: 매수가 미입력 → 현재가 기준, 수익률 10%)
+    // 저장값 로드 (기본: 매수 예정가 미입력 → 현재가 기준, 수익률 10%)
     var buyVal = parseFloat(localStorage.getItem('swing_buy_' + ticker));
     if (isNaN(buyVal)) buyVal = 0;   // 0 = 미입력
     var sellPct = parseFloat(localStorage.getItem('swing_sell_' + ticker));
     if (isNaN(sellPct)) sellPct = 10;
 
-    // 유효 매수가 — 입력값(>0)이 없으면 현재가(지금 매수 시) 기준
+    // 유효 매수 예정가 — 입력값(>0)이 없으면 현재가(지금 매수 시) 기준
     function buyBase() {
       var v = parseFloat(buyInput.value);
       if (isNaN(v) || v <= 0) v = close;
       return v;
     }
 
-    // 사용자별 매도 상태 — 내 매수가 × (1 + 수익률) 기준으로 항상 재판정
+    // 사용자별 매도 상태 — 내 매수 예정가 × (1 + 수익률) 기준으로 항상 재판정
     function applySellStatus() {
       if (!chip || isNaN(close)) return;
       var target = buyBase() * (1 + sellPct / 100);
@@ -626,11 +625,10 @@ _PLAN_JS = """
     function update() {
       if (isNaN(close)) return;   // 가격 데이터 없으면 계산 생략
       var base = buyBase();
-      // 매도가 = 매수가 × (1 + 수익률/100)
+      // 매도 예정가 = 매수 예정가 × (1 + 수익률/100)
       var sell = base * (1 + sellPct / 100);
-      buyEl.textContent = '$' + base.toFixed(2);
       sellEl.textContent = '$' + sell.toFixed(2);
-      // 매수가는 직접 입력한 양수 값만 저장 (비우거나 0이면 현재가 기준으로 초기화)
+      // 매수 예정가는 직접 입력한 양수 값만 저장 (비우거나 0이면 현재가 기준으로 초기화)
       var pv = parseFloat(buyInput.value);
       if (!isNaN(pv) && pv > 0) {
         localStorage.setItem('swing_buy_' + ticker, String(pv));
@@ -748,7 +746,7 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
   <div class="info">📊 전고가: ${st["ath"]:,.2f} ({st["ath_date"]})</div>
   <div class="plan">
     <div class="plan-row">
-      <label for="buy-{st["ticker"]}">💰 매수가</label>
+      <label for="buy-{st["ticker"]}">💰 매수 예정가</label>
       <input id="buy-{st["ticker"]}" class="plan-buy-input" type="number" min="0" step="0.01" placeholder="{st["price"]:.2f}">
       <span class="plan-unit">$</span>
     </div>
@@ -762,8 +760,7 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
       </div>
     </div>
     <div class="plan-out">
-      <span class="po">매수가 <b class="plan-buy">-</b></span>
-      <span class="po">매도가 <b class="plan-sell">-</b></span>
+      <span class="po">🎯 매도 예정가 <b class="plan-sell">-</b></span>
     </div>
   </div>
   <div class="ladder">{rows}</div>

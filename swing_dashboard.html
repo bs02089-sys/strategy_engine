@@ -137,7 +137,7 @@ footer{color:#4b5563;font-size:12px;text-align:center;margin-top:8px;line-height
 .pages a:active{opacity:.7}
 .plan{margin-top:14px;background:#0f1420;border:1px solid var(--border);border-radius:12px;padding:12px}
 .plan-row{display:flex;align-items:center;gap:8px;margin-bottom:8px}
-.plan-row label{font-size:13px;color:var(--muted);width:96px;flex-shrink:0}
+.plan-row label{font-size:13px;color:var(--muted);width:112px;flex-shrink:0}
 .plan-buy-input{flex:1;min-width:0;background:#1c2533;border:1px solid var(--border);border-radius:8px;
   color:var(--text);font-size:15px;font-weight:700;padding:7px 10px;font-family:ui-monospace,Menlo,Consolas,monospace}
 .plan-unit{font-size:13px;color:var(--muted)}
@@ -146,15 +146,15 @@ footer{color:#4b5563;font-size:12px;text-align:center;margin-top:8px;line-height
   border:1px solid var(--border);background:#1c2533;color:var(--muted);cursor:pointer;-webkit-tap-highlight-color:transparent}
 .pct.on{border-color:var(--green);background:var(--green-dim);color:var(--green)}
 .pct:active{opacity:.7}
-.plan-out{display:flex;gap:16px;margin-top:6px;flex-wrap:wrap}
-.po{font-size:14px;color:var(--muted)}
-.po b{color:var(--text);font-family:ui-monospace,Menlo,Consolas,monospace;font-size:16px}
+.plan-out{display:flex;align-items:center;gap:8px;margin-top:10px}
+.po{font-size:14px;color:var(--muted);font-weight:600}
+.po b{color:var(--text);font-family:ui-monospace,Menlo,Consolas,monospace;font-size:22px;font-weight:800}
 </style>
 </head>
 <body>
 <header>
   <h1>📈 스윙 투자 알리미</h1>
-  <div class="sub">업데이트 2026-08-09 12:30 · 종가 기준 2026-08-09 08:30 (미국)<span class="pages">· <a href="https://bs02089-sys.github.io/strategy_engine/" target="_blank" rel="noopener">🌐 라이브 열기</a></span></div>
+  <div class="sub">업데이트 2026-08-09 21:41 · 종가 기준 2026-08-09 08:41 (미국)<span class="pages">· <a href="https://bs02089-sys.github.io/strategy_engine/" target="_blank" rel="noopener">🌐 라이브 열기</a></span></div>
   <div class="chips">
     <button id="push-btn" class="push-btn" disabled>🔔 알림 받기</button>
     <span class="chip gray" id="sell-alarm-cnt">🚨 매도 알람 0</span>
@@ -177,7 +177,7 @@ footer{color:#4b5563;font-size:12px;text-align:center;margin-top:8px;line-height
   <div class="info">📊 전고가: $87.22 (2026-06-02)</div>
   <div class="plan">
     <div class="plan-row">
-      <label for="buy-TQQQ">💰 매수가</label>
+      <label for="buy-TQQQ">💰 매수 예정가</label>
       <input id="buy-TQQQ" class="plan-buy-input" type="number" min="0" step="0.01" placeholder="74.47">
       <span class="plan-unit">$</span>
     </div>
@@ -191,8 +191,7 @@ footer{color:#4b5563;font-size:12px;text-align:center;margin-top:8px;line-height
       </div>
     </div>
     <div class="plan-out">
-      <span class="po">매수가 <b class="plan-buy">-</b></span>
-      <span class="po">매도가 <b class="plan-sell">-</b></span>
+      <span class="po">🎯 매도 예정가 <b class="plan-sell">-</b></span>
     </div>
   </div>
   <div class="ladder"><div class="lvl hit"><span class="pct">-5%</span><span class="val">$82.86</span><div class="bar"><i style="width:100%"></i></div><span class="st">매수</span></div><div class="lvl hit"><span class="pct">-10%</span><span class="val">$78.50</span><div class="bar"><i style="width:100%"></i></div><span class="st">매수</span></div><div class="lvl current"><span class="pct">-15%</span><span class="val">$74.14</span><div class="bar"><i style="width:92%"></i></div><span class="st">대기</span></div><div class="lvl wait"><span class="pct">-20%</span><span class="val">$69.78</span><div class="bar"><i style="width:0%"></i></div><span class="st">대기</span></div><div class="lvl wait"><span class="pct">-25%</span><span class="val">$65.42</span><div class="bar"><i style="width:0%"></i></div><span class="st">대기</span></div><div class="lvl wait"><span class="pct">-30%</span><span class="val">$61.05</span><div class="bar"><i style="width:0%"></i></div><span class="st">대기</span></div><div class="lvl wait"><span class="pct">-35%</span><span class="val">$56.69</span><div class="bar"><i style="width:0%"></i></div><span class="st">대기</span></div><div class="lvl wait"><span class="pct">-40%</span><span class="val">$52.33</span><div class="bar"><i style="width:0%"></i></div><span class="st">대기</span></div><div class="lvl wait"><span class="pct">-45%</span><span class="val">$47.97</span><div class="bar"><i style="width:0%"></i></div><span class="st">대기</span></div><div class="lvl wait"><span class="pct">-50%</span><span class="val">$43.61</span><div class="bar"><i style="width:0%"></i></div><span class="st">대기</span></div><div class="lvl wait"><span class="pct">-55%</span><span class="val">$39.25</span><div class="bar"><i style="width:0%"></i></div><span class="st">대기</span></div><div class="lvl wait"><span class="pct">-60%</span><span class="val">$34.89</span><div class="bar"><i style="width:0%"></i></div><span class="st">대기</span></div><div class="lvl wait"><span class="pct">-65%</span><span class="val">$30.53</span><div class="bar"><i style="width:0%"></i></div><span class="st">대기</span></div><div class="lvl wait"><span class="pct">-70%</span><span class="val">$26.17</span><div class="bar"><i style="width:0%"></i></div><span class="st">대기</span></div><div class="lvl wait"><span class="pct">-75%</span><span class="val">$21.81</span><div class="bar"><i style="width:0%"></i></div><span class="st">대기</span></div><div class="lvl wait"><span class="pct">-80%</span><span class="val">$17.44</span><div class="bar"><i style="width:0%"></i></div><span class="st">대기</span></div><div class="lvl wait"><span class="pct">-85%</span><span class="val">$13.08</span><div class="bar"><i style="width:0%"></i></div><span class="st">대기</span></div><div class="lvl wait"><span class="pct">-90%</span><span class="val">$8.72</span><div class="bar"><i style="width:0%"></i></div><span class="st">대기</span></div><div class="lvl wait"><span class="pct">-95%</span><span class="val">$4.36</span><div class="bar"><i style="width:0%"></i></div><span class="st">대기</span></div></div>
@@ -212,7 +211,7 @@ footer{color:#4b5563;font-size:12px;text-align:center;margin-top:8px;line-height
   <div class="info">📊 전고가: $300.77 (2026-06-22)</div>
   <div class="plan">
     <div class="plan-row">
-      <label for="buy-SOXL">💰 매수가</label>
+      <label for="buy-SOXL">💰 매수 예정가</label>
       <input id="buy-SOXL" class="plan-buy-input" type="number" min="0" step="0.01" placeholder="140.25">
       <span class="plan-unit">$</span>
     </div>
@@ -226,8 +225,7 @@ footer{color:#4b5563;font-size:12px;text-align:center;margin-top:8px;line-height
       </div>
     </div>
     <div class="plan-out">
-      <span class="po">매수가 <b class="plan-buy">-</b></span>
-      <span class="po">매도가 <b class="plan-sell">-</b></span>
+      <span class="po">🎯 매도 예정가 <b class="plan-sell">-</b></span>
     </div>
   </div>
   <div class="ladder"><div class="lvl hit"><span class="pct">-5%</span><span class="val">$285.73</span><div class="bar"><i style="width:100%"></i></div><span class="st">매수</span></div><div class="lvl hit"><span class="pct">-10%</span><span class="val">$270.69</span><div class="bar"><i style="width:100%"></i></div><span class="st">매수</span></div><div class="lvl hit"><span class="pct">-15%</span><span class="val">$255.65</span><div class="bar"><i style="width:100%"></i></div><span class="st">매수</span></div><div class="lvl hit"><span class="pct">-20%</span><span class="val">$240.62</span><div class="bar"><i style="width:100%"></i></div><span class="st">매수</span></div><div class="lvl hit"><span class="pct">-25%</span><span class="val">$225.58</span><div class="bar"><i style="width:100%"></i></div><span class="st">매수</span></div><div class="lvl hit"><span class="pct">-30%</span><span class="val">$210.54</span><div class="bar"><i style="width:100%"></i></div><span class="st">매수</span></div><div class="lvl hit"><span class="pct">-35%</span><span class="val">$195.50</span><div class="bar"><i style="width:100%"></i></div><span class="st">매수</span></div><div class="lvl hit"><span class="pct">-40%</span><span class="val">$180.46</span><div class="bar"><i style="width:100%"></i></div><span class="st">매수</span></div><div class="lvl hit"><span class="pct">-45%</span><span class="val">$165.42</span><div class="bar"><i style="width:100%"></i></div><span class="st">매수</span></div><div class="lvl hit"><span class="pct">-50%</span><span class="val">$150.38</span><div class="bar"><i style="width:100%"></i></div><span class="st">매수</span></div><div class="lvl current"><span class="pct">-55%</span><span class="val">$135.35</span><div class="bar"><i style="width:67%"></i></div><span class="st">대기</span></div><div class="lvl wait"><span class="pct">-60%</span><span class="val">$120.31</span><div class="bar"><i style="width:0%"></i></div><span class="st">대기</span></div><div class="lvl wait"><span class="pct">-65%</span><span class="val">$105.27</span><div class="bar"><i style="width:0%"></i></div><span class="st">대기</span></div><div class="lvl wait"><span class="pct">-70%</span><span class="val">$90.23</span><div class="bar"><i style="width:0%"></i></div><span class="st">대기</span></div><div class="lvl wait"><span class="pct">-75%</span><span class="val">$75.19</span><div class="bar"><i style="width:0%"></i></div><span class="st">대기</span></div><div class="lvl wait"><span class="pct">-80%</span><span class="val">$60.15</span><div class="bar"><i style="width:0%"></i></div><span class="st">대기</span></div><div class="lvl wait"><span class="pct">-85%</span><span class="val">$45.12</span><div class="bar"><i style="width:0%"></i></div><span class="st">대기</span></div><div class="lvl wait"><span class="pct">-90%</span><span class="val">$30.08</span><div class="bar"><i style="width:0%"></i></div><span class="st">대기</span></div><div class="lvl wait"><span class="pct">-95%</span><span class="val">$15.04</span><div class="bar"><i style="width:0%"></i></div><span class="st">대기</span></div></div>
@@ -238,31 +236,30 @@ footer{color:#4b5563;font-size:12px;text-align:center;margin-top:8px;line-height
 
 <script>
 (function() {
-  // 카드별 저장 키: swing_buy_{TICKER}(매수가) / swing_sell_{TICKER}(수익률)
+  // 카드별 저장 키: swing_buy_{TICKER}(매수 예정가) / swing_sell_{TICKER}(수익률)
   document.querySelectorAll('.card[data-ath]').forEach(function(card) {
     var ticker = card.dataset.ticker;
     var close = parseFloat(card.dataset.close);
     var gapPct = parseFloat(card.dataset.gap) || 5;
     var buyInput = card.querySelector('.plan-buy-input');
     var pctBtns = card.querySelectorAll('.pct');
-    var buyEl = card.querySelector('.plan-buy');
     var sellEl = card.querySelector('.plan-sell');
     var chip = card.querySelector('[data-sell-chip]');
 
-    // 저장값 로드 (기본: 매수가 미입력 → 현재가 기준, 수익률 10%)
+    // 저장값 로드 (기본: 매수 예정가 미입력 → 현재가 기준, 수익률 10%)
     var buyVal = parseFloat(localStorage.getItem('swing_buy_' + ticker));
     if (isNaN(buyVal)) buyVal = 0;   // 0 = 미입력
     var sellPct = parseFloat(localStorage.getItem('swing_sell_' + ticker));
     if (isNaN(sellPct)) sellPct = 10;
 
-    // 유효 매수가 — 입력값(>0)이 없으면 현재가(지금 매수 시) 기준
+    // 유효 매수 예정가 — 입력값(>0)이 없으면 현재가(지금 매수 시) 기준
     function buyBase() {
       var v = parseFloat(buyInput.value);
       if (isNaN(v) || v <= 0) v = close;
       return v;
     }
 
-    // 사용자별 매도 상태 — 내 매수가 × (1 + 수익률) 기준으로 항상 재판정
+    // 사용자별 매도 상태 — 내 매수 예정가 × (1 + 수익률) 기준으로 항상 재판정
     function applySellStatus() {
       if (!chip || isNaN(close)) return;
       var target = buyBase() * (1 + sellPct / 100);
@@ -297,11 +294,10 @@ footer{color:#4b5563;font-size:12px;text-align:center;margin-top:8px;line-height
     function update() {
       if (isNaN(close)) return;   // 가격 데이터 없으면 계산 생략
       var base = buyBase();
-      // 매도가 = 매수가 × (1 + 수익률/100)
+      // 매도 예정가 = 매수 예정가 × (1 + 수익률/100)
       var sell = base * (1 + sellPct / 100);
-      buyEl.textContent = '$' + base.toFixed(2);
       sellEl.textContent = '$' + sell.toFixed(2);
-      // 매수가는 직접 입력한 양수 값만 저장 (비우거나 0이면 현재가 기준으로 초기화)
+      // 매수 예정가는 직접 입력한 양수 값만 저장 (비우거나 0이면 현재가 기준으로 초기화)
       var pv = parseFloat(buyInput.value);
       if (!isNaN(pv) && pv > 0) {
         localStorage.setItem('swing_buy_' + ticker, String(pv));
