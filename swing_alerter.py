@@ -487,8 +487,10 @@ OneSignalDeferred.push(async function(OneSignal) {
   try {
     await OneSignal.init({
       appId: "__OS_APP_ID__",
-      serviceWorkerPath: "OneSignalSDKWorker.js",
-      serviceWorkerScope: "./",
+      // GitHub Pages 하위 폴더 배포 — 워커/스코프를 하위 폴더 기준 절대 경로로 명시
+      // (루트 기준 상대경로 "OneSignalSDKWorker.js"는 루트에서 찾아 404 → 등록 실패)
+      serviceWorkerPath: "/strategy_engine/OneSignalSDKWorker.js",
+      serviceWorkerScope: "/strategy_engine/",
     });
     // init 성공 → 구독 상태 반영 + 버튼 활성화
     // v16(User Model)에서는 isPushEnabled()가 제거됨 → PushSubscription.optedIn 사용
