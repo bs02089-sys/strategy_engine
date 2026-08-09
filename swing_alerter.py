@@ -488,7 +488,7 @@ def build_briefing_text(statuses: list[dict], cfg: dict) -> str:
             sell_txt = "매도 미설정"
         # 매수 구간 상태 (앱 카드 chip과 동일)
         hit_cnt = len([l for l in st["ladder"] if l["hit"]])
-        buy_txt = f"🟢 매수 구간 {hit_cnt}개 도달" if hit_cnt else "매수 구간 대기"
+        buy_txt = f"🟢 매수 구간 {hit_cnt}개 경과" if hit_cnt else "매수 구간 대기"
         lines.extend([
             f"**{st['ticker']}** · {sell_txt}",
             f"- 현재가 ${st['price']:.2f} (종가 기준 {st['as_of']})",
@@ -863,7 +863,7 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
   <div class="meta">전일 종가 ${st["price"]:,.2f} ({st["as_of"]}){day_span}</div>
   <div class="row" style="margin-top:10px;justify-content:flex-end">
     <span class="chip {'green' if st['deepest_hit'] else 'gray'}">
-      {'🟢 매수 구간 ' + str(len([l for l in st['ladder'] if l['hit']])) + '개 도달' if st['deepest_hit'] else '매수 구간 대기'}</span>
+      {'🟢 매수 구간 ' + str(len([l for l in st['ladder'] if l['hit']])) + '개 경과' if st['deepest_hit'] else '매수 구간 대기'}</span>
   </div>
   <div class="info">📊 전고가 ${st["ath"]:,.2f} ({st["ath_date"]}) 대비 <span class="dd {dd_cls}">{dd_sign}{abs(st["dd_pct"]):.1f}%</span></div>
   <div class="plan">
@@ -919,7 +919,7 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
   <div class="chips">
     {push_btn}
     <span class="chip {'red' if sell_cnt else 'gray'}" id="sell-alarm-cnt">🚨 매도 알람 {sell_cnt}</span>
-    <span class="chip {'green' if buy_cnt else 'gray'}">🟢 매수 구간 {buy_cnt}</span>
+    <span class="chip {'green' if buy_cnt else 'gray'}">🟢 매수 경과 {buy_cnt}</span>
   </div>
 </header>
 <main>{''.join(cards)}</main>
