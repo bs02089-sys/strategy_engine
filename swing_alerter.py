@@ -503,10 +503,15 @@ OneSignalDeferred.push(async function(OneSignal) {
   try {
     await OneSignal.init({
       appId: "__OS_APP_ID__",
-      // GitHub Pages 하위 폴더 배포 — 워커/스코프를 하위 폴더 기준 절대 경로로 명시
-      // (루트 기준 상대경로 "OneSignalSDKWorker.js"는 루트에서 찾아 404 → 등록 실패)
-      serviceWorkerPath: "/strategy_engine/OneSignalSDKWorker.js",
-      serviceWorkerScope: "/strategy_engine/",
+      // GitHub Pages 하위 폴더(project site) 배포 — SDK 소스 기준 정확한 조합:
+      // ① serviceWorkerOverrideForTypical: true → 대시보드(Typical) 설정이어도 코드 옵션 우선
+      // ② path: "/" + serviceWorkerPath(슬래시 없는 상대경로) → new URL(경로, location.origin)로
+      //    /strategy_engine/OneSignalSDKWorker.js 조립 (절대경로 "/strategy_engine/..."는 path와 이중 결합됨)
+      // ③ serviceWorkerParam.scope → v16의 정식 스코프 키 (serviceWorkerScope는 v16에서 미인식)
+      serviceWorkerOverrideForTypical: true,
+      path: "/",
+      serviceWorkerPath: "strategy_engine/OneSignalSDKWorker.js",
+      serviceWorkerParam: { scope: "/strategy_engine/" },
     });
     // init 성공 → 구독 상태 반영 + 버튼 활성화
     // v16(User Model)에서는 isPushEnabled()가 제거됨 → PushSubscription.optedIn 사용
