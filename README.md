@@ -528,10 +528,15 @@ python3 DCA_MA_strategy.py --signal --discord --all  # TQQQ+SOXL 단일 메시�
   **🚀 임박** (호박) / 그 외 → **⏳ 대기**
 - **서버 설정 불필요**: owner가 `swing_config.json`에 `BUY_PRICE`를 기록하지 않아도 앱의 사용자별
   매도 알람은 항상 동작합니다.
-- **서버 푸시 (선택)**: Discord/OneSignal 푸시는 `BUY_PRICE`가 기록된 포지션에 한해
-  `BUY_PRICE × (1 + SWING_TARGET_PCT/100)` 기준으로 발송됩니다 (전역 — 사용자별 푸시는 불가).
+- **사용자별 푸시 (OneSignal 태그)**: 앱에서 매도 예정가가 계산되면 구독에
+  `swing_sell_{TICKER}` 태그로 등록됩니다. 서버 모니터가 현재가를 확인해 **자기 매도 예정가 ≤
+  현재가인 사용자에게만** 푸시를 발송합니다 (메시지에 내 매도 예정가 표시, 1일 1회 중복 방지).
+- **푸시 수신 조건**: 앱에서 🔔 알림을 구독하고, 앱을 한 번 이상 열어 매도 예정가 태그가
+  등록돼야 합니다 (태그 없이 구독만 한 사용자는 대상에서 제외).
+- **전역 푸시 (선택)**: `BUY_PRICE`를 기록하면 그 기준(`BUY_PRICE × (1 + SWING_TARGET_PCT/100)`)
+  의 공통 신호 푸시가 구독자 전체에 추가 발송됩니다.
 - **저장**: 매수 예정가(`swing_buy_{TICKER}`)·예상 수익률(`swing_sell_{TICKER}`)은 브라우저
-  localStorage에 기기별로 독립 저장됩니다.
+  localStorage에 기기별로 독립 저장되고, 매도 예정가가 OneSignal 태그로 파생 등록됩니다.
 
 #### 예시 (TQQQ 현재가 $74.47)
 

@@ -117,8 +117,13 @@ def _resolve_onesignal(cfg: dict) -> tuple[str, str]:
 
 
 def send_onesignal_push(app_id: str, api_key: str, title: str, body: str,
-                        url: str | None = None) -> tuple[int, str]:
-    """OneSignal REST API로 웹 푸시 발송 — 구독자 전체(Subscribed Users) 대상.
+                        url: str | None = None,
+                        filters: list | None = None) -> tuple[int, str]:
+    """OneSignal REST API로 웹 푸시 발송.
+
+    filters 미지정: 구독자 전체(Subscribed Users) 대상
+    filters 지정: 태그 조건을 만족하는 구독자만 대상 (사용자별 푸시)
+    ※ OneSignal은 요청당 타겟팅 방식 1개만 허용 — filters 시 included_segments 금지
 
     반환: (HTTP 상태코드, 응답 본문)
     """
@@ -126,11 +131,14 @@ def send_onesignal_push(app_id: str, api_key: str, title: str, body: str,
         return 0, "ONESIGNAL_APP_ID / ONESIGNAL_REST_API_KEY 미설정"
     payload: dict = {
         "app_id": app_id,
-        "included_segments": ["Subscribed Users"],
         "target_channel": "push",
         "headings": {"en": title},
         "contents": {"en": body},
     }
+    if filters:
+        payload["filters"] = filters
+    else:
+        payload["included_segments"] = ["Subscribed Users"]
     if url:
         payload["url"] = url
     # OneSignal 인증 헤더: 구식 REST 키는 Basic, 신식 API 키는 Key 를 사용
@@ -151,6 +159,53 @@ def send_onesignal_push(app_id: str, api_key: str, title: str, body: str,
         except Exception as e:  # noqa: BLE001
             return 0, f"전송 예외: {e}"
     return 401, "인증 실패 (Basic/Key 모두 401) — API 키 형식 확인 필요"
+
+
+def send_user_sell_pushes(statuses: list[dict], cfg: dict) -> bool:
+    """사용자별 매도 푸시 — 앱이 등록한 매도 예정가 태그(swing_sell_{TICKER})가
+    현재가 이하인 구독자에게만 발송한다. 1일 1회(SELL_PUSH_LAST_AT) 중복 방지.
+
+    푸시 본문의 매도 예정가는 Liquid({{ user.tags.swing_sell_{TICKER} }})로
+    구독자마다 자기 값이 렌더링된다. (OneSignal 공식 개인화 문법)
+    """
+    app_id, api_key = _resolve_onesignal(cfg)
+    if not app_id or not api_key:
+        return False
+    today = datetime.now(NY_TZ).strftime("%Y-%m-%d")
+    pages = (cfg.get("PAGES_URL") or "").strip()
+    changed = False
+    for st in statuses:
+        if st.get("error"):
+            continue
+        ticker = st["ticker"]
+        pos = cfg["POSITIONS"][ticker]
+        if pos.get("SELL_PUSH_LAST_AT") == today:
+            continue  # 오늘 이미 발송 (1일 1회)
+        # 매도 예정가(target) ≤ 현재가 인 사용자만 — OneSignal tag 필터는 <,> 만 지원하므로
+        # target < (현재가+0.01) 을 찾으면 target ≤ 현재가 와 동치 (소수 2자리 가격 기준)
+        filters = [{
+            "field": "tag",
+            "key": f"swing_sell_{ticker}",
+            "relation": "<",
+            "value": f"{st['price'] + 0.01:.2f}",
+        }]
+        body = (f"내 매도 예정가(${{{{ user.tags.swing_sell_{ticker} }}}})에 도달했습니다 — 매도 검토가 필요해요."
+                + (f"\n앱에서 확인: {pages}" if pages else ""))
+        code, resp = send_onesignal_push(
+            app_id, api_key,
+            title=f"📈 {ticker} 매도 신호",
+            body=body,
+            url=pages or None,
+            filters=filters,
+        )
+        # 성공(2xx)일 때만 발송일 기록 — 실패 시 당일 재시도 가능 (알림 누락 방지)
+        if str(code).startswith("2"):
+            pos["SELL_PUSH_LAST_AT"] = today
+            changed = True
+        print(f"   📣 {ticker} 사용자별 매도 푸시: HTTP {code} — {resp[:80]}")
+    if changed:
+        save_config(cfg)
+    return changed
 
 
 # ═══════════════════════════════════════════════════════════
@@ -622,12 +677,27 @@ _PLAN_JS = """
       }
     }
 
+    // 매도 예정가 → OneSignal 태그 동기화 — 서버가 '내 매도 예정가 ≤ 현재가' 사용자에게만
+    // 사용자별 매도 푸시를 보낼 때 기준으로 사용한다 (푸시 미설정/미구독 환경에서는 무시됨)
+    function syncSellTag(ticker, sell) {
+      try {
+        if (window.OneSignalDeferred && window.OneSignalDeferred.push) {
+          window.OneSignalDeferred.push(function(OneSignal) {
+            if (OneSignal && OneSignal.User && OneSignal.User.addTag) {
+              OneSignal.User.addTag('swing_sell_' + ticker, sell.toFixed(2));
+            }
+          });
+        }
+      } catch (e) { /* OneSignal 미설정 — 무시 */ }
+    }
+
     function update() {
       if (isNaN(close)) return;   // 가격 데이터 없으면 계산 생략
       var base = buyBase();
       // 매도 예정가 = 매수 예정가 × (1 + 예상 수익률/100)
       var sell = base * (1 + sellPct / 100);
       sellEl.textContent = '$' + sell.toFixed(2);
+      syncSellTag(ticker, sell);
       // 매수 예정가는 직접 입력한 양수 값만 저장 (비우거나 0이면 현재가 기준으로 초기화)
       var pv = parseFloat(buyInput.value);
       if (!isNaN(pv) && pv > 0) {
@@ -1017,6 +1087,7 @@ def main() -> None:
 
     statuses = _compute_all(cfg, force=True)
     webhook, user_id = _resolve_discord(cfg)
+    send_user_sell_pushes(statuses, cfg)   # 사용자별 매도 푸시 (1일 1회, 앱 등록 태그 기준)
 
     if args.monitor:
         # ── 실시간 모니터: 상태 변경분만 알림 ──
