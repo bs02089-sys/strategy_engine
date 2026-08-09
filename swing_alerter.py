@@ -413,20 +413,20 @@ _CSS = """
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 html,body{background:var(--bg);color:var(--text);
   font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Noto Sans KR","Malgun Gothic",sans-serif}
-body{max-width:640px;margin:0 auto;padding:0 14px 40px}
+body{max-width:640px;margin:0 auto;padding:0 14px 40px;font-size:16px}
 .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
 header{position:sticky;top:0;z-index:5;background:rgba(11,14,20,.92);
   backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
   padding:16px 0 12px;border-bottom:1px solid var(--border);margin-bottom:14px}
-header h1{font-size:20px;letter-spacing:-.3px}
-header .sub{color:var(--muted);font-size:12px;margin-top:4px}
+header h1{font-size:21px;letter-spacing:-.3px}
+header .sub{color:var(--muted);font-size:13px;margin-top:4px}
 .chips{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
-.chip{font-size:12px;padding:5px 10px;border-radius:999px;font-weight:600}
+.chip{font-size:13px;padding:6px 11px;border-radius:999px;font-weight:600}
 .chip.gray{background:#1c2533;color:var(--muted)}
 .chip.green{background:var(--green-dim);color:var(--green)}
 .chip.red{background:var(--red-dim);color:var(--red)}
 .chip.amber{background:var(--amber-dim);color:var(--amber)}
-.push-btn{font-size:13px;font-weight:700;padding:8px 14px;border-radius:999px;border:1px solid var(--blue);
+.push-btn{font-size:14px;font-weight:700;padding:8px 15px;border-radius:999px;border:1px solid var(--blue);
   background:var(--blue-dim);color:var(--blue);cursor:pointer;-webkit-tap-highlight-color:transparent}
 .push-btn:active{opacity:.7}
 .push-btn:disabled{opacity:.4;cursor:default}
@@ -436,18 +436,18 @@ header .sub{color:var(--muted);font-size:12px;margin-top:4px}
 .card{background:var(--card);border:1px solid var(--border);border-radius:16px;
   padding:16px;margin-bottom:16px}
 .row{display:flex;align-items:center;justify-content:space-between;gap:8px}
-.tick{font-size:18px;font-weight:800}
-.tag{font-size:11px;color:var(--muted);font-weight:400;margin-left:6px}
-.dd{font-size:15px;font-weight:800}
+.tick{font-size:19px;font-weight:800}
+.tag{font-size:12px;color:var(--muted);font-weight:400;margin-left:6px}
+.dd{font-size:16px;font-weight:800}
 .dd.down{color:var(--blue)} .dd.up{color:var(--red)} .dd.flat{color:var(--muted)}
-.price{font-size:34px;font-weight:800;margin:10px 0 2px}
-.meta{color:var(--muted);font-size:12px}
+.price{font-size:36px;font-weight:800;margin:10px 0 2px}
+.meta{color:var(--muted);font-size:13px}
 .info{background:#0f1420;border:1px solid var(--border);border-radius:12px;
-  padding:10px 12px;margin-top:12px;font-size:13px;line-height:1.7}
+  padding:10px 12px;margin-top:12px;font-size:14px;line-height:1.7}
 .info b{color:var(--text)}
 .ladder{margin-top:14px}
 .lvl{display:grid;grid-template-columns:52px 1fr 1.4fr 60px;gap:8px;
-  align-items:center;padding:7px 0;border-bottom:1px solid #1a2231;font-size:13px}
+  align-items:center;padding:7px 0;border-bottom:1px solid #1a2231;font-size:14px}
 .lvl:last-child{border-bottom:none}
 .lvl .pct{font-weight:700;color:var(--muted)}
 .lvl.hit .pct,.lvl.current .pct{color:var(--green)}
@@ -461,24 +461,24 @@ header .sub{color:var(--muted);font-size:12px;margin-top:4px}
 .lvl.hit .st,.lvl.current .st{color:var(--amber)}
 .lvl.wait .st{color:#4b5563}
 .lvl.wait .bar i{background:#2a3344}
-footer{color:#4b5563;font-size:11px;text-align:center;margin-top:8px;line-height:1.8}
-.legend{display:flex;gap:14px;justify-content:center;color:var(--muted);font-size:11px;margin-top:6px}
+footer{color:#4b5563;font-size:12px;text-align:center;margin-top:8px;line-height:1.8}
+.legend{display:flex;gap:14px;justify-content:center;color:var(--muted);font-size:12px;margin-top:6px}
 .pages a{color:var(--blue);text-decoration:none;font-weight:700;font-size:12px}
 .pages a:active{opacity:.7}
 .plan{margin-top:14px;background:#0f1420;border:1px solid var(--border);border-radius:12px;padding:12px}
 .plan-row{display:flex;align-items:center;gap:8px;margin-bottom:8px}
-.plan-row label{font-size:12px;color:var(--muted);width:88px;flex-shrink:0}
+.plan-row label{font-size:13px;color:var(--muted);width:96px;flex-shrink:0}
 .plan-dd{flex:1;min-width:0;background:#1c2533;border:1px solid var(--border);border-radius:8px;
   color:var(--text);font-size:15px;font-weight:700;padding:7px 10px;font-family:ui-monospace,Menlo,Consolas,monospace}
 .plan-unit{font-size:13px;color:var(--muted)}
 .plan-pcts{display:flex;gap:6px;flex-wrap:wrap}
-.pct{font-size:12px;font-weight:700;padding:6px 12px;border-radius:999px;
+.pct{font-size:13px;font-weight:700;padding:7px 13px;border-radius:999px;
   border:1px solid var(--border);background:#1c2533;color:var(--muted);cursor:pointer;-webkit-tap-highlight-color:transparent}
 .pct.on{border-color:var(--green);background:var(--green-dim);color:var(--green)}
 .pct:active{opacity:.7}
 .plan-out{display:flex;gap:16px;margin-top:6px;flex-wrap:wrap}
-.po{font-size:13px;color:var(--muted)}
-.po b{color:var(--text);font-family:ui-monospace,Menlo,Consolas,monospace;font-size:15px}
+.po{font-size:14px;color:var(--muted)}
+.po b{color:var(--text);font-family:ui-monospace,Menlo,Consolas,monospace;font-size:16px}
 """
 
 # PWA 서비스 워커 등록 — Chrome '앱 설치' 기준 충족 (통과형 fetch, 캐시 없음)
@@ -652,13 +652,6 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
                 and st["sell_gap_pct"] <= float(cfg.get("IMMINENT_GAP_PCT", 5)):
             sell_chip = '<span class="chip amber">🚀 임박</span>'
 
-        pnl_html = ""
-        if st["exp_profit"] is not None:
-            pnl_html = (f'<div class="info">💰 보유 매수가 <b>${st["buy_price"]:.2f}</b> × '
-                        f'<b>{st["shares"]:.0f}주</b> → 목표 매도 시 '
-                        f'<b style="color:var(--green)">+${st["exp_profit"]:,.2f}</b> '
-                        f'(<b style="color:var(--green)">{st["exp_roi"]:+.1f}%</b>)</div>')
-
         # 사용자 선택용 기준값 — ATH(매수 지점 계산) / 매수시 전고가(매도가 계산)
         ath_buy_ref = st["ath_at_buy"] or st["ath"]
 
@@ -692,10 +685,9 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
       {'🟢 매수 구간 ' + str(len([l for l in st['ladder'] if l['hit']])) + '개 도달' if st['deepest_hit'] else '매수 구간 대기'}</span>
   </div>
   <div class="info">📊 기준 전고가: {cfg.get('REFERENCE_HIGH', 'ATH')} ({st['ath_date']})</div>
-  {pnl_html}
   <div class="plan">
     <div class="plan-row">
-      <label for="dd-{st["ticker"]}">🎯 목표 하락률</label>
+      <label for="dd-{st["ticker"]}">🎯 목표 MDD 하락률</label>
       <input id="dd-{st["ticker"]}" class="plan-dd" type="number" min="0" max="95" step="{step}" placeholder="15">
       <span class="plan-unit">%</span>
     </div>

@@ -11,7 +11,7 @@
     "POSITIONS": {
         "TQQQ": {
             "ENABLED": true,
-            "LABEL": "TQQQ (예시)",
+            "LABEL": "TQQQ",
             "BUY_PRICE": 107.0,
             "SHARES": 100,
             "ATH_AT_BUY": 140.0,
@@ -29,7 +29,7 @@
         },
         "SOXL": {
             "ENABLED": true,
-            "LABEL": "SOXL (3x 반도체)",
+            "LABEL": "SOXL",
             "BUY_PRICE": null,
             "SHARES": null,
             "ATH_AT_BUY": 300.77,
