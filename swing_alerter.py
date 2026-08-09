@@ -481,14 +481,14 @@ _PUSH_SDK = """
 <script>
 window.OneSignalDeferred = window.OneSignalDeferred || [];
 OneSignalDeferred.push(async function(OneSignal) {
-  await OneSignal.init({
-    appId: "__OS_APP_ID__",
-    serviceWorkerPath: "OneSignalSDKWorker.js",
-    serviceWorkerScope: "./",
-  });
-  // 구독 상태 반영 + 버튼 활성화
+  const btn = document.getElementById('push-btn');
   try {
-    const btn = document.getElementById('push-btn');
+    await OneSignal.init({
+      appId: "__OS_APP_ID__",
+      serviceWorkerPath: "OneSignalSDKWorker.js",
+      serviceWorkerScope: "./",
+    });
+    // init 성공 → 구독 상태 반영 + 버튼 활성화
     const isEnabled = await OneSignal.Notifications.isPushEnabled();
     if (btn) {
       btn.disabled = false;
@@ -506,10 +506,13 @@ OneSignalDeferred.push(async function(OneSignal) {
       });
     }
   } catch (e) {
-    // SDK 초기화 실패 시 버튼 폴백 (설정/네트워크 문제 안내)
-    console.error('OneSignal init 실패:', e);
-    const btn = document.getElementById('push-btn');
-    if (btn) { btn.disabled = true; btn.textContent = '⚠️ 알림 설정 오류'; }
+    // init/구독 조회 실패 시 원인을 버튼+콘솔에 표시 (기존: 조용히 비활성으로 남음)
+    console.error('OneSignal 초기화 실패:', e);
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = '⚠️ 알림 설정 필요';
+      btn.title = 'OneSignal 대시보드 웹 설정 확인 (콘솔 로그 참조): ' + (e && e.message ? e.message : e);
+    }
   }
 });
 </script>
