@@ -524,8 +524,8 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
 <meta http-equiv="refresh" content="300">
 <!-- PWA: 홈 화면 추가(앱처럼 설치) 지원 -->
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="icon" type="image/png" href="swing_icon.png">
-<link rel="apple-touch-icon" href="swing_icon.png">
+<link rel="icon" type="image/png" href="swing_icon_v2.png">
+<link rel="apple-touch-icon" href="swing_icon_v2.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="스윙 알리미">
@@ -575,6 +575,8 @@ _STATIC_FILES = {
     "/manifest.webmanifest": ("application/manifest+json; charset=utf-8", "swing_manifest.webmanifest"),
     "/swing_icon.png": ("image/png", "swing_icon.png"),
     "/swing_icon_192.png": ("image/png", "swing_icon_192.png"),
+    "/swing_icon_v2.png": ("image/png", "swing_icon_v2.png"),
+    "/swing_icon_192_v2.png": ("image/png", "swing_icon_192_v2.png"),
     "/sw.js": ("application/javascript; charset=utf-8", "sw.js"),
 }
 
