@@ -60,6 +60,7 @@ DEFAULT_CFG = {
     "SWING_TARGET_PCT": -10,        # 스윙 목표 — 매수시 전고가 대비 회복 목표(%)
     "IMMINENT_GAP_PCT": 5,          # 임박 알림 기준 (구간/매도 목표까지 %p)
     "PAGES_URL": "",               # GitHub Pages 주소 — 설정 시 대시보드에 라이브 링크 표시
+    "ONESIGNAL_APP_ID": "",        # OneSignal 웹 푸시 앱 ID (대시보드 SDK 초기화용, 공개값)
     "POSITIONS": {},
 }
 
@@ -103,6 +104,54 @@ def _resolve_discord(cfg: dict) -> tuple[str, str]:
         portfolio = {}
     merged = {**portfolio, **cfg}   # swing_config 값이 portfolio 값보다 우선
     return resolve_discord_config(merged)
+
+
+def _resolve_onesignal(cfg: dict) -> tuple[str, str]:
+    """OneSignal APP_ID / REST API KEY — env 우선, swing_config 폴백.
+
+    - APP_ID: 공개값 (대시보드 SDK에 포함) → swing_config.json 에 보관 가능
+    - REST API KEY: 비밀값 → GitHub Actions 시크릿(env)으로만 주입 권장
+    """
+    app_id = os.environ.get("ONESIGNAL_APP_ID") or cfg.get("ONESIGNAL_APP_ID", "")
+    api_key = os.environ.get("ONESIGNAL_REST_API_KEY") or ""
+    return (app_id or "").strip(), (api_key or "").strip()
+
+
+def send_onesignal_push(app_id: str, api_key: str, title: str, body: str,
+                        url: str | None = None) -> tuple[int, str]:
+    """OneSignal REST API로 웹 푸시 발송 — 구독자 전체(Subscribed Users) 대상.
+
+    반환: (HTTP 상태코드, 응답 본문)
+    """
+    if not app_id or not api_key:
+        return 0, "ONESIGNAL_APP_ID / ONESIGNAL_REST_API_KEY 미설정"
+    payload: dict = {
+        "app_id": app_id,
+        "included_segments": ["Subscribed Users"],
+        "target_channel": "push",
+        "headings": {"en": title},
+        "contents": {"en": body},
+    }
+    if url:
+        payload["url"] = url
+    # OneSignal 인증 헤더: 구식 REST 키는 Basic, 신식 API 키는 Key 를 사용
+    # → 401 이면 다른 형식으로 재시도 (키 유형 자동 대응)
+    for scheme in ("Basic", "Key"):
+        try:
+            resp = requests.post(
+                "https://api.onesignal.com/notifications",
+                headers={
+                    "Authorization": f"{scheme} {api_key}",
+                    "Content-Type": "application/json; charset=utf-8",
+                },
+                json=payload,
+                timeout=15,
+            )
+            if resp.status_code != 401:
+                return resp.status_code, resp.text[:500]
+        except Exception as e:  # noqa: BLE001
+            return 0, f"전송 예외: {e}"
+    return 401, "인증 실패 (Basic/Key 모두 401) — API 키 형식 확인 필요"
 
 
 # ═══════════════════════════════════════════════════════════
@@ -377,6 +426,11 @@ header .sub{color:var(--muted);font-size:12px;margin-top:4px}
 .chip.green{background:var(--green-dim);color:var(--green)}
 .chip.red{background:var(--red-dim);color:var(--red)}
 .chip.amber{background:var(--amber-dim);color:var(--amber)}
+.push-btn{font-size:13px;font-weight:700;padding:8px 14px;border-radius:999px;border:1px solid var(--blue);
+  background:var(--blue-dim);color:var(--blue);cursor:pointer;-webkit-tap-highlight-color:transparent}
+.push-btn:active{opacity:.7}
+.push-btn:disabled{opacity:.4;cursor:default}
+.push-btn.on{border-color:var(--green);background:var(--green-dim);color:var(--green)}
 .card{background:var(--card);border:1px solid var(--border);border-radius:16px;
   padding:16px;margin-bottom:16px}
 .row{display:flex;align-items:center;justify-content:space-between;gap:8px}
@@ -418,6 +472,49 @@ if ('serviceWorker' in navigator) { navigator.serviceWorker.register('sw.js'); }
 </script>
 """
 
+# OneSignal 웹 푸시 — SDK 로드 + 구독 버튼 (알림 받기)
+# - 하위 폴더(GitHub Pages /strategy_engine/) 배포를 위해 serviceWorkerPath/Scope 를
+#   페이지 기준 상대 경로로 지정 (OneSignalSDKWorker.js 가 같은 폴더에 배포됨)
+# - iOS(16.4+)는 홈 화면 추가 후 구독 가능 → 안내 문구 포함
+_PUSH_SDK = """
+<script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
+<script>
+window.OneSignalDeferred = window.OneSignalDeferred || [];
+OneSignalDeferred.push(async function(OneSignal) {
+  await OneSignal.init({
+    appId: "__OS_APP_ID__",
+    serviceWorkerPath: "OneSignalSDKWorker.js",
+    serviceWorkerScope: "./",
+  });
+  // 구독 상태 반영 + 버튼 활성화
+  try {
+    const btn = document.getElementById('push-btn');
+    const isEnabled = await OneSignal.Notifications.isPushEnabled();
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = isEnabled ? '🔔 알림 ON' : '🔔 알림 받기';
+      if (isEnabled) btn.classList.add('on');
+      btn.addEventListener('click', async function() {
+        try {
+          await OneSignal.Notifications.requestPermission();
+        } catch (e) {
+          // iOS: 홈 화면 추가 전이면 거부됨
+        }
+        const on = await OneSignal.Notifications.isPushEnabled();
+        btn.textContent = on ? '🔔 알림 ON' : '🔔 알림 받기';
+        if (on) btn.classList.add('on'); else btn.classList.remove('on');
+      });
+    }
+  } catch (e) {
+    // SDK 초기화 실패 시 버튼 폴백 (설정/네트워크 문제 안내)
+    console.error('OneSignal init 실패:', e);
+    const btn = document.getElementById('push-btn');
+    if (btn) { btn.disabled = true; btn.textContent = '⚠️ 알림 설정 오류'; }
+  }
+});
+</script>
+"""
+
 
 def _lvl_row(lvl: dict, next_fill: float | None = None) -> str:
     """래더 1줄 — hit: 초록 100% / next: 호박색 진행바(다음 구간 접근도) / wait: 회색."""
@@ -445,6 +542,13 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
     live_link = (
         f'<span class="pages">· <a href="{pages_url}" target="_blank" rel="noopener">🌐 라이브 열기</a></span>'
         if pages_url else ""
+    )
+    # OneSignal 웹 푸시 — APP_ID 설정 시 SDK + 알림 받기 버튼 활성화
+    app_id = (cfg.get("ONESIGNAL_APP_ID") or "").strip()
+    push_sdk = _PUSH_SDK.replace("__OS_APP_ID__", app_id) if app_id else ""
+    push_btn = (
+        '<button id="push-btn" class="push-btn" disabled>🔔 알림 받기</button>'
+        if app_id else ""
     )
 
     for st in statuses:
@@ -532,6 +636,7 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
 <meta name="mobile-web-app-capable" content="yes">
 <title>스윙 투자 알리미</title>
 {_SW_REGISTER}
+{push_sdk}
 <style>{_CSS}</style>
 </head>
 <body>
@@ -539,6 +644,7 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
   <h1>📈 스윙 투자 알리미</h1>
   <div class="sub">업데이트 {updated_at} · 종가 기준 {as_of_ny} (미국){live_link}</div>
   <div class="chips">
+    {push_btn}
     <span class="chip {'red' if sell_cnt else 'gray'}">🚨 매도 알람 {sell_cnt}</span>
     <span class="chip {'green' if buy_cnt else 'gray'}">🟢 매수 구간 {buy_cnt}</span>
   </div>
@@ -576,6 +682,7 @@ _STATIC_FILES = {
     "/swing_icon.png": ("image/png", "swing_icon.png"),
     "/swing_icon_192.png": ("image/png", "swing_icon.png"),
     "/sw.js": ("application/javascript; charset=utf-8", "sw.js"),
+    "/OneSignalSDKWorker.js": ("application/javascript; charset=utf-8", "OneSignalSDKWorker.js"),
 }
 
 
@@ -724,6 +831,7 @@ def main() -> None:
                         help="스마트폰용 대시보드 HTTP 서버 실행 (기본 포트 8080)")
     parser.add_argument("--reset", metavar="TICKER", help="티커 알림 플래그 초기화 (새 포지션 진입 후)")
     parser.add_argument("--dashboard", default=DASHBOARD_PATH, help=f"대시보드 저장 경로 (기본 {DASHBOARD_PATH})")
+    parser.add_argument("--test-push", action="store_true", help="OneSignal 테스트 푸시 발송 (구독자 전체)")
     args = parser.parse_args()
 
     if args.reset:
@@ -731,6 +839,23 @@ def main() -> None:
         return
     if args.serve is not None:
         run_serve(args.serve)
+        return
+    if args.test_push:
+        cfg = load_config()
+        app_id, api_key = _resolve_onesignal(cfg)
+        if not app_id or not api_key:
+            raise SystemExit("❌ ONESIGNAL_APP_ID / ONESIGNAL_REST_API_KEY 가 설정되지 않았습니다.")
+        code, resp = send_onesignal_push(
+            app_id, api_key,
+            title="🔔 스윙 알리미 테스트",
+            body="매도 알림이 정상적으로 수신되고 있습니다.",
+            url=cfg.get("PAGES_URL") or None,
+        )
+        print(f"OneSignal 응답: HTTP {code} — {resp}")
+        if str(code).startswith("2"):
+            print("✅ 테스트 푸시 발송 완료 (스마트폰 알림 확인)")
+        else:
+            print("⚠️ 발송 실패 — 코드/키/앱 설정 확인 필요")
         return
 
     cfg = load_config()
@@ -765,6 +890,20 @@ def main() -> None:
                 print("✅ Discord 알림 발송 완료")
             else:
                 print("⚠️ DISCORD_WEBHOOK 미설정 — 콘솔 출력만 표시 (로컬 테스트용)")
+            # ── OneSignal 웹 푸시 (지인 스마트폰 알림) ──
+            app_id, api_key = _resolve_onesignal(cfg)
+            if app_id and api_key:
+                # 마크다운(** ) 제거 + 첫 줄 요약 (푸시는 120자 내외 권장)
+                plain = " | ".join(a.replace("**", "").replace("\n", " · ") for a in alerts)
+                code, resp = send_onesignal_push(
+                    app_id, api_key,
+                    title="📈 스윙 알리미 신호",
+                    body=plain[:200],
+                    url=cfg.get("PAGES_URL") or None,
+                )
+                print(f"OneSignal 푸시: HTTP {code} — {resp[:120]}")
+            else:
+                print("ℹ️ ONESIGNAL 미설정 — 푸시 발송 생략")
         else:
             print("✅ 신규 스윙 알림 없음 (매수 구간/임박/매도 변화 없음)")
         return

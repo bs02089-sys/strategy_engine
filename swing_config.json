@@ -7,6 +7,7 @@
     "SWING_TARGET_PCT": -10,
     "IMMINENT_GAP_PCT": 5,
     "PAGES_URL": "https://bs02089-sys.github.io/strategy_engine/",
+    "ONESIGNAL_APP_ID": "fc892714-97d9-457a-b3d6-12d25d93cc48",
     "POSITIONS": {
         "TQQQ": {
             "ENABLED": true,
