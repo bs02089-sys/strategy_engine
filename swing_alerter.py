@@ -555,7 +555,6 @@ _PLAN_JS = """
     var ticker = card.dataset.ticker;
     var ath = parseFloat(card.dataset.ath);
     var athBuy = parseFloat(card.dataset.athBuy) || ath;
-    var step = parseFloat(card.dataset.step) || 5;
     var ddInput = card.querySelector('.plan-dd');
     var pctBtns = card.querySelectorAll('.pct');
     var buyEl = card.querySelector('.plan-buy');
@@ -680,7 +679,7 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
         )
 
         cards.append(f"""
-<div class="card" data-ticker="{st["ticker"]}" data-ath="{st["ath"]:.2f}" data-ath-buy="{ath_buy_ref:.2f}" data-step="{step}">
+<div class="card" data-ticker="{st["ticker"]}" data-ath="{st["ath"]:.2f}" data-ath-buy="{ath_buy_ref:.2f}">
   <div class="row">
     <span class="tick">{st["ticker"]}</span>
     {sell_chip}

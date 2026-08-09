@@ -17,5 +17,9 @@ self.addEventListener("activate", (event) => {
 });
 
 self.addEventListener("fetch", (event) => {
-  event.respondWith(fetch(event.request));
+  // navigation(페이지 이동)만 통과형 처리 — OneSignal SDK 워커의
+  // 내부 요청(push 전달/추적 등)을 가로채지 않도록 다른 요청은 무시
+  if (event.request.mode === "navigate") {
+    event.respondWith(fetch(event.request));
+  }
 });
