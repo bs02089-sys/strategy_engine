@@ -558,7 +558,7 @@ python3 setup_cronjob_org.py   # CRONJOB_ORG_API_KEY/GITHUB_PAT/GITHUB_OWNER/GIT
 ### 스마트폰 홈 화면 추가 (앱처럼 사용)
 
 대시보드는 PWA(웹앱)로 동작하므로 홈 화면에 **앱처럼 설치**할 수 있습니다
-(`swing_manifest.webmanifest` + `swing_icon_v2.png` — 배포 시 함께 업로드, 스탠드얼론 실행).
+(`swing_manifest.webmanifest` + `swing_icon.png` — 배포 시 함께 업로드, 스탠드얼론 실행).
 
 - **아이폰 (Safari)**: 대시보드 열기 → 하단 **공유 버튼** → **홈 화면에 추가**
 - **안드로이드 (Chrome)**: 대시보드 열기 → 메뉴(⋮) → **앱 설치** 또는 **홈 화면에 추가**

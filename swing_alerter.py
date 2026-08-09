@@ -524,8 +524,8 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
 <meta http-equiv="refresh" content="300">
 <!-- PWA: 홈 화면 추가(앱처럼 설치) 지원 -->
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="icon" type="image/png" href="swing_icon_v2.png">
-<link rel="apple-touch-icon" href="swing_icon_v2.png">
+<link rel="icon" type="image/png" href="swing_icon.png?v=3">
+<link rel="apple-touch-icon" href="swing_icon.png?v=3">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="스윙 알리미">
@@ -573,8 +573,8 @@ _LAST_COMPUTE: dict = {"ts": 0.0, "statuses": None, "cfg": None}
 # 배포(gh-pages)에서는 manifest.webmanifest 로 이름이 바뀌므로 로컬 파일명을 별도 지정
 _STATIC_FILES = {
     "/manifest.webmanifest": ("application/manifest+json; charset=utf-8", "swing_manifest.webmanifest"),
-    "/swing_icon.png": ("image/png", "swing_icon_v2.png"),
-    "/swing_icon_192.png": ("image/png", "swing_icon_192_v2.png"),
+    "/swing_icon.png": ("image/png", "swing_icon.png"),
+    "/swing_icon_192.png": ("image/png", "swing_icon.png"),
     "/sw.js": ("application/javascript; charset=utf-8", "sw.js"),
 }
 
