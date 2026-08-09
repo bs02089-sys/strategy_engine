@@ -569,7 +569,7 @@ footer{color:#4b5563;font-size:12px;text-align:center;margin-top:8px;line-height
 .pages a:active{opacity:.7}
 .plan{margin-top:14px;background:#0f1420;border:1px solid var(--border);border-radius:12px;padding:12px}
 .plan-row{display:flex;align-items:center;gap:8px;margin-bottom:8px}
-.plan-row label{font-size:13px;color:var(--muted);width:112px;flex-shrink:0}
+.plan-row label{font-size:22px;color:var(--muted);width:168px;flex-shrink:0}
 .plan-buy-input{flex:1;min-width:0;background:#1c2533;border:1px solid var(--border);border-radius:8px;
   color:var(--text);font-size:22px;font-weight:700;padding:7px 10px;font-family:ui-monospace,Menlo,Consolas,monospace}
 .plan-unit{font-size:13px;color:var(--muted)}
@@ -579,7 +579,7 @@ footer{color:#4b5563;font-size:12px;text-align:center;margin-top:8px;line-height
 .pct.on{border-color:var(--green);background:var(--green-dim);color:var(--green)}
 .pct:active{opacity:.7}
 .plan-out{display:flex;align-items:center;gap:8px;margin-top:10px}
-.po{font-size:14px;color:var(--muted);font-weight:600}
+.po{font-size:22px;color:var(--muted);font-weight:600}
 .po b{color:var(--text);font-family:ui-monospace,Menlo,Consolas,monospace;font-size:22px;font-weight:800}
 """
 
