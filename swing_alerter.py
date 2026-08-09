@@ -6,11 +6,11 @@
 유튜브 'TQQQ 스윙 투자 전략 / 스윙 투자 계산기&매수 매도 시점 알리미'
 (구글 스프레드시트 버전)의 로직을 자체 엔진으로 재구현한 도구입니다.
 
-전략 요약 (스프레드시트 기준):
+전략 요약 (매수: 스프레드시트 기준, 매도: 수익률 기준으로 변형):
   - 매수: 역대 최고가(ATH) 대비 MDD 5% 단위 구간(-5% ~ -95%)에
     현재가가 도달하면 해당 구간이 '매수' 상태가 됩니다.
-  - 매도: 매수 시점의 전고가(ATH_AT_BUY) 대비 스윙 목표(SWING_TARGET_PCT,
-    기본 -10%) 회복 시 매도 알람이 울립니다 (예: $140 → $126).
+  - 매도: 실제 매수가(BUY_PRICE) 대비 스윙 목표 수익률(SWING_TARGET_PCT,
+    기본 +10%) 도달 시 매도 알람이 울립니다 (예: 매수가 $100 → 목표 $110).
   - 계산기: 매수가 × 보유수량 → 목표 매도 시 예상 수익금/수익률 자동 계산.
 
 기능:
@@ -57,7 +57,7 @@ DEFAULT_CFG = {
     "MDD_START_PCT": 5,             # 매수 구간 시작 (-5%)
     "MDD_END_PCT": 95,              # 매수 구간 종료 (-95%)
     "MDD_STEP_PCT": 5,              # 구간 간격
-    "SWING_TARGET_PCT": -10,        # 스윙 목표 — 매수시 전고가 대비 회복 목표(%)
+    "SWING_TARGET_PCT": 10,         # 스윙 목표 수익률(%) — 매도가 = 매수가 × (1 + 목표/100)
     "IMMINENT_GAP_PCT": 5,          # 임박 알림 기준 (구간/매도 목표까지 %p)
     "PAGES_URL": "",               # GitHub Pages 주소 — 설정 시 대시보드에 라이브 링크 표시
     "ONESIGNAL_APP_ID": "",        # OneSignal 웹 푸시 앱 ID (대시보드 SDK 초기화용, 공개값)
@@ -234,13 +234,13 @@ def compute_ticker(ticker: str, pos: dict, cfg: dict) -> dict:
     deepest_hit = hit_levels[-1]["pct"] if hit_levels else None
     next_zone = next((l for l in ladder if not l["hit"]), None)
 
-    # 매도 목표 — 매수 시점 전고가 × (1 + 스윙 목표)
-    ath_at_buy = pos.get("ATH_AT_BUY")
+    # 매도 목표 — 실제 매수가(BUY_PRICE) × (1 + 스윙 목표 수익률)
+    buy_price = pos.get("BUY_PRICE")
     sell_target = None
     sell_ready = False
     sell_gap_pct = None
-    if ath_at_buy:
-        sell_target = float(ath_at_buy) * (1 + float(cfg.get("SWING_TARGET_PCT", -10)) / 100.0)
+    if buy_price:
+        sell_target = float(buy_price) * (1 + float(cfg.get("SWING_TARGET_PCT", 10)) / 100.0)
         sell_ready = bool(price >= sell_target - 1e-9)
         if not sell_ready:
             sell_gap_pct = (sell_target - price) / sell_target * 100.0  # 양수 = 목표까지 남은 %
@@ -248,7 +248,6 @@ def compute_ticker(ticker: str, pos: dict, cfg: dict) -> dict:
                 sell_gap_pct = 0.0
 
     # 계산기 — 목표 매도 시 예상 손익
-    buy_price = pos.get("BUY_PRICE")
     shares = pos.get("SHARES") or 0   # null/미입력 시 0 처리 (모니터링 전용 포지션)
     exp_profit = exp_roi = None
     if buy_price and sell_target and shares > 0:
@@ -265,7 +264,6 @@ def compute_ticker(ticker: str, pos: dict, cfg: dict) -> dict:
         "deepest_hit": deepest_hit,
         "next_zone": next_zone,
         "ladder": ladder,
-        "ath_at_buy": float(ath_at_buy) if ath_at_buy else None,
         "sell_target": sell_target,
         "sell_ready": sell_ready,
         "sell_gap_pct": sell_gap_pct,
@@ -334,7 +332,7 @@ def detect_alerts(st: dict, pos: dict, cfg: dict) -> list[str]:
         msgs.append(
             f"🚨 **{tick} 매도 알람 — 목표 도달!**\n"
             f"현재가 ${price:.2f} ≥ 매도 목표 ${st['sell_target']:.2f}\n"
-            f"매도 검토 필요 (스윙 목표 {cfg.get('SWING_TARGET_PCT', -10):+.0f}%)"
+            f"매도 검토 필요 (스윙 목표 수익률 {cfg.get('SWING_TARGET_PCT', 10):+.0f}%)"
         )
     return msgs
 
@@ -475,9 +473,6 @@ footer{color:#4b5563;font-size:12px;text-align:center;margin-top:8px;line-height
 .plan{margin-top:14px;background:#0f1420;border:1px solid var(--border);border-radius:12px;padding:12px}
 .plan-row{display:flex;align-items:center;gap:8px;margin-bottom:8px}
 .plan-row label{font-size:13px;color:var(--muted);width:96px;flex-shrink:0}
-.plan-dd{flex:1;min-width:0;background:#1c2533;border:1px solid var(--border);border-radius:8px;
-  color:var(--text);font-size:15px;font-weight:700;padding:7px 10px;font-family:ui-monospace,Menlo,Consolas,monospace}
-.plan-unit{font-size:13px;color:var(--muted)}
 .plan-pcts{display:flex;gap:6px;flex-wrap:wrap}
 .pct{font-size:13px;font-weight:700;padding:7px 13px;border-radius:999px;
   border:1px solid var(--border);background:#1c2533;color:var(--muted);cursor:pointer;-webkit-tap-highlight-color:transparent}
@@ -565,34 +560,32 @@ OneSignalDeferred.push(async function(OneSignal) {
 """
 
 
-# 목표 하락률/매도 수익률 → 매수가/매도가 자동 계산 (브라우저 localStorage 저장)
-# 매도 상태 칩은 서버(전역 SWING_TARGET_PCT) 기준이 아니라 사용자별 선택한 매도 수익률로 재판정한다.
+# 매수가(실매수 BUY_PRICE, 없으면 현재가) × (1 + 수익률) → 매도가 자동 계산 (브라우저 localStorage 저장)
+# 매도 상태 칩은 서버(전역 SWING_TARGET_PCT) 기준이 아니라 사용자별 선택한 수익률로 재판정한다.
 _PLAN_JS = """
 <script>
 (function() {
-  // 카드별 저장 키: swing_dd_{TICKER}(목표 하락률) / swing_sell_{TICKER}(매도 수익률)
+  // 카드별 저장 키: swing_sell_{TICKER}(수익률)
   document.querySelectorAll('.card[data-ath]').forEach(function(card) {
     var ticker = card.dataset.ticker;
-    var ath = parseFloat(card.dataset.ath);
-    var athBuy = parseFloat(card.dataset.athBuy) || ath;
     var close = parseFloat(card.dataset.close);
     var gapPct = parseFloat(card.dataset.gap) || 5;
-    var ddInput = card.querySelector('.plan-dd');
+    // 매수가 기준 — 실제 매수(BUY_PRICE) 기록 시 그 값, 아니면 현재가(지금 매수 시)
+    var buyBase = parseFloat(card.dataset.buyPrice);
+    if (isNaN(buyBase)) buyBase = close;
     var pctBtns = card.querySelectorAll('.pct');
     var buyEl = card.querySelector('.plan-buy');
     var sellEl = card.querySelector('.plan-sell');
     var chip = card.querySelector('[data-sell-chip]');
 
-    // 저장값 로드 (기본: 하락률 15%, 매도 수익률 10%)
-    var dd = parseFloat(localStorage.getItem('swing_dd_' + ticker));
-    if (isNaN(dd)) dd = 15;
+    // 저장값 로드 (기본: 수익률 10%)
     var sellPct = parseFloat(localStorage.getItem('swing_sell_' + ticker));
     if (isNaN(sellPct)) sellPct = 10;
 
-    // 사용자별 매도 상태 — 내가 고른 매도 수익률 기준으로 재판정 (data-armed 카드만)
+    // 사용자별 매도 상태 — 내가 고른 수익률 기준으로 재판정 (data-armed 카드만)
     function applySellStatus() {
       if (!chip || chip.dataset.armed !== '1' || isNaN(close)) return;
-      var target = athBuy * (1 - sellPct / 100);
+      var target = buyBase * (1 + sellPct / 100);
       var remain = (target - close) / target * 100;   // 목표까지 남은 % (양수)
       chip.classList.remove('red', 'amber', 'gray');
       if (close >= target - 1e-9) {
@@ -622,16 +615,10 @@ _PLAN_JS = """
     }
 
     function update() {
-      var v = parseFloat(ddInput.value);
-      if (isNaN(v)) v = 15;
-      dd = Math.min(Math.max(v, 0), 95);
-      ddInput.value = dd;
-      // 매수가 = ATH × (1 - 목표하락률/100) / 매도가 = 매수시 전고가 × (1 - 매도수익률/100)
-      var buy = ath * (1 - dd / 100);
-      var sell = athBuy * (1 - sellPct / 100);
-      buyEl.textContent = '$' + buy.toFixed(2);
+      // 매도가 = 매수가 × (1 + 수익률/100)
+      var sell = buyBase * (1 + sellPct / 100);
+      buyEl.textContent = '$' + buyBase.toFixed(2);
       sellEl.textContent = '$' + sell.toFixed(2);
-      localStorage.setItem('swing_dd_' + ticker, String(dd));
       localStorage.setItem('swing_sell_' + ticker, String(sellPct));
       pctBtns.forEach(function(b) {
         b.classList.toggle('on', parseFloat(b.dataset.pct) === sellPct);
@@ -640,8 +627,6 @@ _PLAN_JS = """
       refreshAlarmCount();
     }
 
-    ddInput.value = dd;
-    ddInput.addEventListener('input', update);
     pctBtns.forEach(function(b) {
       b.addEventListener('click', function() {
         sellPct = parseFloat(b.dataset.pct);
@@ -709,8 +694,8 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
                 and st["sell_gap_pct"] <= float(cfg.get("IMMINENT_GAP_PCT", 5)):
             sell_chip = '<span class="chip amber" data-sell-chip data-armed="1">🚀 임박</span>'
 
-        # 사용자 선택용 기준값 — ATH(매수 지점 계산) / 매수시 전고가(매도가 계산)
-        ath_buy_ref = st["ath_at_buy"] or st["ath"]
+        # 매수가 기준 — 실매수(BUY_PRICE) 기록 시 그 값, 없으면 대시보드 JS가 현재가 폴백
+        buy_attr = f' data-buy-price="{st["buy_price"]:.2f}"' if st["buy_price"] else ""
 
         # 다음 구간 접근 진행도: 현재 구간 상단(0%) → 다음 구간(100%)
         step = int(cfg.get("MDD_STEP_PCT", 5))
@@ -729,7 +714,7 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
         )
 
         cards.append(f"""
-<div class="card" data-ticker="{st["ticker"]}" data-ath="{st["ath"]:.2f}" data-ath-buy="{ath_buy_ref:.2f}" data-close="{st["price"]:.2f}" data-gap="{float(cfg.get("IMMINENT_GAP_PCT", 5)):g}">
+<div class="card" data-ticker="{st["ticker"]}" data-ath="{st["ath"]:.2f}" data-close="{st["price"]:.2f}" data-gap="{float(cfg.get("IMMINENT_GAP_PCT", 5)):g}"{buy_attr}>
   <div class="row">
     <span class="tick">{st["ticker"]}</span>
     {sell_chip}
@@ -744,12 +729,7 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
   <div class="info">📊 기준 전고가: {cfg.get('REFERENCE_HIGH', 'ATH')} ({st['ath_date']})</div>
   <div class="plan">
     <div class="plan-row">
-      <label for="dd-{st["ticker"]}">🎯 목표 MDD</label>
-      <input id="dd-{st["ticker"]}" class="plan-dd" type="number" min="0" max="95" step="{step}" placeholder="15">
-      <span class="plan-unit">%</span>
-    </div>
-    <div class="plan-row">
-      <label>📈 매도 수익률</label>
+      <label>📈 수익률</label>
       <div class="plan-pcts">
         <button type="button" class="pct" data-pct="5">5%</button>
         <button type="button" class="pct" data-pct="10">10%</button>
@@ -952,9 +932,9 @@ def print_console(statuses: list[dict], cfg: dict) -> None:
         print(f"[{st['ticker']}] 현재 ${st['price']:,.2f} ({st['as_of']})")
         print(f"   ATH ${st['ath']:,.2f} ({st['ath_date']}) → 하락 {st['dd_pct']:+.1f}%")
         if st["sell_target"] is not None:
-            print(f"   🎯 매도 목표 ${st['sell_target']:,.2f} (매수시 전고가 ${st['ath_at_buy']:,.2f}) | {_sell_chip(st, gap)}")
+            print(f"   🎯 매도 목표 ${st['sell_target']:,.2f} (매수가 ${st['buy_price']:,.2f} × {cfg.get('SWING_TARGET_PCT', 10):+.0f}%) | {_sell_chip(st, gap)}")
         else:
-            print("   🎯 매도 목표 미설정 (ATH_AT_BUY 입력 필요)")
+            print("   🎯 매도 목표 미설정 (BUY_PRICE 입력 필요 — 실제 매수 후 설정)")
         print(f"   📊 {_ladder_summary(st)}")
         if st["exp_profit"] is not None:
             print(f"   💰 매수 ${st['buy_price']:,.2f} × {st['shares']:.0f}주 → +${st['exp_profit']:,.2f} ({st['exp_roi']:+.1f}%)")

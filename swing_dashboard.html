@@ -138,9 +138,6 @@ footer{color:#4b5563;font-size:12px;text-align:center;margin-top:8px;line-height
 .plan{margin-top:14px;background:#0f1420;border:1px solid var(--border);border-radius:12px;padding:12px}
 .plan-row{display:flex;align-items:center;gap:8px;margin-bottom:8px}
 .plan-row label{font-size:13px;color:var(--muted);width:96px;flex-shrink:0}
-.plan-dd{flex:1;min-width:0;background:#1c2533;border:1px solid var(--border);border-radius:8px;
-  color:var(--text);font-size:15px;font-weight:700;padding:7px 10px;font-family:ui-monospace,Menlo,Consolas,monospace}
-.plan-unit{font-size:13px;color:var(--muted)}
 .plan-pcts{display:flex;gap:6px;flex-wrap:wrap}
 .pct{font-size:13px;font-weight:700;padding:7px 13px;border-radius:999px;
   border:1px solid var(--border);background:#1c2533;color:var(--muted);cursor:pointer;-webkit-tap-highlight-color:transparent}
@@ -154,7 +151,7 @@ footer{color:#4b5563;font-size:12px;text-align:center;margin-top:8px;line-height
 <body>
 <header>
   <h1>📈 스윙 투자 알리미</h1>
-  <div class="sub">업데이트 2026-08-09 11:53 · 종가 기준 2026-08-09 07:53 (미국)<span class="pages">· <a href="https://bs02089-sys.github.io/strategy_engine/" target="_blank" rel="noopener">🌐 라이브 열기</a></span></div>
+  <div class="sub">업데이트 2026-08-09 21:08 · 종가 기준 2026-08-09 08:08 (미국)<span class="pages">· <a href="https://bs02089-sys.github.io/strategy_engine/" target="_blank" rel="noopener">🌐 라이브 열기</a></span></div>
   <div class="chips">
     <button id="push-btn" class="push-btn" disabled>🔔 알림 받기</button>
     <span class="chip gray" id="sell-alarm-cnt">🚨 매도 알람 0</span>
@@ -162,10 +159,10 @@ footer{color:#4b5563;font-size:12px;text-align:center;margin-top:8px;line-height
   </div>
 </header>
 <main>
-<div class="card" data-ticker="TQQQ" data-ath="87.22" data-ath-buy="87.22" data-close="74.47" data-gap="5">
+<div class="card" data-ticker="TQQQ" data-ath="87.22" data-close="74.47" data-gap="5">
   <div class="row">
     <span class="tick">TQQQ</span>
-    <span class="chip gray" data-sell-chip data-armed="1">⏳ 대기</span>
+    <span class="chip gray" data-sell-chip>매도 미설정</span>
   </div>
   <div class="price mono">$74.47</div>
   <div class="meta">종가 기준 08-07 · ATH $87.22 (2026-06-02)</div>
@@ -177,12 +174,7 @@ footer{color:#4b5563;font-size:12px;text-align:center;margin-top:8px;line-height
   <div class="info">📊 기준 전고가: ATH (2026-06-02)</div>
   <div class="plan">
     <div class="plan-row">
-      <label for="dd-TQQQ">🎯 목표 MDD</label>
-      <input id="dd-TQQQ" class="plan-dd" type="number" min="0" max="95" step="5" placeholder="15">
-      <span class="plan-unit">%</span>
-    </div>
-    <div class="plan-row">
-      <label>📈 매도 수익률</label>
+      <label>📈 수익률</label>
       <div class="plan-pcts">
         <button type="button" class="pct" data-pct="5">5%</button>
         <button type="button" class="pct" data-pct="10">10%</button>
@@ -197,10 +189,10 @@ footer{color:#4b5563;font-size:12px;text-align:center;margin-top:8px;line-height
   </div>
   <div class="ladder"><div class="lvl hit"><span class="pct">-5%</span><span class="val">$82.86</span><div class="bar"><i style="width:100%"></i></div><span class="st">매수</span></div><div class="lvl hit"><span class="pct">-10%</span><span class="val">$78.50</span><div class="bar"><i style="width:100%"></i></div><span class="st">매수</span></div><div class="lvl current"><span class="pct">-15%</span><span class="val">$74.14</span><div class="bar"><i style="width:92%"></i></div><span class="st">대기</span></div><div class="lvl wait"><span class="pct">-20%</span><span class="val">$69.78</span><div class="bar"><i style="width:0%"></i></div><span class="st">대기</span></div><div class="lvl wait"><span class="pct">-25%</span><span class="val">$65.42</span><div class="bar"><i style="width:0%"></i></div><span class="st">대기</span></div><div class="lvl wait"><span class="pct">-30%</span><span class="val">$61.05</span><div class="bar"><i style="width:0%"></i></div><span class="st">대기</span></div><div class="lvl wait"><span class="pct">-35%</span><span class="val">$56.69</span><div class="bar"><i style="width:0%"></i></div><span class="st">대기</span></div><div class="lvl wait"><span class="pct">-40%</span><span class="val">$52.33</span><div class="bar"><i style="width:0%"></i></div><span class="st">대기</span></div><div class="lvl wait"><span class="pct">-45%</span><span class="val">$47.97</span><div class="bar"><i style="width:0%"></i></div><span class="st">대기</span></div><div class="lvl wait"><span class="pct">-50%</span><span class="val">$43.61</span><div class="bar"><i style="width:0%"></i></div><span class="st">대기</span></div><div class="lvl wait"><span class="pct">-55%</span><span class="val">$39.25</span><div class="bar"><i style="width:0%"></i></div><span class="st">대기</span></div><div class="lvl wait"><span class="pct">-60%</span><span class="val">$34.89</span><div class="bar"><i style="width:0%"></i></div><span class="st">대기</span></div><div class="lvl wait"><span class="pct">-65%</span><span class="val">$30.53</span><div class="bar"><i style="width:0%"></i></div><span class="st">대기</span></div><div class="lvl wait"><span class="pct">-70%</span><span class="val">$26.17</span><div class="bar"><i style="width:0%"></i></div><span class="st">대기</span></div><div class="lvl wait"><span class="pct">-75%</span><span class="val">$21.81</span><div class="bar"><i style="width:0%"></i></div><span class="st">대기</span></div><div class="lvl wait"><span class="pct">-80%</span><span class="val">$17.44</span><div class="bar"><i style="width:0%"></i></div><span class="st">대기</span></div><div class="lvl wait"><span class="pct">-85%</span><span class="val">$13.08</span><div class="bar"><i style="width:0%"></i></div><span class="st">대기</span></div><div class="lvl wait"><span class="pct">-90%</span><span class="val">$8.72</span><div class="bar"><i style="width:0%"></i></div><span class="st">대기</span></div><div class="lvl wait"><span class="pct">-95%</span><span class="val">$4.36</span><div class="bar"><i style="width:0%"></i></div><span class="st">대기</span></div></div>
 </div>
-<div class="card" data-ticker="SOXL" data-ath="300.77" data-ath-buy="300.77" data-close="140.25" data-gap="5">
+<div class="card" data-ticker="SOXL" data-ath="300.77" data-close="140.25" data-gap="5">
   <div class="row">
     <span class="tick">SOXL</span>
-    <span class="chip gray" data-sell-chip data-armed="1">⏳ 대기</span>
+    <span class="chip gray" data-sell-chip>매도 미설정</span>
   </div>
   <div class="price mono">$140.25</div>
   <div class="meta">종가 기준 08-07 · ATH $300.77 (2026-06-22)</div>
@@ -212,12 +204,7 @@ footer{color:#4b5563;font-size:12px;text-align:center;margin-top:8px;line-height
   <div class="info">📊 기준 전고가: ATH (2026-06-22)</div>
   <div class="plan">
     <div class="plan-row">
-      <label for="dd-SOXL">🎯 목표 MDD</label>
-      <input id="dd-SOXL" class="plan-dd" type="number" min="0" max="95" step="5" placeholder="15">
-      <span class="plan-unit">%</span>
-    </div>
-    <div class="plan-row">
-      <label>📈 매도 수익률</label>
+      <label>📈 수익률</label>
       <div class="plan-pcts">
         <button type="button" class="pct" data-pct="5">5%</button>
         <button type="button" class="pct" data-pct="10">10%</button>
@@ -238,29 +225,27 @@ footer{color:#4b5563;font-size:12px;text-align:center;margin-top:8px;line-height
 
 <script>
 (function() {
-  // 카드별 저장 키: swing_dd_{TICKER}(목표 하락률) / swing_sell_{TICKER}(매도 수익률)
+  // 카드별 저장 키: swing_sell_{TICKER}(수익률)
   document.querySelectorAll('.card[data-ath]').forEach(function(card) {
     var ticker = card.dataset.ticker;
-    var ath = parseFloat(card.dataset.ath);
-    var athBuy = parseFloat(card.dataset.athBuy) || ath;
     var close = parseFloat(card.dataset.close);
     var gapPct = parseFloat(card.dataset.gap) || 5;
-    var ddInput = card.querySelector('.plan-dd');
+    // 매수가 기준 — 실제 매수(BUY_PRICE) 기록 시 그 값, 아니면 현재가(지금 매수 시)
+    var buyBase = parseFloat(card.dataset.buyPrice);
+    if (isNaN(buyBase)) buyBase = close;
     var pctBtns = card.querySelectorAll('.pct');
     var buyEl = card.querySelector('.plan-buy');
     var sellEl = card.querySelector('.plan-sell');
     var chip = card.querySelector('[data-sell-chip]');
 
-    // 저장값 로드 (기본: 하락률 15%, 매도 수익률 10%)
-    var dd = parseFloat(localStorage.getItem('swing_dd_' + ticker));
-    if (isNaN(dd)) dd = 15;
+    // 저장값 로드 (기본: 수익률 10%)
     var sellPct = parseFloat(localStorage.getItem('swing_sell_' + ticker));
     if (isNaN(sellPct)) sellPct = 10;
 
-    // 사용자별 매도 상태 — 내가 고른 매도 수익률 기준으로 재판정 (data-armed 카드만)
+    // 사용자별 매도 상태 — 내가 고른 수익률 기준으로 재판정 (data-armed 카드만)
     function applySellStatus() {
       if (!chip || chip.dataset.armed !== '1' || isNaN(close)) return;
-      var target = athBuy * (1 - sellPct / 100);
+      var target = buyBase * (1 + sellPct / 100);
       var remain = (target - close) / target * 100;   // 목표까지 남은 % (양수)
       chip.classList.remove('red', 'amber', 'gray');
       if (close >= target - 1e-9) {
@@ -290,16 +275,10 @@ footer{color:#4b5563;font-size:12px;text-align:center;margin-top:8px;line-height
     }
 
     function update() {
-      var v = parseFloat(ddInput.value);
-      if (isNaN(v)) v = 15;
-      dd = Math.min(Math.max(v, 0), 95);
-      ddInput.value = dd;
-      // 매수가 = ATH × (1 - 목표하락률/100) / 매도가 = 매수시 전고가 × (1 - 매도수익률/100)
-      var buy = ath * (1 - dd / 100);
-      var sell = athBuy * (1 - sellPct / 100);
-      buyEl.textContent = '$' + buy.toFixed(2);
+      // 매도가 = 매수가 × (1 + 수익률/100)
+      var sell = buyBase * (1 + sellPct / 100);
+      buyEl.textContent = '$' + buyBase.toFixed(2);
       sellEl.textContent = '$' + sell.toFixed(2);
-      localStorage.setItem('swing_dd_' + ticker, String(dd));
       localStorage.setItem('swing_sell_' + ticker, String(sellPct));
       pctBtns.forEach(function(b) {
         b.classList.toggle('on', parseFloat(b.dataset.pct) === sellPct);
@@ -308,8 +287,6 @@ footer{color:#4b5563;font-size:12px;text-align:center;margin-top:8px;line-height
       refreshAlarmCount();
     }
 
-    ddInput.value = dd;
-    ddInput.addEventListener('input', update);
     pctBtns.forEach(function(b) {
       b.addEventListener('click', function() {
         sellPct = parseFloat(b.dataset.pct);
