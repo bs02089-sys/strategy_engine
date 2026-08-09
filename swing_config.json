@@ -12,19 +12,14 @@
         "TQQQ": {
             "ENABLED": true,
             "LABEL": "TQQQ",
-            "BUY_PRICE": 107.0,
-            "SHARES": 100,
-            "ATH_AT_BUY": 140.0,
+            "BUY_PRICE": null,
+            "SHARES": null,
+            "ATH_AT_BUY": null,
             "SELL_ALARM_SENT": false,
             "SELL_IMMINENT_SENT": false,
             "ZONE_ALERTS": {
-                "hit": [
-                    5,
-                    10
-                ],
-                "imminent": [
-                    15
-                ]
+                "hit": [],
+                "imminent": []
             }
         },
         "SOXL": {
@@ -32,7 +27,7 @@
             "LABEL": "SOXL",
             "BUY_PRICE": null,
             "SHARES": null,
-            "ATH_AT_BUY": 300.77,
+            "ATH_AT_BUY": null,
             "SELL_ALARM_SENT": false,
             "SELL_IMMINENT_SENT": false,
             "ZONE_ALERTS": {

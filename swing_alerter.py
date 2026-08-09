@@ -373,30 +373,37 @@ def _ladder_summary(st: dict) -> str:
 
 
 def build_briefing_text(statuses: list[dict], cfg: dict) -> str:
-    """일일 종합 브리핑 (Discord 설명란용)."""
+    """일일 종합 브리핑 (Discord 설명란용).
+    앱 대시보드 카드의 막대(래더 -5%~-95%) 위쪽 내용을 그대로 개조식(불릿)으로 표현한다.
+    (앱 카드: 티커·매도 상태 → 현재가 → 종가 기준일·ATH → 하락률·매수 구간 → 기준 전고가)
+    """
     gap = float(cfg.get("IMMINENT_GAP_PCT", 5))
     lines = []
     for st in statuses:
         if st.get("error"):
             lines.append(f"**{st['ticker']}** ❌ {st['error']}")
             continue
-        pnl = ""
-        if st["exp_profit"] is not None:
-            pnl = (f"💰 매수 ${st['buy_price']:.2f} × {st['shares']:.0f}주 → "
-                   f"목표 매도 +${st['exp_profit']:,.2f} ({st['exp_roi']:+.1f}%)")
-        sell_part = "매도 목표 미설정 (ATH_AT_BUY 입력 필요)"
-        if st["sell_target"] is not None:
-            sell_part = f"매도 목표 ${st['sell_target']:.2f} (매수시 전고가 ${st['ath_at_buy']:.2f}) → {_sell_chip(st, gap)}"
+        # 매도 상태 (앱 카드 sell_chip과 동일한 판정)
+        if st["sell_ready"]:
+            sell_txt = "🎉 매도 도달"
+        elif st["sell_target"] is not None:
+            if st["sell_gap_pct"] is not None and st["sell_gap_pct"] <= gap:
+                sell_txt = "🚀 매도 임박"
+            else:
+                sell_txt = "⏳ 매도 대기"
+        else:
+            sell_txt = "매도 미설정"
+        # 매수 구간 상태 (앱 카드 chip과 동일)
+        hit_cnt = len([l for l in st["ladder"] if l["hit"]])
+        buy_txt = f"🟢 매수 구간 {hit_cnt}개 도달" if hit_cnt else "매수 구간 대기"
         lines.extend([
-            f"**{st['ticker']}** {st['label']}",
-            f"현재가 ${st['price']:.2f} ({st['as_of']}) | ATH ${st['ath']:.2f} "
-            f"({st['ath_date']}) → 하락 **{st['dd_pct']:+.1f}%**",
-            f"🎯 {sell_part}",
-            f"📊 {_ladder_summary(st)}",
+            f"**{st['ticker']}** · {sell_txt}",
+            f"- 현재가 ${st['price']:.2f} (종가 기준 {st['as_of']})",
+            f"- ATH ${st['ath']:.2f} ({st['ath_date']}) → 하락 **{st['dd_pct']:+.1f}%**",
+            f"- {buy_txt}",
+            f"- 기준 전고가: {cfg.get('REFERENCE_HIGH', 'ATH')} ({st['ath_date']})",
+            "",
         ])
-        if pnl:
-            lines.append(pnl)
-        lines.append("")
     return "\n".join(lines).strip()
 
 
@@ -699,7 +706,7 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
   <div class="info">📊 기준 전고가: {cfg.get('REFERENCE_HIGH', 'ATH')} ({st['ath_date']})</div>
   <div class="plan">
     <div class="plan-row">
-      <label for="dd-{st["ticker"]}">🎯 목표 MDD 하락률</label>
+      <label for="dd-{st["ticker"]}">🎯 목표 MDD</label>
       <input id="dd-{st["ticker"]}" class="plan-dd" type="number" min="0" max="95" step="{step}" placeholder="15">
       <span class="plan-unit">%</span>
     </div>
