@@ -250,6 +250,39 @@ def get_ath(ticker: str, max_retries: int = 3) -> tuple[float | None, str | None
     return None, None
 
 
+def get_prior_close(ticker: str, as_of: str, max_retries: int = 3) -> float | None:
+    """마지막 확정 종가(as_of, 'MM-DD') 세션의 직전 거래일 종가.
+
+    전일 종가 대비 등락률 표시용 — get_prev_close()가 반환한 최종 세션의
+    바로 앞 세션 종가를 같은 yfinance 1개월 데이터에서 찾는다.
+    as_of에 해당하는 행이 없으면(데이터 변경 등) 마지막 두 행을 사용한다.
+    """
+    try:
+        as_month, as_day = int(as_of[:2]), int(as_of[3:5])
+    except (ValueError, TypeError, IndexError):
+        return None
+    last_err: Exception | None = None
+    for attempt in range(max_retries):
+        try:
+            hist = yf.Ticker(ticker).history(period="1mo", interval="1d", auto_adjust=False)
+            closes = hist["Close"].dropna()
+            if len(closes) < 2:
+                raise ValueError("Need at least 2 sessions.")
+            for i in range(len(closes) - 1, 0, -1):
+                d = closes.index[i].date() if hasattr(closes.index[i], "date") else None
+                if d is not None and d.month == as_month and d.day == as_day:
+                    return float(closes.iloc[i - 1])
+            # as_of 미발견(새 fetch가 한 세션 뒤처진 데이터 지연) → 마지막 행을
+            # 직전 종가로 사용 (표시 가격의 직전 세션 = 데이터의 마지막 세션)
+            return float(closes.iloc[-1])
+        except Exception as e:  # noqa: BLE001
+            last_err = e
+            if attempt < max_retries - 1:
+                time.sleep(2.0)
+    print(f"   ⚠️ {ticker} 직전 종가 조회 실패: {last_err}")
+    return None
+
+
 # ═══════════════════════════════════════════════════════════
 # 상태 계산
 # ═══════════════════════════════════════════════════════════
@@ -280,6 +313,13 @@ def compute_ticker(ticker: str, pos: dict, cfg: dict) -> dict:
         return st
 
     dd_pct = (price - ath) / ath * 100.0  # ATH 대비 하락율 (음수 = 하락)
+
+    # 전일 종가 대비 등락률 — 직전 거래일 종가 대비 (대시보드 전일 종가 줄 표시용)
+    prior_close = get_prior_close(ticker, as_of)
+    day_change_pct = None
+    if prior_close and prior_close > 0:
+        day_change_pct = (price - prior_close) / prior_close * 100.0
+
     ladder = build_ladder(ath, cfg)
     for lvl in ladder:
         lvl["hit"] = bool(price <= lvl["price"] + 1e-9)
@@ -315,6 +355,7 @@ def compute_ticker(ticker: str, pos: dict, cfg: dict) -> dict:
         "ath": ath,
         "ath_date": ath_date,
         "dd_pct": dd_pct,
+        "day_change_pct": day_change_pct,
         "deepest_hit": deepest_hit,
         "next_zone": next_zone,
         "ladder": ladder,
@@ -427,7 +468,7 @@ def _ladder_summary(st: dict) -> str:
 def build_briefing_text(statuses: list[dict], cfg: dict) -> str:
     """일일 종합 브리핑 (Discord 설명란용).
     앱 대시보드 카드의 막대(래더 -5%~-95%) 위쪽 내용을 그대로 개조식(불릿)으로 표현한다.
-    (앱 카드: 티커·매도 상태 → 현재가 → 전일 종가(하락률) → 매수 구간 → 전고가(하락률))
+    (앱 카드: 티커·매도 상태 → 현재가 → 전일 종가(전일 대비 등락률) → 매수 구간 → 전고가(ATH 대비 하락률))
     """
     gap = float(cfg.get("IMMINENT_GAP_PCT", 5))
     lines = []
@@ -775,6 +816,15 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
 
         dd_cls = "up" if st["dd_pct"] > 0 else ("down" if st["dd_pct"] < 0 else "flat")
         dd_sign = "🆕 +" if st["dd_pct"] > 0 else ("▼ " if st["dd_pct"] < 0 else "")
+
+        # 전일 종가 대비 등락률 — 전일 종가 줄 끝 표시 (ATH 하락률과 별개 수치)
+        dc = st.get("day_change_pct")
+        if dc is None:
+            day_span = ""
+        else:
+            day_cls = "up" if dc > 0 else ("down" if dc < 0 else "flat")
+            day_sign = "▲ " if dc > 0 else ("▼ " if dc < 0 else "")
+            day_span = f' 대비 <span class="dd {day_cls}">{day_sign}{abs(dc):.1f}%</span>'
         sell_chip = (
             '<span class="chip red" data-sell-chip>🚨 매도</span>' if st["sell_ready"]
             else '<span class="chip gray" data-sell-chip>⏳ 대기</span>' if st["sell_target"] is not None
@@ -809,12 +859,12 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
     {sell_chip}
   </div>
   <div class="price mono">${st["price"]:,.2f}</div>
-  <div class="meta">전일 종가 ${st["price"]:,.2f} ({st["as_of"]}) <span class="dd {dd_cls}">{dd_sign}{abs(st["dd_pct"]):.1f}%</span></div>
+  <div class="meta">전일 종가 ${st["price"]:,.2f} ({st["as_of"]}){day_span}</div>
   <div class="row" style="margin-top:10px;justify-content:flex-end">
     <span class="chip {'green' if st['deepest_hit'] else 'gray'}">
       {'🟢 매수 구간 ' + str(len([l for l in st['ladder'] if l['hit']])) + '개 도달' if st['deepest_hit'] else '매수 구간 대기'}</span>
   </div>
-  <div class="info">📊 전고가: ${st["ath"]:,.2f} ({st["ath_date"]}) <span class="dd {dd_cls}">{dd_sign}{abs(st["dd_pct"]):.1f}%</span></div>
+  <div class="info">📊 전고가 ${st["ath"]:,.2f} ({st["ath_date"]}) 대비 <span class="dd {dd_cls}">{dd_sign}{abs(st["dd_pct"]):.1f}%</span></div>
   <div class="plan">
     <div class="plan-row">
       <label for="buy-{st["ticker"]}">💰 매수 예정가</label>

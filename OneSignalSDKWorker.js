@@ -17,9 +17,11 @@ self.addEventListener("activate", (event) => {
 });
 
 self.addEventListener("fetch", (event) => {
-  // navigation(페이지 이동)만 통과형 처리 — OneSignal SDK 워커의
+  // navigation(페이지 이동)만 처리 — OneSignal SDK 워커의
   // 내부 요청(push 전달/추적 등)을 가로채지 않도록 다른 요청은 무시
   if (event.request.mode === "navigate") {
-    event.respondWith(fetch(event.request));
+    // GitHub Pages 의 HTTP 캐시(max-age=600)를 우회해 항상 최신 대시보드를 가져온다.
+    // 설치형 PWA가 오래된 화면을 보여주는 캐시 지연을 방지 (no-store: 캐시 읽기/쓰기 모두 금지)
+    event.respondWith(fetch(event.request, { cache: "no-store" }));
   }
 });
