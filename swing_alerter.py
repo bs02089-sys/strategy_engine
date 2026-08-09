@@ -6,7 +6,7 @@
 유튜브 'TQQQ 스윙 투자 전략 / 스윙 투자 계산기&매수 매도 시점 알리미'
 (구글 스프레드시트 버전)의 로직을 자체 엔진으로 재구현한 도구입니다.
 
-전략 요약 (매수: 스프레드시트 기준, 매도: 수익률 기준으로 변형):
+전략 요약 (매수: 스프레드시트 기준, 매도: 예상 수익률 기준으로 변형):
   - 매수: 역대 최고가(ATH) 대비 MDD 5% 단위 구간(-5% ~ -95%)에
     현재가가 도달하면 해당 구간이 '매수' 상태가 됩니다.
   - 매도: 실제 매수가(BUY_PRICE) 대비 스윙 목표 수익률(SWING_TARGET_PCT,
@@ -562,12 +562,12 @@ OneSignalDeferred.push(async function(OneSignal) {
 """
 
 
-# 매수 예정가(사용자 입력, 없으면 현재가) × (1 + 수익률) → 매도 예정가 자동 계산 (브라우저 localStorage 저장)
+# 매수 예정가(사용자 입력, 없으면 현재가) × (1 + 예상 수익률) → 매도 예정가 자동 계산 (브라우저 localStorage 저장)
 # 매도 상태 칩/카운트는 사용자별 입력 기준으로 항상 재판정 — 서버 설정(BUY_PRICE) 없이도 동작한다.
 _PLAN_JS = """
 <script>
 (function() {
-  // 카드별 저장 키: swing_buy_{TICKER}(매수 예정가) / swing_sell_{TICKER}(수익률)
+  // 카드별 저장 키: swing_buy_{TICKER}(매수 예정가) / swing_sell_{TICKER}(예상 수익률)
   document.querySelectorAll('.card[data-ath]').forEach(function(card) {
     var ticker = card.dataset.ticker;
     var close = parseFloat(card.dataset.close);
@@ -577,7 +577,7 @@ _PLAN_JS = """
     var sellEl = card.querySelector('.plan-sell');
     var chip = card.querySelector('[data-sell-chip]');
 
-    // 저장값 로드 (기본: 매수 예정가 미입력 → 현재가 기준, 수익률 10%)
+    // 저장값 로드 (기본: 매수 예정가 미입력 → 현재가 기준, 예상 수익률 10%)
     var buyVal = parseFloat(localStorage.getItem('swing_buy_' + ticker));
     if (isNaN(buyVal)) buyVal = 0;   // 0 = 미입력
     var sellPct = parseFloat(localStorage.getItem('swing_sell_' + ticker));
@@ -590,7 +590,7 @@ _PLAN_JS = """
       return v;
     }
 
-    // 사용자별 매도 상태 — 내 매수 예정가 × (1 + 수익률) 기준으로 항상 재판정
+    // 사용자별 매도 상태 — 내 매수 예정가 × (1 + 예상 수익률) 기준으로 항상 재판정
     function applySellStatus() {
       if (!chip || isNaN(close)) return;
       var target = buyBase() * (1 + sellPct / 100);
@@ -625,7 +625,7 @@ _PLAN_JS = """
     function update() {
       if (isNaN(close)) return;   // 가격 데이터 없으면 계산 생략
       var base = buyBase();
-      // 매도 예정가 = 매수 예정가 × (1 + 수익률/100)
+      // 매도 예정가 = 매수 예정가 × (1 + 예상 수익률/100)
       var sell = base * (1 + sellPct / 100);
       sellEl.textContent = '$' + sell.toFixed(2);
       // 매수 예정가는 직접 입력한 양수 값만 저장 (비우거나 0이면 현재가 기준으로 초기화)
@@ -751,7 +751,7 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
       <span class="plan-unit">$</span>
     </div>
     <div class="plan-row">
-      <label>📈 수익률</label>
+      <label>📈 예상 수익률</label>
       <div class="plan-pcts">
         <button type="button" class="pct" data-pct="5">5%</button>
         <button type="button" class="pct" data-pct="10">10%</button>
