@@ -85,8 +85,6 @@ jobs:
           # 브랜치 전환 시 워킹트리에서 사라지므로 임시 저장 (대시보드 + PWA 파일)
           cp swing_dashboard.html /tmp/swing_dash.html
           cp swing_manifest.webmanifest /tmp/swing_manifest.webmanifest
-          cp swing_icon.png /tmp/swing_icon.png
-          cp swing_icon_192.png /tmp/swing_icon_192.png
           cp swing_icon_v2.png /tmp/swing_icon_v2.png
           cp swing_icon_192_v2.png /tmp/swing_icon_192_v2.png
           cp sw.js /tmp/sw.js
@@ -100,15 +98,16 @@ jobs:
             git rm -rf --quiet . 2>/dev/null || true
           fi
 
+          # 구버전 아이콘(swing_icon.png 계열)은 v2 로 대체 — gh-pages 에서 정리
+          git rm --ignore-unmatch swing_icon.png swing_icon_192.png 2>/dev/null || true
+
           # 대시보드를 index.html 로 배포 (사이트 루트에서 바로 열림) + PWA 파일
           cp /tmp/swing_dash.html index.html
           cp /tmp/swing_manifest.webmanifest manifest.webmanifest
-          cp /tmp/swing_icon.png swing_icon.png
-          cp /tmp/swing_icon_192.png swing_icon_192.png
           cp /tmp/swing_icon_v2.png swing_icon_v2.png
           cp /tmp/swing_icon_192_v2.png swing_icon_192_v2.png
           cp /tmp/sw.js sw.js
-          git add index.html manifest.webmanifest swing_icon.png swing_icon_192.png swing_icon_v2.png swing_icon_192_v2.png sw.js
+          git add index.html manifest.webmanifest swing_icon_v2.png swing_icon_192_v2.png sw.js
           if git diff --quiet --cached origin/gh-pages >/dev/null 2>&1; then
             echo "변경 없음 — 배포 생략"
           else

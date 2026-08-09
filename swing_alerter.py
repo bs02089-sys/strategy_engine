@@ -573,10 +573,8 @@ _LAST_COMPUTE: dict = {"ts": 0.0, "statuses": None, "cfg": None}
 # 배포(gh-pages)에서는 manifest.webmanifest 로 이름이 바뀌므로 로컬 파일명을 별도 지정
 _STATIC_FILES = {
     "/manifest.webmanifest": ("application/manifest+json; charset=utf-8", "swing_manifest.webmanifest"),
-    "/swing_icon.png": ("image/png", "swing_icon.png"),
-    "/swing_icon_192.png": ("image/png", "swing_icon_192.png"),
-    "/swing_icon_v2.png": ("image/png", "swing_icon_v2.png"),
-    "/swing_icon_192_v2.png": ("image/png", "swing_icon_192_v2.png"),
+    "/swing_icon.png": ("image/png", "swing_icon_v2.png"),
+    "/swing_icon_192.png": ("image/png", "swing_icon_192_v2.png"),
     "/sw.js": ("application/javascript; charset=utf-8", "sw.js"),
 }
 
