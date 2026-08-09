@@ -431,6 +431,8 @@ header .sub{color:var(--muted);font-size:12px;margin-top:4px}
 .push-btn:active{opacity:.7}
 .push-btn:disabled{opacity:.4;cursor:default}
 .push-btn.on{border-color:var(--green);background:var(--green-dim);color:var(--green)}
+.push-err{font-size:11px;color:var(--amber);background:var(--amber-dim);border:1px solid var(--amber);
+  border-radius:8px;padding:5px 9px;margin-top:6px;width:100%;word-break:break-all;line-height:1.5}
 .card{background:var(--card);border:1px solid var(--border);border-radius:16px;
   padding:16px;margin-bottom:16px}
 .row{display:flex;align-items:center;justify-content:space-between;gap:8px}
@@ -506,12 +508,18 @@ OneSignalDeferred.push(async function(OneSignal) {
       });
     }
   } catch (e) {
-    // init/구독 조회 실패 시 원인을 버튼+콘솔에 표시 (기존: 조용히 비활성으로 남음)
+    // init/구독 조회 실패 시 원인을 화면+콘솔에 표시 (스마트폰 PWA에도 보이도록)
     console.error('OneSignal 초기화 실패:', e);
     if (btn) {
       btn.disabled = true;
       btn.textContent = '⚠️ 알림 설정 필요';
-      btn.title = 'OneSignal 대시보드 웹 설정 확인 (콘솔 로그 참조): ' + (e && e.message ? e.message : e);
+      btn.title = 'OneSignal 대시보드 웹 설정 확인: ' + (e && e.message ? e.message : e);
+      // hover 없이도 보이는 화면 배너 (스마트폰/설치형 PWA 대응)
+      const msg = (e && e.message) ? e.message : String(e);
+      const banner = document.createElement('div');
+      banner.className = 'push-err';
+      banner.textContent = '🔕 푸시 설정 오류: ' + msg;
+      btn.insertAdjacentElement('afterend', banner);
     }
   }
 });
