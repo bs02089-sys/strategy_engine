@@ -465,12 +465,28 @@ footer{color:#4b5563;font-size:11px;text-align:center;margin-top:8px;line-height
 .legend{display:flex;gap:14px;justify-content:center;color:var(--muted);font-size:11px;margin-top:6px}
 .pages a{color:var(--blue);text-decoration:none;font-weight:700;font-size:12px}
 .pages a:active{opacity:.7}
+.plan{margin-top:14px;background:#0f1420;border:1px solid var(--border);border-radius:12px;padding:12px}
+.plan-row{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.plan-row label{font-size:12px;color:var(--muted);width:88px;flex-shrink:0}
+.plan-dd{flex:1;min-width:0;background:#1c2533;border:1px solid var(--border);border-radius:8px;
+  color:var(--text);font-size:15px;font-weight:700;padding:7px 10px;font-family:ui-monospace,Menlo,Consolas,monospace}
+.plan-unit{font-size:13px;color:var(--muted)}
+.plan-pcts{display:flex;gap:6px;flex-wrap:wrap}
+.pct{font-size:12px;font-weight:700;padding:6px 12px;border-radius:999px;
+  border:1px solid var(--border);background:#1c2533;color:var(--muted);cursor:pointer;-webkit-tap-highlight-color:transparent}
+.pct.on{border-color:var(--green);background:var(--green-dim);color:var(--green)}
+.pct:active{opacity:.7}
+.plan-out{display:flex;gap:16px;margin-top:6px;flex-wrap:wrap}
+.po{font-size:13px;color:var(--muted)}
+.po b{color:var(--text);font-family:ui-monospace,Menlo,Consolas,monospace;font-size:15px}
 """
 
 # PWA 서비스 워커 등록 — Chrome '앱 설치' 기준 충족 (통과형 fetch, 캐시 없음)
 _SW_REGISTER = """
 <script>
-if ('serviceWorker' in navigator) { navigator.serviceWorker.register('sw.js'); }
+// OneSignal 워커(OneSignalSDKWorker.js)에 PWA 핸들러를 통합했으므로 같은 파일을 등록
+// → 같은 스코프에 워커가 1개만 존재 (sw.js와의 충돌로 인한 등록 실패 방지)
+if ('serviceWorker' in navigator) { navigator.serviceWorker.register('OneSignalSDKWorker.js'); }
 </script>
 """
 
@@ -526,6 +542,59 @@ OneSignalDeferred.push(async function(OneSignal) {
     }
   }
 });
+</script>
+"""
+
+
+# 목표 하락률/매도 수익률 → 매수가/매도가 자동 계산 (브라우저 localStorage 저장)
+_PLAN_JS = """
+<script>
+(function() {
+  // 카드별 저장 키: swing_dd_{TICKER}(목표 하락률) / swing_sell_{TICKER}(매도 수익률)
+  document.querySelectorAll('.card[data-ath]').forEach(function(card) {
+    var ticker = card.dataset.ticker;
+    var ath = parseFloat(card.dataset.ath);
+    var athBuy = parseFloat(card.dataset.athBuy) || ath;
+    var step = parseFloat(card.dataset.step) || 5;
+    var ddInput = card.querySelector('.plan-dd');
+    var pctBtns = card.querySelectorAll('.pct');
+    var buyEl = card.querySelector('.plan-buy');
+    var sellEl = card.querySelector('.plan-sell');
+
+    // 저장값 로드 (기본: 하락률 15%, 매도 수익률 10%)
+    var dd = parseFloat(localStorage.getItem('swing_dd_' + ticker));
+    if (isNaN(dd)) dd = 15;
+    var sellPct = parseFloat(localStorage.getItem('swing_sell_' + ticker));
+    if (isNaN(sellPct)) sellPct = 10;
+
+    function update() {
+      var v = parseFloat(ddInput.value);
+      if (isNaN(v)) v = 15;
+      dd = Math.min(Math.max(v, 0), 95);
+      ddInput.value = dd;
+      // 매수가 = ATH × (1 - 목표하락률/100) / 매도가 = 매수시 전고가 × (1 - 매도수익률/100)
+      var buy = ath * (1 - dd / 100);
+      var sell = athBuy * (1 - sellPct / 100);
+      buyEl.textContent = '$' + buy.toFixed(2);
+      sellEl.textContent = '$' + sell.toFixed(2);
+      localStorage.setItem('swing_dd_' + ticker, String(dd));
+      localStorage.setItem('swing_sell_' + ticker, String(sellPct));
+      pctBtns.forEach(function(b) {
+        b.classList.toggle('on', parseFloat(b.dataset.pct) === sellPct);
+      });
+    }
+
+    ddInput.value = dd;
+    ddInput.addEventListener('input', update);
+    pctBtns.forEach(function(b) {
+      b.addEventListener('click', function() {
+        sellPct = parseFloat(b.dataset.pct);
+        update();
+      });
+    });
+    update();
+  });
+})();
 </script>
 """
 
@@ -586,15 +655,13 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
 
         pnl_html = ""
         if st["exp_profit"] is not None:
-            pnl_html = (f'<div class="info">💰 매수가 <b>${st["buy_price"]:.2f}</b> × '
+            pnl_html = (f'<div class="info">💰 보유 매수가 <b>${st["buy_price"]:.2f}</b> × '
                         f'<b>{st["shares"]:.0f}주</b> → 목표 매도 시 '
                         f'<b style="color:var(--green)">+${st["exp_profit"]:,.2f}</b> '
                         f'(<b style="color:var(--green)">{st["exp_roi"]:+.1f}%</b>)</div>')
 
-        sell_info = "매수 시점 전고가 미입력 (ATH_AT_BUY)"
-        if st["sell_target"] is not None:
-            sell_info = (f'매도 목표 <b>${st["sell_target"]:.2f}</b> '
-                         f'(매수시 전고가 ${st["ath_at_buy"]:.2f} × {cfg.get("SWING_TARGET_PCT", -10):+.0f}%)')
+        # 사용자 선택용 기준값 — ATH(매수 지점 계산) / 매수시 전고가(매도가 계산)
+        ath_buy_ref = st["ath_at_buy"] or st["ath"]
 
         # 다음 구간 접근 진행도: 현재 구간 상단(0%) → 다음 구간(100%)
         step = int(cfg.get("MDD_STEP_PCT", 5))
@@ -613,9 +680,9 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
         )
 
         cards.append(f"""
-<div class="card">
+<div class="card" data-ticker="{st["ticker"]}" data-ath="{st["ath"]:.2f}" data-ath-buy="{ath_buy_ref:.2f}" data-step="{step}">
   <div class="row">
-    <span class="tick">{st["ticker"]}<span class="tag">{st["label"]}</span></span>
+    <span class="tick">{st["ticker"]}</span>
     {sell_chip}
   </div>
   <div class="price mono">${st["price"]:,.2f}</div>
@@ -625,8 +692,28 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
     <span class="chip {'green' if st['deepest_hit'] else 'gray'}">
       {'🟢 매수 구간 ' + str(len([l for l in st['ladder'] if l['hit']])) + '개 도달' if st['deepest_hit'] else '매수 구간 대기'}</span>
   </div>
-  <div class="info">🎯 {sell_info}<br>📊 기준 전고가: {cfg.get('REFERENCE_HIGH', 'ATH')} ({st['ath_date']})</div>
+  <div class="info">📊 기준 전고가: {cfg.get('REFERENCE_HIGH', 'ATH')} ({st['ath_date']})</div>
   {pnl_html}
+  <div class="plan">
+    <div class="plan-row">
+      <label for="dd-{st["ticker"]}">🎯 목표 하락률</label>
+      <input id="dd-{st["ticker"]}" class="plan-dd" type="number" min="0" max="95" step="{step}" placeholder="15">
+      <span class="plan-unit">%</span>
+    </div>
+    <div class="plan-row">
+      <label>📈 매도 수익률</label>
+      <div class="plan-pcts">
+        <button type="button" class="pct" data-pct="5">5%</button>
+        <button type="button" class="pct" data-pct="10">10%</button>
+        <button type="button" class="pct" data-pct="15">15%</button>
+        <button type="button" class="pct" data-pct="20">20%</button>
+      </div>
+    </div>
+    <div class="plan-out">
+      <span class="po">매수가 <b class="plan-buy">-</b></span>
+      <span class="po">매도가 <b class="plan-sell">-</b></span>
+    </div>
+  </div>
   <div class="ladder">{rows}</div>
 </div>""")
 
@@ -667,6 +754,7 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
 {legend}
 <footer>⚠️ 신호 알림·계산기용 — 자동매매가 아닙니다. 실제 매매는 본인이 직접 하세요.<br>
 출처: 유튜브 'TQQQ 스윙 투자 전략' 스프레드시트 방식 재구현</footer>
+{_PLAN_JS}
 </body>
 </html>"""
 
