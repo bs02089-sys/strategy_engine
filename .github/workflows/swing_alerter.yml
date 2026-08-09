@@ -97,8 +97,8 @@ jobs:
             git rm -rf --quiet . 2>/dev/null || true
           fi
 
-          # 구버전 아이콘(v2 계열)은 swing_icon.png 로 통합 — gh-pages 에서 정리
-          git rm --ignore-unmatch swing_icon_v2.png swing_icon_192_v2.png 2>/dev/null || true
+          # 구버전 아이콘(원본/v2 계열)은 swing_icon.png 로 통합 — gh-pages 에서 정리
+          git rm --ignore-unmatch swing_icon.png swing_icon_192.png swing_icon_v2.png swing_icon_192_v2.png 2>/dev/null || true
 
           # 대시보드를 index.html 로 배포 (사이트 루트에서 바로 열림) + PWA 파일
           cp /tmp/swing_dash.html index.html
