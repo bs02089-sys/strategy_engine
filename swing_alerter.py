@@ -482,13 +482,20 @@ footer{color:#4b5563;font-size:12px;text-align:center;margin-top:8px;line-height
 """
 
 # PWA 서비스 워커 등록 — Chrome '앱 설치' 기준 충족 (통과형 fetch, 캐시 없음)
-_SW_REGISTER = """
+# 5분 자동 새로고침 — meta refresh(<meta http-equiv="refresh">)는 설치형(standalone) 앱에서
+# 창이 닫히고 Chrome 브라우저로 빠져나가는 안드로이드 문제가 있어 JS 방식으로 대체한다.
+# (화면에 보일 때만 새로고침해 백그라운드에서 불필요한 갱신 방지)
+_AUTO_RELOAD_JS = """
 <script>
-// OneSignal 워커(OneSignalSDKWorker.js)에 PWA 핸들러를 통합했으므로 같은 파일을 등록
-// → 같은 스코프에 워커가 1개만 존재 (sw.js와의 충돌로 인한 등록 실패 방지)
-if ('serviceWorker' in navigator) { navigator.serviceWorker.register('OneSignalSDKWorker.js'); }
+setTimeout(function () { if (!document.hidden) { location.reload(); } }, 300000);
 </script>
 """
+
+
+# 서비스워커는 OneSignal.init()이 /strategy_engine/OneSignalSDKWorker.js(?appId&sdkVersion)로 단일 등록한다.
+# 별도로 등록하면 같은 스코프에 URL이 다른 워커가 매 페이지 로드마다 서로를 교체하는
+# 'SW 교체 루프'가 생겨 앱이 불안정해지므로, 여기서는 등록하지 않는다. (OneSignal 등록이 곧 PWA 워커)
+_SW_REGISTER = ""
 
 # OneSignal 웹 푸시 — SDK 로드 + 구독 버튼 (알림 받기)
 # - 하위 폴더(GitHub Pages /strategy_engine/) 배포를 위해 serviceWorkerPath/Scope 를
@@ -722,7 +729,7 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#0b0e14">
-<meta http-equiv="refresh" content="300">
+{_AUTO_RELOAD_JS}
 <!-- PWA: 홈 화면 추가(앱처럼 설치) 지원 -->
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/png" href="swing_icon.png?v=3">
