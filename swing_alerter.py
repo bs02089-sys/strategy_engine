@@ -427,7 +427,7 @@ def _ladder_summary(st: dict) -> str:
 def build_briefing_text(statuses: list[dict], cfg: dict) -> str:
     """일일 종합 브리핑 (Discord 설명란용).
     앱 대시보드 카드의 막대(래더 -5%~-95%) 위쪽 내용을 그대로 개조식(불릿)으로 표현한다.
-    (앱 카드: 티커·매도 상태 → 현재가 → 전일 종가 → 하락률·매수 구간 → 전고가)
+    (앱 카드: 티커·매도 상태 → 현재가 → 전일 종가(하락률) → 매수 구간 → 전고가(하락률))
     """
     gap = float(cfg.get("IMMINENT_GAP_PCT", 5))
     lines = []
@@ -501,6 +501,7 @@ header .sub{color:var(--muted);font-size:13px;margin-top:4px}
 .dd.down{color:var(--blue)} .dd.up{color:var(--red)} .dd.flat{color:var(--muted)}
 .price{font-size:36px;font-weight:800;margin:10px 0 2px}
 .meta{color:var(--muted);font-size:13px}
+.meta .dd{font-size:13px}
 .info{background:#0f1420;border:1px solid var(--border);border-radius:12px;
   padding:10px 12px;margin-top:12px;font-size:14px;line-height:1.7}
 .info b{color:var(--text)}
@@ -807,13 +808,12 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
     {sell_chip}
   </div>
   <div class="price mono">${st["price"]:,.2f}</div>
-  <div class="meta">전일 종가 ${st["price"]:,.2f} ({st["as_of"]})</div>
-  <div class="row" style="margin-top:10px">
-    <span class="dd {dd_cls}">{dd_sign}{abs(st["dd_pct"]):.1f}%</span>
+  <div class="meta">전일 종가 ${st["price"]:,.2f} ({st["as_of"]}) <span class="dd {dd_cls}">{dd_sign}{abs(st["dd_pct"]):.1f}%</span></div>
+  <div class="row" style="margin-top:10px;justify-content:flex-end">
     <span class="chip {'green' if st['deepest_hit'] else 'gray'}">
       {'🟢 매수 구간 ' + str(len([l for l in st['ladder'] if l['hit']])) + '개 도달' if st['deepest_hit'] else '매수 구간 대기'}</span>
   </div>
-  <div class="info">📊 전고가: ${st["ath"]:,.2f} ({st["ath_date"]})</div>
+  <div class="info">📊 전고가: ${st["ath"]:,.2f} ({st["ath_date"]}) <span class="dd {dd_cls}">{dd_sign}{abs(st["dd_pct"]):.1f}%</span></div>
   <div class="plan">
     <div class="plan-row">
       <label for="buy-{st["ticker"]}">💰 매수 예정가</label>
