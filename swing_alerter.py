@@ -53,7 +53,6 @@ NY_TZ = ZoneInfo("America/New_York")
 # ── 기본 설정 (swing_config.json 에서 덮어쓸 수 있음) ──────────────
 DEFAULT_CFG = {
     "ENABLED": True,
-    "REFERENCE_HIGH": "ATH",        # 기준 전고가 (ATH = 역대 최고가)
     "MDD_START_PCT": 5,             # 매수 구간 시작 (-5%)
     "MDD_END_PCT": 95,              # 매수 구간 종료 (-95%)
     "MDD_STEP_PCT": 5,              # 구간 간격
@@ -373,7 +372,7 @@ def _ladder_summary(st: dict) -> str:
 def build_briefing_text(statuses: list[dict], cfg: dict) -> str:
     """일일 종합 브리핑 (Discord 설명란용).
     앱 대시보드 카드의 막대(래더 -5%~-95%) 위쪽 내용을 그대로 개조식(불릿)으로 표현한다.
-    (앱 카드: 티커·매도 상태 → 현재가 → 종가 기준일·ATH → 하락률·매수 구간 → 기준 전고가)
+    (앱 카드: 티커·매도 상태 → 현재가 → 전일 종가 → 하락률·매수 구간 → 전고가)
     """
     gap = float(cfg.get("IMMINENT_GAP_PCT", 5))
     lines = []
@@ -399,7 +398,7 @@ def build_briefing_text(statuses: list[dict], cfg: dict) -> str:
             f"- 현재가 ${st['price']:.2f} (종가 기준 {st['as_of']})",
             f"- ATH ${st['ath']:.2f} ({st['ath_date']}) → 하락 **{st['dd_pct']:+.1f}%**",
             f"- {buy_txt}",
-            f"- 기준 전고가: {cfg.get('REFERENCE_HIGH', 'ATH')} ({st['ath_date']})",
+            f"- 전고가: ${st['ath']:,.2f} ({st['ath_date']})",
             "",
         ])
     return "\n".join(lines).strip()
@@ -473,6 +472,9 @@ footer{color:#4b5563;font-size:12px;text-align:center;margin-top:8px;line-height
 .plan{margin-top:14px;background:#0f1420;border:1px solid var(--border);border-radius:12px;padding:12px}
 .plan-row{display:flex;align-items:center;gap:8px;margin-bottom:8px}
 .plan-row label{font-size:13px;color:var(--muted);width:96px;flex-shrink:0}
+.plan-buy-input{flex:1;min-width:0;background:#1c2533;border:1px solid var(--border);border-radius:8px;
+  color:var(--text);font-size:15px;font-weight:700;padding:7px 10px;font-family:ui-monospace,Menlo,Consolas,monospace}
+.plan-unit{font-size:13px;color:var(--muted)}
 .plan-pcts{display:flex;gap:6px;flex-wrap:wrap}
 .pct{font-size:13px;font-weight:700;padding:7px 13px;border-radius:999px;
   border:1px solid var(--border);background:#1c2533;color:var(--muted);cursor:pointer;-webkit-tap-highlight-color:transparent}
@@ -560,32 +562,39 @@ OneSignalDeferred.push(async function(OneSignal) {
 """
 
 
-# 매수가(실매수 BUY_PRICE, 없으면 현재가) × (1 + 수익률) → 매도가 자동 계산 (브라우저 localStorage 저장)
-# 매도 상태 칩은 서버(전역 SWING_TARGET_PCT) 기준이 아니라 사용자별 선택한 수익률로 재판정한다.
+# 매수가(사용자 입력, 없으면 현재가) × (1 + 수익률) → 매도가 자동 계산 (브라우저 localStorage 저장)
+# 매도 상태 칩/카운트는 사용자별 입력 기준으로 항상 재판정 — 서버 설정(BUY_PRICE) 없이도 동작한다.
 _PLAN_JS = """
 <script>
 (function() {
-  // 카드별 저장 키: swing_sell_{TICKER}(수익률)
+  // 카드별 저장 키: swing_buy_{TICKER}(매수가) / swing_sell_{TICKER}(수익률)
   document.querySelectorAll('.card[data-ath]').forEach(function(card) {
     var ticker = card.dataset.ticker;
     var close = parseFloat(card.dataset.close);
     var gapPct = parseFloat(card.dataset.gap) || 5;
-    // 매수가 기준 — 실제 매수(BUY_PRICE) 기록 시 그 값, 아니면 현재가(지금 매수 시)
-    var buyBase = parseFloat(card.dataset.buyPrice);
-    if (isNaN(buyBase)) buyBase = close;
+    var buyInput = card.querySelector('.plan-buy-input');
     var pctBtns = card.querySelectorAll('.pct');
     var buyEl = card.querySelector('.plan-buy');
     var sellEl = card.querySelector('.plan-sell');
     var chip = card.querySelector('[data-sell-chip]');
 
-    // 저장값 로드 (기본: 수익률 10%)
+    // 저장값 로드 (기본: 매수가 미입력 → 현재가 기준, 수익률 10%)
+    var buyVal = parseFloat(localStorage.getItem('swing_buy_' + ticker));
+    if (isNaN(buyVal)) buyVal = 0;   // 0 = 미입력
     var sellPct = parseFloat(localStorage.getItem('swing_sell_' + ticker));
     if (isNaN(sellPct)) sellPct = 10;
 
-    // 사용자별 매도 상태 — 내가 고른 수익률 기준으로 재판정 (data-armed 카드만)
+    // 유효 매수가 — 입력값(>0)이 없으면 현재가(지금 매수 시) 기준
+    function buyBase() {
+      var v = parseFloat(buyInput.value);
+      if (isNaN(v) || v <= 0) v = close;
+      return v;
+    }
+
+    // 사용자별 매도 상태 — 내 매수가 × (1 + 수익률) 기준으로 항상 재판정
     function applySellStatus() {
-      if (!chip || chip.dataset.armed !== '1' || isNaN(close)) return;
-      var target = buyBase * (1 + sellPct / 100);
+      if (!chip || isNaN(close)) return;
+      var target = buyBase() * (1 + sellPct / 100);
       var remain = (target - close) / target * 100;   // 목표까지 남은 % (양수)
       chip.classList.remove('red', 'amber', 'gray');
       if (close >= target - 1e-9) {
@@ -603,7 +612,7 @@ _PLAN_JS = """
     // 상단 '🚨 매도 알람 N' — 사용자별 판정 결과로 카운트 갱신
     function refreshAlarmCount() {
       var cnt = 0;
-      document.querySelectorAll('[data-sell-chip][data-armed="1"]').forEach(function(c) {
+      document.querySelectorAll('[data-sell-chip]').forEach(function(c) {
         if (c.classList.contains('red')) cnt++;
       });
       var el = document.getElementById('sell-alarm-cnt');
@@ -615,10 +624,19 @@ _PLAN_JS = """
     }
 
     function update() {
+      if (isNaN(close)) return;   // 가격 데이터 없으면 계산 생략
+      var base = buyBase();
       // 매도가 = 매수가 × (1 + 수익률/100)
-      var sell = buyBase * (1 + sellPct / 100);
-      buyEl.textContent = '$' + buyBase.toFixed(2);
+      var sell = base * (1 + sellPct / 100);
+      buyEl.textContent = '$' + base.toFixed(2);
       sellEl.textContent = '$' + sell.toFixed(2);
+      // 매수가는 직접 입력한 양수 값만 저장 (비우거나 0이면 현재가 기준으로 초기화)
+      var pv = parseFloat(buyInput.value);
+      if (!isNaN(pv) && pv > 0) {
+        localStorage.setItem('swing_buy_' + ticker, String(pv));
+      } else {
+        localStorage.removeItem('swing_buy_' + ticker);
+      }
       localStorage.setItem('swing_sell_' + ticker, String(sellPct));
       pctBtns.forEach(function(b) {
         b.classList.toggle('on', parseFloat(b.dataset.pct) === sellPct);
@@ -627,6 +645,8 @@ _PLAN_JS = """
       refreshAlarmCount();
     }
 
+    if (buyVal > 0) buyInput.value = buyVal;
+    buyInput.addEventListener('input', update);
     pctBtns.forEach(function(b) {
       b.addEventListener('click', function() {
         sellPct = parseFloat(b.dataset.pct);
@@ -686,16 +706,15 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
         dd_cls = "up" if st["dd_pct"] > 0 else ("down" if st["dd_pct"] < 0 else "flat")
         dd_sign = "🆕 +" if st["dd_pct"] > 0 else ("▼ " if st["dd_pct"] < 0 else "")
         sell_chip = (
-            '<span class="chip red" data-sell-chip data-armed="1">🚨 매도</span>' if st["sell_ready"]
-            else '<span class="chip gray" data-sell-chip data-armed="1">⏳ 대기</span>' if st["sell_target"] is not None
+            '<span class="chip red" data-sell-chip>🚨 매도</span>' if st["sell_ready"]
+            else '<span class="chip gray" data-sell-chip>⏳ 대기</span>' if st["sell_target"] is not None
             else '<span class="chip gray" data-sell-chip>매도 미설정</span>'
         )
         if not st["sell_ready"] and st["sell_target"] is not None and st["sell_gap_pct"] is not None \
                 and st["sell_gap_pct"] <= float(cfg.get("IMMINENT_GAP_PCT", 5)):
-            sell_chip = '<span class="chip amber" data-sell-chip data-armed="1">🚀 임박</span>'
+            sell_chip = '<span class="chip amber" data-sell-chip>🚀 임박</span>'
 
-        # 매수가 기준 — 실매수(BUY_PRICE) 기록 시 그 값, 없으면 대시보드 JS가 현재가 폴백
-        buy_attr = f' data-buy-price="{st["buy_price"]:.2f}"' if st["buy_price"] else ""
+
 
         # 다음 구간 접근 진행도: 현재 구간 상단(0%) → 다음 구간(100%)
         step = int(cfg.get("MDD_STEP_PCT", 5))
@@ -714,20 +733,25 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
         )
 
         cards.append(f"""
-<div class="card" data-ticker="{st["ticker"]}" data-ath="{st["ath"]:.2f}" data-close="{st["price"]:.2f}" data-gap="{float(cfg.get("IMMINENT_GAP_PCT", 5)):g}"{buy_attr}>
+<div class="card" data-ticker="{st["ticker"]}" data-ath="{st["ath"]:.2f}" data-close="{st["price"]:.2f}" data-gap="{float(cfg.get("IMMINENT_GAP_PCT", 5)):g}">
   <div class="row">
     <span class="tick">{st["ticker"]}</span>
     {sell_chip}
   </div>
   <div class="price mono">${st["price"]:,.2f}</div>
-  <div class="meta">종가 기준 {st["as_of"]} · ATH ${st["ath"]:,.2f} ({st["ath_date"]})</div>
+  <div class="meta">전일 종가 ${st["price"]:,.2f} ({st["as_of"]})</div>
   <div class="row" style="margin-top:10px">
     <span class="dd {dd_cls}">{dd_sign}{abs(st["dd_pct"]):.1f}%</span>
     <span class="chip {'green' if st['deepest_hit'] else 'gray'}">
       {'🟢 매수 구간 ' + str(len([l for l in st['ladder'] if l['hit']])) + '개 도달' if st['deepest_hit'] else '매수 구간 대기'}</span>
   </div>
-  <div class="info">📊 기준 전고가: {cfg.get('REFERENCE_HIGH', 'ATH')} ({st['ath_date']})</div>
+  <div class="info">📊 전고가: ${st["ath"]:,.2f} ({st["ath_date"]})</div>
   <div class="plan">
+    <div class="plan-row">
+      <label for="buy-{st["ticker"]}">💰 매수가</label>
+      <input id="buy-{st["ticker"]}" class="plan-buy-input" type="number" min="0" step="0.01" placeholder="{st["price"]:.2f}">
+      <span class="plan-unit">$</span>
+    </div>
     <div class="plan-row">
       <label>📈 수익률</label>
       <div class="plan-pcts">

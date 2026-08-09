@@ -138,6 +138,9 @@ footer{color:#4b5563;font-size:12px;text-align:center;margin-top:8px;line-height
 .plan{margin-top:14px;background:#0f1420;border:1px solid var(--border);border-radius:12px;padding:12px}
 .plan-row{display:flex;align-items:center;gap:8px;margin-bottom:8px}
 .plan-row label{font-size:13px;color:var(--muted);width:96px;flex-shrink:0}
+.plan-buy-input{flex:1;min-width:0;background:#1c2533;border:1px solid var(--border);border-radius:8px;
+  color:var(--text);font-size:15px;font-weight:700;padding:7px 10px;font-family:ui-monospace,Menlo,Consolas,monospace}
+.plan-unit{font-size:13px;color:var(--muted)}
 .plan-pcts{display:flex;gap:6px;flex-wrap:wrap}
 .pct{font-size:13px;font-weight:700;padding:7px 13px;border-radius:999px;
   border:1px solid var(--border);background:#1c2533;color:var(--muted);cursor:pointer;-webkit-tap-highlight-color:transparent}
@@ -151,7 +154,7 @@ footer{color:#4b5563;font-size:12px;text-align:center;margin-top:8px;line-height
 <body>
 <header>
   <h1>📈 스윙 투자 알리미</h1>
-  <div class="sub">업데이트 2026-08-09 12:14 · 종가 기준 2026-08-09 08:14 (미국)<span class="pages">· <a href="https://bs02089-sys.github.io/strategy_engine/" target="_blank" rel="noopener">🌐 라이브 열기</a></span></div>
+  <div class="sub">업데이트 2026-08-09 21:26 · 종가 기준 2026-08-09 08:26 (미국)<span class="pages">· <a href="https://bs02089-sys.github.io/strategy_engine/" target="_blank" rel="noopener">🌐 라이브 열기</a></span></div>
   <div class="chips">
     <button id="push-btn" class="push-btn" disabled>🔔 알림 받기</button>
     <span class="chip gray" id="sell-alarm-cnt">🚨 매도 알람 0</span>
@@ -165,14 +168,19 @@ footer{color:#4b5563;font-size:12px;text-align:center;margin-top:8px;line-height
     <span class="chip gray" data-sell-chip>매도 미설정</span>
   </div>
   <div class="price mono">$74.47</div>
-  <div class="meta">종가 기준 08-07 · ATH $87.22 (2026-06-02)</div>
+  <div class="meta">전일 종가 $74.47 (08-07)</div>
   <div class="row" style="margin-top:10px">
     <span class="dd down">▼ 14.6%</span>
     <span class="chip green">
       🟢 매수 구간 2개 도달</span>
   </div>
-  <div class="info">📊 기준 전고가: ATH (2026-06-02)</div>
+  <div class="info">📊 전고가: $87.22 (2026-06-02)</div>
   <div class="plan">
+    <div class="plan-row">
+      <label for="buy-TQQQ">💰 매수가</label>
+      <input id="buy-TQQQ" class="plan-buy-input" type="number" min="0" step="0.01" placeholder="74.47">
+      <span class="plan-unit">$</span>
+    </div>
     <div class="plan-row">
       <label>📈 수익률</label>
       <div class="plan-pcts">
@@ -195,14 +203,19 @@ footer{color:#4b5563;font-size:12px;text-align:center;margin-top:8px;line-height
     <span class="chip gray" data-sell-chip>매도 미설정</span>
   </div>
   <div class="price mono">$140.25</div>
-  <div class="meta">종가 기준 08-07 · ATH $300.77 (2026-06-22)</div>
+  <div class="meta">전일 종가 $140.25 (08-07)</div>
   <div class="row" style="margin-top:10px">
     <span class="dd down">▼ 53.4%</span>
     <span class="chip green">
       🟢 매수 구간 10개 도달</span>
   </div>
-  <div class="info">📊 기준 전고가: ATH (2026-06-22)</div>
+  <div class="info">📊 전고가: $300.77 (2026-06-22)</div>
   <div class="plan">
+    <div class="plan-row">
+      <label for="buy-SOXL">💰 매수가</label>
+      <input id="buy-SOXL" class="plan-buy-input" type="number" min="0" step="0.01" placeholder="140.25">
+      <span class="plan-unit">$</span>
+    </div>
     <div class="plan-row">
       <label>📈 수익률</label>
       <div class="plan-pcts">
@@ -225,27 +238,34 @@ footer{color:#4b5563;font-size:12px;text-align:center;margin-top:8px;line-height
 
 <script>
 (function() {
-  // 카드별 저장 키: swing_sell_{TICKER}(수익률)
+  // 카드별 저장 키: swing_buy_{TICKER}(매수가) / swing_sell_{TICKER}(수익률)
   document.querySelectorAll('.card[data-ath]').forEach(function(card) {
     var ticker = card.dataset.ticker;
     var close = parseFloat(card.dataset.close);
     var gapPct = parseFloat(card.dataset.gap) || 5;
-    // 매수가 기준 — 실제 매수(BUY_PRICE) 기록 시 그 값, 아니면 현재가(지금 매수 시)
-    var buyBase = parseFloat(card.dataset.buyPrice);
-    if (isNaN(buyBase)) buyBase = close;
+    var buyInput = card.querySelector('.plan-buy-input');
     var pctBtns = card.querySelectorAll('.pct');
     var buyEl = card.querySelector('.plan-buy');
     var sellEl = card.querySelector('.plan-sell');
     var chip = card.querySelector('[data-sell-chip]');
 
-    // 저장값 로드 (기본: 수익률 10%)
+    // 저장값 로드 (기본: 매수가 미입력 → 현재가 기준, 수익률 10%)
+    var buyVal = parseFloat(localStorage.getItem('swing_buy_' + ticker));
+    if (isNaN(buyVal)) buyVal = 0;   // 0 = 미입력
     var sellPct = parseFloat(localStorage.getItem('swing_sell_' + ticker));
     if (isNaN(sellPct)) sellPct = 10;
 
-    // 사용자별 매도 상태 — 내가 고른 수익률 기준으로 재판정 (data-armed 카드만)
+    // 유효 매수가 — 입력값(>0)이 없으면 현재가(지금 매수 시) 기준
+    function buyBase() {
+      var v = parseFloat(buyInput.value);
+      if (isNaN(v) || v <= 0) v = close;
+      return v;
+    }
+
+    // 사용자별 매도 상태 — 내 매수가 × (1 + 수익률) 기준으로 항상 재판정
     function applySellStatus() {
-      if (!chip || chip.dataset.armed !== '1' || isNaN(close)) return;
-      var target = buyBase * (1 + sellPct / 100);
+      if (!chip || isNaN(close)) return;
+      var target = buyBase() * (1 + sellPct / 100);
       var remain = (target - close) / target * 100;   // 목표까지 남은 % (양수)
       chip.classList.remove('red', 'amber', 'gray');
       if (close >= target - 1e-9) {
@@ -263,7 +283,7 @@ footer{color:#4b5563;font-size:12px;text-align:center;margin-top:8px;line-height
     // 상단 '🚨 매도 알람 N' — 사용자별 판정 결과로 카운트 갱신
     function refreshAlarmCount() {
       var cnt = 0;
-      document.querySelectorAll('[data-sell-chip][data-armed="1"]').forEach(function(c) {
+      document.querySelectorAll('[data-sell-chip]').forEach(function(c) {
         if (c.classList.contains('red')) cnt++;
       });
       var el = document.getElementById('sell-alarm-cnt');
@@ -275,10 +295,19 @@ footer{color:#4b5563;font-size:12px;text-align:center;margin-top:8px;line-height
     }
 
     function update() {
+      if (isNaN(close)) return;   // 가격 데이터 없으면 계산 생략
+      var base = buyBase();
       // 매도가 = 매수가 × (1 + 수익률/100)
-      var sell = buyBase * (1 + sellPct / 100);
-      buyEl.textContent = '$' + buyBase.toFixed(2);
+      var sell = base * (1 + sellPct / 100);
+      buyEl.textContent = '$' + base.toFixed(2);
       sellEl.textContent = '$' + sell.toFixed(2);
+      // 매수가는 직접 입력한 양수 값만 저장 (비우거나 0이면 현재가 기준으로 초기화)
+      var pv = parseFloat(buyInput.value);
+      if (!isNaN(pv) && pv > 0) {
+        localStorage.setItem('swing_buy_' + ticker, String(pv));
+      } else {
+        localStorage.removeItem('swing_buy_' + ticker);
+      }
       localStorage.setItem('swing_sell_' + ticker, String(sellPct));
       pctBtns.forEach(function(b) {
         b.classList.toggle('on', parseFloat(b.dataset.pct) === sellPct);
@@ -287,6 +316,8 @@ footer{color:#4b5563;font-size:12px;text-align:center;margin-top:8px;line-height
       refreshAlarmCount();
     }
 
+    if (buyVal > 0) buyInput.value = buyVal;
+    buyInput.addEventListener('input', update);
     pctBtns.forEach(function(b) {
       b.addEventListener('click', function() {
         sellPct = parseFloat(b.dataset.pct);

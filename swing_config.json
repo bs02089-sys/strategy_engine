@@ -1,6 +1,5 @@
 {
     "ENABLED": true,
-    "REFERENCE_HIGH": "ATH",
     "MDD_START_PCT": 5,
     "MDD_END_PCT": 95,
     "MDD_STEP_PCT": 5,
