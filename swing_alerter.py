@@ -938,8 +938,12 @@ def write_dashboard(statuses: list[dict], cfg: dict, path: str) -> None:
         updated_at=datetime.now().strftime("%Y-%m-%d %H:%M"),
         as_of_ny=now_ny.strftime("%Y-%m-%d %H:%M"),
     )
-    with open(path, "w", encoding="utf-8") as f:
+    # 원자적 쓰기(임시 파일 → rename) — 스크립트가 쓰기 중 중단돼도 잘린 HTML이
+    # 남지 않아, 봇이 배포용으로 복사하는 /tmp 사본이 깨질 일이 없다.
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
         f.write(html)
+    os.replace(tmp, path)
     print(f"✅ 대시보드 저장: {path}")
 
 

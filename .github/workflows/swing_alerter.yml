@@ -64,9 +64,14 @@ jobs:
           git config --global user.name "Swing Bot"
           git config --global user.email "bot@example.com"
 
-          # 상태/대시보드 파일만 커밋 (로그/히스토리는 저장하지 않음)
+          # 대시보드는 main에 커밋하지 않는다 — 생성 파일(헤더 시각 등)이 봇/사용자
+          # 양쪽에서 재생성되어 git pull 충돌을 반복하는 문제 방지.
+          # 신선한 사본은 /tmp로 보존해 Deploy 단계가 gh-pages에만 반영한다.
+          [ -f "swing_dashboard.html" ] && cp swing_dashboard.html /tmp/swing_dash.html
+          [ -f "swing_dashboard.html" ] && git checkout -- swing_dashboard.html
+
+          # 상태 파일만 커밋 (로그/히스토리는 저장하지 않음)
           [ -f "swing_config.json" ] && git add swing_config.json
-          [ -f "swing_dashboard.html" ] && git add swing_dashboard.html
 
           git commit -m "update: swing-state $(date +'%Y-%m-%d')" || echo "No changes to commit"
           # -X theirs: 충돌 시 원격(사람) 버전을 유지 — 봇의 스테일 상태는 버리고 다음 실행에서 재생성.
@@ -84,8 +89,8 @@ jobs:
           git config --global user.name "Swing Bot"
           git config --global user.email "bot@example.com"
 
-          # 브랜치 전환 시 워킹트리에서 사라지므로 임시 저장 (대시보드 + PWA 파일)
-          cp swing_dashboard.html /tmp/swing_dash.html
+          # 브랜치 전환 시 워킹트리에서 사라지므로 임시 저장 (PWA 파일)
+          # 대시보드(/tmp/swing_dash.html)는 Sync 단계가 보존한 신선한 사본 사용
           cp swing_manifest.webmanifest /tmp/swing_manifest.webmanifest
           cp swing_icon.png /tmp/swing_icon.png
           cp sw.js /tmp/sw.js
