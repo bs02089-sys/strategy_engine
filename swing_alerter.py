@@ -552,7 +552,7 @@ header .sub{color:var(--muted);font-size:13px;margin-top:4px}
 .lvl{display:grid;grid-template-columns:52px 1fr 1.4fr 60px;gap:8px;
   align-items:center;padding:7px 0;border-bottom:1px solid #1a2231;font-size:14px}
 .lvl:last-child{border-bottom:none}
-.lvl .pct{font-weight:700;color:var(--muted)}
+.lvl .pct{font-weight:700;color:var(--muted);font-size:12px}   /* 한 단계 축소 — 긴 % 라벨이 달러 표시를 가리지 않도록 */
 .lvl.hit .pct,.lvl.current .pct{color:var(--green)}
 .lvl .val{color:var(--muted);font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px}
 .lvl.hit{background:linear-gradient(90deg,rgba(63,185,80,.08),transparent 70%);border-radius:6px}
@@ -561,7 +561,8 @@ header .sub{color:var(--muted);font-size:13px;margin-top:4px}
 .bar i{display:block;height:100%;border-radius:3px;background:var(--green)}
 .lvl.current .bar i{background:var(--amber)}
 .lvl .st{text-align:right;font-size:12px;font-weight:700}
-.lvl.hit .st,.lvl.current .st{color:var(--amber)}
+.lvl.hit .st{color:var(--green)}   /* 경과 — 막대색(초록)과 동일 */
+.lvl.current .st{color:var(--amber)}
 .lvl.wait .st{color:#4b5563}
 .lvl.wait .bar i{background:#2a3344}
 footer{color:#4b5563;font-size:12px;text-align:center;margin-top:8px;line-height:1.8}
@@ -698,12 +699,15 @@ _PLAN_JS = """
       if (close >= target - 1e-9) {
         chip.classList.add('red');
         chip.textContent = '🚨 매도';
+        chip.style.display = '';                       // 알람 상태만 표시
       } else if (remain <= gapPct) {
         chip.classList.add('amber');
         chip.textContent = '🚀 임박';
+        chip.style.display = '';                       // 임박 상태만 표시
       } else {
         chip.classList.add('gray');
         chip.textContent = '⏳ 대기';
+        chip.style.display = 'none';                   // 기본(대기) 상태 — 칩 숨김
       }
     }
 
@@ -775,7 +779,7 @@ _PLAN_JS = """
 def _lvl_row(lvl: dict, next_fill: float | None = None) -> str:
     """래더 1줄 — hit: 초록 100% / next: 호박색 진행바(다음 구간 접근도) / wait: 회색."""
     if lvl["hit"]:
-        cls, st_txt, fill = "hit", "매수", 100.0
+        cls, st_txt, fill = "hit", "경과", 100.0
     elif next_fill is not None:
         cls, st_txt, fill = "current", "대기", next_fill
     else:
@@ -826,14 +830,17 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
             day_cls = "up" if dc > 0 else ("down" if dc < 0 else "flat")
             day_sign = "▲ " if dc > 0 else ("▼ " if dc < 0 else "")
             day_span = f' 대비 <span class="dd {day_cls}">{day_sign}{abs(dc):.1f}%</span>'
+        imminent = (not st["sell_ready"] and st["sell_target"] is not None
+                    and st["sell_gap_pct"] is not None
+                    and st["sell_gap_pct"] <= float(cfg.get("IMMINENT_GAP_PCT", 5)))
+        # 기본(대기) 상태는 칩을 숨긴다 — 매도 예정가는 하단 계획 섹션에 항상 표시되므로
+        # 화면의 고정 노이즈(⏳ 대기)를 제거하고 🚨 매도 / 🚀 임박 상태만 보여준다.
         sell_chip = (
             '<span class="chip red" data-sell-chip>🚨 매도</span>' if st["sell_ready"]
-            else '<span class="chip gray" data-sell-chip>⏳ 대기</span>' if st["sell_target"] is not None
-            else '<span class="chip gray" data-sell-chip>매도 미설정</span>'
+            else '<span class="chip amber" data-sell-chip>🚀 임박</span>' if imminent
+            else '<span class="chip gray" data-sell-chip>매도 미설정</span>' if st["sell_target"] is None
+            else '<span class="chip gray" data-sell-chip style="display:none">⏳ 대기</span>'
         )
-        if not st["sell_ready"] and st["sell_target"] is not None and st["sell_gap_pct"] is not None \
-                and st["sell_gap_pct"] <= float(cfg.get("IMMINENT_GAP_PCT", 5)):
-            sell_chip = '<span class="chip amber" data-sell-chip>🚀 임박</span>'
 
 
 
@@ -889,8 +896,8 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
   <div class="ladder">{rows}</div>
 </div>""")
 
-    legend = ('<div class="legend"><span>🟢 매수 도달</span>'
-              '<span>🟡 다음 구간 접근</span><span>⚪ 대기</span></div>')
+    legend = ('<div class="legend"><span>🟢 경과</span>'
+              '<span>🟡 대기</span></div>')
 
     return f"""<!doctype html>
 <html lang="ko">
