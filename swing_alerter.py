@@ -49,6 +49,7 @@ from DCA_MA_strategy import _send_discord, get_prev_close, resolve_discord_confi
 
 CONFIG_PATH = "swing_config.json"
 STATE_PATH = "swing_state.json"        # 봇 전용 상태 파일 (ZONE_ALERTS/매도 플래그) — 설정과 분리
+PERSONAL_CONFIG_PATH = "swing_personal.json"   # 🔒 개인 매수 포지션 (BUY_PRICE/SHARES) — 공용 설정과 분리
 DASHBOARD_PATH = "swing_dashboard.html"
 PORTFOLIO_CONFIG_PATH = "portfolio_config.json"
 NY_TZ = ZoneInfo("America/New_York")
@@ -71,7 +72,7 @@ DEFAULT_CFG = {
     "MDD_START_PCT": 5,             # 매수 구간 시작 (-5%)
     "MDD_END_PCT": 95,              # 매수 구간 종료 (-95%)
     "MDD_STEP_PCT": 5,              # 구간 간격
-    "SWING_TARGET_PCT": 10,         # 스윙 목표 수익률(%) — 매도 예정가 = 매수 예정가 × (1 + 목표/100)
+    "SWING_TARGET_PCT": 10,         # 스윙 목표 수익률(%) — 매도 예정가 = 매수 예정가 × (1 + 목표/100). 앱 대시보드의 기본 선택값도 이 값을 읽는다 (JS 하드코딩 없음, 2026-08-10)
     "IMMINENT_GAP_PCT": 5,          # 임박 알림 기준 (구간/매도 목표까지 %p)
     "PAGES_URL": "",               # GitHub Pages 주소 — 설정 시 대시보드에 라이브 링크 표시
     "ONESIGNAL_APP_ID": "",        # OneSignal 웹 푸시 앱 ID (대시보드 SDK 초기화용, 공개값)
@@ -99,6 +100,22 @@ def _load_state() -> dict:
             return json.load(f)
     except Exception:
         return {"POSITIONS": {}}
+
+
+def _load_personal_positions() -> dict:
+    """🔒 개인 매수 포지션(swing_personal.json) 로드 — 없거나 깨졌으면 빈 dict.
+
+    BUY_PRICE/SHARES 는 사용자 개인 정보라 공용 설정(swing_config.json)에 두지 않고
+    별도 파일에서 관리한다. 이 값이 Discord 브리핑/전역 푸시 등 공용 알림에
+    노출되지 않도록 _PERSONAL 마커로 구분한다. 봇은 이 파일을 절대 쓰지 않는다.
+    """
+    if not os.path.isfile(PERSONAL_CONFIG_PATH):
+        return {}
+    try:
+        with open(PERSONAL_CONFIG_PATH, "r", encoding="utf-8") as f:
+            return (json.load(f) or {}).get("POSITIONS", {}) or {}
+    except Exception:
+        return {}
 
 
 def load_config() -> dict:
@@ -130,6 +147,31 @@ def load_config() -> dict:
         for key in _STATE_KEYS:
             if key in st:
                 pos[key] = st[key]
+    # 🔒 개인 매수 포지션 오버레이 — BUY_PRICE/SHARES 는 개인 파일(swing_personal.json)에서만
+    # 가져오고, _PERSONAL 마커를 붙여 공용 알림(Discord 브리핑/전역 푸시/대시보드)에서 제외한다.
+    personal = _load_personal_positions()
+    # 방어 계층: 공용 설정(swing_config.json) POSITIONS 에 BUY_PRICE/SHARES 가 직접 들어오면
+    # (옛 습관·문서 미숙지) _PERSONAL 마커 없이 남아 Discord 브리핑에 노출되는 누출 구멍이 되므로
+    # 개인 취급 + 이동 경고를 출력한다. 전역 푸시가 제거된 지금 공용 BUY_PRICE 는 쓰임새가 없다.
+    for ticker, pos in merged["POSITIONS"].items():
+        if pos.get("BUY_PRICE") is not None or pos.get("SHARES") is not None:
+            print(f"   ⚠️ {ticker}: BUY_PRICE/SHARES 가 공용 설정({CONFIG_PATH})에 있습니다 — "
+                  f"{PERSONAL_CONFIG_PATH} 로 옮기세요. (개인 취급으로 공용 알림 제외)")
+            pos["_PERSONAL"] = True
+    for ticker, pos in merged["POSITIONS"].items():
+        pp = personal.get(ticker)
+        if not pp:
+            continue
+        if pp.get("BUY_PRICE") is not None or pp.get("SHARES") is not None:
+            if pp.get("BUY_PRICE") is not None:
+                pos["BUY_PRICE"] = pp["BUY_PRICE"]
+            if pp.get("SHARES") is not None:
+                pos["SHARES"] = pp["SHARES"]
+            pos["_PERSONAL"] = True
+    # 개인 파일에만 있는 티커 (공용 POSITIONS 와 불일치) — 오타 조기 발견용 경고
+    for ticker in personal:
+        if ticker not in merged["POSITIONS"]:
+            print(f"   ⚠️ {PERSONAL_CONFIG_PATH} 의 '{ticker}' 가 공용 설정 POSITIONS 에 없어 무시됩니다 — 티커 오타 확인.")
     return merged
 
 
@@ -417,6 +459,7 @@ def compute_ticker(ticker: str, pos: dict, cfg: dict) -> dict:
         "shares": float(shares),
         "exp_profit": exp_profit,
         "exp_roi": exp_roi,
+        "personal": bool(pos.get("_PERSONAL")),
         "zone_alerts": pos.setdefault("ZONE_ALERTS", {"hit": [], "imminent": []}),
     })
     return st
@@ -497,8 +540,9 @@ def detect_alerts(st: dict, pos: dict, cfg: dict) -> list[str]:
                 f"현재 하락 {st['dd_pct']:.1f}% (남은 {remain:.1f}%p) | 목표가 ${nxt['price']:.2f}"
             )
 
-    # 3) 매도 목표 임박
-    if st["sell_target"] and st["sell_gap_pct"] is not None and not pos.get("SELL_IMMINENT_SENT"):
+    # 3) 매도 목표 임박 — 개인 포지션(_PERSONAL)은 공용 알림에서 제외
+    #    (내 매도 목표가 Discord/전역 푸시로 지인에게 노출되는 것 방지 — 개인은 앱 태그 푸시로 수신)
+    if not pos.get("_PERSONAL") and st["sell_target"] and st["sell_gap_pct"] is not None and not pos.get("SELL_IMMINENT_SENT"):
         if 0 < st["sell_gap_pct"] <= gap_p:
             pos["SELL_IMMINENT_SENT"] = True
             msgs.append(
@@ -507,8 +551,8 @@ def detect_alerts(st: dict, pos: dict, cfg: dict) -> list[str]:
                 f"(남은 {st['sell_gap_pct']:.1f}%)"
             )
 
-    # 4) 매도 알람
-    if st["sell_ready"] and not pos.get("SELL_ALARM_SENT"):
+    # 4) 매도 알람 — 개인 포지션(_PERSONAL)은 공용 알림에서 제외 (위와 동일한 이유)
+    if not pos.get("_PERSONAL") and st["sell_ready"] and not pos.get("SELL_ALARM_SENT"):
         pos["SELL_ALARM_SENT"] = True
         msgs.append(
             f"🚨 **{tick} 매도 알람 — 목표 도달!**\n"
@@ -562,8 +606,11 @@ def build_briefing_text(statuses: list[dict], cfg: dict) -> str:
         if st.get("error"):
             lines.append(f"**{st['ticker']}** ❌ {st['error']}")
             continue
-        # 매도 상태 (앱 카드 sell_chip과 동일한 판정)
-        if st["sell_ready"]:
+        # 매도 상태 — 개인 포지션(BUY_PRICE/SHARES)은 공용 브리핑에 노출하지 않는다
+        # (지인이 Discord 채널에서 내 매도 목표/수량을 볼 수 없도록 매도 미설정으로 표시)
+        if st.get("personal"):
+            sell_txt = "매도 미설정"
+        elif st["sell_ready"]:
             sell_txt = "🎉 매도 도달"
         elif st["sell_target"] is not None:
             if st["sell_gap_pct"] is not None and st["sell_gap_pct"] <= gap:
@@ -763,11 +810,11 @@ _PLAN_JS = """
     var sellEl = card.querySelector('.plan-sell');
     var chip = card.querySelector('[data-sell-chip]');
 
-    // 저장값 로드 (기본: 매수 예정가 미입력 → 현재가 기준, 예상 수익률 10%)
+    // 저장값 로드 (기본: 매수 예정가 미입력 → 현재가 기준, 예상 수익률 → 서버 SWING_TARGET_PCT 기본값)
     var buyVal = parseFloat(localStorage.getItem('swing_buy_' + ticker));
     if (isNaN(buyVal)) buyVal = 0;   // 0 = 미입력
     var sellPct = parseFloat(localStorage.getItem('swing_sell_' + ticker));
-    if (isNaN(sellPct)) sellPct = 10;
+    if (isNaN(sellPct)) sellPct = parseFloat(card.dataset.sellDefault) || 10;
 
     // 유효 매수 예정가 — 입력값(>0)이 없으면 현재가(지금 매수 시) 기준
     function buyBase() {
@@ -911,7 +958,10 @@ def _lvl_row(lvl: dict, next_fill: float | None = None) -> str:
 def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny: str) -> str:
     """스마트폰용 자체 완결 HTML 대시보드 생성 (외부 리소스 없음)."""
     cards = []
-    sell_cnt = sum(1 for s in statuses if s.get("sell_ready") and not s.get("error"))
+    # 개인 포지션은 공용 대시보드의 서버 렌더 매도 칩/카운트에서 제외 — 앱의 매도 상태는
+    # 사용자별 localStorage 기준으로 JS(_PLAN_JS)가 항상 재판정하므로 서버 값은 필요 없다.
+    sell_cnt = sum(1 for s in statuses
+                   if s.get("sell_ready") and not s.get("error") and not s.get("personal"))
     buy_cnt = sum(1 for s in statuses if s.get("deepest_hit") and not s.get("error"))
     pages_url = (cfg.get("PAGES_URL") or "").strip()
     live_link = (
@@ -951,7 +1001,8 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
         # 기본(대기) 상태는 칩을 숨긴다 — 매도 예정가는 하단 계획 섹션에 항상 표시되므로
         # 화면의 고정 노이즈(⏳ 대기)를 제거하고 🚨 매도 / 🚀 임박 상태만 보여준다.
         sell_chip = (
-            '<span class="chip red" data-sell-chip>🚨 매도</span>' if st["sell_ready"]
+            '<span class="chip gray" data-sell-chip>매도 미설정</span>' if st.get("personal")
+            else '<span class="chip red" data-sell-chip>🚨 매도</span>' if st["sell_ready"]
             else '<span class="chip amber" data-sell-chip>🚀 임박</span>' if imminent
             else '<span class="chip gray" data-sell-chip>매도 미설정</span>' if st["sell_target"] is None
             else '<span class="chip gray" data-sell-chip style="display:none">⏳ 대기</span>'
@@ -976,7 +1027,7 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
         )
 
         cards.append(f"""
-<div class="card" data-ticker="{st["ticker"]}" data-ath="{st["ath"]:.2f}" data-close="{st["price"]:.2f}" data-gap="{float(cfg.get("IMMINENT_GAP_PCT", 5)):g}">
+<div class="card" data-ticker="{st["ticker"]}" data-ath="{st["ath"]:.2f}" data-close="{st["price"]:.2f}" data-gap="{float(cfg.get("IMMINENT_GAP_PCT", 5)):g}" data-sell-default="{float(cfg.get("SWING_TARGET_PCT", 10)):g}">
   <div class="row">
     <span class="tick">{st["ticker"]}</span>
     {sell_chip}
@@ -1202,7 +1253,8 @@ def print_console(statuses: list[dict], cfg: dict) -> None:
         print(f"[{st['ticker']}] 현재 ${st['price']:,.2f} ({st['as_of']})")
         print(f"   ATH ${st['ath']:,.2f} ({st['ath_date']}) → 하락 {st['dd_pct']:+.1f}%")
         if st["sell_target"] is not None:
-            print(f"   🎯 매도 목표 ${st['sell_target']:,.2f} (매수가 ${st['buy_price']:,.2f} × {cfg.get('SWING_TARGET_PCT', 10):+.0f}%) | {_sell_chip(st, gap)}")
+            tag = " 🔒 개인" if st.get("personal") else ""
+            print(f"   🎯 매도 목표 ${st['sell_target']:,.2f} (매수가 ${st['buy_price']:,.2f} × {cfg.get('SWING_TARGET_PCT', 10):+.0f}%){tag} | {_sell_chip(st, gap)}")
         else:
             print("   🎯 매도 목표 미설정 (BUY_PRICE 입력 필요 — 실제 매수 후 설정)")
         print(f"   📊 {_ladder_summary(st)}")
@@ -1292,20 +1344,11 @@ def main() -> None:
                 print("✅ Discord 알림 발송 완료")
             else:
                 print("⚠️ DISCORD_WEBHOOK 미설정 — 콘솔 출력만 표시 (로컬 테스트용)")
-            # ── OneSignal 웹 푸시 (지인 스마트폰 알림) ──
-            app_id, api_key = _resolve_onesignal(cfg)
-            if app_id and api_key:
-                # 마크다운(** ) 제거 + 첫 줄 요약 (푸시는 120자 내외 권장)
-                plain = " | ".join(a.replace("**", "").replace("\n", " · ") for a in alerts)
-                code, resp = send_onesignal_push(
-                    app_id, api_key,
-                    title="📈 스윙 알리미 신호",
-                    body=plain[:200],
-                    url=cfg.get("PAGES_URL") or None,
-                )
-                print(f"OneSignal 푸시: HTTP {code} — {resp[:120]}")
-            else:
-                print("ℹ️ ONESIGNAL 미설정 — 푸시 발송 생략")
+            # ── OneSignal 전역 푸시: 제거 (2026-08-10) ──
+            # 기존에는 신호 요약을 구독자 전체(지인 포함)에게 발송했으나, 내 매수 정보 기반
+            # 신호가 지인에게 노출되는 문제가 있어 차단했다. 개인 알림은 main() 에서 먼저 호출되는
+            # send_user_sell_pushes() 가 각자 등록한 매도 예정가 태그(swing_sell_{TICKER})로만
+            # 발송하므로, 지인은 자기 기준 신호만 받는다. 공용 Discord 알림은 그대로 유지된다.
         else:
             print("✅ 신규 스윙 알림 없음 (매수 구간/임박/매도 변화 없음)")
         return

@@ -12,27 +12,6 @@
                     15
                 ]
             }
-        },
-        "SOXL": {
-            "SELL_ALARM_SENT": false,
-            "SELL_IMMINENT_SENT": false,
-            "ZONE_ALERTS": {
-                "hit": [
-                    5,
-                    10,
-                    15,
-                    20,
-                    25,
-                    30,
-                    35,
-                    40,
-                    45,
-                    50
-                ],
-                "imminent": [
-                    55
-                ]
-            }
         }
     }
 }

@@ -1,0 +1,9 @@
+{
+    "_NOTE": "🔒 개인 매수 포지션 — 공용 설정(swing_config.json)과 분리된 개인 파일. BUY_PRICE(실제 매수가)/SHARES(보유수량)는 여기에만 기록하며, 이 값은 Discord 브리핑·전역 푸시·공용 대시보드에 노출되지 않는다. 실제 매수 후 입력 (예: BUY_PRICE 60.00, SHARES 100). (JSON 주석 불가로 _NOTE 메타 키로 기록 — 엔진은 무시)",
+    "POSITIONS": {
+        "TQQQ": {
+            "BUY_PRICE": null,
+            "SHARES": null
+        }
+    }
+}

@@ -155,7 +155,8 @@
 | **DCA_MA_strategy_flowchart.py** | 시스템 전체 플로우차트 문서 |
 | **setup_cronjob_org.py** | cron-job.org 실시간 알림 설정 자동화 (생성/--list/--test-dispatch/--update-pat/--update-schedule) |
 | **swing_alerter.py** | 🆕 **스윙 투자 알리미** — MDD 구간 매수/매도 알림 + 모바일 대시보드 (유튜브 TQQQ 스윙 전략 재구현) |
-| **swing_config.json** | 스윙 알리미 설정 (사용자 소유 — MDD 구간/목표/포지션) |
+| **swing_config.json** | 스윙 알리미 공용 설정 (사용자 소유 — MDD 구간/목표/포지션/푸시) |
+| **swing_personal.json** | 🔒 스윙 알리미 **개인 포지션** (BUY_PRICE/SHARES — 공용 알림에 노출 안 됨, 사용자 소유) |
 | **swing_state.json** | 스윙 알리미 봇 상태 (ZONE_ALERTS/매도 플래그 — 봇 전용, 자동 관리) |
 | **swing_dashboard.html** | 스윙 알리미 모바일 대시보드 (자동 생성) |
 | **MarketStageSystem.py** | 독립적인 시장 단계 시스템 — 바닥 단계 감지 |
@@ -486,28 +487,45 @@ python3 DCA_MA_strategy.py --signal --discord --all  # TQQQ+SOXL 단일 메시�
 
 - **매수**: 역대 최고가(ATH) 대비 MDD 5% 단위 구간(-5% ~ -95%)에 현재가가 도달하면
   해당 구간이 '매수' 상태가 됩니다.
-- **매도**: 실제 매수가(`BUY_PRICE`) 대비 스윙 목표 수익률(기본 +10%) 도달 시 매도
-  알람 (예: 매수가 $100 → 목표 $110).
+- **매도**: 실제 매수가(`BUY_PRICE`) 대비 스윙 목표 수익률(`SWING_TARGET_PCT`, 현재 +20%) 도달 시
+  매도 알람 (예: 매수가 $100 → 목표 $120). 앱 대시보드의 기본 선택 수익률도 이 설정값을 읽습니다.
 - **계산기**: `BUY_PRICE` × `SHARES` → 목표 매도 시 예상 수익금/수익률 자동 계산.
 
-### 설정 (swing_config.json — 사용자 설정 / swing_state.json — 봇 상태)
+### 설정 (swing_config.json — 공용 / swing_personal.json — 개인 / swing_state.json — 봇 상태)
 
 ```json
 {
     "ENABLED": true,
     "REFERENCE_HIGH": "ATH",
     "MDD_START_PCT": 5, "MDD_END_PCT": 95, "MDD_STEP_PCT": 5,
-    "SWING_TARGET_PCT": 10,
+    "SWING_TARGET_PCT": 20,   # 앱 대시보드 기본 선택 수익률도 이 값을 읽음 (JS 하드코딩 없음)
     "IMMINENT_GAP_PCT": 5,
     "POSITIONS": {
         "TQQQ": {
-            "ENABLED": true, "LABEL": "TQQQ (예시)",
+            "ENABLED": true, "LABEL": "TQQQ (예시)"
+        }
+    }
+}
+```
+
+**🔒 개인 포지션은 `swing_personal.json`에 분리해서 기록합니다** (2026-08-10):
+
+```json
+{
+    "POSITIONS": {
+        "TQQQ": {
             "BUY_PRICE": 100.0, "SHARES": 100
         }
     }
 }
 ```
 
+- 실제 매수가(BUY_PRICE)·보유수량(SHARES)은 지인과 공유되는 Discord 브리핑/대시보드에
+  노출되지 않도록 **공용 설정(`swing_config.json`)에서 분리**했습니다. `_PERSONAL` 마커가 붙은
+  포지션은 공용 알림에서 "매도 미설정"으로 표시되고, 콘솔에서만 🔒 개인 라벨로 확인할 수 있습니다.
+- **전역 OneSignal 푸시는 제거됨 (2026-08-10)**: `--monitor`가 신호 요약을 구독자 전체에게
+  보내던 동작은 차단되었습니다. 개인 알림은 앱이 등록한 매도 예정가 태그(`swing_sell_{TICKER}`)
+  기준 사용자별 푸시로만 발송됩니다.
 - `POSITIONS` 에 티커를 추가/수정하면 자유롭게 여러 종목을 모니터링합니다.
 - 알림 플래그(`ZONE_ALERTS`, `SELL_ALARM_SENT`)는 엔진이 자동 관리하며 **`swing_state.json`** 에
   보관됩니다. 설정(사용자)과 상태(봇)가 별도 파일로 분리되어 있어 봇이 상태 파일만 커밋하므로
@@ -526,7 +544,8 @@ python3 DCA_MA_strategy.py --signal --discord --all  # TQQQ+SOXL 단일 메시�
 
 대시보드의 **매도 상태 칩**(🚨 매도 / 🚀 임박 / ⏳ 대기)과 상단 **"🚨 매도 알람 N"** 카운트는
 **각 사용자가 입력한 매수 예정가와 선택한 예상 수익률**(5/10/15/20%, 브라우저 localStorage) 기준으로
-자동 판정됩니다. 서버 설정 없이도 사용자별로 동작합니다.
+자동 판정됩니다. 서버 설정 없이도 사용자별로 동작하며, **기본 선택 수익률은 `SWING_TARGET_PCT`
+설정값**(현재 20%)을 읽습니다 (이전엔 JS 하드코딩 10% — 2026-08-10 설정 기반으로 변경).
 
 - **매수 예정가 입력**: 앱에서 사용자가 직접 입력합니다. 비워두면 **현재가 (지금 매수 시 기준)** 로
   동작합니다.
@@ -540,18 +559,18 @@ python3 DCA_MA_strategy.py --signal --discord --all  # TQQQ+SOXL 단일 메시�
   현재가인 사용자에게만** 푸시를 발송합니다 (메시지에 내 매도 예정가 표시, 1일 1회 중복 방지).
 - **푸시 수신 조건**: 앱에서 🔔 알림을 구독하고, 앱을 한 번 이상 열어 매도 예정가 태그가
   등록돼야 합니다 (태그 없이 구독만 한 사용자는 대상에서 제외).
-- **전역 푸시 (선택)**: `BUY_PRICE`를 기록하면 그 기준(`BUY_PRICE × (1 + SWING_TARGET_PCT/100)`)
-  의 공통 신호 푸시가 구독자 전체에 추가 발송됩니다.
+- **전역 푸시: 제거됨 (2026-08-10)** — 기존에 `BUY_PRICE` 기준 공통 신호를 구독자 전체에게
+  발송하던 동작은 지인 노출 문제로 차단했습니다. 푸시는 사용자별 태그 기준으로만 발송됩니다.
 - **저장**: 매수 예정가(`swing_buy_{TICKER}`)·예상 수익률(`swing_sell_{TICKER}`)은 브라우저
   localStorage에 기기별로 독립 저장되고, 매도 예정가가 OneSignal 태그로 파생 등록됩니다.
 
 #### 예시 (TQQQ 현재가 $74.47)
 
-| 내 매수 예정가 | 예상 수익률 10% 매도 예정가 | 현재가 기준 상태 |
+| 내 매수 예정가 | 예상 수익률 20% 매도 예정가 | 현재가 기준 상태 |
 |---|---|---|
-| (미입력 = 현재가 $74.47) | $81.92 | ⏳ 대기 |
-| $60 | $66.00 | 🚨 매도 (이미 도달) |
-| $70 | $77.00 | 🚀 임박 (남은 3.3%p) |
+| (미입력 = 현재가 $74.47) | $89.36 | ⏳ 대기 |
+| $60 | $72.00 | ⏳ 대기 |
+| $55 | $66.00 | 🚨 매도 (이미 도달) |
 
 ### 실행 방법
 
