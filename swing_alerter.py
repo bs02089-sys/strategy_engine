@@ -55,12 +55,14 @@ NY_TZ = ZoneInfo("America/New_York")
 
 # swing_state.json 에 보관하는 봇 전용 상태 키 (POSITIONS 내부) —
 # swing_config.json(사용자 설정)과 분리해 봇/사용자 커밋 충돌로 상태가 유실되지 않게 한다.
-_STATE_KEYS = ("SELL_ALARM_SENT", "SELL_IMMINENT_SENT", "SELL_PUSH_LAST_AT", "ZONE_ALERTS")
+_STATE_KEYS = ("SELL_ALARM_SENT", "SELL_IMMINENT_SENT", "SELL_PUSH_LAST_AT", "ZONE_ALERTS", "ATH_CYCLE_BASE")
 _STATE_DEFAULTS = {
     "SELL_ALARM_SENT": False,
     "SELL_IMMINENT_SENT": False,
     "SELL_PUSH_LAST_AT": None,
     "ZONE_ALERTS": {"hit": [], "imminent": []},
+    # ATH_CYCLE_BASE: None — '부재 = 첫 실행' 계약 (save_config 가 None 을 걸러내므로 파일엔 안 쓰임)
+    "ATH_CYCLE_BASE": None,
 }
 
 # ── 기본 설정 (swing_config.json 에서 덮어쓸 수 있음) ──────────────
@@ -424,6 +426,39 @@ def compute_ticker(ticker: str, pos: dict, cfg: dict) -> dict:
 # 알림 감지 (--monitor) — 상태를 변경하며 1회성 알림 메시지 생성
 # ═══════════════════════════════════════════════════════════
 
+def _handle_ath_cycle_reset(st: dict, pos: dict, zone_alerts: dict, msgs: list[str]) -> None:
+    """신규 전고가 감지 → 매수 구간 알림 상태 자동 리셋 (DCA 엔진 사이클 리셋과 동일 패턴).
+
+    ATH_CYCLE_BASE(봇 상태) 대비 +1% 이상 신규 전고가가 확인되면 기존에 기록된
+    hit/imminent 를 비워 새 하락 사이클을 시작한다 — 이전 사이클의 기록이 남아
+    새 사이클의 구간 도달/임박 알림이 삼켜지는 문제를 방지.
+
+    동작 주의: 리셋은 detect_alerts 의 구간 감지 루프보다 앞서 실행되므로, 같은 실행에서
+    현재 도달 중인 구간이 다시 기록되고 '구간 도달' 알림으로 재발송된다 (새 사이클 재무장).
+    이를 '재기록만 하고 재발송 미루기'로 바꾸면 다음 폴링에서 중복 방지(hit 에 이미 있음)로
+    재알림이 영원히 오지 않으므로, 재기록+재알림이 의도된 동작이다.
+
+    마이그레이션: 기존 상태 파일(hit/imminent 채워짐, ATH_CYCLE_BASE 없음)에 배포된 첫 실행은
+    base = 현재 ATH 를 설정만 하고 기존 기록은 유지한다 — 이미 +1% 넘게 갱신된 ATH 상태로
+    배포되는 경우 한 사이클 동안 스테일 기록이 살아남을 수 있으나, 신규 전고가 발생 시점부터
+    정상 리셋이 동작한다.
+    """
+    ath = st.get("ath")
+    if not ath or ath <= 0:
+        return
+    base = pos.get("ATH_CYCLE_BASE")
+    if base is None:
+        pos["ATH_CYCLE_BASE"] = round(ath, 2)          # 최초 실행 — 기준만 설정
+    elif ath > float(base) * 1.01:
+        zone_alerts["hit"] = []
+        zone_alerts["imminent"] = []
+        pos["ATH_CYCLE_BASE"] = round(ath, 2)
+        msgs.append(
+            f"🆕 **{st['ticker']} 신규 전고가 갱신 ${ath:,.2f} ({st.get('ath_date', '')})**\n"
+            "   매수 구간이 새 전고가 기준으로 초기화되었습니다 (새 하락 사이클)."
+        )
+
+
 def detect_alerts(st: dict, pos: dict, cfg: dict) -> list[str]:
     """새로 도달한 매수 구간 / 임박 / 매도 알림을 감지해 메시지 목록 반환.
 
@@ -433,6 +468,8 @@ def detect_alerts(st: dict, pos: dict, cfg: dict) -> list[str]:
     if st.get("error"):
         return msgs
     zone_alerts = st["zone_alerts"]
+    # 신규 전고가 확인 → 기록된 구간 상태 리셋 (알림 삼킴 방지)
+    _handle_ath_cycle_reset(st, pos, zone_alerts, msgs)
     tick = st["ticker"]
     price = st["price"]
     gap_p = float(cfg.get("IMMINENT_GAP_PCT", 5))
@@ -1182,6 +1219,7 @@ def reset_position(ticker: str) -> None:
     pos["SELL_ALARM_SENT"] = False
     pos["SELL_IMMINENT_SENT"] = False
     pos["ZONE_ALERTS"] = {"hit": [], "imminent": []}
+    pos.pop("ATH_CYCLE_BASE", None)   # 새 사이클 기준도 초기화 (다음 실행에서 재설정)
     save_config(cfg)
     print(f"✅ {ticker} 알림 플래그 초기화 완료 — 새 포지션 진입 후 사용하세요.")
 
