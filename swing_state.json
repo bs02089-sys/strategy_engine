@@ -4,9 +4,11 @@
             "SELL_ALARM_SENT": false,
             "SELL_IMMINENT_SENT": false,
             "ZONE_ALERTS": {
-                "hit": [],
-                "imminent": [
+                "hit": [
                     15
+                ],
+                "imminent": [
+                    20
                 ]
             },
             "ATH_CYCLE_BASE": 87.02
