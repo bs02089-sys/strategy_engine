@@ -105,7 +105,7 @@ def _load_state() -> dict:
 def _load_personal_positions() -> dict:
     """🔒 개인 매수 포지션(swing_personal.json) 로드 — 없거나 깨졌으면 빈 dict.
 
-    BUY_PRICE/SHARES 는 사용자 개인 정보라 공용 설정(swing_config.json)에 두지 않고
+    BUY_PRICE/SHARES/LOTS 는 사용자 개인 정보라 공용 설정(swing_config.json)에 두지 않고
     별도 파일에서 관리한다. 이 값이 Discord 브리핑/전역 푸시 등 공용 알림에
     노출되지 않도록 _PERSONAL 마커로 구분한다. 봇은 이 파일을 절대 쓰지 않는다.
     """
@@ -116,6 +116,36 @@ def _load_personal_positions() -> dict:
             return (json.load(f) or {}).get("POSITIONS", {}) or {}
     except Exception:
         return {}
+
+
+def _normalize_lots(pp: dict) -> list[dict]:
+    """개인 파일의 LOTS(신형 — 세븐 스플릿 7계좌) 또는 BUY_PRICE/SHARES(구형 단일)를
+    정규화된 로트 리스트로 변환. 미입력 계좌(BUY_PRICE/SHARES 모두 null)는 제외.
+
+    반환: [{account, buy_price, shares}, ...]  (입력된 계좌만)
+    """
+    lots = pp.get("LOTS")
+    if isinstance(lots, list) and lots:
+        out = []
+        for i, lot in enumerate(lots, 1):
+            bp = lot.get("BUY_PRICE")
+            sh = lot.get("SHARES")
+            if bp is None and sh is None:
+                continue  # 미입력 계좌 — 건너뜀
+            out.append({
+                "account": int(lot.get("ACCOUNT") or i),
+                "buy_price": float(bp) if bp is not None else None,
+                "shares": float(sh) if sh is not None else 0.0,
+            })
+        return out
+    if pp.get("BUY_PRICE") is not None or pp.get("SHARES") is not None:
+        # 구형 단일 키 → 1번 계좌 로트로 승격 (하위 호환)
+        return [{
+            "account": 1,
+            "buy_price": float(pp["BUY_PRICE"]) if pp.get("BUY_PRICE") is not None else None,
+            "shares": float(pp["SHARES"]) if pp.get("SHARES") is not None else 0.0,
+        }]
+    return []
 
 
 def load_config() -> dict:
@@ -147,8 +177,9 @@ def load_config() -> dict:
         for key in _STATE_KEYS:
             if key in st:
                 pos[key] = st[key]
-    # 🔒 개인 매수 포지션 오버레이 — BUY_PRICE/SHARES 는 개인 파일(swing_personal.json)에서만
+    # 🔒 개인 매수 포지션 오버레이 — BUY_PRICE/SHARES/LOTS 는 개인 파일(swing_personal.json)에서만
     # 가져오고, _PERSONAL 마커를 붙여 공용 알림(Discord 브리핑/전역 푸시/대시보드)에서 제외한다.
+    # 세븐 스플릿: LOTS(계좌별 로트) 구조 — 계좌 7개 각자의 매수가/수량을 개별 추적한다.
     personal = _load_personal_positions()
     # 방어 계층: 공용 설정(swing_config.json) POSITIONS 에 BUY_PRICE/SHARES 가 직접 들어오면
     # (옛 습관·문서 미숙지) _PERSONAL 마커 없이 남아 Discord 브리핑에 노출되는 누출 구멍이 되므로
@@ -162,11 +193,10 @@ def load_config() -> dict:
         pp = personal.get(ticker)
         if not pp:
             continue
-        if pp.get("BUY_PRICE") is not None or pp.get("SHARES") is not None:
-            if pp.get("BUY_PRICE") is not None:
-                pos["BUY_PRICE"] = pp["BUY_PRICE"]
-            if pp.get("SHARES") is not None:
-                pos["SHARES"] = pp["SHARES"]
+        lots = _normalize_lots(pp)
+        has_lots_key = isinstance(pp.get("LOTS"), list)
+        if lots or has_lots_key:
+            pos["LOTS"] = lots
             pos["_PERSONAL"] = True
     # 개인 파일에만 있는 티커 (공용 POSITIONS 와 불일치) — 오타 조기 발견용 경고
     for ticker in personal:
@@ -258,10 +288,11 @@ def send_onesignal_push(app_id: str, api_key: str, title: str, body: str,
 
 
 def send_user_sell_pushes(statuses: list[dict], cfg: dict) -> bool:
-    """사용자별 매도 푸시 — 앱이 등록한 매도 예정가 태그(swing_sell_{TICKER})가
-    현재가 이하인 구독자에게만 발송한다. 1일 1회(SELL_PUSH_LAST_AT) 중복 방지.
+    """사용자별 매도 푸시 — 앱이 등록한 계좌별 매도 예정가 태그
+    (swing_sell_{TICKER}_{ACCOUNT})가 현재가 이하인 구독자에게만 발송한다. 1일 1회 중복 방지.
 
-    푸시 본문의 매도 예정가는 Liquid({{ user.tags.swing_sell_{TICKER} }})로
+    발송 대상 계좌: 서버 LOTS(swing_personal.json)에 기록된 계좌 + 기본 1번 계좌(단일 계좌 사용자용).
+    푸시 본문의 매도 예정가는 Liquid({{ user.tags.swing_sell_{TICKER}_{ACCOUNT} }})로
     구독자마다 자기 값이 렌더링된다. (OneSignal 공식 개인화 문법)
     """
     app_id, api_key = _resolve_onesignal(cfg)
@@ -275,30 +306,47 @@ def send_user_sell_pushes(statuses: list[dict], cfg: dict) -> bool:
             continue
         ticker = st["ticker"]
         pos = cfg["POSITIONS"][ticker]
-        if pos.get("SELL_PUSH_LAST_AT") == today:
-            continue  # 오늘 이미 발송 (1일 1회)
-        # 매도 예정가(target) ≤ 현재가 인 사용자만 — OneSignal tag 필터는 <,> 만 지원하므로
-        # target < (현재가+0.01) 을 찾으면 target ≤ 현재가 와 동치 (소수 2자리 가격 기준)
-        filters = [{
-            "field": "tag",
-            "key": f"swing_sell_{ticker}",
-            "relation": "<",
-            "value": f"{st['price'] + 0.01:.2f}",
-        }]
-        body = (f"내 매도 예정가(${{{{ user.tags.swing_sell_{ticker} }}}})에 도달했습니다 — 매도 검토가 필요해요."
-                + (f"\n앱에서 확인: {pages}" if pages else ""))
-        code, resp = send_onesignal_push(
-            app_id, api_key,
-            title=f"📈 {ticker} 매도 신호",
-            body=body,
-            url=pages or None,
-            filters=filters,
-        )
-        # 성공(2xx)일 때만 발송일 기록 — 실패 시 당일 재시도 가능 (알림 누락 방지)
-        if str(code).startswith("2"):
-            pos["SELL_PUSH_LAST_AT"] = today
+        # 발송일 기록 — 계좌별: {계좌번호: 날짜} (구형 단일 날짜 문자열은 1번 계좌로 마이그레이션)
+        sent = pos.get("SELL_PUSH_LAST_AT") or {}
+        if isinstance(sent, str):
+            sent = {"1": sent}
+        # 발송 계좌 목록 — 서버 LOTS 에 매도 목표가 있는 계좌 + 1번(단일 계좌 사용자 기본값)
+        # 미입력 계좌는 제외 (앱이 태그를 지우므로 발송 대상이 없어도 요청 낭비 방지)
+        accounts = {1}
+        for lot in st.get("lots") or []:
+            if lot.get("account") and lot.get("sell_target"):
+                accounts.add(int(lot["account"]))
+        sent_any = False
+        for n in sorted(accounts):
+            if sent.get(str(n)) == today:
+                continue  # 해당 계좌는 오늘 이미 발송 (계좌별 1일 1회)
+            # 1번 계좌는 구형 단일 태그(swing_sell_{TICKER})로 발송 — 구버전 앱을 아직 안 연 기기 호환.
+            # 신형 앱은 1번 계좌 값을 단일 태그에도 동일하게 기록하므로 중복 발송이 없다.
+            tag = f"swing_sell_{ticker}" if n == 1 else f"swing_sell_{ticker}_{n}"
+            # 매도 예정가(target) ≤ 현재가 인 구독자만 — OneSignal tag 필터는 <,> 만 지원하므로
+            # target < (현재가+0.01) 을 찾으면 target ≤ 현재가 와 동치 (소수 2자리 가격 기준)
+            filters = [{"field": "tag", "key": tag, "relation": "<",
+                        "value": f"{st['price'] + 0.01:.2f}"}]
+            if len(accounts) > 1:
+                title = f"📈 {ticker} {n}번 계좌 매도 신호"
+                body = (f"{n}번 계좌 매도 예정가(${{{{ user.tags.{tag} }}}})에 도달했습니다 — "
+                        "매도 검토가 필요해요." + (f"\n앱에서 확인: {pages}" if pages else ""))
+            else:
+                title = f"📈 {ticker} 매도 신호"
+                body = (f"내 매도 예정가(${{{{ user.tags.{tag} }}}})에 도달했습니다 — 매도 검토가 필요해요."
+                        + (f"\n앱에서 확인: {pages}" if pages else ""))
+            code, resp = send_onesignal_push(
+                app_id, api_key, title=title, body=body,
+                url=pages or None, filters=filters,
+            )
+            # 성공(2xx)일 때만 발송일 기록 — 실패 시 당일 재시도 가능 (알림 누락 방지)
+            if str(code).startswith("2"):
+                sent[str(n)] = today
+                sent_any = True
+            print(f"   📣 {ticker} {n}번 계좌 매도 푸시: HTTP {code} — {resp[:80]}")
+        if sent_any:
+            pos["SELL_PUSH_LAST_AT"] = sent
             changed = True
-        print(f"   📣 {ticker} 사용자별 매도 푸시: HTTP {code} — {resp[:80]}")
     if changed:
         save_config(cfg)
     return changed
@@ -421,25 +469,63 @@ def compute_ticker(ticker: str, pos: dict, cfg: dict) -> dict:
     deepest_hit = hit_levels[-1]["pct"] if hit_levels else None
     next_zone = next((l for l in ladder if not l["hit"]), None)
 
-    # 매도 목표 — 실제 매수가(BUY_PRICE) × (1 + 스윙 목표 수익률)
+    # 매도 목표 — 계좌별 로트(LOTS, 개인 포지션) 또는 단일 BUY_PRICE(하위 호환) 기준.
+    # 세븐 스플릿: 계좌 1~7 각자의 매수가 × (1 + 스윙 목표 수익률) → 계좌별 매도 목표를 개별 계산.
+    target_pct = float(cfg.get("SWING_TARGET_PCT", 10))
+    lots = pos.get("LOTS") or []
+    lot_stats = []
+    for lot in lots:
+        bp = lot.get("buy_price")
+        sh = float(lot.get("shares") or 0)
+        ls = {"account": lot.get("account"), "buy_price": None, "shares": sh,
+              "sell_target": None, "sell_ready": False, "sell_gap_pct": None,
+              "exp_profit": None, "exp_roi": None}
+        if bp:
+            bp = float(bp)
+            s_target = bp * (1 + target_pct / 100.0)
+            s_ready = bool(price >= s_target - 1e-9)
+            s_gap = None if s_ready else max((s_target - price) / s_target * 100.0, 0.0)
+            ls.update(buy_price=bp, sell_target=s_target, sell_ready=s_ready,
+                      sell_gap_pct=s_gap,
+                      exp_profit=(s_target - bp) * sh if sh > 0 else None,
+                      exp_roi=(s_target / bp - 1.0) * 100.0 if sh > 0 else None)
+        lot_stats.append(ls)
+
+    # 상위(집계) 필드 — 단일 BUY_PRICE 경로(하위 호환) + LOTS 집계 (아무 계좌나 목표 도달 시 매도 준비)
     buy_price = pos.get("BUY_PRICE")
     sell_target = None
     sell_ready = False
     sell_gap_pct = None
     if buy_price:
-        sell_target = float(buy_price) * (1 + float(cfg.get("SWING_TARGET_PCT", 10)) / 100.0)
+        sell_target = float(buy_price) * (1 + target_pct / 100.0)
         sell_ready = bool(price >= sell_target - 1e-9)
         if not sell_ready:
-            sell_gap_pct = (sell_target - price) / sell_target * 100.0  # 양수 = 목표까지 남은 %
-            if sell_gap_pct < 0:
-                sell_gap_pct = 0.0
+            sell_gap_pct = max((sell_target - price) / sell_target * 100.0, 0.0)
+    open_lots = [l for l in lot_stats if l["sell_target"]]
+    if open_lots:
+        if any(l["sell_ready"] for l in open_lots):
+            sell_ready = True
+        if sell_target is None:
+            sell_target = max(l["sell_target"] for l in open_lots)
+        if not sell_ready:
+            gaps = [l["sell_gap_pct"] for l in open_lots if l["sell_gap_pct"] is not None]
+            sell_gap_pct = min(gaps) if gaps else None
 
-    # 계산기 — 목표 매도 시 예상 손익
+    # 계산기 — 목표 매도 시 예상 손익 (단일 경로 + LOTS 가중평균)
     shares = pos.get("SHARES") or 0   # null/미입력 시 0 처리 (모니터링 전용 포지션)
     exp_profit = exp_roi = None
     if buy_price and sell_target and shares > 0:
         exp_profit = (sell_target - float(buy_price)) * float(shares)
         exp_roi = (sell_target / float(buy_price) - 1.0) * 100.0
+    elif open_lots:
+        total_shares = sum(l["shares"] for l in open_lots)
+        total_cost = sum(l["buy_price"] * l["shares"] for l in open_lots)
+        if total_shares > 0 and total_cost > 0:
+            buy_price = total_cost / total_shares   # 대표 매수가 (가중평균)
+            shares = total_shares
+            exp_profit = sum((l["sell_target"] - l["buy_price"]) * l["shares"]
+                             for l in open_lots if l["shares"] > 0)
+            exp_roi = exp_profit / total_cost * 100.0
 
     st.update({
         "label": pos.get("LABEL") or ticker,
@@ -460,6 +546,7 @@ def compute_ticker(ticker: str, pos: dict, cfg: dict) -> dict:
         "exp_profit": exp_profit,
         "exp_roi": exp_roi,
         "personal": bool(pos.get("_PERSONAL")),
+        "lots": lot_stats,
         "zone_alerts": pos.setdefault("ZONE_ALERTS", {"hit": [], "imminent": []}),
     })
     return st
@@ -574,6 +661,17 @@ def _sell_chip(st: dict, gap_pct: float = 5.0) -> str:
     if st.get("sell_target") is None:
         return "—"
     if st["sell_gap_pct"] is not None and st["sell_gap_pct"] <= gap_pct:
+        return "🚀 임박"
+    return "⏳ 대기"
+
+
+def _lot_chip(lot: dict, gap_pct: float = 5.0) -> str:
+    """계좌(로트) 1개의 매도 상태 칩 — 목표 도달/임박/대기."""
+    if lot.get("sell_target") is None:
+        return "—"
+    if lot["sell_ready"]:
+        return "🚨 매도"
+    if lot.get("sell_gap_pct") is not None and lot["sell_gap_pct"] <= gap_pct:
         return "🚀 임박"
     return "⏳ 대기"
 
@@ -705,8 +803,17 @@ footer{color:#4b5563;font-size:12px;text-align:center;margin-top:8px;line-height
 .plan{margin-top:14px;background:#0f1420;border:1px solid var(--border);border-radius:12px;padding:12px}
 .plan-row{display:flex;align-items:center;gap:8px;margin-bottom:8px}
 .plan-row label{font-size:22px;color:var(--muted);width:168px;flex-shrink:0}
+.plan-head{display:flex;align-items:baseline;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+.plan-head .pt{font-size:22px;font-weight:700;color:var(--text)}
+.plan-head .ps{font-size:12px;color:#5b6572}
+.plan-acc{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.acc-no{width:26px;height:26px;flex-shrink:0;display:flex;align-items:center;justify-content:center;
+  font-size:12px;font-weight:800;color:var(--muted);border:1px solid var(--border);
+  border-radius:999px;background:#1c2533}
 .plan-buy-input{flex:1;min-width:0;background:#1c2533;border:1px solid var(--border);border-radius:8px;
   color:var(--text);font-size:22px;font-weight:700;padding:7px 10px;font-family:ui-monospace,Menlo,Consolas,monospace}
+.acc-sell{font-size:13px;font-weight:700;color:var(--text);font-family:ui-monospace,Menlo,Consolas,monospace;
+  width:94px;text-align:right;flex-shrink:0}
 .plan-unit{font-size:22px;color:var(--muted)}
 .plan-pcts{display:flex;gap:6px;flex-wrap:wrap}
 .pct{font-size:22px;font-weight:700;padding:7px 13px;border-radius:999px;
@@ -795,33 +902,34 @@ OneSignalDeferred.push(async function(OneSignal) {
 """
 
 
-# 매수 예정가(사용자 입력, 없으면 현재가) × (1 + 예상 수익률) → 매도 예정가 자동 계산 (브라우저 localStorage 저장)
+# 계좌별 매수 예정가(사용자 입력) × (1 + 예상 수익률) → 계좌별 매도 예정가 자동 계산 (브라우저 localStorage 저장)
+# 세븐 스플릿: 7개 계좌를 각각 추적 — 저장 키 swing_buy_{TICKER}_{ACCOUNT}, 푸시 태그 swing_sell_{TICKER}_{ACCOUNT}
 # 매도 상태 칩/카운트는 사용자별 입력 기준으로 항상 재판정 — 서버 설정(BUY_PRICE) 없이도 동작한다.
+# 구형 단일 키(swing_buy_{TICKER})는 1번 계좌로 자동 마이그레이션된다.
 _PLAN_JS = """
 <script>
 (function() {
-  // 카드별 저장 키: swing_buy_{TICKER}(매수 예정가) / swing_sell_{TICKER}(예상 수익률)
+  // 카드별 저장 키: swing_buy_{TICKER}_{ACCOUNT}(계좌별 매수 예정가) / swing_sell_{TICKER}(예상 수익률, 카드 공용)
   document.querySelectorAll('.card[data-ath]').forEach(function(card) {
     var ticker = card.dataset.ticker;
     var close = parseFloat(card.dataset.close);
     var gapPct = parseFloat(card.dataset.gap) || 5;
-    var buyInput = card.querySelector('.plan-buy-input');
+    var accRows = Array.prototype.slice.call(card.querySelectorAll('.plan-acc'));
     var pctBtns = card.querySelectorAll('.pct');
-    var sellEl = card.querySelector('.plan-sell');
     var chip = card.querySelector('[data-sell-chip]');
 
-    // 저장값 로드 (기본: 매수 예정가 미입력 → 현재가 기준, 예상 수익률 → 서버 SWING_TARGET_PCT 기본값)
-    var buyVal = parseFloat(localStorage.getItem('swing_buy_' + ticker));
-    if (isNaN(buyVal)) buyVal = 0;   // 0 = 미입력
+    // 예상 수익률 → 서버 SWING_TARGET_PCT 기본값
     var sellPct = parseFloat(localStorage.getItem('swing_sell_' + ticker));
     if (isNaN(sellPct)) sellPct = parseFloat(card.dataset.sellDefault) || 10;
 
-    // 유효 매수 예정가 — 입력값(>0)이 없으면 현재가(지금 매수 시) 기준
-    function buyBase() {
-      var v = parseFloat(buyInput.value);
-      if (isNaN(v) || v <= 0) v = close;
-      return v;
-    }
+    // 계좌별 초기값 로드 — 1번 계좌는 구형 단일 키(swing_buy_{TICKER}) 폴백 (자동 마이그레이션)
+    accRows.forEach(function(row) {
+      var n = row.dataset.acc;
+      var v = parseFloat(localStorage.getItem('swing_buy_' + ticker + '_' + n));
+      if (isNaN(v) && n === '1') v = parseFloat(localStorage.getItem('swing_buy_' + ticker));
+      var input = row.querySelector('.plan-buy-input');
+      if (!isNaN(v) && v > 0) input.value = v;
+    });
 
     // 페이지 로드 시 최초 판정에서만 진동 — 매수 예정가 입력/수익률 버튼 조작으로 상태가
     // 오락가락해도 잡음 진동이 울리지 않게 한다 (시장 가격은 서버 렌더 → 새로고침 시 갱신).
@@ -830,7 +938,7 @@ _PLAN_JS = """
     // 매도 알람/임박 시 스마트폰 진동 (Vibration API) — Android Chrome만 지원, iOS는 미지원(무시).
     // localStorage(swing_vibe_{TICKER})에 직전 상태를 기록해 5분 자동 새로고침 등으로 같은 상태가
     // 반복돼도 재진동하지 않는다. 🚨 매도는 강한 3연타, 🚀 임박은 짧은 2연타.
-    function vibrateSell(ticker, stateClass) {
+    function vibrateSell(stateClass) {
       if (vibed) return;
       vibed = true;
       try {
@@ -847,30 +955,38 @@ _PLAN_JS = """
       } catch (e) { /* 진동 미지원 — 무시 */ }
     }
 
-    // 사용자별 매도 상태 — 내 매수 예정가 × (1 + 예상 수익률) 기준으로 항상 재판정
-    function applySellStatus() {
+    // 계좌 1개의 매도 상태 — 입력된 매수 예정가 × (1 + 예상 수익률) 기준으로 항상 재판정.
+    // 미입력 계좌(active=false)는 계산/저장/태그에서 제외 — 푸시 오발송 방지.
+    function rowState(row) {
+      var n = row.dataset.acc;
+      var v = parseFloat(row.querySelector('.plan-buy-input').value);
+      if (isNaN(v) || v <= 0) return { n: n, active: false };
+      var sell = v * (1 + sellPct / 100);
+      var remain = (sell - close) / sell * 100;   // 목표까지 남은 % (양수)
+      var state = 'gray';
+      if (close >= sell - 1e-9) state = 'red';
+      else if (remain <= gapPct) state = 'amber';
+      return { n: n, active: true, buy: v, sell: sell, state: state };
+    }
+
+    // 카드 상단 칩 — 입력된 계좌 중 하나라도 매도 도달(red) → 🚨, 임박(amber) → 🚀, 없으면 숨김
+    function applyChip(anyRed, anyAmber) {
       if (!chip || isNaN(close)) return;
-      var target = buyBase() * (1 + sellPct / 100);
-      var remain = (target - close) / target * 100;   // 목표까지 남은 % (양수)
       chip.classList.remove('red', 'amber', 'gray');
-      var stateClass;
-      if (close >= target - 1e-9) {
-        stateClass = 'red';
+      if (anyRed) {
         chip.classList.add('red');
         chip.textContent = '🚨 매도';
-        chip.style.display = '';                       // 알람 상태만 표시
-      } else if (remain <= gapPct) {
-        stateClass = 'amber';
+        chip.style.display = '';
+      } else if (anyAmber) {
         chip.classList.add('amber');
         chip.textContent = '🚀 임박';
-        chip.style.display = '';                       // 임박 상태만 표시
+        chip.style.display = '';
       } else {
-        stateClass = 'gray';
         chip.classList.add('gray');
         chip.textContent = '⏳ 대기';
         chip.style.display = 'none';                   // 기본(대기) 상태 — 칩 숨김
       }
-      vibrateSell(ticker, stateClass);
+      vibrateSell(anyRed ? 'red' : (anyAmber ? 'amber' : 'gray'));
     }
 
     // 상단 '🚨 매도 알람 N' — 사용자별 판정 결과로 카운트 갱신
@@ -887,14 +1003,23 @@ _PLAN_JS = """
       }
     }
 
-    // 매도 예정가 → OneSignal 태그 동기화 — 서버가 '내 매도 예정가 ≤ 현재가' 사용자에게만
-    // 사용자별 매도 푸시를 보낼 때 기준으로 사용한다 (푸시 미설정/미구독 환경에서는 무시됨)
-    function syncSellTag(ticker, sell) {
+    // 계좌별 매도 예정가 → OneSignal 태그 동기화 — 서버가 '내 매도 예정가 ≤ 현재가' 구독자에게만
+    // 계좌별 매도 푸시(swing_sell_{TICKER}_{ACCOUNT})를 보낼 때 기준으로 사용한다.
+    // (푸시 미설정/미구독 환경에서는 무시됨 — 미입력 계좌는 태그 제거로 오발송 방지)
+    function setSellTag(n, sell) {
       try {
         if (window.OneSignalDeferred && window.OneSignalDeferred.push) {
           window.OneSignalDeferred.push(function(OneSignal) {
-            if (OneSignal && OneSignal.User && OneSignal.User.addTag) {
-              OneSignal.User.addTag('swing_sell_' + ticker, sell.toFixed(2));
+            if (!OneSignal || !OneSignal.User) return;
+            var key = 'swing_sell_' + ticker + '_' + n;
+            if (sell) {
+              OneSignal.User.addTag(key, sell.toFixed(2));
+              // 1번 계좌는 구형 단일 태그(swing_sell_{TICKER})에도 동일 기록 —
+              // 아직 새 앱을 열지 않은 기기의 기존 태그와 호환 (서버는 단일 태그로 1번 계좌 푸시)
+              if (n === '1') OneSignal.User.addTag('swing_sell_' + ticker, sell.toFixed(2));
+            } else if (OneSignal.User.removeTag) {
+              OneSignal.User.removeTag(key);
+              if (n === '1') OneSignal.User.removeTag('swing_sell_' + ticker);
             }
           });
         }
@@ -903,28 +1028,35 @@ _PLAN_JS = """
 
     function update() {
       if (isNaN(close)) return;   // 가격 데이터 없으면 계산 생략
-      var base = buyBase();
-      // 매도 예정가 = 매수 예정가 × (1 + 예상 수익률/100)
-      var sell = base * (1 + sellPct / 100);
-      sellEl.textContent = '$' + sell.toFixed(2);
-      syncSellTag(ticker, sell);
-      // 매수 예정가는 직접 입력한 양수 값만 저장 (비우거나 0이면 현재가 기준으로 초기화)
-      var pv = parseFloat(buyInput.value);
-      if (!isNaN(pv) && pv > 0) {
-        localStorage.setItem('swing_buy_' + ticker, String(pv));
-      } else {
-        localStorage.removeItem('swing_buy_' + ticker);
-      }
+      var anyRed = false, anyAmber = false;
+      accRows.forEach(function(row) {
+        var sellEl = row.querySelector('.acc-sell');
+        var r = rowState(row);
+        if (!r.active) {
+          sellEl.textContent = '—';
+          localStorage.removeItem('swing_buy_' + ticker + '_' + r.n);
+          setSellTag(r.n, null);                       // 미입력 계좌 — 태그 제거 (푸시 제외)
+          return;
+        }
+        sellEl.textContent = '$' + r.sell.toFixed(2);
+        localStorage.setItem('swing_buy_' + ticker + '_' + r.n, String(r.buy));
+        setSellTag(r.n, r.sell);
+        if (r.state === 'red') anyRed = true;
+        else if (r.state === 'amber') anyAmber = true;
+      });
+      // 구형 단일 키는 1번 계좌로 마이그레이션 완료 후 정리
+      localStorage.removeItem('swing_buy_' + ticker);
       localStorage.setItem('swing_sell_' + ticker, String(sellPct));
       pctBtns.forEach(function(b) {
         b.classList.toggle('on', parseFloat(b.dataset.pct) === sellPct);
       });
-      applySellStatus();
+      applyChip(anyRed, anyAmber);
       refreshAlarmCount();
     }
 
-    if (buyVal > 0) buyInput.value = buyVal;
-    buyInput.addEventListener('input', update);
+    accRows.forEach(function(row) {
+      row.querySelector('.plan-buy-input').addEventListener('input', update);
+    });
     pctBtns.forEach(function(b) {
       b.addEventListener('click', function() {
         sellPct = parseFloat(b.dataset.pct);
@@ -1026,6 +1158,17 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
             for lvl in st["ladder"]
         )
 
+        # 계좌별 매수 예정가 입력 7행 — 세븐 스플릿 7개 계좌(각 $500). 미입력 계좌는 무시되고
+        # 입력된 계좌만 매도 예정가 계산 + OneSignal 태그(swing_sell_{TICKER}_{N}) 동기화.
+        acc_rows = "\n".join(
+            f'''    <div class="plan-acc" data-acc="{n}">
+      <span class="acc-no">{n}</span>
+      <input class="plan-buy-input" type="number" min="0" step="0.01" placeholder="{st['price']:.2f}">
+      <span class="acc-sell">—</span>
+    </div>'''
+            for n in range(1, 8)
+        )
+
         cards.append(f"""
 <div class="card" data-ticker="{st["ticker"]}" data-ath="{st["ath"]:.2f}" data-close="{st["price"]:.2f}" data-gap="{float(cfg.get("IMMINENT_GAP_PCT", 5)):g}" data-sell-default="{float(cfg.get("SWING_TARGET_PCT", 10)):g}">
   <div class="row">
@@ -1040,11 +1183,11 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
   </div>
   <div class="info">📊 전고가 ${st["ath"]:,.2f} ({st["ath_date"]}) 대비 <span class="dd {dd_cls}">{dd_sign}{abs(st["dd_pct"]):.1f}%</span></div>
   <div class="plan">
-    <div class="plan-row">
-      <label for="buy-{st["ticker"]}">💰 매수 예정가</label>
-      <span class="plan-unit">$</span>
-      <input id="buy-{st["ticker"]}" class="plan-buy-input" type="number" min="0" step="0.01" placeholder="{st["price"]:.2f}">
+    <div class="plan-head">
+      <span class="pt">💰 계좌별 매수 예정가</span>
+      <span class="ps">세븐 스플릿 — 7개 계좌 · 각 $500 · +{float(cfg.get("SWING_TARGET_PCT", 10)):.0f}% 매도</span>
     </div>
+{acc_rows}
     <div class="plan-row">
       <label>📈 예상 수익률</label>
       <div class="plan-pcts">
@@ -1053,9 +1196,6 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
         <button type="button" class="pct" data-pct="15">15%</button>
         <button type="button" class="pct" data-pct="20">20%</button>
       </div>
-    </div>
-    <div class="plan-out">
-      <span class="po">🎯 매도 예정가 <b class="plan-sell">-</b></span>
     </div>
   </div>
   <div class="ladder-title">📉 매수 구간 (전고가 대비 MDD)</div>
@@ -1244,6 +1384,7 @@ def run_serve(port: int) -> None:
 
 def print_console(statuses: list[dict], cfg: dict) -> None:
     gap = float(cfg.get("IMMINENT_GAP_PCT", 5))
+    target_pct = float(cfg.get("SWING_TARGET_PCT", 10))
     print(f"\n📊 스윙 투자 알리미 — {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     print("=" * 60)
     for st in statuses:
@@ -1252,13 +1393,25 @@ def print_console(statuses: list[dict], cfg: dict) -> None:
             continue
         print(f"[{st['ticker']}] 현재 ${st['price']:,.2f} ({st['as_of']})")
         print(f"   ATH ${st['ath']:,.2f} ({st['ath_date']}) → 하락 {st['dd_pct']:+.1f}%")
-        if st["sell_target"] is not None:
-            tag = " 🔒 개인" if st.get("personal") else ""
-            print(f"   🎯 매도 목표 ${st['sell_target']:,.2f} (매수가 ${st['buy_price']:,.2f} × {cfg.get('SWING_TARGET_PCT', 10):+.0f}%){tag} | {_sell_chip(st, gap)}")
+        lots = st.get("lots") or []
+        if st.get("personal"):
+            if lots:
+                print(f"   🎯 계좌별 매도 목표 (매수가 × {target_pct:+.0f}%) 🔒 개인")
+                for lot in lots:
+                    if not lot.get("sell_target"):
+                        print(f"      {lot['account']}번 계좌: 매수 미입력")
+                        continue
+                    qty = f" × {lot['shares']:.0f}주" if lot.get("shares") else ""
+                    print(f"      {lot['account']}번 계좌: 매수가 ${lot['buy_price']:,.2f}{qty}"
+                          f" → 목표 ${lot['sell_target']:,.2f} ({_lot_chip(lot, gap)})")
+            else:
+                print(f"   🎯 계좌별 매도 목표 미입력 🔒 개인 (swing_personal.json LOTS — 실제 매수 후 매수가/수량 입력)")
+        elif st["sell_target"] is not None:
+            print(f"   🎯 매도 목표 ${st['sell_target']:,.2f} (매수가 ${st['buy_price']:,.2f} × {target_pct:+.0f}%) | {_sell_chip(st, gap)}")
         else:
             print("   🎯 매도 목표 미설정 (BUY_PRICE 입력 필요 — 실제 매수 후 설정)")
         print(f"   📊 {_ladder_summary(st)}")
-        if st["exp_profit"] is not None:
+        if not st.get("personal") and st["exp_profit"] is not None:
             print(f"   💰 매수 ${st['buy_price']:,.2f} × {st['shares']:.0f}주 → +${st['exp_profit']:,.2f} ({st['exp_roi']:+.1f}%)")
     print("=" * 60)
 

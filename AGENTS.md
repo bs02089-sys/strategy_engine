@@ -39,9 +39,12 @@ Not lazy about: input validation at trust boundaries, error handling that preven
   설정은 `swing_config.json`(사용자 소유 — 공용: 티커/구간/목표/푸시 설정), 상태는 `swing_state.json`
   (봇 전용 — ZONE_ALERTS/매도 플래그)로 분리 — 봇이 상태 파일만 커밋하므로 git 충돌로 알림 상태가
   유실되지 않는다.
-  🔒 **개인 포지션 분리 (2026-08-10)**: BUY_PRICE/SHARES(실제 매수가/보유수량)는 공용 설정에 두지 않고
-  `swing_personal.json`(사용자 소유, 봇 미기입)에만 기록한다. `_PERSONAL` 마커가 붙은 포지션은
-  Discord 브리핑/대시보드/전역 푸시 등 공용 알림에서 매도 정보가 노출되지 않는다 (매도 미설정으로 표시).
+  🔒 **개인 포지션 분리 (2026-08-10)**: 실제 매수가/보유수량은 공용 설정에 두지 않고
+  `swing_personal.json`(사용자 소유, 봇 미기입)에만 기록한다. 세븐 스플릿 7개 계좌는 `LOTS`
+  (계좌별 BUY_PRICE/SHARES) 구조로 개별 추적 — `_PERSONAL` 마커가 붙은 포지션은
+  Discord 브리핑/대시보드/전역 푸시 등 공용 알림에서 매도 정보가 노출되지 않는다 (매도 미설정으로 표시),
+  콘솔에서만 🔒 개인 라벨로 계좌별 매도 목표를 확인한다. 계좌별 푸시 태그는
+  `swing_sell_{TICKER}_{ACCOUNT}` (앱 입력 기준, 구형 단일 태그는 1번 계좌로 자동 마이그레이션).
   ⚠️ **전역 OneSignal 푸시 제거 (2026-08-10)**: `--monitor`가 신호 요약을 구독자 전체에게 발송하던
   동작은 제거됨 — 지인에게 내 매수 정보 기반 신호가 노출되는 것을 차단. 개인 알림은 사용자별 태그
   푸시(`send_user_sell_pushes`)로만 발송. 다시 전역 푸시를 추가하지 말 것.

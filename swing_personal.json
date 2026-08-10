@@ -1,9 +1,44 @@
 {
-    "_NOTE": "🔒 개인 매수 포지션 — 공용 설정(swing_config.json)과 분리된 개인 파일. BUY_PRICE(실제 매수가)/SHARES(보유수량)는 여기에만 기록하며, 이 값은 Discord 브리핑·전역 푸시·공용 대시보드에 노출되지 않는다. 실제 매수 후 입력 (예: BUY_PRICE 60.00, SHARES 100). (JSON 주석 불가로 _NOTE 메타 키로 기록 — 엔진은 무시)",
+    "_NOTE": "🔒 개인 매수 포지션 — 공용 설정(swing_config.json)과 분리된 개인 파일. 세븐 스플릿 7개 계좌를 LOTS로 기록한다. 계좌별 BUY_PRICE(실제 매수가)/SHARES(보유수량)를 입력하면 매도 목표(매수가 × 1.2)가 계좌별로 계산되고, 공용 알림(Discord 브리핑·전역 푸시·대시보드)에는 노출되지 않는다. (JSON 주석 불가로 _NOTE 메타 키로 기록 — 엔진은 무시)",
     "POSITIONS": {
         "TQQQ": {
-            "BUY_PRICE": null,
-            "SHARES": null
+            "LOTS": [
+                {
+                    "ACCOUNT": 1,
+                    "BUY_PRICE": null,
+                    "SHARES": null
+                },
+                {
+                    "ACCOUNT": 2,
+                    "BUY_PRICE": null,
+                    "SHARES": null
+                },
+                {
+                    "ACCOUNT": 3,
+                    "BUY_PRICE": null,
+                    "SHARES": null
+                },
+                {
+                    "ACCOUNT": 4,
+                    "BUY_PRICE": null,
+                    "SHARES": null
+                },
+                {
+                    "ACCOUNT": 5,
+                    "BUY_PRICE": null,
+                    "SHARES": null
+                },
+                {
+                    "ACCOUNT": 6,
+                    "BUY_PRICE": null,
+                    "SHARES": null
+                },
+                {
+                    "ACCOUNT": 7,
+                    "BUY_PRICE": null,
+                    "SHARES": null
+                }
+            ]
         }
     }
 }
