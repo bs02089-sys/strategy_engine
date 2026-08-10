@@ -34,6 +34,7 @@
   python3 swing_alerter.py --dashboard PATH    # 대시보드 저장 경로 변경
 """
 import argparse
+import copy
 import json
 import os
 import sys
@@ -116,10 +117,13 @@ def load_config() -> dict:
     merged = {**DEFAULT_CFG, **cfg}
     merged["POSITIONS"] = dict(DEFAULT_CFG["POSITIONS"], **cfg.get("POSITIONS", {}))
     # 봇 상태 오버레이 (swing_state.json) — 기본값 → 상태 파일 값 순으로 덮어씀
+    # ⚠️ 기본값은 deepcopy 로 티커마다 새 객체를 줘야 한다 — ZONE_ALERTS 같은 가변 dict 를
+    # 공유하면 첫 실행(상태 파일 없음)에서 티커 간 알림 상태가 서로 덮어쓴다.
     state_positions = _load_state().get("POSITIONS", {})
     for ticker, pos in merged["POSITIONS"].items():
         for key, default in _STATE_DEFAULTS.items():
-            pos.setdefault(key, default)
+            if key not in pos:
+                pos[key] = copy.deepcopy(default)
         st = state_positions.get(ticker) or {}
         for key in _STATE_KEYS:
             if key in st:
