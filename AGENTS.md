@@ -35,7 +35,9 @@ Not lazy about: input validation at trust boundaries, error handling that preven
 - **설정 단일 소스**: `portfolio_config.json` (포지션/시그마/모드 상태). 설정값은 코드에 하드코딩하지 않고 여기에서 읽는다.
 - **스윙 알리미**: `swing_alerter.py` (2026-08-08 신규) — 유튜브 'TQQQ 스윙 투자 전략' 구글 스프레드시트
   (ATH 대비 MDD 구간 매수 + 매수가 대비 스윙 목표 수익률 매도) 재구현. 사용자별 매도 푸시는 앱이
-  등록한 매도 예정가 태그(`swing_sell_{TICKER}`) 기준으로 OneSignal에 필터 발송(1일 1회). 설정/상태는 `swing_config.json` 단일 파일,
+  등록한 매도 예정가 태그(`swing_sell_{TICKER}`) 기준으로 OneSignal에 필터 발송(1일 1회).
+  설정은 `swing_config.json`(사용자 소유), 상태는 `swing_state.json`(봇 전용 — ZONE_ALERTS/매도 플래그)로 분리 —
+  봇이 상태 파일만 커밋하므로 git 충돌로 알림 상태가 유실되지 않는다.
   알림은 Discord, 실시간은 cron-job.org `swing-monitor` 디스패치, 모바일 대시보드는
   `--serve`/`swing_dashboard.html` + GitHub Pages(`gh-pages` 브랜치 자동 배포).
   ⚠️ **봇은 `swing_dashboard.html`을 main에 커밋하지 않는다** — 생성 파일(헤더 시각 등)이 봇/사용자

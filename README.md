@@ -155,7 +155,8 @@
 | **DCA_MA_strategy_flowchart.py** | 시스템 전체 플로우차트 문서 |
 | **setup_cronjob_org.py** | cron-job.org 실시간 알림 설정 자동화 (생성/--list/--test-dispatch/--update-pat/--update-schedule) |
 | **swing_alerter.py** | 🆕 **스윙 투자 알리미** — MDD 구간 매수/매도 알림 + 모바일 대시보드 (유튜브 TQQQ 스윙 전략 재구현) |
-| **swing_config.json** | 스윙 알리미 설정/상태 (단일 파일 — 설정 단일 소스) |
+| **swing_config.json** | 스윙 알리미 설정 (사용자 소유 — MDD 구간/목표/포지션) |
+| **swing_state.json** | 스윙 알리미 봇 상태 (ZONE_ALERTS/매도 플래그 — 봇 전용, 자동 관리) |
 | **swing_dashboard.html** | 스윙 알리미 모바일 대시보드 (자동 생성) |
 | **MarketStageSystem.py** | 독립적인 시장 단계 시스템 — 바닥 단계 감지 |
 | **bear_market_signals.py** | 약세장 신호 분석 시스템 |
@@ -489,7 +490,7 @@ python3 DCA_MA_strategy.py --signal --discord --all  # TQQQ+SOXL 단일 메시�
   알람 (예: 매수가 $100 → 목표 $110).
 - **계산기**: `BUY_PRICE` × `SHARES` → 목표 매도 시 예상 수익금/수익률 자동 계산.
 
-### 설정 (swing_config.json — 단일 파일)
+### 설정 (swing_config.json — 사용자 설정 / swing_state.json — 봇 상태)
 
 ```json
 {
@@ -508,8 +509,10 @@ python3 DCA_MA_strategy.py --signal --discord --all  # TQQQ+SOXL 단일 메시�
 ```
 
 - `POSITIONS` 에 티커를 추가/수정하면 자유롭게 여러 종목을 모니터링합니다.
-- 알림 플래그(`ZONE_ALERTS`, `SELL_ALARM_SENT`)는 엔진이 자동 관리합니다. 실제 매수 후
-  새 포지션을 기록했으면 `python3 swing_alerter.py --reset TICKER` 로 초기화하세요.
+- 알림 플래그(`ZONE_ALERTS`, `SELL_ALARM_SENT`)는 엔진이 자동 관리하며 **`swing_state.json`** 에
+  보관됩니다. 설정(사용자)과 상태(봇)가 별도 파일로 분리되어 있어 봇이 상태 파일만 커밋하므로
+  git 충돌로 알림 상태가 유실되지 않습니다. 실제 매수 후 새 포지션을 기록했으면
+  `python3 swing_alerter.py --reset TICKER` 로 초기화하세요.
 - 첫 실행 또는 `--reset` 직후 첫 모니터링에서는 **현재 도달된 모든 매수 구간이 한 번에**
   알림으로 옵니다 (현재 상태 스냅샷). 이후에는 새로 도달하는 구간/임박/매도만 알립니다.
 - 기준가는 기본 `ATH`(역대 최고가)이며 **배당 조정 종가(Adj Close) 기준**으로 계산해

@@ -18,7 +18,8 @@
   - 매수 구간 도달 / 임박 / 매도 알림을 Discord로 발송 (--monitor)
   - 일일 종합 브리핑 Discord 발송 (--discord)
   - 모바일 대시보드 HTML 생성 + 로컬 HTTP 서버 (--serve) — 스마트폰 확인용
-  - 설정/상태는 단일 파일 swing_config.json (설정 단일 소스)
+  - 설정은 swing_config.json(사용자 소유), 상태는 swing_state.json(봇 전용) 두 파일로 분리
+    (봇이 상태 파일만 커밋 → git 충돌로 알림 상태가 유실되지 않음)
 
 기존 인프라 재사용:
   - DCA_MA_strategy.py 의 get_prev_close / _send_discord / resolve_discord_config
@@ -46,9 +47,20 @@ import yfinance as yf
 from DCA_MA_strategy import _send_discord, get_prev_close, resolve_discord_config
 
 CONFIG_PATH = "swing_config.json"
+STATE_PATH = "swing_state.json"        # 봇 전용 상태 파일 (ZONE_ALERTS/매도 플래그) — 설정과 분리
 DASHBOARD_PATH = "swing_dashboard.html"
 PORTFOLIO_CONFIG_PATH = "portfolio_config.json"
 NY_TZ = ZoneInfo("America/New_York")
+
+# swing_state.json 에 보관하는 봇 전용 상태 키 (POSITIONS 내부) —
+# swing_config.json(사용자 설정)과 분리해 봇/사용자 커밋 충돌로 상태가 유실되지 않게 한다.
+_STATE_KEYS = ("SELL_ALARM_SENT", "SELL_IMMINENT_SENT", "SELL_PUSH_LAST_AT", "ZONE_ALERTS")
+_STATE_DEFAULTS = {
+    "SELL_ALARM_SENT": False,
+    "SELL_IMMINENT_SENT": False,
+    "SELL_PUSH_LAST_AT": None,
+    "ZONE_ALERTS": {"hit": [], "imminent": []},
+}
 
 # ── 기본 설정 (swing_config.json 에서 덮어쓸 수 있음) ──────────────
 DEFAULT_CFG = {
@@ -67,10 +79,34 @@ DEFAULT_CFG = {
 # 설정 로드/저장
 # ═══════════════════════════════════════════════════════════
 
+def _write_json(path: str, data: dict) -> None:
+    """원자적 저장 — 임시 파일 후 rename (깨진 파일 방지)."""
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
+    os.replace(tmp, path)
+
+
+def _load_state() -> dict:
+    """봇 전용 상태(swing_state.json) 로드 — 없거나 깨졌으면 빈 상태."""
+    if not os.path.isfile(STATE_PATH):
+        return {"POSITIONS": {}}
+    try:
+        with open(STATE_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {"POSITIONS": {}}
+
+
 def load_config() -> dict:
-    """swing_config.json 로드. 없으면 기본 템플릿 생성 후 안내."""
+    """swing_config.json(설정) + swing_state.json(상태) 병합 로드.
+
+    설정은 사용자, 상태는 봇이 각자 소유하는 두 파일 구조 — 봇이 설정 파일을
+    쓰지 않으므로 git 충돌로 상태(ZONE_ALERTS 등)가 유실되지 않는다.
+    없으면 기본 템플릿 생성 후 안내.
+    """
     if not os.path.isfile(CONFIG_PATH):
-        _write_json(DEFAULT_CFG)
+        _write_json(CONFIG_PATH, DEFAULT_CFG)
         print(f"ℹ️  {CONFIG_PATH} 이(가) 없어 기본 템플릿을 생성했습니다.")
         print("   POSITIONS 에 모니터링할 티커를 추가한 뒤 다시 실행하세요.")
         return json.loads(json.dumps(DEFAULT_CFG))
@@ -79,19 +115,31 @@ def load_config() -> dict:
     # 기본값 병합 (새 필드 추가 시 하위 호환)
     merged = {**DEFAULT_CFG, **cfg}
     merged["POSITIONS"] = dict(DEFAULT_CFG["POSITIONS"], **cfg.get("POSITIONS", {}))
+    # 봇 상태 오버레이 (swing_state.json) — 기본값 → 상태 파일 값 순으로 덮어씀
+    state_positions = _load_state().get("POSITIONS", {})
+    for ticker, pos in merged["POSITIONS"].items():
+        for key, default in _STATE_DEFAULTS.items():
+            pos.setdefault(key, default)
+        st = state_positions.get(ticker) or {}
+        for key in _STATE_KEYS:
+            if key in st:
+                pos[key] = st[key]
     return merged
 
 
-def _write_json(cfg: dict) -> None:
-    """원자적 저장 — 임시 파일 후 rename (깨진 파일 방지)."""
-    tmp = CONFIG_PATH + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(cfg, f, ensure_ascii=False, indent=4)
-    os.replace(tmp, CONFIG_PATH)
-
-
 def save_config(cfg: dict) -> None:
-    _write_json(cfg)
+    """봇 상태만 swing_state.json 에 저장.
+
+    swing_config.json(사용자 설정)은 절대 쓰지 않는다 — 봇/사용자 파일이 분리되어
+    git pull 충돌이 상태를 덮어쓰는 문제가 원천 차단된다.
+    """
+    state = {"POSITIONS": {}}
+    for ticker, pos in cfg.get("POSITIONS", {}).items():
+        # None 값(예: 아직 푸시를 안 보낸 SELL_PUSH_LAST_AT)은 파일에 쓰지 않는다
+        st = {k: pos[k] for k in _STATE_KEYS if k in pos and pos[k] is not None}
+        if st:
+            state["POSITIONS"][ticker] = st
+    _write_json(STATE_PATH, state)
 
 
 def _resolve_discord(cfg: dict) -> tuple[str, str]:

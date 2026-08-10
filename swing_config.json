@@ -12,25 +12,13 @@
             "ENABLED": true,
             "LABEL": "TQQQ",
             "BUY_PRICE": null,
-            "SHARES": null,
-            "SELL_ALARM_SENT": false,
-            "SELL_IMMINENT_SENT": false,
-            "ZONE_ALERTS": {
-                "hit": [],
-                "imminent": []
-            }
+            "SHARES": null
         },
         "SOXL": {
             "ENABLED": true,
             "LABEL": "SOXL",
             "BUY_PRICE": null,
-            "SHARES": null,
-            "SELL_ALARM_SENT": false,
-            "SELL_IMMINENT_SENT": false,
-            "ZONE_ALERTS": {
-                "hit": [],
-                "imminent": []
-            }
+            "SHARES": null
         }
     }
 }

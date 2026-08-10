@@ -70,11 +70,13 @@ jobs:
           [ -f "swing_dashboard.html" ] && cp swing_dashboard.html /tmp/swing_dash.html
           [ -f "swing_dashboard.html" ] && git checkout -- swing_dashboard.html
 
-          # 상태 파일만 커밋 (로그/히스토리는 저장하지 않음)
-          [ -f "swing_config.json" ] && git add swing_config.json
+          # 봇 전용 상태 파일만 커밋 — 설정(swing_config.json)은 사용자 소유라 건드리지 않는다.
+          # 상태/설정이 별도 파일로 분리되어 봇·사용자 git 충돌이 상태를 유실시킬 수 없다.
+          [ -f "swing_state.json" ] && git add swing_state.json
 
           git commit -m "update: swing-state $(date +'%Y-%m-%d')" || echo "No changes to commit"
-          # -X theirs: 충돌 시 원격(사람) 버전을 유지 — 봇의 스테일 상태는 버리고 다음 실행에서 재생성.
+          # -X theirs: 안전망 — 상태가 별도 파일(swing_state.json)에 있어 사용자 설정과
+          # 충돌할 일이 없지만, 만에 하나를 대비해 원격(사람) 버전을 유지한다.
           # || true: 일시적 실패(네트워크 등) 시에도 push는 계속 시도해 갱신 유실을 방지
           git pull --rebase -X theirs || true
           git push
