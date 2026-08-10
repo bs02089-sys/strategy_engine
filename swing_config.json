@@ -1,8 +1,8 @@
 {
-    "_NOTE": "나무증권 앱 별도 계좌(스윙 전용) 공용 설정 — 장기 투자(LS증권, DCA_MA_strategy.py + portfolio_config.json)와 분리 운용. 매수: ATH 대비 MDD 구간(-5%~-95% 5% 단위), 매도: 매수가 대비 +20% (SWING_TARGET_PCT — 앱 기본 선택값도 이 값을 읽음). 개인 매수 정보(BUY_PRICE/SHARES)는 swing_personal.json 에 기록한다 (공용 알림 노출 방지). (JSON 주석 불가로 _NOTE 메타 키로 기록 — 엔진은 무시)",
+    "_NOTE": "나무증권 앱 별도 계좌(스윙 전용) 공용 설정 — 장기 투자(LS증권, DCA_MA_strategy.py + portfolio_config.json)와 분리 운용. [세븐 스플릿 전략] 매수: ATH 대비 -15%~-45% 5% 단위 7구간 (15/20/25/30/35/40/45% — 계좌 1~7번 각 $500 대응), 매도: 매수가 대비 +20% (SWING_TARGET_PCT — 앱 기본 선택값도 이 값을 읽음). 개인 매수 정보(BUY_PRICE/SHARES)는 swing_personal.json 에 기록한다 (공용 알림 노출 방지). (JSON 주석 불가로 _NOTE 메타 키로 기록 — 엔진은 무시)",
     "ENABLED": true,
-    "MDD_START_PCT": 5,
-    "MDD_END_PCT": 95,
+    "MDD_START_PCT": 15,
+    "MDD_END_PCT": 45,
     "MDD_STEP_PCT": 5,
     "SWING_TARGET_PCT": 20,
     "IMMINENT_GAP_PCT": 5,
