@@ -414,6 +414,9 @@ def get_period_ath(ticker: str, lookback_days: int = 252, max_retries: int = 3) 
       - Close prices (종가 기준)
       - auto_adjust=True (주식분할/배당 조정 → 과거 데이터와 연속성 유지)
 
+    swing_alerter.get_ath() 와 동일 기준(배당 조정 종가) — 전고점 표시가
+    TradingView 등 조정가 차트와 일치한다 (예: TQQQ 2026-06-02 $87.02).
+
     Same calendar-day buffering approach as _fetch_closes_for_lookback() so
     yfinance's calendar-day `period` still yields enough trading days.
     """
