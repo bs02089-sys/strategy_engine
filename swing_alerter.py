@@ -122,7 +122,10 @@ def _normalize_lots(pp: dict) -> list[dict]:
     """개인 파일의 LOTS(신형 — 세븐 스플릿 7계좌) 또는 BUY_PRICE/SHARES(구형 단일)를
     정규화된 로트 리스트로 변환. 미입력 계좌(BUY_PRICE/SHARES 모두 null)는 제외.
 
-    반환: [{account, buy_price, shares}, ...]  (입력된 계좌만)
+    주수(SHARES)는 정수로만 기록한다 — 나무증권 등 정수 주 단위 매수 대응.
+    소수 입력 시 **내림(floor)** — 반올림하면 예산($500)을 넘는 주수가 기록될 수 있기 때문
+    (예: $500 ÷ $73.97 = 6.76 → 6주만 실제 매수 가능).
+    반환: [{account, buy_price, shares}, ...]  (입력된 계좌만, shares 는 정수)
     """
     lots = pp.get("LOTS")
     if isinstance(lots, list) and lots:
@@ -135,7 +138,7 @@ def _normalize_lots(pp: dict) -> list[dict]:
             out.append({
                 "account": int(lot.get("ACCOUNT") or i),
                 "buy_price": float(bp) if bp is not None else None,
-                "shares": float(sh) if sh is not None else 0.0,
+                "shares": float(int(sh)) if sh is not None else 0.0,
             })
         return out
     if pp.get("BUY_PRICE") is not None or pp.get("SHARES") is not None:
@@ -143,7 +146,7 @@ def _normalize_lots(pp: dict) -> list[dict]:
         return [{
             "account": 1,
             "buy_price": float(pp["BUY_PRICE"]) if pp.get("BUY_PRICE") is not None else None,
-            "shares": float(pp["SHARES"]) if pp.get("SHARES") is not None else 0.0,
+            "shares": float(int(pp["SHARES"])) if pp.get("SHARES") is not None else 0.0,
         }]
     return []
 

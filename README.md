@@ -516,8 +516,8 @@ python3 DCA_MA_strategy.py --signal --discord --all  # TQQQ+SOXL 단일 메시�
     "POSITIONS": {
         "TQQQ": {
             "LOTS": [
-                { "ACCOUNT": 1, "BUY_PRICE": 73.97, "SHARES": 6.76 },
-                { "ACCOUNT": 2, "BUY_PRICE": 70.00, "SHARES": 7.14 },
+                { "ACCOUNT": 1, "BUY_PRICE": 73.97, "SHARES": 6 },
+                { "ACCOUNT": 2, "BUY_PRICE": 70.00, "SHARES": 7 },
                 { "ACCOUNT": 3, "BUY_PRICE": null, "SHARES": null },
                 { "ACCOUNT": 4, "BUY_PRICE": null, "SHARES": null },
                 { "ACCOUNT": 5, "BUY_PRICE": null, "SHARES": null },
@@ -529,6 +529,8 @@ python3 DCA_MA_strategy.py --signal --discord --all  # TQQQ+SOXL 단일 메시�
 }
 ```
 
+- **주수(SHARES)는 정수로만 기록** — 나무증권 등 정수 주 단위 매수 대응. 소수 입력 시 내림(버림):
+  $500 ÷ 매수가 = 6.76 → **6주** (반올림 금지 — 예산 초과로 실제 매수 불가).
 - 계좌별 `BUY_PRICE`(실제 매수가) × `(1 + SWING_TARGET_PCT/100)` → **계좌별 매도 목표**가 자동 계산되고,
   콘솔에서 계좌별 상태(🚨 매도/🚀 임박/⏳ 대기)와 예상 손익을 확인할 수 있습니다. 미입력 계좌는 무시됩니다.
 - 구형 단일 키(`BUY_PRICE`/`SHARES` 직접 입력)도 지원됩니다 (1번 계좌 로트로 승격 — 하위 호환).
