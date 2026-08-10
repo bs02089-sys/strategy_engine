@@ -158,7 +158,7 @@ footer{color:#4b5563;font-size:12px;text-align:center;margin-top:8px;line-height
 <body>
 <header>
   <h1>📈 스윙 투자 알리미</h1>
-  <div class="sub">업데이트 2026-08-10 08:07 · 종가 기준 2026-08-10 04:07 (미국)<span class="pages">· <a href="https://bs02089-sys.github.io/strategy_engine/" target="_blank" rel="noopener">🌐 라이브 열기</a></span></div>
+  <div class="sub">업데이트 2026-08-10 08:18 · 종가 기준 2026-08-10 04:18 (미국)<span class="pages">· <a href="https://bs02089-sys.github.io/strategy_engine/" target="_blank" rel="noopener">🌐 라이브 열기</a></span></div>
   <div class="chips">
     <button id="push-btn" class="push-btn" disabled>🔔 알림 받기</button>
     <span class="chip gray" id="sell-alarm-cnt">🚨 매도 알람 0</span>
@@ -263,25 +263,54 @@ footer{color:#4b5563;font-size:12px;text-align:center;margin-top:8px;line-height
       return v;
     }
 
+    // 페이지 로드 시 최초 판정에서만 진동 — 매수 예정가 입력/수익률 버튼 조작으로 상태가
+    // 오락가락해도 잡음 진동이 울리지 않게 한다 (시장 가격은 서버 렌더 → 새로고침 시 갱신).
+    var vibed = false;
+
+    // 매도 알람/임박 시 스마트폰 진동 (Vibration API) — Android Chrome만 지원, iOS는 미지원(무시).
+    // localStorage(swing_vibe_{TICKER})에 직전 상태를 기록해 5분 자동 새로고침 등으로 같은 상태가
+    // 반복돼도 재진동하지 않는다. 🚨 매도는 강한 3연타, 🚀 임박은 짧은 2연타.
+    function vibrateSell(ticker, stateClass) {
+      if (vibed) return;
+      vibed = true;
+      try {
+        if (!navigator.vibrate) return;                      // 미지원 브라우저
+        var key = 'swing_vibe_' + ticker;
+        var prev = localStorage.getItem(key);
+        localStorage.setItem(key, stateClass);
+        if (prev === stateClass) return;                     // 동일 상태 반복 — 재진동 없음
+        if (stateClass === 'red' && prev !== 'red') {
+          navigator.vibrate([300, 100, 300, 100, 600]);      // 🚨 매도 — 강한 3연타
+        } else if (stateClass === 'amber' && prev !== 'red') {
+          navigator.vibrate([150, 100, 300]);                // 🚀 임박 — 짧은 2연타
+        }
+      } catch (e) { /* 진동 미지원 — 무시 */ }
+    }
+
     // 사용자별 매도 상태 — 내 매수 예정가 × (1 + 예상 수익률) 기준으로 항상 재판정
     function applySellStatus() {
       if (!chip || isNaN(close)) return;
       var target = buyBase() * (1 + sellPct / 100);
       var remain = (target - close) / target * 100;   // 목표까지 남은 % (양수)
       chip.classList.remove('red', 'amber', 'gray');
+      var stateClass;
       if (close >= target - 1e-9) {
+        stateClass = 'red';
         chip.classList.add('red');
         chip.textContent = '🚨 매도';
         chip.style.display = '';                       // 알람 상태만 표시
       } else if (remain <= gapPct) {
+        stateClass = 'amber';
         chip.classList.add('amber');
         chip.textContent = '🚀 임박';
         chip.style.display = '';                       // 임박 상태만 표시
       } else {
+        stateClass = 'gray';
         chip.classList.add('gray');
         chip.textContent = '⏳ 대기';
         chip.style.display = 'none';                   // 기본(대기) 상태 — 칩 숨김
       }
+      vibrateSell(ticker, stateClass);
     }
 
     // 상단 '🚨 매도 알람 N' — 사용자별 판정 결과로 카운트 갱신
