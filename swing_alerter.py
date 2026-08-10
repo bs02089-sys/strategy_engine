@@ -810,6 +810,10 @@ footer{color:#4b5563;font-size:12px;text-align:center;margin-top:8px;line-height
 .plan-head .pt{font-size:22px;font-weight:700;color:var(--text)}
 .plan-head .ps{font-size:12px;color:#5b6572}
 .plan-acc{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.plan-hd{display:flex;align-items:center;gap:8px;margin-bottom:4px;font-size:11px;color:#5b6572}
+.plan-hd .hd-no{width:26px;flex-shrink:0;text-align:center}
+.plan-hd .lbl{flex:1;min-width:0}
+.plan-hd .acc-sell{color:#5b6572;font-weight:400;width:94px}
 .acc-no{width:26px;height:26px;flex-shrink:0;display:flex;align-items:center;justify-content:center;
   font-size:12px;font-weight:800;color:var(--muted);border:1px solid var(--border);
   border-radius:999px;background:#1c2533}
@@ -963,7 +967,11 @@ _PLAN_JS = """
     function rowState(row) {
       var n = row.dataset.acc;
       var v = parseFloat(row.querySelector('.plan-buy-input').value);
-      if (isNaN(v) || v <= 0) return { n: n, active: false };
+      if (isNaN(v) || v <= 0) {
+        // 미입력 — 현재가 기준 매도 예정가만 표시 (저장/태그는 제외 — 푸시 오발송 방지)
+        if (isNaN(close)) return { n: n, active: false, sell: null };
+        return { n: n, active: false, buy: close, sell: close * (1 + sellPct / 100), state: 'gray' };
+      }
       var sell = v * (1 + sellPct / 100);
       var remain = (sell - close) / sell * 100;   // 목표까지 남은 % (양수)
       var state = 'gray';
@@ -1036,7 +1044,8 @@ _PLAN_JS = """
         var sellEl = row.querySelector('.acc-sell');
         var r = rowState(row);
         if (!r.active) {
-          sellEl.textContent = '—';
+          // 미입력 — 현재가 기준 매도 예정가 표시 (푸시용 태그/저장은 하지 않음)
+          sellEl.textContent = r.sell ? '$' + r.sell.toFixed(2) : '—';
           localStorage.removeItem('swing_buy_' + ticker + '_' + r.n);
           setSellTag(r.n, null);                       // 미입력 계좌 — 태그 제거 (푸시 제외)
           return;
@@ -1163,11 +1172,19 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
 
         # 계좌별 매수 예정가 입력 7행 — 세븐 스플릿 7개 계좌(각 $500). 미입력 계좌는 무시되고
         # 입력된 계좌만 매도 예정가 계산 + OneSignal 태그(swing_sell_{TICKER}_{N}) 동기화.
-        acc_rows = "\n".join(
+        # 계좌별 매도 예정가를 서버에서도 사전 렌더 (JS 로드 전에도 보이도록) — 미입력 = 현재가 기준
+        sell_default = st['price'] * (1 + float(cfg.get("SWING_TARGET_PCT", 10)) / 100.0)
+        acc_rows = (
+            '    <div class="plan-hd">\n'
+            '      <span class="hd-no">#</span>\n'
+            '      <span class="lbl">매수 예정가 (미입력 = 현재가)</span>\n'
+            '      <span class="acc-sell">매도 예정가</span>\n'
+            '    </div>\n'
+        ) + "\n".join(
             f'''    <div class="plan-acc" data-acc="{n}">
       <span class="acc-no">{n}</span>
       <input class="plan-buy-input" type="number" min="0" step="0.01" placeholder="{st['price']:.2f}">
-      <span class="acc-sell">—</span>
+      <span class="acc-sell">${sell_default:,.2f}</span>
     </div>'''
             for n in range(1, 8)
         )
