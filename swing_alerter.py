@@ -57,7 +57,7 @@ NY_TZ = ZoneInfo("America/New_York")
 
 # swing_state.json 에 보관하는 봇 전용 상태 키 (POSITIONS 내부) —
 # swing_config.json(사용자 설정)과 분리해 봇/사용자 커밋 충돌로 상태가 유실되지 않게 한다.
-_STATE_KEYS = ("SELL_ALARM_SENT", "SELL_IMMINENT_SENT", "SELL_PUSH_LAST_AT", "ZONE_ALERTS", "ATH_CYCLE_BASE", "CYCLE_RESET_DONE")
+_STATE_KEYS = ("SELL_ALARM_SENT", "SELL_IMMINENT_SENT", "SELL_PUSH_LAST_AT", "ZONE_ALERTS", "ATH_CYCLE_BASE", "CYCLE_RESET_DONE", "ZONE_PUSH_PENDING")
 _STATE_DEFAULTS = {
     "SELL_ALARM_SENT": False,
     "SELL_IMMINENT_SENT": False,
@@ -67,6 +67,9 @@ _STATE_DEFAULTS = {
     "ATH_CYCLE_BASE": None,
     # CYCLE_RESET_DONE: 전 계좌 매도 목표 도달(사이클 완료) 시 자동 리셋의 중복 방지 플래그 (2026-08-11)
     "CYCLE_RESET_DONE": False,
+    # ZONE_PUSH_PENDING: 매수 구간 푸시 실패 시 대기 큐 {msgs: [...], date: "YYYY-MM-DD"} —
+    # 다음 폴링에서 재시도, 하루 지난 대기분은 폐기 (스테일 방지). None 기본값 → 파일 노이즈 없음 (2026-08-11)
+    "ZONE_PUSH_PENDING": None,
 }
 
 # ── 기본 설정 (swing_config.json 에서 덮어쓸 수 있음) ──────────────
@@ -358,6 +361,67 @@ def send_user_sell_pushes(statuses: list[dict], cfg: dict) -> bool:
     return changed
 
 
+def send_zone_pushes(zone_msgs: dict[str, list[str]], cfg: dict) -> None:
+    """매수 구간 도달(🔻)/임박(📡) 푸시 — 앱을 연 구독자(swing_zone_{TICKER} 태그)에게만 필터 발송.
+
+    전역 푸시가 아니라 태그 필터 기반 — AGENTS.md '전역 푸시 금지' 규칙과 충돌하지 않는다.
+    매수 구간은 ATH(공개 정보) 기준이므로 개인 정보 노출이 없다.
+
+    중복 방지/재시도: 새 이벤트는 detect_alerts 의 ZONE_ALERTS 상태가 1회만 생성하고,
+    발송 실패(비 2xx) 시 메시지를 ZONE_PUSH_PENDING(봇 상태)에 보관해 다음 폴링에서 재시도한다.
+    대기분은 당일(미국 날짜)까지만 재시도 — 하루가 지나면 폐기해 무기한 재시도·스테일 발송을 막는다
+    (매도 푸시의 SELL_PUSH_LAST_AT 날짜 경계와 동일 취지 — 푸시가 주 채널인 지인 누락 방지).
+    """
+    app_id, api_key = _resolve_onesignal(cfg)
+    if not app_id or not api_key:
+        return
+    pages = (cfg.get("PAGES_URL") or "").strip()
+    today = datetime.now(NY_TZ).strftime("%Y-%m-%d")
+    changed = False
+    # 발송 대상 티커 = 신규 이벤트 + 실패 대기 중인 티커
+    tickers = set(zone_msgs)
+    for ticker, pos in cfg.get("POSITIONS", {}).items():
+        if pos.get("ZONE_PUSH_PENDING"):
+            tickers.add(ticker)
+    for ticker in sorted(tickers):
+        pos = cfg["POSITIONS"].get(ticker)
+        pending = (pos or {}).get("ZONE_PUSH_PENDING")
+        p_msgs: list[str] = []
+        if pending:
+            if pending.get("date") == today:
+                p_msgs = pending.get("msgs") or []
+            else:
+                # 지난 날짜 대기분 폐기 — 가격 정보가 스테일해진 알림은 발송하지 않는다
+                pos.pop("ZONE_PUSH_PENDING", None)
+                changed = True
+                print(f"   📭 {ticker} 만료 매수 구간 푸시 폐기 (일자 {pending.get('date')})")
+        msgs = list(p_msgs) + list(zone_msgs.get(ticker) or [])
+        if not msgs:
+            continue
+        # Discord 마크다운(**) 제거 — 푸시 알림 본문 정제. 타이틀은 도달 포함 여부로 아이콘 선택.
+        body = "\n".join(msgs).replace("**", "")
+        has_hit = any("매수 구간 도달" in m for m in msgs)
+        filters = [{"field": "tag", "key": f"swing_zone_{ticker}", "relation": "exists"}]
+        code, resp = send_onesignal_push(
+            app_id, api_key,
+            title=f"{'🔻' if has_hit else '📡'} {ticker} 매수 구간 신호",
+            body=body,
+            url=pages or None,
+            filters=filters,
+        )
+        if str(code).startswith("2"):
+            # 성공 → 대기 큐 제거 (신규 메시지는 이미 전송됨 — 재발송 없음)
+            if pos and p_msgs:
+                pos.pop("ZONE_PUSH_PENDING", None)
+                changed = True
+        elif pos:
+            # 실패 → 대기 큐 보관 (신규+기존, 당일 한정) — 다음 폴링에서 재시도
+            pos["ZONE_PUSH_PENDING"] = {"msgs": msgs, "date": today}
+            changed = True
+        print(f"   📣 {ticker} 매수 구간 푸시: HTTP {code} — {resp[:80]}")
+    if changed:
+        save_config(cfg)
+
 # ═══════════════════════════════════════════════════════════
 # 데이터 조회
 # ═══════════════════════════════════════════════════════════
@@ -642,6 +706,7 @@ def _handle_ath_cycle_reset(st: dict, pos: dict, zone_alerts: dict, msgs: list[s
     elif ath > float(base) * 1.01:
         zone_alerts["hit"] = []
         zone_alerts["imminent"] = []
+        pos.pop("ZONE_PUSH_PENDING", None)   # 죽은 사이클의 미전송 푸시 대기 큐 정리 (2026-08-11)
         pos["ATH_CYCLE_BASE"] = round(ath, 2)
         msgs.append(
             f"🆕 **{st['ticker']} 신규 전고가 갱신 ${ath:,.2f} ({st.get('ath_date', '')})**\n"
@@ -649,14 +714,19 @@ def _handle_ath_cycle_reset(st: dict, pos: dict, zone_alerts: dict, msgs: list[s
         )
 
 
-def detect_alerts(st: dict, pos: dict, cfg: dict) -> list[str]:
+def detect_alerts(st: dict, pos: dict, cfg: dict) -> tuple[list[str], list[str]]:
     """새로 도달한 매수 구간 / 임박 / 매도 알림을 감지해 메시지 목록 반환.
 
+    반환: (전체 메시지, 매수 구간 푸시 전용 메시지)
+    - 전체: Discord 발송용 — 구간 도달/임박/매도/신규 전고가
+    - 매수 구간 푸시 전용: 🔻 도달/📡 임박만 — ATH(공개 정보) 기준이라 앱 구독자 전원에게
+      사용자별 태그 푸시로 발송 가능 (매도·신규 전고가는 개인 정보/노이즈라 제외, 2026-08-11)
     pos(ZONE_ALERTS/SELL_*) 상태를 갱신하므로 재폴링 시 중복 알림이 없습니다.
     """
     msgs: list[str] = []
+    zone_msgs: list[str] = []
     if st.get("error"):
-        return msgs
+        return msgs, zone_msgs
     zone_alerts = st["zone_alerts"]
     # 신규 전고가 확인 → 기록된 구간 상태 리셋 (알림 삼킴 방지)
     _handle_ath_cycle_reset(st, pos, zone_alerts, msgs)
@@ -672,10 +742,10 @@ def detect_alerts(st: dict, pos: dict, cfg: dict) -> list[str]:
         if lvl["hit"] and p not in zone_alerts["hit"]:
             zone_alerts["hit"].append(p)
             zone_alerts["imminent"] = [x for x in zone_alerts["imminent"] if x != p]
-            msgs.append(
-                f"🔻 **{tick} -{p:.0f}% 매수 구간 도달**\n"
-                f"현재가 ${price:.2f} | 목표가 ${lvl['price']:.2f} (하락 {st['dd_pct']:.1f}%)"
-            )
+            msg = (f"🔻 **{tick} -{p:.0f}% 매수 구간 도달**\n"
+                   f"현재가 ${price:.2f} | 목표가 ${lvl['price']:.2f} (하락 {st['dd_pct']:.1f}%)")
+            msgs.append(msg)
+            zone_msgs.append(msg)
 
     # 2) 다음 구간 임박
     nxt = st["next_zone"]
@@ -683,10 +753,10 @@ def detect_alerts(st: dict, pos: dict, cfg: dict) -> list[str]:
         remain = nxt["pct"] - dd_abs          # 다음 구간까지 남은 %p
         if 0 <= remain <= gap_p:
             zone_alerts["imminent"].append(nxt["pct"])
-            msgs.append(
-                f"📡 **{tick} -{nxt['pct']:.0f}% 매수 구간 임박**\n"
-                f"현재 하락 {st['dd_pct']:.1f}% (남은 {remain:.1f}%p) | 목표가 ${nxt['price']:.2f}"
-            )
+            msg = (f"📡 **{tick} -{nxt['pct']:.0f}% 매수 구간 임박**\n"
+                   f"현재 하락 {st['dd_pct']:.1f}% (남은 {remain:.1f}%p) | 목표가 ${nxt['price']:.2f}")
+            msgs.append(msg)
+            zone_msgs.append(msg)
 
     # 3) 매도 목표 임박 — 개인 포지션(_PERSONAL)은 공용 알림에서 제외
     #    (내 매도 목표가 Discord/전역 푸시로 지인에게 노출되는 것 방지 — 개인은 앱 태그 푸시로 수신)
@@ -707,7 +777,7 @@ def detect_alerts(st: dict, pos: dict, cfg: dict) -> list[str]:
             f"현재가 ${price:.2f} ≥ 매도 목표 ${st['sell_target']:.2f}\n"
             f"매도 검토 필요 (스윙 목표 수익률 {cfg.get('SWING_TARGET_PCT', 10):+.0f}%)"
         )
-    return msgs
+    return msgs, zone_msgs
 
 
 # ═══════════════════════════════════════════════════════════
@@ -948,6 +1018,14 @@ OneSignalDeferred.push(async function(OneSignal) {
         if (on) btn.classList.add('on'); else btn.classList.remove('on');
       });
     }
+    // 매수 구간 푸시 태그 자동 등록 — 앱을 연 구독자는 swing_zone_{TICKER} 태그를 가져
+    // 서버가 매수 구간 도달(🔻)/임박(📡)을 사용자별 푸시로 발송한다 (전역 푸시 아님 — 2026-08-11).
+    // 구독 전에도 태그는 등록되며, 알림을 허용한 시점부터 바로 수신된다.
+    document.querySelectorAll('.card[data-ticker]').forEach(function(card) {
+      try {
+        OneSignal.User.addTag('swing_zone_' + card.dataset.ticker, '1');
+      } catch (e) { /* OneSignal 미설정 — 무시 */ }
+    });
   } catch (e) {
     // init/구독 조회 실패 시 원인을 화면+콘솔에 표시 (스마트폰 PWA에도 보이도록)
     console.error('OneSignal 초기화 실패:', e);
@@ -1542,6 +1620,7 @@ def auto_cycle_reset(st: dict, pos: dict) -> tuple[str | None, bool]:
     pos["SELL_IMMINENT_SENT"] = False
     pos["ZONE_ALERTS"] = {"hit": [], "imminent": []}
     pos.pop("ATH_CYCLE_BASE", None)
+    pos.pop("ZONE_PUSH_PENDING", None)   # 이전 사이클의 미전송 푸시 대기 큐 정리 (2026-08-11)
     pos["CYCLE_RESET_DONE"] = True
     return (f"🔄 **{st['ticker']} 전 계좌 매도 목표 도달 — 새 사이클 자동 리셋 완료**\n"
             "   매수 구간/매도 알림 상태가 초기화되었습니다.\n"
@@ -1557,6 +1636,7 @@ def reset_position(ticker: str) -> None:
     pos["SELL_IMMINENT_SENT"] = False
     pos["ZONE_ALERTS"] = {"hit": [], "imminent": []}
     pos.pop("ATH_CYCLE_BASE", None)   # 새 사이클 기준도 초기화 (다음 실행에서 재설정)
+    pos.pop("ZONE_PUSH_PENDING", None)  # 미전송 매수 구간 푸시 대기 큐 정리 (2026-08-11)
     pos["CYCLE_RESET_DONE"] = False  # 자동 리셋 감지 재무장 (2026-08-11)
     save_config(cfg)
     print(f"✅ {ticker} 알림 플래그 초기화 완료 — 새 포지션 진입 후 사용하세요.")
@@ -1625,16 +1705,22 @@ def main() -> None:
         # 주의: _compute_all 이 비활성 포지션을 건너뛰므로 zip 대신
         # statuses 의 ticker 로 포지션을 찾아야 상태 기록이 틀어지지 않는다.
         alerts: list[str] = list(cycle_msgs)   # 사이클 자동 리셋 알림 포함
+        zone_msgs: dict[str, list[str]] = {}   # 매수 구간 푸시용 (티커별 — 2026-08-11)
         changed = state_changed
         for st in statuses:
             ticker = st["ticker"]
             pos = cfg["POSITIONS"][ticker]
-            msgs = detect_alerts(st, pos, cfg)
+            msgs, z_msgs = detect_alerts(st, pos, cfg)
+            if z_msgs:
+                zone_msgs[ticker] = z_msgs
             if msgs:
                 changed = True
                 alerts.extend([f"**{ticker}**"] + msgs)
         if changed:
             save_config(cfg)  # 알림 플래그 영속화 (중복 방지)
+        # 매수 구간 도달/임박 푸시 — Discord(공용)와 별개로 앱 구독자(swing_zone_{TICKER} 태그)에게.
+        # 새 이벤트만 담겨 있어 중복 발송이 없다 (ZONE_ALERTS 상태가 dedup 담당).
+        send_zone_pushes(zone_msgs, cfg)
         # 장중 실시간 대시보드 갱신 — 디스패치마다 신선한 HTML 을 만들어 gh-pages 에 재배포한다.
         # Discord 발송보다 먼저 수행해 알림 전송 실패가 대시보드 갱신을 막지 않는다.
         # (2026-08-11: 스마트폰 앱이 장중 가격을 따라가도록)

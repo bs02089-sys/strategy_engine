@@ -48,6 +48,12 @@ Not lazy about: input validation at trust boundaries, error handling that preven
   ⚠️ **전역 OneSignal 푸시 제거 (2026-08-10)**: `--monitor`가 신호 요약을 구독자 전체에게 발송하던
   동작은 제거됨 — 지인에게 내 매수 정보 기반 신호가 노출되는 것을 차단. 개인 알림은 사용자별 태그
   푸시(`send_user_sell_pushes`)로만 발송. 다시 전역 푸시를 추가하지 말 것.
+  📣 **매수 구간 푸시 (2026-08-11)**: 매수 구간 도달(🔻)/임박(📡)은 Discord뿐 아니라 앱 구독자
+  (앱을 연 기기 — `swing_zone_{TICKER}` 태그 자동 등록)에게도 사용자별 태그 필터 푸시
+  (`send_zone_pushes`)로 발송 — 디스코드 미가입 지인도 스마트폰으로 수신 가능. 전역 푸시가 아니라
+  태그 필터 기반이라 위 '전역 푸시 금지' 규칙과 충돌하지 않는다. 매수 구간은 ATH(공개 정보) 기준이라
+  개인 정보 노출이 없다. 중복 방지는 `ZONE_ALERTS` 상태(detect_alerts)가 담당 — 신규 이벤트만 푸시하고,
+  발송 실패 시 `ZONE_PUSH_PENDING` 대기 큐(당일 한정)에 보관해 다음 폴링에서 재시도, 하루 지난 대기분은 폐기한다.
   알림은 Discord, 실시간은 cron-job.org `swing-monitor` 디스패치, 모바일 대시보드는
   `--serve`/`swing_dashboard.html` + GitHub Pages(`gh-pages` 브랜치 자동 배포).
   ⚠️ **장중 실시간 표시 (2026-08-11)**: 앱/대시보드의 **현재가 표시만** 장중에
