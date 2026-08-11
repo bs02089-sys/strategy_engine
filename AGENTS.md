@@ -59,7 +59,7 @@ Not lazy about: input validation at trust boundaries, error handling that preven
   스마트폰 앱이 장중 갱신된다 (배포 가드: 대시보드 생성 실패 시 배포 생략).
   ⚠️ **봇은 `swing_dashboard.html`을 main에 커밋하지 않는다** — 생성 파일(헤더 시각 등)이 봇/사용자
   양쪽에서 재생성되어 git pull 충돌을 반복하므로, 워크플로우가 생성한 신선한 사본을 `gh-pages`에만
-  배포한다 (`swing_alerter.yml` Sync 단계의 cp/checkout 참고).
+  배포한다 (`swing_alerter.yml` Sync 단계의 cp 참고 — 미추적 파일이라 `git checkout --` 금지, pathspec 오류).
   **아래 '스윙 봇(swing)' 제거 항목과 무관한 별개 기능**이며 혼동하지 말 것.
 - **현재 전략 규칙**: LOC ↔ ATH_DCA 듀얼 모드 · MA 레짐 필터(LOC 모드 한정) · ATH 하락분할 DCA(3분할, 3차 = Stage 5 바닥) ·
   비상 모드 종료(RECOVERY_REENTRY: 미사용 분할 ≥1 + 30영업일 + DD ≤ TRIGGER_1×50% + MA20>MA60).
