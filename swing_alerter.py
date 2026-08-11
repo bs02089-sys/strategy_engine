@@ -1291,7 +1291,13 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
         # 현재 종가는 바로 위 큰 가격(36px)에 이미 표시되므로 메타 줄에서 반복하지 않는다
         # ('종가 $X (date)' 중복 제거). 전일 종가 조회 실패 시에만 현재 종가+날짜로 폴백.
         if st.get("live"):
-            meta_src = f'🟢 실시간 ${st["price"]:,.2f} ({st["as_of"]})'
+            # 장중 실시간 줄에도 전일 종가 값을 함께 표시 — 비교 기준이 보이도록 (2026-08-12)
+            pc = st.get("prior_close")
+            if pc and pc > 0:
+                meta_src = (f'🟢 실시간 ${st["price"]:,.2f} ({st["as_of"]}) · '
+                            f'전일 종가 ${pc:,.2f}')
+            else:
+                meta_src = f'🟢 실시간 ${st["price"]:,.2f} ({st["as_of"]})'
         else:
             pc = st.get("prior_close")
             if pc and pc > 0:
