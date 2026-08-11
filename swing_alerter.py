@@ -1287,16 +1287,16 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
             day_cls = "up" if dc > 0 else ("down" if dc < 0 else "flat")
             day_sign = "▲ " if dc > 0 else ("▼ " if dc < 0 else "")
             day_span = f' 대비 <span class="dd {day_cls}">{day_sign}{abs(dc):.1f}%</span>'
-        # 현재가 출처 줄 — 종가 기준이면 실제 직전 거래일 종가를 '전일 종가'로 표시한다.
-        # (기존에는 현재 종가를 '전일 종가' 라벨로 잘못 표시 — 2026-08-12 수정)
+        # 현재가 출처 줄 — 종가 기준이면 실제 직전 거래일 종가만 표시한다 (2026-08-12).
+        # 현재 종가는 바로 위 큰 가격(36px)에 이미 표시되므로 메타 줄에서 반복하지 않는다
+        # ('종가 $X (date)' 중복 제거). 전일 종가 조회 실패 시에만 현재 종가+날짜로 폴백.
         if st.get("live"):
             meta_src = f'🟢 실시간 ${st["price"]:,.2f} ({st["as_of"]})'
         else:
             pc = st.get("prior_close")
             if pc and pc > 0:
                 pcd = st.get("prior_close_date") or ""
-                meta_src = (f'종가 ${st["price"]:,.2f} ({st["as_of"]}) · '
-                            f'전일 종가 ${pc:,.2f}' + (f' ({pcd})' if pcd else ''))
+                meta_src = f'전일 종가 ${pc:,.2f}' + (f' ({pcd})' if pcd else '')
             else:
                 meta_src = f'종가 ${st["price"]:,.2f} ({st["as_of"]})'
         imminent = (not st["sell_ready"] and st["sell_target"] is not None
