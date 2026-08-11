@@ -5,8 +5,8 @@
             "LOTS": [
                 {
                     "ACCOUNT": 1,
-                    "BUY_PRICE": null,
-                    "SHARES": null
+                    "BUY_PRICE": 73.97,
+                    "SHARES": 6
                 },
                 {
                     "ACCOUNT": 2,
