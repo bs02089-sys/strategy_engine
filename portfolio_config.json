@@ -83,7 +83,7 @@
                 "MA_CONFIRM": true
             },
             "ATH_DCA_ENTERED_ON": "2026-07-28",
-            "ATH_DCA_WAIT_SENT": "2026-08-10|• ⏳ **SOXL 비상 모드 유지:** D+9/30 영업일 (남은 21영업일 | 진입 2026-07-28, 경과 13일)",
+            "ATH_DCA_WAIT_SENT": "2026-08-11|• ⏳ **SOXL 비상 모드 유지:** D+10/30 영업일 (남은 20영업일 | 진입 2026-07-28, 경과 14일)",
             "MA_FILTER_CONFIG_FINGERPRINT": "250|dca_reset|1.0",
             "MA_FILTER_STATE": {
                 "regime": "above",
