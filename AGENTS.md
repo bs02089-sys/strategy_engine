@@ -57,6 +57,11 @@ Not lazy about: input validation at trust boundaries, error handling that preven
   종가 기준 유지** — `detect_alerts`는 `close_price`를 사용하며, 실시간 값으로 알림
   시점을 흔들지 말 것. `swing-monitor` 디스패치도 대시보드를 재생성·gh-pages 재배포하므로
   스마트폰 앱이 장중 갱신된다 (배포 가드: 대시보드 생성 실패 시 배포 생략).
+  🔄 **사이클 자동 리셋 (2026-08-11)**: LOTS의 전 계좌가 매도 목표(+20%)에 도달하면
+  수동 `--reset` 없이 알림 상태(ZONE_ALERTS/SELL 플래그/ATH_CYCLE_BASE)를 자동 초기화한다
+  (`auto_cycle_reset()` — `CYCLE_RESET_DONE` 플래그로 중복 방지, 매도 미도달 상태가 되면 자동
+  재무장). 신고가 갱신(+1%) 리셋과 별개 동작이며, 봇은 여전히 `swing_personal.json`(사용자 소유)을
+  절대 쓰지 않는다 — 매도 후 LOTS 정리/재기록은 사용자 몫이다. 전 계좌 매도 시 수동 --reset 은 불필요.
   ⚠️ **봇은 `swing_dashboard.html`을 main에 커밋하지 않는다** — 생성 파일(헤더 시각 등)이 봇/사용자
   양쪽에서 재생성되어 git pull 충돌을 반복하므로, 워크플로우가 생성한 신선한 사본을 `gh-pages`에만
   배포한다 (`swing_alerter.yml` Sync 단계의 cp 참고 — 미추적 파일이라 `git checkout --` 금지, pathspec 오류).

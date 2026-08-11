@@ -57,7 +57,7 @@ NY_TZ = ZoneInfo("America/New_York")
 
 # swing_state.json 에 보관하는 봇 전용 상태 키 (POSITIONS 내부) —
 # swing_config.json(사용자 설정)과 분리해 봇/사용자 커밋 충돌로 상태가 유실되지 않게 한다.
-_STATE_KEYS = ("SELL_ALARM_SENT", "SELL_IMMINENT_SENT", "SELL_PUSH_LAST_AT", "ZONE_ALERTS", "ATH_CYCLE_BASE")
+_STATE_KEYS = ("SELL_ALARM_SENT", "SELL_IMMINENT_SENT", "SELL_PUSH_LAST_AT", "ZONE_ALERTS", "ATH_CYCLE_BASE", "CYCLE_RESET_DONE")
 _STATE_DEFAULTS = {
     "SELL_ALARM_SENT": False,
     "SELL_IMMINENT_SENT": False,
@@ -65,6 +65,8 @@ _STATE_DEFAULTS = {
     "ZONE_ALERTS": {"hit": [], "imminent": []},
     # ATH_CYCLE_BASE: None — '부재 = 첫 실행' 계약 (save_config 가 None 을 걸러내므로 파일엔 안 쓰임)
     "ATH_CYCLE_BASE": None,
+    # CYCLE_RESET_DONE: 전 계좌 매도 목표 도달(사이클 완료) 시 자동 리셋의 중복 방지 플래그 (2026-08-11)
+    "CYCLE_RESET_DONE": False,
 }
 
 # ── 기본 설정 (swing_config.json 에서 덮어쓸 수 있음) ──────────────
@@ -1504,6 +1506,48 @@ def print_console(statuses: list[dict], cfg: dict) -> None:
     print("=" * 60)
 
 
+def auto_cycle_reset(st: dict, pos: dict) -> tuple[str | None, bool]:
+    """전 계좌 매도 목표 도달(사이클 완료) 시 알림 상태 자동 리셋 (2026-08-11).
+
+    LOTS 의 모든 계좌가 매도 목표에 도달(sell_ready)하면 reset_position() 과 동일한
+    초기화(SELL 플래그/ZONE_ALERTS/ATH_CYCLE_BASE)를 자동 수행한다 — 매도 후 수동
+    --reset 없이 다음 하락 사이클의 구간 도달/임박 알림이 다시 울리도록 재무장한다.
+
+    - '매도 목표 도달'은 신호(종가 기준)일 뿐 실제 체결 여부는 봇이 모르므로,
+      목표 도달만으로 리셋한다. LOTS(swing_personal.json)는 절대 건드리지 않는다.
+    - CYCLE_RESET_DONE(봇 상태)로 중복 방지 — 리셋 후 LOTS 를 새 포지션으로 갱신해
+      '미도달' 상태가 되면 자동 재무장되어 다음 사이클에서 다시 감지한다.
+    - 엣지(허용): 리셋 후 LOTS 를 갱신하지 않은 채 가격이 매도 목표선을 찔렀다가 다시
+      넘으면 재리셋이 한 번 더 발화할 수 있다 — 동작은 수동 --reset 과 동일하며 무해.
+      LOTS 를 새 포지션으로 갱신하면 정상 재무장된다.
+    - 미입력 계좌만 있거나 포지션(LOTS)이 없으면 아무것도 하지 않는다.
+
+    반환: (알림 메시지 또는 None, 상태 변경 여부 — 변경 시 호출자가 저장해야 함)
+    """
+    if st.get("error"):
+        return None, False
+    open_lots = [l for l in (st.get("lots") or []) if l.get("sell_target")]
+    if not open_lots:
+        return None, False   # 매도 목표가 설정된 계좌 없음 — 판단 불가
+    all_sold = all(l.get("sell_ready") for l in open_lots)
+    if pos.get("CYCLE_RESET_DONE"):
+        if not all_sold:
+            pos["CYCLE_RESET_DONE"] = False   # 재무장 — 다음 사이클에서 다시 감지
+            return None, True
+        return None, False   # 이미 이번 사이클에 리셋 완료 — 중복 방지
+    if not all_sold:
+        return None, False
+    # --reset 과 동일한 초기화
+    pos["SELL_ALARM_SENT"] = False
+    pos["SELL_IMMINENT_SENT"] = False
+    pos["ZONE_ALERTS"] = {"hit": [], "imminent": []}
+    pos.pop("ATH_CYCLE_BASE", None)
+    pos["CYCLE_RESET_DONE"] = True
+    return (f"🔄 **{st['ticker']} 전 계좌 매도 목표 도달 — 새 사이클 자동 리셋 완료**\n"
+            "   매수 구간/매도 알림 상태가 초기화되었습니다.\n"
+            "   새 포지션을 swing_personal.json 과 앱에 기록하고 새 사이클을 시작하세요."), True
+
+
 def reset_position(ticker: str) -> None:
     cfg = load_config()
     if ticker not in cfg.get("POSITIONS", {}):
@@ -1513,6 +1557,7 @@ def reset_position(ticker: str) -> None:
     pos["SELL_IMMINENT_SENT"] = False
     pos["ZONE_ALERTS"] = {"hit": [], "imminent": []}
     pos.pop("ATH_CYCLE_BASE", None)   # 새 사이클 기준도 초기화 (다음 실행에서 재설정)
+    pos["CYCLE_RESET_DONE"] = False  # 자동 리셋 감지 재무장 (2026-08-11)
     save_config(cfg)
     print(f"✅ {ticker} 알림 플래그 초기화 완료 — 새 포지션 진입 후 사용하세요.")
 
@@ -1523,7 +1568,7 @@ def main() -> None:
     parser.add_argument("--monitor", action="store_true", help="실시간 모니터 — 변경분(매수/임박/매도) 알림만 발송")
     parser.add_argument("--serve", nargs="?", const=8080, type=int, metavar="PORT",
                         help="스마트폰용 대시보드 HTTP 서버 실행 (기본 포트 8080)")
-    parser.add_argument("--reset", metavar="TICKER", help="티커 알림 플래그 초기화 (새 포지션 진입 후)")
+    parser.add_argument("--reset", metavar="TICKER", help="티커 알림 플래그 초기화 (전 계좌 매도 시 자동 리셋 — 특수 상황 수동 사용)")
     parser.add_argument("--dashboard", default=DASHBOARD_PATH, help=f"대시보드 저장 경로 (기본 {DASHBOARD_PATH})")
     parser.add_argument("--test-push", action="store_true", help="OneSignal 테스트 푸시 발송 (구독자 전체)")
     args = parser.parse_args()
@@ -1564,12 +1609,23 @@ def main() -> None:
     webhook, user_id = _resolve_discord(cfg)
     send_user_sell_pushes(statuses, cfg)   # 사용자별 매도 푸시 (1일 1회, 앱 등록 태그 기준)
 
+    # 전 계좌 매도 목표 도달(사이클 완료) → 알림 상태 자동 리셋 — 수동 --reset 불필요 (2026-08-11)
+    cycle_msgs: list[str] = []
+    state_changed = False
+    for st in statuses:
+        msg, changed = auto_cycle_reset(st, cfg["POSITIONS"][st["ticker"]])
+        if msg:
+            cycle_msgs.append(msg)
+        state_changed = state_changed or changed
+    if state_changed:
+        save_config(cfg)   # 자동 리셋/재무장 상태 영속화 (중복 방지 플래그 포함)
+
     if args.monitor:
         # ── 실시간 모니터: 상태 변경분만 알림 ──
         # 주의: _compute_all 이 비활성 포지션을 건너뛰므로 zip 대신
         # statuses 의 ticker 로 포지션을 찾아야 상태 기록이 틀어지지 않는다.
-        alerts: list[str] = []
-        changed = False
+        alerts: list[str] = list(cycle_msgs)   # 사이클 자동 리셋 알림 포함
+        changed = state_changed
         for st in statuses:
             ticker = st["ticker"]
             pos = cfg["POSITIONS"][ticker]
@@ -1601,12 +1657,16 @@ def main() -> None:
         return
 
     # ── 기본 실행 / 일일 브리핑 ──
+    if cycle_msgs:
+        print("\n" + "\n\n".join(cycle_msgs) + "\n")
     print_console(statuses, cfg)
     write_dashboard(statuses, cfg, args.dashboard)
 
     if args.discord:
         title = f"📈 스윙 투자 알리미 브리핑 — {datetime.now(NY_TZ).strftime('%m-%d')}"
         content = build_briefing_text(statuses, cfg)
+        if cycle_msgs:
+            content = "\n\n".join(cycle_msgs) + "\n\n" + content   # 사이클 자동 리셋 안내 선두
         print(f"\n📨 Discord 브리핑 ({len(statuses)}개 티커)")
         if webhook:
             _send_discord(webhook, user_id, title, content)

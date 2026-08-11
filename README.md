@@ -543,14 +543,21 @@ python3 DCA_MA_strategy.py --signal --discord --all  # TQQQ+SOXL 단일 메시�
 - `POSITIONS` 에 티커를 추가/수정하면 자유롭게 여러 종목을 모니터링합니다.
 - 알림 플래그(`ZONE_ALERTS`, `SELL_ALARM_SENT`)는 엔진이 자동 관리하며 **`swing_state.json`** 에
   보관됩니다. 설정(사용자)과 상태(봇)가 별도 파일로 분리되어 있어 봇이 상태 파일만 커밋하므로
-  git 충돌로 알림 상태가 유실되지 않습니다. 실제 매수 후 새 포지션을 기록했으면
-  `python3 swing_alerter.py --reset TICKER` 로 초기화하세요.
+  git 충돌로 알림 상태가 유실되지 않습니다. **전 계좌 매도 완료 시엔 자동 리셋**되며(2026-08-11),
+  부분 매도 후 즉시 초기화하려면 `python3 swing_alerter.py --reset TICKER` 를 수동 실행하세요.
 - **신규 전고가 자동 리셋 (2026-08-10)**: 전고가가 직전 사이클 기준(`ATH_CYCLE_BASE`)보다
   **+1% 이상** 갱신되면 기록된 매수 구간 상태(`hit`/`imminent`)가 자동 초기화됩니다 —
   이전 사이클의 기록이 남아 새 하락 사이클의 구간 도달/임박 알림이 삼켜지는 문제를 방지하며,
   갱신 시 🆕 신규 전고가 알림이 1회 발송됩니다.
-- 첫 실행 또는 `--reset` 직후 첫 모니터링에서는 **현재 도달된 모든 매수 구간이 한 번에**
-  알림으로 옵니다 (현재 상태 스냅샷). 이후에는 새로 도달하는 구간/임박/매도만 알립니다.
+- **전 계좌 매도 완료 자동 리셋 (2026-08-11)**: `LOTS` 의 모든 계좌가 매도 목표(+20%)에 도달하면
+  수동 `--reset` 없이 알림 상태(매수 구간/매도 플래그/`ATH_CYCLE_BASE`)가 자동 초기화됩니다 —
+  새 포지션을 `swing_personal.json` 과 앱에 기록하면 다음 하락 사이클의 구간 도달/임박 알림이
+  다시 울립니다. `CYCLE_RESET_DONE` 플래그로 중복 리셋을 방지하고, 매도 미도달 상태가 되면
+  자동 재무장됩니다. ⚠️ 자동 리셋은 '목표 도달' 신호 기준이며 **봇은 `swing_personal.json`을
+  건드리지 않으므로** 매도 후 기록 정리·재기록은 계속 사용자 수동 작업입니다.
+- 첫 실행, `--reset`, 또는 **전 계좌 매도 자동 리셋 직후** 첫 모니터링에서는 **현재 도달된
+  모든 매수 구간이 한 번에** 알림으로 옵니다 (현재 상태 스냅샷 — 수동 리셋과 동일 동작).
+  이후에는 새로 도달하는 구간/임박/매도만 알립니다.
 - 기준가는 기본 `ATH`(역대 최고가)이며 **배당 조정 종가(Adj Close) 기준**으로 계산해
   TradingView 등 조정가 차트와 일치합니다. (분할·배당 자동 반영 — 2026-08-10 변경)
 
@@ -595,7 +602,7 @@ python3 swing_alerter.py                    # 상태 출력 + 대시보드 HTML 
 python3 swing_alerter.py --discord          # + Discord 일일 브리핑 발송
 python3 swing_alerter.py --monitor          # 실시간 모니터 (변경분 알림만)
 python3 swing_alerter.py --serve 8080       # 스마트폰 대시보드 서버 (같은 Wi-Fi)
-python3 swing_alerter.py --reset TQQQ       # 알림 플래그 초기화 (새 포지션 진입 후)
+python3 swing_alerter.py --reset TQQQ       # 알림 플래그 초기화 (전 계좌 매도 시 자동 — 특수 상황 수동 사용)
 ```
 
 ### 실시간 알림 (cron-job.org)
