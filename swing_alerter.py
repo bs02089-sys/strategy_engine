@@ -461,17 +461,20 @@ def get_ath(ticker: str, max_retries: int = 3) -> tuple[float | None, str | None
     return None, None
 
 
-def get_prior_close(ticker: str, as_of: str, max_retries: int = 3) -> float | None:
-    """마지막 확정 종가(as_of, 'MM-DD') 세션의 직전 거래일 종가.
+def get_prior_close(ticker: str, as_of: str, max_retries: int = 3) -> tuple[float | None, str | None]:
+    """마지막 확정 종가(as_of, 'MM-DD') 세션의 직전 거래일 종가와 그 날짜.
 
-    전일 종가 대비 등락률 표시용 — get_prev_close()가 반환한 최종 세션의
-    바로 앞 세션 종가를 같은 yfinance 1개월 데이터에서 찾는다.
-    as_of에 해당하는 행이 없으면(데이터 변경 등) 마지막 두 행을 사용한다.
+    전일 종가 대비 등락률 + 대시보드 '전일 종가' 줄 표시용 — get_prev_close()가 반환한
+    최종 세션의 바로 앞 세션 종가/날짜를 같은 yfinance 1개월 데이터에서 찾는다.
+    as_of에 해당하는 행이 없으면(데이터 변경 등) 마지막에서 두 번째 행을 사용한다.
+
+    ⚠️ 폴백은 반드시 '한 세션 앞' 행(iloc[-2])으로 해야 한다 — 마지막 행(iloc[-1])은
+    현재 표시 중인 종가와 같은 값이라 '전일 종가 = 현재가'로 잘못 표시된다. (2026-08-12)
     """
     try:
         as_month, as_day = int(as_of[:2]), int(as_of[3:5])
     except (ValueError, TypeError, IndexError):
-        return None
+        return None, None
     last_err: Exception | None = None
     for attempt in range(max_retries):
         try:
@@ -479,19 +482,23 @@ def get_prior_close(ticker: str, as_of: str, max_retries: int = 3) -> float | No
             closes = hist["Close"].dropna()
             if len(closes) < 2:
                 raise ValueError("Need at least 2 sessions.")
-            for i in range(len(closes) - 1, 0, -1):
+            for i in range(len(closes) - 1, -1, -1):
                 d = closes.index[i].date() if hasattr(closes.index[i], "date") else None
                 if d is not None and d.month == as_month and d.day == as_day:
-                    return float(closes.iloc[i - 1])
-            # as_of 미발견(새 fetch가 한 세션 뒤처진 데이터 지연) → 마지막 행을
-            # 직전 종가로 사용 (표시 가격의 직전 세션 = 데이터의 마지막 세션)
-            return float(closes.iloc[-1])
+                    if i == 0:
+                        return None, None   # as_of 가 데이터 첫 행 — 이전 세션 없음
+                    pd = closes.index[i - 1].date() if hasattr(closes.index[i - 1], "date") else None
+                    return float(closes.iloc[i - 1]), (pd.strftime("%m-%d") if pd is not None else None)
+            # as_of 미발견(새 fetch가 한 세션 뒤처진 데이터 지연 등) → 마지막에서 두 번째 행을
+            # 직전 종가로 사용 (마지막 행 = 현재 표시 종가이므로 절대 쓰지 않는다)
+            pd = closes.index[-2].date() if hasattr(closes.index[-2], "date") else None
+            return float(closes.iloc[-2]), (pd.strftime("%m-%d") if pd is not None else None)
         except Exception as e:  # noqa: BLE001
             last_err = e
             if attempt < max_retries - 1:
                 time.sleep(2.0)
     print(f"   ⚠️ {ticker} 직전 종가 조회 실패: {last_err}")
-    return None
+    return None, None
 
 
 def _ny_market_open(now_ny: datetime | None = None) -> bool:
@@ -569,7 +576,7 @@ def compute_ticker(ticker: str, pos: dict, cfg: dict, live: bool = False) -> dic
     dd_pct = (price - ath) / ath * 100.0  # ATH 대비 하락율 (음수 = 하락)
 
     # 전일 종가 대비 등락률 — 직전 거래일 종가 대비 (대시보드 전일 종가 줄 표시용)
-    prior_close = get_prior_close(ticker, as_of)
+    prior_close, prior_close_date = get_prior_close(ticker, as_of)
     day_change_pct = None
     if prior_close and prior_close > 0:
         day_change_pct = (price - prior_close) / prior_close * 100.0
@@ -648,6 +655,8 @@ def compute_ticker(ticker: str, pos: dict, cfg: dict, live: bool = False) -> dic
         "ath_date": ath_date,
         "dd_pct": dd_pct,
         "day_change_pct": day_change_pct,
+        "prior_close": prior_close,
+        "prior_close_date": prior_close_date,
         "deepest_hit": deepest_hit,
         "next_zone": next_zone,
         "ladder": ladder,
@@ -1100,14 +1109,13 @@ _PLAN_JS = """
     }
 
     // 계좌 1개의 매도 상태 — 입력된 매수 예정가 × (1 + 예상 수익률) 기준으로 항상 재판정.
-    // 미입력 계좌(active=false)는 계산/저장/태그에서 제외 — 푸시 오발송 방지.
+    // 미입력 계좌(active=false)는 계산/저장/태그에서 제외 — 매도 예정가도 비워둔다 (푸시 오발송 방지).
     function rowState(row) {
       var n = row.dataset.acc;
       var v = parseFloat(row.querySelector('.plan-buy-input').value);
       if (isNaN(v) || v <= 0) {
-        // 미입력 — 현재가 기준 매도 예정가만 표시 (저장/태그는 제외 — 푸시 오발송 방지)
-        if (isNaN(close)) return { n: n, active: false, sell: null };
-        return { n: n, active: false, buy: close, sell: close * (1 + sellPct / 100), state: 'gray' };
+        // 미입력 — 매수/매도 예정가 모두 비움 (저장/태그 제외). 매수 예정가 입력 시에만 자동 계산.
+        return { n: n, active: false, sell: null };
       }
       var sell = v * (1 + sellPct / 100);
       var remain = (sell - close) / sell * 100;   // 목표까지 남은 % (양수)
@@ -1181,8 +1189,8 @@ _PLAN_JS = """
         var sellEl = row.querySelector('.acc-sell');
         var r = rowState(row);
         if (!r.active) {
-          // 미입력 — 현재가 기준 매도 예정가 표시 (푸시용 태그/저장은 하지 않음)
-          sellEl.textContent = r.sell ? '$' + r.sell.toFixed(2) : '—';
+          // 미입력 — 매도 예정가 비움 (푸시용 태그/저장도 하지 않음)
+          sellEl.textContent = '—';
           localStorage.removeItem('swing_buy_' + ticker + '_' + r.n);
           setSellTag(r.n, null);                       // 미입력 계좌 — 태그 제거 (푸시 제외)
           return;
@@ -1279,6 +1287,18 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
             day_cls = "up" if dc > 0 else ("down" if dc < 0 else "flat")
             day_sign = "▲ " if dc > 0 else ("▼ " if dc < 0 else "")
             day_span = f' 대비 <span class="dd {day_cls}">{day_sign}{abs(dc):.1f}%</span>'
+        # 현재가 출처 줄 — 종가 기준이면 실제 직전 거래일 종가를 '전일 종가'로 표시한다.
+        # (기존에는 현재 종가를 '전일 종가' 라벨로 잘못 표시 — 2026-08-12 수정)
+        if st.get("live"):
+            meta_src = f'🟢 실시간 ${st["price"]:,.2f} ({st["as_of"]})'
+        else:
+            pc = st.get("prior_close")
+            if pc and pc > 0:
+                pcd = st.get("prior_close_date") or ""
+                meta_src = (f'종가 ${st["price"]:,.2f} ({st["as_of"]}) · '
+                            f'전일 종가 ${pc:,.2f}' + (f' ({pcd})' if pcd else ''))
+            else:
+                meta_src = f'종가 ${st["price"]:,.2f} ({st["as_of"]})'
         imminent = (not st["sell_ready"] and st["sell_target"] is not None
                     and st["sell_gap_pct"] is not None
                     and st["sell_gap_pct"] <= float(cfg.get("IMMINENT_GAP_PCT", 5)))
@@ -1310,21 +1330,21 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
             for lvl in st["ladder"]
         )
 
-        # 계좌별 매수 예정가 입력 7행 — 세븐 스플릿 7개 계좌(각 $500). 미입력 계좌는 무시되고
-        # 입력된 계좌만 매도 예정가 계산 + OneSignal 태그(swing_sell_{TICKER}_{N}) 동기화.
-        # 계좌별 매도 예정가를 서버에서도 사전 렌더 (JS 로드 전에도 보이도록) — 미입력 = 현재가 기준
-        sell_default = st['price'] * (1 + float(cfg.get("SWING_TARGET_PCT", 10)) / 100.0)
+        # 계좌별 매수 예정가 입력 7행 — 세븐 스플릿 7개 계좌(각 $500). 미입력 계좌는 매수/매도
+        # 예정가를 모두 비워두고(현재가 자동 표시 없음), 매수 예정가를 입력한 계좌만 매도 예정가
+        # 자동 계산 + OneSignal 태그(swing_sell_{TICKER}_{N}) 동기화. (2026-08-12: 미입력 = 현재가
+        # 기준 매도 예정가 표시 제거 — 실제 매수한 계좌만 입력하도록 라벨 변경)
         acc_rows = (
             '    <div class="plan-hd">\n'
             '      <span class="hd-no">#</span>\n'
-            '      <span class="lbl">매수 예정가 (미입력 = 현재가)</span>\n'
+            '      <span class="lbl">매수한 계좌만 입력 요망</span>\n'
             '      <span class="acc-sell">매도 예정가</span>\n'
             '    </div>\n'
         ) + "\n".join(
             f'''    <div class="plan-acc" data-acc="{n}">
       <span class="acc-no">{n}</span>
-      <input class="plan-buy-input" type="number" min="0" step="0.01" placeholder="{st['price']:.2f}">
-      <span class="acc-sell">${sell_default:,.2f}</span>
+      <input class="plan-buy-input" type="number" min="0" step="0.01">
+      <span class="acc-sell">—</span>
     </div>'''
             for n in range(1, 8)
         )
@@ -1336,7 +1356,7 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
     {sell_chip}
   </div>
   <div class="price mono">${st["price"]:,.2f}</div>
-  <div class="meta">{'🟢 실시간' if st.get('live') else '전일 종가'} ${st["price"]:,.2f} ({st["as_of"]}){day_span}</div>
+  <div class="meta">{meta_src}{day_span}</div>
   <div class="row" style="margin-top:10px;justify-content:flex-end">
     <span class="chip {'green' if st['deepest_hit'] else 'gray'}">
       {'🟢 매수 구간 ' + str(len([l for l in st['ladder'] if l['hit']])) + '개 경과' if st['deepest_hit'] else '매수 구간 대기'}</span>
@@ -1345,7 +1365,7 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
   <div class="plan">
     <div class="plan-head">
       <span class="pt">💰 계좌별 매수 예정가</span>
-      <span class="ps">세븐 스플릿 — 7개 계좌 · 각 $500 · +{float(cfg.get("SWING_TARGET_PCT", 10)):.0f}% 매도</span>
+      <span class="ps">세븐 스플릿 — 7개 계좌</span>
     </div>
 {acc_rows}
     <div class="plan-row">
