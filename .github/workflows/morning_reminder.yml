@@ -1,0 +1,75 @@
+name: Morning Reminder
+
+# ⏰ 2026-08-12(수) 09:05 KST 1회용 아침 리마인더
+#   → ① LS증권 타사출고 신청 (TQQQ 6주 → 나무증권 1번)
+#     ② 나무증권 외화이체 (달러 입금 / 기본예탁금 충족)
+# 날짜 가드: 2026-08-12(UTC) 이외엔 no-op — 8/13 이후 이 파일 삭제 가능.
+# 전역 푸시 금지(AGENTS.md) 준수 — 앱이 등록한 개인 태그(swing_sell_*)로만 타겟 (내 기기만 수신).
+on:
+  schedule:
+    # 00:05 UTC = 09:05 KST — 정각(00:00) 큐 지연 회피
+    - cron: "5 0 * * *"
+  workflow_dispatch:   # 수동 테스트용
+
+jobs:
+  send-reminder:
+    runs-on: ubuntu-latest
+    env:
+      ONESIGNAL_APP_ID: ${{ secrets.ONESIGNAL_APP_ID }}
+      ONESIGNAL_REST_API_KEY: ${{ secrets.ONESIGNAL_REST_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Send OneSignal reminder push (one-shot 2026-08-12)
+        run: |
+          set -e
+          # 1회용 — 지정일(UTC 기준)만 발송, 그 외 날짜는 조용히 종료
+          if [ "$(date -u +%F)" != "2026-08-12" ]; then
+            echo "Reminder day 아님 — skip (2026-08-12 전용)"
+            exit 0
+          fi
+          python3 - <<'PY'
+          import json, os, requests
+
+          app_id = os.environ["ONESIGNAL_APP_ID"]
+          api_key = os.environ["ONESIGNAL_REST_API_KEY"]
+          try:
+              pages = json.load(open("swing_config.json")).get("PAGES_URL", "")
+          except Exception:
+              pages = ""
+
+          payload = {
+              "app_id": app_id,
+              "target_channel": "push",
+              "headings": {"en": "⏰ 아침 리마인더 — 타사출고 + 외화이체"},
+              "contents": {"en":
+                  "① LS증권 타사출고 신청: TQQQ 6주 → 나무증권 1번\n"
+                  "   (취득단가 $73.97 증빙 먼저 확보)\n"
+                  "② 나무증권 외화이체: 달러 입금 (기본예탁금 1천만원)\n"
+                  "둘 다 오전 영업시간 안에!"},
+              # 전역 발송 금지 — 내 기기(앱이 등록한 매도 예정가 태그)로만 발송
+              "filters": [
+                  {"field": "tag", "key": "swing_sell_TQQQ", "relation": "exists"},
+                  {"operator": "OR"},
+                  {"field": "tag", "key": "swing_sell_TQQQ_1", "relation": "exists"},
+              ],
+          }
+          if pages:
+              payload["url"] = pages
+
+          # 구식 REST 키는 Basic, 신식 API 키는 Key — 401이면 다른 형식으로 재시도
+          for scheme in ("Basic", "Key"):
+              r = requests.post(
+                  "https://api.onesignal.com/notifications",
+                  headers={"Authorization": f"{scheme} {api_key}",
+                           "Content-Type": "application/json; charset=utf-8"},
+                  json=payload,
+                  timeout=15,
+              )
+              if r.status_code != 401:
+                  print(f"HTTP {r.status_code}: {r.text[:400]}")
+                  r.raise_for_status()
+                  break
+          else:
+              raise SystemExit("인증 실패 (Basic/Key 모두 401) — API 키 확인 필요")
+          PY
