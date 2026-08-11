@@ -3,6 +3,9 @@
         "TQQQ": {
             "SELL_ALARM_SENT": false,
             "SELL_IMMINENT_SENT": false,
+            "SELL_PUSH_LAST_AT": {
+                "1": "2026-08-11"
+            },
             "ZONE_ALERTS": {
                 "hit": [
                     15
