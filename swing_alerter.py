@@ -37,6 +37,7 @@ import argparse
 import copy
 import json
 import os
+import requests
 import sys
 import time
 from datetime import datetime, timedelta
@@ -1312,7 +1313,7 @@ def _compute_all(cfg: dict, force: bool = False) -> list[dict]:
 
 
 class _DashboardHandler(BaseHTTPRequestHandler):
-    def log_message(self, *args):  # 요청 로그 최소화
+    def log_message(self, format: str, *args: object) -> None:  # 요청 로그 최소화
         pass
 
     def _json(self, obj: dict) -> None:
