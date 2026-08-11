@@ -42,7 +42,9 @@ jobs:
 
       - name: Run Realtime Swing Monitor (from cron-job.org dispatch)
         if: github.event_name == 'repository_dispatch'
-        # 실시간 모니터 — 변경분(매수 구간 도달/임박/매도)만 Discord 발송
+        # 실시간 모니터 — 변경분(매수 구간 도달/임박/매도)만 Discord 발송.
+        # --monitor 가 장중 실시간 가격을 반영한 대시보드 HTML 도 저장한다 (2026-08-11)
+        # → Sync 단계가 /tmp 로 보존해 Deploy 단계가 gh-pages 에 재배포.
         run: |
           set -o pipefail
           python swing_alerter.py --monitor 2>&1 | tee swing_log.txt
@@ -82,12 +84,14 @@ jobs:
           git push
 
       - name: Deploy Dashboard to GitHub Pages (gh-pages branch)
-        # 일일/수동 실행에서만 배포 (실시간 폴링 dispatch 에서는 배포 안 함)
-        # 스마트폰에서 어디서나 접속: GitHub Pages 로 대시보드 공개
-        if: github.event_name != 'repository_dispatch'
+        # 일일/수동/장중 디스패치 모두 재배포 — 장중 실시간 가격을 스마트폰 앱에서 보려면
+        # 디스패치마다 신선한 대시보드를 gh-pages 에 올려야 한다 (2026-08-11)
+        if: always()
         # set -e: push 실패 시 스텝이 조용히 성공 처리되지 않도록 즉시 실패시킴
         run: |
           set -e
+          # 대시보드 생성이 실패한 실행에선 배포를 건너뛴다 — 이전 gh-pages 유지
+          [ -f /tmp/swing_dash.html ] || { echo "대시보드 없음 — 배포 생략"; exit 0; }
           git config --global user.name "Swing Bot"
           git config --global user.email "bot@example.com"
 

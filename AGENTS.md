@@ -50,6 +50,13 @@ Not lazy about: input validation at trust boundaries, error handling that preven
   푸시(`send_user_sell_pushes`)로만 발송. 다시 전역 푸시를 추가하지 말 것.
   알림은 Discord, 실시간은 cron-job.org `swing-monitor` 디스패치, 모바일 대시보드는
   `--serve`/`swing_dashboard.html` + GitHub Pages(`gh-pages` 브랜치 자동 배포).
+  ⚠️ **장중 실시간 표시 (2026-08-11)**: 앱/대시보드의 **현재가 표시만** 장중에
+  yfinance 실시간(15분 지연) 기준으로 오버레이한다 — `compute_ticker(live=True)`가
+  `_get_live_price()`(fast_info → 1분봉 폴백, 미국 정규장 09:30~16:00 ET 판정)로
+  표시 가격/as_of/등락률만 갱신한다. **알림 판정(매수 구간 도달/임박/매도)은 항상 확정
+  종가 기준 유지** — `detect_alerts`는 `close_price`를 사용하며, 실시간 값으로 알림
+  시점을 흔들지 말 것. `swing-monitor` 디스패치도 대시보드를 재생성·gh-pages 재배포하므로
+  스마트폰 앱이 장중 갱신된다 (배포 가드: 대시보드 생성 실패 시 배포 생략).
   ⚠️ **봇은 `swing_dashboard.html`을 main에 커밋하지 않는다** — 생성 파일(헤더 시각 등)이 봇/사용자
   양쪽에서 재생성되어 git pull 충돌을 반복하므로, 워크플로우가 생성한 신선한 사본을 `gh-pages`에만
   배포한다 (`swing_alerter.yml` Sync 단계의 cp/checkout 참고).

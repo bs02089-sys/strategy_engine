@@ -40,7 +40,7 @@ import os
 import requests
 import sys
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, time as dtime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from zoneinfo import ZoneInfo
 
@@ -428,6 +428,42 @@ def get_prior_close(ticker: str, as_of: str, max_retries: int = 3) -> float | No
     return None
 
 
+def _ny_market_open(now_ny: datetime | None = None) -> bool:
+    """미국 정규장(월~금 09:30~16:00 ET) 여부 — 장중에만 실시간 표시 가격 사용.
+
+    공휴일은 별도 판정하지 않는다 — 휴장일엔 yfinance 가격이 갱신되지 않아 실시간
+    값이 이전 종가와 같아져 화면상 영향이 없다 (오버레이해도 값이 같을 뿐).
+    """
+    now_ny = now_ny or datetime.now(NY_TZ)
+    if now_ny.weekday() >= 5:
+        return False
+    t = now_ny.time()
+    return dtime(9, 30) <= t <= dtime(16, 0)
+
+
+def _get_live_price(ticker: str) -> float | None:
+    """장중 실시간 가격 (yfinance, 15분 지연) — fast_info 우선, 1분봉 폴백.
+
+    정규장이 아니면 None 을 반환해 표시 가격이 확정 종가로 유지되게 한다.
+    알림(매수 구간/임박/매도) 판정은 이 값을 쓰지 않는다 — 항상 확정 종가 기준.
+    """
+    if not _ny_market_open():
+        return None
+    try:
+        p = yf.Ticker(ticker).fast_info.last_price
+        if p is not None and float(p) > 0:
+            return float(p)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        h = yf.Ticker(ticker).history(period="1d", interval="1m")
+        if not h.empty:
+            return float(h["Close"].iloc[-1])
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
 # ═══════════════════════════════════════════════════════════
 # 상태 계산
 # ═══════════════════════════════════════════════════════════
@@ -443,14 +479,21 @@ def build_ladder(ath: float, cfg: dict) -> list[dict]:
     return ladder
 
 
-def compute_ticker(ticker: str, pos: dict, cfg: dict) -> dict:
-    """티커 1개의 현재 상태 계산 (가격/ATH/래더/매도/손익)."""
-    st: dict = {"ticker": ticker, "error": None}
+def compute_ticker(ticker: str, pos: dict, cfg: dict, live: bool = False) -> dict:
+    """티커 1개의 현재 상태 계산 (가격/ATH/래더/매도/손익).
+
+    live=True 면 미국 정규장 중에 **표시 가격만** yfinance 실시간(15분 지연) 값으로
+    오버레이한다 (2026-08-11). 알림 판정(래더 hit/매도 플래그/dd_pct)은 항상 확정
+    종가 기준으로 유지 — 장중 변동성에 알림이 흔들리지 않는다. 장외/휴장이면
+    실시간 조회를 건너뛰어 종가 표시로 동작한다.
+    """
+    st: dict = {"ticker": ticker, "error": None, "live": False, "close_price": None}
 
     price, as_of = get_prev_close(ticker)
     if price is None:
         st["error"] = f"{ticker} 가격 조회 실패"
         return st
+    st["close_price"] = price
 
     ath, ath_date = get_ath(ticker)
     if ath is None or ath <= 0:
@@ -553,6 +596,17 @@ def compute_ticker(ticker: str, pos: dict, cfg: dict) -> dict:
         "lots": lot_stats,
         "zone_alerts": pos.setdefault("ZONE_ALERTS", {"hit": [], "imminent": []}),
     })
+    # 실시간 표시 오버레이 — 장중 라이브 가격을 표시 필드에만 반영 (알림 필드는 종가 기준 유지)
+    if live:
+        live_price = _get_live_price(ticker)
+        if live_price is not None and live_price > 0:
+            st["price"] = live_price
+            st["live"] = True
+            st["as_of"] = datetime.now(NY_TZ).strftime("%m-%d %H:%M")
+            # 전고가 대비 하락률/전일 대비 등락률도 라이브 가격 기준으로 표시 (표시 전용)
+            st["live_dd_pct"] = (live_price - ath) / ath * 100.0
+            if prior_close and prior_close > 0:
+                st["day_change_pct"] = (live_price - prior_close) / prior_close * 100.0
     return st
 
 
@@ -605,7 +659,8 @@ def detect_alerts(st: dict, pos: dict, cfg: dict) -> list[str]:
     # 신규 전고가 확인 → 기록된 구간 상태 리셋 (알림 삼킴 방지)
     _handle_ath_cycle_reset(st, pos, zone_alerts, msgs)
     tick = st["ticker"]
-    price = st["price"]
+    # 알림 메시지의 현재가는 확정 종가 기준 (알림 판정이 종가 기반이므로 — 실시간은 표시 전용)
+    price = st.get("close_price") or st["price"]
     gap_p = float(cfg.get("IMMINENT_GAP_PCT", 5))
     dd_abs = abs(st["dd_pct"])
 
@@ -724,9 +779,10 @@ def build_briefing_text(statuses: list[dict], cfg: dict) -> str:
         # 매수 구간 상태 (앱 카드 chip과 동일)
         hit_cnt = len([l for l in st["ladder"] if l["hit"]])
         buy_txt = f"🟢 매수 구간 {hit_cnt}개 경과" if hit_cnt else "매수 구간 대기"
+        src_txt = f"실시간 {st['as_of']}" if st.get("live") else f"종가 기준 {st['as_of']}"
         lines.extend([
             f"**{st['ticker']}** · {sell_txt}",
-            f"- 현재가 ${st['price']:.2f} (종가 기준 {st['as_of']})",
+            f"- 현재가 ${st['price']:.2f} ({src_txt})",
             f"- ATH ${st['ath']:.2f} ({st['ath_date']}) → 하락 **{st['dd_pct']:+.1f}%**",
             f"- {buy_txt}",
             f"- 전고가: ${st['ath']:,.2f} ({st['ath_date']})",
@@ -1108,6 +1164,7 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
     sell_cnt = sum(1 for s in statuses
                    if s.get("sell_ready") and not s.get("error") and not s.get("personal"))
     buy_cnt = sum(1 for s in statuses if s.get("deepest_hit") and not s.get("error"))
+    any_live = any(s.get("live") for s in statuses if not s.get("error"))
     pages_url = (cfg.get("PAGES_URL") or "").strip()
     live_link = (
         f'<span class="pages">· <a href="{pages_url}" target="_blank" rel="noopener">🌐 라이브 열기</a></span>'
@@ -1129,8 +1186,10 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
             )
             continue
 
-        dd_cls = "up" if st["dd_pct"] > 0 else ("down" if st["dd_pct"] < 0 else "flat")
-        dd_sign = "🆕 +" if st["dd_pct"] > 0 else ("▼ " if st["dd_pct"] < 0 else "")
+        # 전고가 대비 하락률 — 장중엔 라이브 가격 기준으로 표시 (표시 전용, 알림 판정은 종가 기준)
+        dd_pct_disp = st.get("live_dd_pct", st["dd_pct"])
+        dd_cls = "up" if dd_pct_disp > 0 else ("down" if dd_pct_disp < 0 else "flat")
+        dd_sign = "🆕 +" if dd_pct_disp > 0 else ("▼ " if dd_pct_disp < 0 else "")
 
         # 전일 종가 대비 등락률 — 전일 종가 줄 끝 표시 (ATH 하락률과 별개 수치)
         dc = st.get("day_change_pct")
@@ -1197,12 +1256,12 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
     {sell_chip}
   </div>
   <div class="price mono">${st["price"]:,.2f}</div>
-  <div class="meta">전일 종가 ${st["price"]:,.2f} ({st["as_of"]}){day_span}</div>
+  <div class="meta">{'🟢 실시간' if st.get('live') else '전일 종가'} ${st["price"]:,.2f} ({st["as_of"]}){day_span}</div>
   <div class="row" style="margin-top:10px;justify-content:flex-end">
     <span class="chip {'green' if st['deepest_hit'] else 'gray'}">
       {'🟢 매수 구간 ' + str(len([l for l in st['ladder'] if l['hit']])) + '개 경과' if st['deepest_hit'] else '매수 구간 대기'}</span>
   </div>
-  <div class="info">📊 전고가 ${st["ath"]:,.2f} ({st["ath_date"]}) 대비 <span class="dd {dd_cls}">{dd_sign}{abs(st["dd_pct"]):.1f}%</span></div>
+  <div class="info">📊 전고가 ${st["ath"]:,.2f} ({st["ath_date"]}) 대비 <span class="dd {dd_cls}">{dd_sign}{abs(dd_pct_disp):.1f}%</span></div>
   <div class="plan">
     <div class="plan-head">
       <span class="pt">💰 계좌별 매수 예정가</span>
@@ -1249,7 +1308,7 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
 <body>
 <header>
   <h1>📈 스윙 투자 알리미</h1>
-  <div class="sub">업데이트 {updated_at} · 종가 기준 {as_of_ny} (미국){live_link}</div>
+  <div class="sub">업데이트 {updated_at} · {'실시간(15분 지연) 기준' if any_live else '종가 기준'} {as_of_ny} (미국){live_link}</div>
   <div class="chips">
     {push_btn}
     <span class="chip {'red' if sell_cnt else 'gray'}" id="sell-alarm-cnt">🚨 매도 알람 {sell_cnt}</span>
@@ -1298,17 +1357,24 @@ _STATIC_FILES = {
 }
 
 
-def _compute_all(cfg: dict, force: bool = False) -> list[dict]:
-    """전 티커 상태 계산 (60초 캐시 — 서버 폴링 부하 방지)."""
+def _compute_all(cfg: dict, force: bool = False, live: bool = False) -> list[dict]:
+    """전 티커 상태 계산 (60초 캐시 — 서버 폴링 부하 방지).
+
+    live=True 면 장중 표시 가격을 실시간(15분 지연)으로 오버레이한다 (대시보드용).
+    알림(--monitor) 경로는 live=False 로 종가 기준을 유지한다.
+    """
     now = time.time()
-    if not force and _LAST_COMPUTE["statuses"] is not None and now - _LAST_COMPUTE["ts"] < 60:
+    # 캐시 키에 live 플래그 포함 — 같은 60초 안에 live=True/False 호출이 섞여도
+    # 잘못된 변형(실시간/종가)을 반환하지 않도록 한다. (2026-08-11)
+    if not force and _LAST_COMPUTE["statuses"] is not None \
+            and _LAST_COMPUTE.get("live") == live and now - _LAST_COMPUTE["ts"] < 60:
         return _LAST_COMPUTE["statuses"]
     statuses = []
     for ticker, pos in cfg.get("POSITIONS", {}).items():
         if not pos.get("ENABLED", True):
             continue
-        statuses.append(compute_ticker(ticker, pos, cfg))
-    _LAST_COMPUTE.update(ts=now, statuses=statuses, cfg=cfg)
+        statuses.append(compute_ticker(ticker, pos, cfg, live=live))
+    _LAST_COMPUTE.update(ts=now, statuses=statuses, cfg=cfg, live=live)
     return statuses
 
 
@@ -1348,7 +1414,7 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             self.wfile.write(body)
             return
         cfg = load_config()
-        statuses = _compute_all(cfg)
+        statuses = _compute_all(cfg, live=True)
         if self.path.startswith("/api/status"):
             self._json({"updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                         "positions": statuses})
@@ -1412,7 +1478,8 @@ def print_console(statuses: list[dict], cfg: dict) -> None:
         if st.get("error"):
             print(f"❌ {st['ticker']}: {st['error']}")
             continue
-        print(f"[{st['ticker']}] 현재 ${st['price']:,.2f} ({st['as_of']})")
+        src = " · 실시간" if st.get("live") else ""
+        print(f"[{st['ticker']}] 현재 ${st['price']:,.2f} ({st['as_of']}{src})")
         print(f"   ATH ${st['ath']:,.2f} ({st['ath_date']}) → 하락 {st['dd_pct']:+.1f}%")
         lots = st.get("lots") or []
         if st.get("personal"):
@@ -1491,7 +1558,9 @@ def main() -> None:
     if not cfg.get("POSITIONS"):
         raise SystemExit("ℹ️  POSITIONS 이 비어 있습니다. swing_config.json 에 티커를 추가하세요.")
 
-    statuses = _compute_all(cfg, force=True)
+    # 라이브 표시 가격은 모든 경로에 적용한다 — 알림 판정 필드는 항상 종가 기준이라
+    # --monitor 도 live=True 로 계산해도 알림 시점은 변하지 않는다 (2026-08-11).
+    statuses = _compute_all(cfg, force=True, live=True)
     webhook, user_id = _resolve_discord(cfg)
     send_user_sell_pushes(statuses, cfg)   # 사용자별 매도 푸시 (1일 1회, 앱 등록 태그 기준)
 
@@ -1510,6 +1579,10 @@ def main() -> None:
                 alerts.extend([f"**{ticker}**"] + msgs)
         if changed:
             save_config(cfg)  # 알림 플래그 영속화 (중복 방지)
+        # 장중 실시간 대시보드 갱신 — 디스패치마다 신선한 HTML 을 만들어 gh-pages 에 재배포한다.
+        # Discord 발송보다 먼저 수행해 알림 전송 실패가 대시보드 갱신을 막지 않는다.
+        # (2026-08-11: 스마트폰 앱이 장중 가격을 따라가도록)
+        write_dashboard(statuses, cfg, args.dashboard)
         content = "\n\n".join(alerts)
         if content:
             print(content)
