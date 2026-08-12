@@ -73,6 +73,7 @@ Not lazy about: input validation at trust boundaries, error handling that preven
   페이지 로드 시 태그가 로컬 localStorage보다 우선 채택된다 (마지막 변경 기기 기준). 매수 예정가가
   OneSignal 사용자 레코드에 저장되지만 공용 알림(Discord 브리핑/전역 푸시) 노출 경로는 아니며, 코드
   미입력 기기는 기존 기기별 localStorage 동작을 그대로 유지한다 (OneSignal SDK v16 login/logout/getTags).
+  🔒 코드 입력칸은 마스킹(password) 표시 — 눈 아이콘 토글로 잠시 확인 (어깨 너머 노출 방지, 2026-08-12).
   ⚠️ **봇은 `swing_dashboard.html`을 main에 커밋하지 않는다** — 생성 파일(헤더 시각 등)이 봇/사용자
   양쪽에서 재생성되어 git pull 충돌을 반복하므로, 워크플로우가 생성한 신선한 사본을 `gh-pages`에만
   배포한다 (`swing_alerter.yml` Sync 단계의 cp 참고 — 미추적 파일이라 `git checkout --` 금지, pathspec 오류).

@@ -970,9 +970,13 @@ footer{color:#4b5563;font-size:12px;text-align:center;margin-top:8px;line-height
 .po b{color:var(--text);font-family:ui-monospace,Menlo,Consolas,monospace;font-size:22px;font-weight:800}
 .sync-row{display:flex;align-items:center;gap:8px;margin-top:10px}
 .sync-lbl{font-size:12px;color:var(--muted);flex-shrink:0}
+.sync-key-wrap{flex:1;min-width:0;display:flex;align-items:center;gap:6px}
 .sync-key-input{flex:1;min-width:0;background:#1c2533;border:1px solid var(--border);border-radius:8px;
   color:var(--text);font-size:14px;font-weight:600;padding:7px 10px;font-family:ui-monospace,Menlo,Consolas,monospace}
 .sync-key-input::placeholder{color:#4b5563;font-weight:400}
+.sync-toggle{flex-shrink:0;width:36px;height:36px;border-radius:8px;border:1px solid var(--border);
+  background:#1c2533;color:var(--text);font-size:15px;cursor:pointer;line-height:1;-webkit-tap-highlight-color:transparent}
+.sync-toggle:active{opacity:.7}
 .sync-status{font-size:12px;font-weight:700;color:var(--green);flex-shrink:0;min-width:70px;text-align:right}
 """
 
@@ -1329,6 +1333,16 @@ _PLAN_JS = """
     keyInput.addEventListener('change', function() { applySyncKey(keyInput.value); });
     if (savedKey) applySyncKey(savedKey);    // 저장된 코드 — 로드 시 자동 연결
   }
+  // 🔒 코드 마스킹 토글 — 기본은 가려짐(password), 눈 아이콘으로 잠시 표시 (어깨 너머 노출 방지)
+  var syncToggle = document.getElementById('sync-key-toggle');
+  if (keyInput && syncToggle) {
+    syncToggle.addEventListener('click', function() {
+      var show = keyInput.type === 'password';
+      keyInput.type = show ? 'text' : 'password';
+      syncToggle.textContent = show ? '🙈' : '👁';
+      keyInput.focus();
+    });
+  }
 
   // 카드 초기화 — 첫 로드 + 태그 채택 후 재판정
   document.querySelectorAll('.card[data-ticker]').forEach(initSwingCard);
@@ -1385,12 +1399,16 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
     )
     # 🔄 기기 간 동기화 코드 행 (2026-08-12) — OneSignal APP_ID 설정 시에만 표시.
     # 같은 코드를 두 기기에 입력하면 OneSignal 외부 ID로 연결되어 예상 수익률/매수 예정가 태그가 공유된다.
+    # 🔒 코드는 마스킹(password) 표시 — 어깨 너머 노출 방지. 눈 아이콘 토글로 잠시 확인 가능 (2026-08-12)
     sync_row = (
         '<div class="sync-row">'
         '<span class="sync-lbl">🔄 동기화 코드</span>'
-        '<input id="sync-key-input" class="sync-key-input" type="text" maxlength="40" '
+        '<div class="sync-key-wrap">'
+        '<input id="sync-key-input" class="sync-key-input" type="password" maxlength="40" '
         'autocomplete="off" autocapitalize="off" spellcheck="false" '
         'placeholder="두 기기에 같은 코드를 입력하면 자동 동기화">'
+        '<button type="button" id="sync-key-toggle" class="sync-toggle" title="코드 보기/숨기기">👁</button>'
+        '</div>'
         '<span class="sync-status" id="sync-status"></span>'
         '</div>'
     ) if app_id else ""
