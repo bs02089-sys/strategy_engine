@@ -46,6 +46,18 @@ jobs:
           if not api_key:
               raise SystemExit("ONESIGNAL_REST_API_KEY 미설정 — GitHub 시크릿 확인")
 
+          # 🔍 임시 진단 (2026-08-12): 구독 기록의 실제 상태 조회 — 왜 Subscribed Users 가 0명인지
+          for scheme in ("Key", "Basic"):
+              d = requests.get(
+                  f"https://api.onesignal.com/apps/{app_id}/subscriptions",
+                  headers={"Authorization": f"{scheme} {api_key}",
+                           "Content-Type": "application/json"},
+                  timeout=15,
+              )
+              print(f"  [진단 {scheme}] subscriptions -> HTTP {d.status_code}: {d.text[:800]}")
+              if d.status_code not in (401, 403):
+                  break
+
           try:
               pages = cfg.get("PAGES_URL", "")
           except Exception:
