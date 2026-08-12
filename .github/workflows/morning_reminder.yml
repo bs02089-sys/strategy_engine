@@ -31,10 +31,23 @@ jobs:
           python3 - <<'PY'
           import json, os, requests
 
-          app_id = os.environ["ONESIGNAL_APP_ID"]
-          api_key = os.environ["ONESIGNAL_REST_API_KEY"]
+          # 🔧 app_id는 공개값(대시보드 SDK에도 포함) — swing_config.json(설정 단일 소스) 우선,
+          # env(시크릿) 폴백. strip 필수: 시크릿에 붙은 개행/공백이 남아 있으면
+          # 'app_id is present but malformed' 400 이 발생한다 (2026-08-12 실패 원인).
+          cfg = {}
           try:
-              pages = json.load(open("swing_config.json")).get("PAGES_URL", "")
+              cfg = json.load(open("swing_config.json"))
+          except Exception:
+              pass
+          app_id = (cfg.get("ONESIGNAL_APP_ID") or os.environ.get("ONESIGNAL_APP_ID", "")).strip()
+          api_key = (os.environ.get("ONESIGNAL_REST_API_KEY") or "").strip()
+          if not app_id:
+              raise SystemExit("ONESIGNAL_APP_ID 미설정 — swing_config.json 또는 GitHub 시크릿 확인")
+          if not api_key:
+              raise SystemExit("ONESIGNAL_REST_API_KEY 미설정 — GitHub 시크릿 확인")
+
+          try:
+              pages = cfg.get("PAGES_URL", "")
           except Exception:
               pages = ""
 
