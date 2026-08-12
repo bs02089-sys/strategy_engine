@@ -20,7 +20,7 @@ jobs:
           import json, os, requests
 
           app_id = "$APP_ID"
-          api_key = os.environ["API_KEY"]
+          api_key = os.environ["API_KEY"].strip()
 
           # 전체 사용자 검색 — 외부 ID/구독 포함 (v2 users/search)
           resp = requests.post(
