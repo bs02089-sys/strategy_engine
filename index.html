@@ -183,7 +183,7 @@ footer{color:#4b5563;font-size:12px;text-align:center;margin-top:8px;line-height
 <body>
 <header>
   <h1>📈 스윙 투자 알리미</h1>
-  <div class="sub">업데이트 2026-08-12 10:23 · 종가 기준 2026-08-12 06:23 (미국)<span class="pages">· <a href="https://bs02089-sys.github.io/strategy_engine/" target="_blank" rel="noopener">🌐 라이브 열기</a></span></div>
+  <div class="sub">업데이트 2026-08-12 10:31 · 종가 기준 2026-08-12 06:31 (미국)<span class="pages">· <a href="https://bs02089-sys.github.io/strategy_engine/" target="_blank" rel="noopener">🌐 라이브 열기</a></span></div>
   <div class="chips">
     <button id="push-btn" class="push-btn" disabled>🔔 알림 받기</button>
     <span class="chip gray" id="sell-alarm-cnt">🚨 매도 알람 0</span>
@@ -282,7 +282,6 @@ footer{color:#4b5563;font-size:12px;text-align:center;margin-top:8px;line-height
   function flushTagSync() {
     tagTimer = null;
     var next = {};
-    var remove = [];
     document.querySelectorAll('.card[data-ticker]').forEach(function(card) {
       var t = card.dataset.ticker;
       var sellPct = parseFloat(localStorage.getItem('swing_sell_' + t));
@@ -292,35 +291,33 @@ footer{color:#4b5563;font-size:12px;text-align:center;margin-top:8px;line-height
         var n = row.dataset.acc;
         var v = parseFloat(row.querySelector('.plan-buy-input').value);
         if (isNaN(v) || v <= 0) {
-          // 미입력 계좌 — 태그 제거 (푸시/동기화 제외)
-          remove.push('swing_buy_' + t + '_' + n);
-          remove.push('swing_sell_' + t + '_' + n);
-          if (n === '1') remove.push('swing_sell_' + t);
-        } else {
-          var sell = v * (1 + sellPct / 100);
-          next['swing_buy_' + t + '_' + n] = String(v);
-          next['swing_sell_' + t + '_' + n] = sell.toFixed(2);
-          // 1번 계좌는 구형 단일 태그(swing_sell_{TICKER})에도 동일 기록 —
-          // 아직 새 앱을 열지 않은 기기의 기존 태그와 호환
-          if (n === '1') next['swing_sell_' + t] = sell.toFixed(2);
+          // ⚠️ 미입력 계좌 — 태그를 건드리지 않는다 (2026-08-12)
+          // OneSignal v16 SDK가 removeTags를 로컬 태그 맵에 빈 문자열("")로 심고,
+          // 이후 set-property 전체 맵 스냅샷에 ""이 포함돼 서버가 409 Conflict로
+          // 모든 태그 업데이트를 거부하던 문제. 새 "" 생성 금지 — 기존 ""은
+          // 브라우저 SDK 캐시(IndexedDB) 정리로만 제거된다.
+          return;
         }
+        var sell = v * (1 + sellPct / 100);
+        next['swing_buy_' + t + '_' + n] = String(v);
+        next['swing_sell_' + t + '_' + n] = sell.toFixed(2);
+        // 1번 계좌는 구형 단일 태그(swing_sell_{TICKER})에도 동일 기록 —
+        // 아직 새 앱을 열지 않은 기기의 기존 태그와 호환
+        if (n === '1') next['swing_sell_' + t] = sell.toFixed(2);
       });
     });
-    // 실제로 바뀐 키만 전송 (lastSentTags 대비)
+    // 실제로 바뀐 키만 전송 (lastSentTags 대비) — 빈 문자열 값은 절대 보내지 않는다
     var add = {};
     Object.keys(next).forEach(function(k) { if (lastSentTags[k] !== next[k]) add[k] = next[k]; });
-    var rm = remove.filter(function(k) { return lastSentTags[k] !== undefined; });
-    if (Object.keys(add).length === 0 && rm.length === 0) return;
+    if (Object.keys(add).length === 0) return;
     if (!(window.OneSignalDeferred && window.OneSignalDeferred.push)) return;   // SDK 미로드 — 건너뜀
     window.OneSignalDeferred.push(function(OneSignal) {
       if (!OneSignal || !OneSignal.User) return;
       try {
-        if (Object.keys(add).length && OneSignal.User.addTags) OneSignal.User.addTags(add);
-        if (rm.length && OneSignal.User.removeTags) OneSignal.User.removeTags(rm);
+        if (OneSignal.User.addTags) OneSignal.User.addTags(add);
       } catch (e) { /* OneSignal 미설정 — 무시 */ }
     });
     Object.keys(add).forEach(function(k) { lastSentTags[k] = add[k]; });
-    rm.forEach(function(k) { delete lastSentTags[k]; });
   }
 
   // 카드별 저장 키: swing_buy_{TICKER}_{ACCOUNT}(계좌별 매수 예정가) / swing_sell_{TICKER}(예상 수익률, 카드 공용)
