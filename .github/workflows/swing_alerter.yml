@@ -2,8 +2,8 @@ name: Swing Alerter
 
 on:
   schedule:
-    # 월~금 23:40 UTC = 19:40 ET (장 마감 후) — DCA 브리핑(23:30) 직후 스윙 일일 브리핑
-    - cron: "40 23 * * 1-5"
+    # 월~금 00:00 UTC = 09:00 KST — 한국 아침 9시 고정 일일 브리핑 (2026-08-13)
+    - cron: "0 0 * * 1-5"
   repository_dispatch:
     types: [swing-monitor]   # cron-job.org 실시간 알림 발사 (매수 구간 도달/임박/매도)
   workflow_dispatch:          # 수동 실행 지원
