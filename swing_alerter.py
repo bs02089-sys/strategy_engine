@@ -276,9 +276,11 @@ def send_onesignal_push(app_id: str, api_key: str, title: str, body: str,
         payload["included_segments"] = ["Subscribed Users"]
     if url:
         payload["url"] = url
-    # OneSignal 인증 헤더: 구식 REST 키는 Basic, 신식 API 키는 Key 를 사용
-    # → 401 이면 다른 형식으로 재시도 (키 유형 자동 대응)
-    for scheme in ("Basic", "Key"):
+    # OneSignal 인증: 신형 앱 키(os_v2_app_…)는 'Key', 구형 REST 키는 'Basic'
+    # → 키 형식(prefix)으로 우선 순위 결정, 401/403(인증·권한 오류)이면 다른 형식으로 재시도.
+    # (Basic을 신형 키로 보내면 401이 아닌 403이 나올 수 있어 폴백이 발동 안 하던 문제 — 2026-08-12)
+    schemes = (("Key", "Basic") if api_key.startswith("os_v2_") else ("Basic", "Key"))
+    for scheme in schemes:
         try:
             resp = requests.post(
                 "https://api.onesignal.com/notifications",
@@ -289,11 +291,11 @@ def send_onesignal_push(app_id: str, api_key: str, title: str, body: str,
                 json=payload,
                 timeout=15,
             )
-            if resp.status_code != 401:
+            if resp.status_code not in (401, 403):
                 return resp.status_code, resp.text[:500]
         except Exception as e:  # noqa: BLE001
             return 0, f"전송 예외: {e}"
-    return 401, "인증 실패 (Basic/Key 모두 401) — API 키 형식 확인 필요"
+    return 401, "인증 실패 (Basic/Key 모두 401/403) — API 키가 현재 앱의 키인지 확인 필요"
 
 
 def send_user_sell_pushes(statuses: list[dict], cfg: dict) -> bool:
