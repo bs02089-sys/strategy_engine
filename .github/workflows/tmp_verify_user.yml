@@ -1,0 +1,60 @@
+name: Temp Verify OneSignal User
+
+on:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check bs0208 user state
+        env:
+          APP_ID: ${{ secrets.ONESIGNAL_APP_ID }}
+          API_KEY: ${{ secrets.ONESIGNAL_REST_API_KEY }}
+        run: |
+          set -e
+          # 1) bs0208 (c33eb986) 사용자 상태 — 구독 활성 여부 확인
+          echo '=== bs0208 (c33eb986) ==='
+          curl -s -X GET "https://api.onesignal.com/apps/${APP_ID}/users/by/onesignal_id/c33eb986-57d3-4266-b378-a959439d508f" \
+            -H "Content-Type: application/json" -H "Authorization: Key ${API_KEY}" \
+            -o /tmp/u.json -w 'HTTP %{http_code}\n'
+          python3 - <<'EOF'
+          import json
+          try:
+              d = json.load(open('/tmp/u.json'))
+          except Exception as e:
+              print('응답 파싱 실패:', e)
+              raise SystemExit(0)
+          p = d.get('properties', {})
+          print('external_id:', d.get('identity', {}).get('external_id'))
+          subs = d.get('subscriptions', [])
+          print('구독 수:', len(subs))
+          for s in subs:
+              print(f'  - {s["type"]} enabled={s.get("enabled")} id={s["id"][:8]}')
+          if not subs:
+              print('⚠️ 구독 없음 — 이 사용자에 연결된 기기가 없습니다')
+          else:
+              enabled = [s for s in subs if s.get('enabled')]
+              print(f'활성 구독: {len(enabled)}개')
+          EOF
+          # 2) 같은 외부 ID를 가진 다른 사용자가 없는지 확인 (중복 여부)
+          echo
+          echo '=== 외부 ID bs0208로 조회 (중복 여부) ==='
+          curl -s -X GET "https://api.onesignal.com/apps/${APP_ID}/users/by/external_id/bs0208" \
+            -H "Content-Type: application/json" -H "Authorization: Key ${API_KEY}" \
+            -o /tmp/u2.json -w 'HTTP %{http_code}\n'
+          python3 - <<'EOF'
+          import json
+          try:
+              d = json.load(open('/tmp/u2.json'))
+          except Exception as e:
+              print('응답 파싱 실패:', e)
+              raise SystemExit(0)
+          print('onesignal_id:', d.get('identity', {}).get('onesignal_id'))
+          p = d.get('properties', {})
+          print('external_id:', d.get('identity', {}).get('external_id'))
+          subs = d.get('subscriptions', [])
+          print('구독 수:', len(subs))
+          for s in subs:
+              print(f'  - {s["type"]} enabled={s.get("enabled")} id={s["id"][:8]}')
+          EOF
