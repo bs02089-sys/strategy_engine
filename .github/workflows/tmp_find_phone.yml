@@ -1,0 +1,50 @@
+name: Temp Find Phone Sub
+
+on:
+  workflow_dispatch:
+
+jobs:
+  find:
+    runs-on: ubuntu-latest
+    env:
+      API_KEY: ${{ secrets.ONESIGNAL_REST_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Search all users and their subscriptions
+        run: |
+          set -e
+          pip install -q requests
+          APP_ID=$(python3 -c "import json; print(json.load(open('swing_config.json')).get('ONESIGNAL_APP_ID',''))")
+          python3 - <<EOF
+          import json, os, requests
+
+          app_id = "$APP_ID"
+          api_key = os.environ["API_KEY"]
+
+          # 전체 사용자 검색 — 외부 ID/구독 포함 (v2 users/search)
+          resp = requests.post(
+              f"https://api.onesignal.com/apps/{app_id}/users/search",
+              headers={"Authorization": f"Key {api_key}", "Content-Type": "application/json"},
+              json={"limit": 50},
+              timeout=20,
+          )
+          print("search HTTP", resp.status_code)
+          if resp.status_code != 200:
+              print(resp.text[:500])
+              raise SystemExit(0)
+          data = resp.json()
+          users = data.get("users", [])
+          print("사용자 수:", len(users))
+          for u in users:
+              ident = u.get("identity", {})
+              props = u.get("properties", {})
+              subs = u.get("subscriptions", [])
+              ext = ident.get("external_id")
+              oid = ident.get("onesignal_id", "")
+              print(f"--- 사용자 {oid[:8]} ext={ext!r} last_active={props.get('last_active')}")
+              for s in subs:
+                  print(f"    구독: {s.get('type')} enabled={s.get('enabled')} id={s.get('id','')[:8]} last_session={s.get('last_session')}")
+              if not subs:
+                  print("    (구독 없음)")
+          EOF
