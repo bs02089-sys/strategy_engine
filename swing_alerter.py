@@ -1058,10 +1058,10 @@ OneSignalDeferred.push(async function(OneSignal) {
 """
 
 
-# 계좌별 매수 예정가(사용자 입력) × (1 + 예상 수익률) → 계좌별 매도 예정가 자동 계산 (브라우저 localStorage 저장)
-# 세븐 스플릿: 7개 계좌를 각각 추적 — 저장 키 swing_buy_{TICKER}_{ACCOUNT}, 푸시 태그 swing_sell_{TICKER}_{ACCOUNT}
-# 매도 상태 칩/카운트는 사용자별 입력 기준으로 항상 재판정 — 서버 설정(BUY_PRICE) 없이도 동작한다.
-# 구형 단일 키(swing_buy_{TICKER})는 1번 계좌로 자동 마이그레이션된다.
+# 계좌별 매수 예정가/매도 예정가 — 서버가 swing_personal.json(단일 소스)을 렌더링해 폰/웹이
+# 항상 같은 값을 표시한다 (2026-08-12 서버 렌더링 전환). JS는 표시용으로만 동작하며, 서버가
+# 렌더링하지 않은 계좌에 한해 기기 localStorage(swing_buy_{TICKER}_{ACCOUNT})를 폴백한다.
+# 구형 단일 키(swing_buy_{TICKER})는 1번 계좌 폴백으로 자동 마이그레이션된다.
 _PLAN_JS = """
 <script>
 (function() {
@@ -1069,7 +1069,7 @@ _PLAN_JS = """
   // 전환. 태그는 더 이상 기기 간 동기화에 쓰지 않는다 (계정의 중복 사용자로 인한 409와 무관하게
   // 폰/웹이 항상 같은 값을 표시한다). OneSignal은 알림 푸시 전용으로만 사용.
 
-  // 카드별 저장 키: swing_buy_{TICKER}_{ACCOUNT}(계좌별 매수 예정가) / swing_sell_{TICKER}(예상 수익률, 카드 공용)
+  // 계좌별 초기값: 서버 렌더링(data-buy) 우선, 없으면 기기 localStorage 폴백.
   function initSwingCard(card) {
     var ticker = card.dataset.ticker;
     var close = parseFloat(card.dataset.close);
@@ -1119,13 +1119,13 @@ _PLAN_JS = """
       } catch (e) { /* 진동 미지원 — 무시 */ }
     }
 
-    // 계좌 1개의 매도 상태 — 입력된 매수 예정가 × (1 + 예상 수익률) 기준으로 항상 재판정.
-    // 미입력 계좌(active=false)는 계산/저장/태그에서 제외 — 매도 예정가도 비워둔다 (푸시 오발송 방지).
+    // 계좌 1개의 매도 상태 — 서버가 렌더링한 매수 예정가 × (1 + 예상 수익률) 기준으로 재판정.
+    // 미입력 계좌(active=false)는 계산에서 제외 — 매도 예정가도 비워둔다 (화면 표시용 판정).
     function rowState(row) {
       var n = row.dataset.acc;
       var v = parseFloat(row.querySelector('.plan-buy-input').value);
       if (isNaN(v) || v <= 0) {
-        // 미입력 — 매수/매도 예정가 모두 비움 (저장/태그 제외). 매수 예정가 입력 시에만 자동 계산.
+        // 미입력 — 매수/매도 예정가 모두 비움 (매수 예정가 입력 시에만 자동 계산).
         return { n: n, active: false, sell: null };
       }
       var sell = v * (1 + sellPct / 100);
@@ -1179,17 +1179,18 @@ _PLAN_JS = """
         var sellEl = row.querySelector('.acc-sell');
         var r = rowState(row);
         if (!r.active) {
-          // 미입력 — 매도 예정가 비움 (저장/태그 제외)
+          // 미입력 — 매도 예정가 비움 (기기 폴백 값도 정리)
           sellEl.textContent = '—';
           localStorage.removeItem('swing_buy_' + ticker + '_' + r.n);
           return;
         }
         sellEl.textContent = '$' + r.sell.toFixed(2);
+        // 기기 폴백용 localStorage 기록 — 값의 단일 소스는 swing_personal.json 서버 렌더링
         localStorage.setItem('swing_buy_' + ticker + '_' + r.n, String(r.buy));
         if (r.state === 'red') anyRed = true;
         else if (r.state === 'amber') anyAmber = true;
       });
-      // 구형 단일 키는 1번 계좌로 마이그레이션 완료 후 정리
+      // 구형 단일 키는 1번 계좌 폴백용 — 마이그레이션 완료 후 정리
       localStorage.removeItem('swing_buy_' + ticker);
       localStorage.setItem('swing_sell_' + ticker, String(sellPct));
       pctBtns.forEach(function(b) {
@@ -1220,7 +1221,7 @@ _PLAN_JS = """
 
   // 🔄 동기화 코드 — 두 기기에 같은 코드를 입력하면 OneSignal 외부 ID로 연결된다.
   // (2026-08-12: 태그 동기화 제거 — 기기 간 값 일치는 서버 렌더링(swing_personal.json)이 담당)
-  // 연결된 기기에서는 예상 수익률/매수 예정가 태그가 로컬보다 우선이라 매도 예정가가 자동 일치한다.
+  // 코드는 값 동기화가 아닌 OneSignal 사용자 병합 용도 — 모닝 리마인더의 외부 ID 타깃팅에 쓰인다.
   var keyInput = document.getElementById('sync-key-input');
   var syncStatus = document.getElementById('sync-status');
   var appliedKey = null;
@@ -1309,9 +1310,10 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
         '<button id="push-btn" class="push-btn" disabled>🔔 알림 받기</button>'
         if app_id else ""
     )
-    # 🔄 기기 간 동기화 코드 행 (2026-08-12) — OneSignal APP_ID 설정 시에만 표시.
-    # 같은 코드를 두 기기에 입력하면 OneSignal 외부 ID로 연결되어 예상 수익률/매수 예정가 태그가 공유된다.
-    # 🔒 코드는 마스킹(password) 표시 — 어깨 너머 노출 방지. 눈 아이콘 토글로 잠시 확인 가능 (2026-08-12)
+    # 🔄 동기화 코드 행 (2026-08-12) — OneSignal APP_ID 설정 시에만 표시.
+    # 두 기기에 같은 코드를 입력하면 OneSignal 외부 ID로 사용자가 병합된다 (태그 동기화 아님 —
+    # 기기 간 값 일치는 서버 렌더링(swing_personal.json 단일 소스)이 담당, 2026-08-12).
+    # 코드는 모닝 리마인더의 외부 ID 타깃팅용. 🔒 마스킹(password) 표시 — 눈 아이콘 토글로 확인 (2026-08-12)
     sync_row = (
         '<div class="sync-row">'
         '<span class="sync-lbl">🔄 동기화 코드</span>'
@@ -1397,10 +1399,10 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
 
         # 계좌별 매수 예정가 입력 7행 — 세븐 스플릿 7개 계좌(각 $500). 미입력 계좌는 매수/매도
         # 예정가를 모두 비워두고(현재가 자동 표시 없음), 매수 예정가를 입력한 계좌만 매도 예정가
-        # 자동 계산 + OneSignal 태그(swing_sell_{TICKER}_{N}) 동기화. (2026-08-12: 미입력 = 현재가
-        # 기준 매도 예정가 표시 제거 — 실제 매수한 계좌만 입력하도록 라벨 변경)
-        # 계좌별 매수 예정가 — 서버가 swing_personal.json(단일 소스)의 실제 매수가를 렌더링해
-        # 폰/웹이 항상 같은 값을 보여준다. (2026-08-12: OneSignal 태그 동기화 대신 서버 렌더링 전환)
+        # 자동 계산. (2026-08-12: 미입력 = 현재가 기준 매도 예정가 표시 제거 — 실제 매수한 계좌만
+        # 입력하도록 라벨 변경)
+        # 계좌별 매수/매도 예정가 — 서버가 swing_personal.json(단일 소스)의 실제 매수가를 렌더링해
+        # 폰/웹이 항상 같은 값을 보여준다. OneSignal 태그 동기화 대신 서버 렌더링 전환 (2026-08-12)
         lot_map = {lot.get("account"): lot for lot in st.get("lots") or []}
         def _plan_cell(n):
             lot = lot_map.get(n) or {}

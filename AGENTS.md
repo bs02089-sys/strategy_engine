@@ -70,11 +70,13 @@ Not lazy about: input validation at trust boundaries, error handling that preven
   (`auto_cycle_reset()` — `CYCLE_RESET_DONE` 플래그로 중복 방지, 매도 미도달 상태가 되면 자동
   재무장). 신고가 갱신(+1%) 리셋과 별개 동작이며, 봇은 여전히 `swing_personal.json`(사용자 소유)을
   절대 쓰지 않는다 — 매도 후 LOTS 정리/재기록은 사용자 몫이다. 전 계좌 매도 시 수동 --reset 은 불필요.
-  🔄 **기기 간 동기화 (2026-08-12)**: 앱 헤더 '동기화 코드'로 두 기기를 OneSignal 외부 ID로 연결하면
-  예상 수익률(`swing_pct_{TICKER}`)·계좌별 매수 예정가(`swing_buy_{TICKER}_{ACCOUNT}`) 태그가 공유되고,
-  페이지 로드 시 태그가 로컬 localStorage보다 우선 채택된다 (마지막 변경 기기 기준). 매수 예정가가
-  OneSignal 사용자 레코드에 저장되지만 공용 알림(Discord 브리핑/전역 푸시) 노출 경로는 아니며, 코드
-  미입력 기기는 기존 기기별 localStorage 동작을 그대로 유지한다 (OneSignal SDK v16 login/logout/getTags).
+  📌 **매수/매도 예정가 — 서버 렌더링 단일 소스 (2026-08-12)**: 계좌별 매수 예정가/매도 예정가는
+  앱 대시보드를 생성할 때 `swing_personal.json`(LOTS 실제 매수가 × SWING_TARGET_PCT)을 읽어 서버가
+  직접 그려 넣는다 — 폰/웹이 OneSignal 상태와 무관하게 항상 같은 값을 표시한다. 예상 수익률도
+  `SWING_TARGET_PCT`(swing_config.json) 단일 소스. OneSignal 태그 동기화(swing_buy_/swing_sell_
+  태그, login/getTags/addTag)는 409/중복 사용자 문제로 전면 제거 — 태그를 다시 추가하지 말 것.
+  앱 헤더의 '동기화 코드' UI는 남아 있으나 OneSignal 외부 ID 병합(사용자 통합) 용도일 뿐 값
+  동기화가 아니다 (모닝 리마인더 외부 ID 타깃팅에 사용).
   🔒 코드 입력칸은 마스킹(password) 표시 — 눈 아이콘 토글로 잠시 확인 (어깨 너머 노출 방지, 2026-08-12).
   ⚠️ **봇은 `swing_dashboard.html`을 main에 커밋하지 않는다** — 생성 파일(헤더 시각 등)이 봇/사용자
   양쪽에서 재생성되어 git pull 충돌을 반복하므로, 워크플로우가 생성한 신선한 사본을 `gh-pages`에만
