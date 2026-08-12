@@ -377,7 +377,7 @@ python3 DCA_MA_strategy_flowchart.py
 
 | 트리거 | 시간 (UTC) | 설명 |
 |--------|------------|------|
-| 예약 실행 | 매일 23:40 (월~금) | 장 마감 후 스윙 일일 브리핑 + 대시보드 갱신 |
+| 예약 실행 | 매일 00:00 UTC = 09:00 KST (월~금) | 스윙 일일 브리핑 + 대시보드 갱신 (한국 아침 9시 고정) |
 | repository_dispatch | 장중 N분 (cron-job.org) | `--monitor` 실시간 알림 (매수 구간 도달/임박/매도) |
 | 수동 실행 | 사용자 요청 시 | workflow_dispatch 수동 실행 |
 
@@ -599,8 +599,8 @@ python3 DCA_MA_strategy.py --signal --discord --all  # TQQQ+SOXL 단일 메시�
   있으면 매도 알람이 항상 동작합니다.
 - **매도 푸시 — 단독 사용 전환 (2026-08-12)**: 서버 모니터가 현재가를 확인해 **매도 목표
   (서버 LOTS 매수가 × 목표 수익률)에 도달한 계좌를 전체 구독자(= 내 기기)에게** 푸시합니다
-  (계좌별 1일 1회 중복 방지). 태그 필터/Liquid 개인화는 제거되어 앱에서 매수 예정가를 입력하지
-  않아도 푸시가 동작합니다.
+  (계좌별 사이클당 1회 — 2026-08-13: 매도 신호가 전달된 계좌는 리셋 전까지 재발송하지 않음).
+  태그 필터/Liquid 개인화는 제거되어 앱에서 매수 예정가를 입력하지 않아도 푸시가 동작합니다.
 - **푸시 수신 조건**: 앱에서 🔔 알림을 구독하기만 하면 수신됩니다 (태그 등록 불필요 — 2026-08-12
   단독 사용 전환).
 - **전역 푸시: 단독 사용 전환 (2026-08-12)** — 지인 노출 차단을 위해 제거했던(2026-08-10) 전체
@@ -656,7 +656,7 @@ python3 setup_cronjob_org.py   # CRONJOB_ORG_API_KEY/GITHUB_PAT/GITHUB_OWNER/GIT
 **1회성 설정 (약 1분):**
 
 1. 변경 사항을 push 한 뒤, 워크플로우가 `gh-pages` 브랜치를 만들 때까지 대기
-   (매일 23:40 UTC 자동 실행, 또는 Actions 탭에서 수동 실행 `workflow_dispatch`).
+   (매일 00:00 UTC = 09:00 KST 자동 실행, 또는 Actions 탭에서 수동 실행 `workflow_dispatch`).
 2. 저장소 **Settings → Pages** 에서:
    - Source: **Deploy from a branch**
    - Branch: `gh-pages` / `/(root)` → **Save**

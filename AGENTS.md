@@ -35,7 +35,9 @@ Not lazy about: input validation at trust boundaries, error handling that preven
 - **설정 단일 소스**: `portfolio_config.json` (포지션/시그마/모드 상태). 설정값은 코드에 하드코딩하지 않고 여기에서 읽는다.
 - **스윙 알리미**: `swing_alerter.py` (2026-08-08 신규) — 유튜브 'TQQQ 스윙 투자 전략' 구글 스프레드시트
   (ATH 대비 MDD 구간 매수 + 매수가 대비 스윙 목표 수익률 매도) 재구현. OneSignal 푸시는
-  **전체 구독자(Subscribed Users = 내 기기) 대상**으로 발송(1일 1회 — 2026-08-12 단독 사용 전환).
+  **전체 구독자(Subscribed Users = 내 기기) 대상**으로 발송(2026-08-12 단독 사용 전환 — 매도 신호 푸시는
+  계좌별 **사이클당 1회**로 변경, 2026-08-13). 매도 신호를 보낸 계좌는 리셋(전 계좌 매도 완료 자동 리셋/수동
+  --reset) 전까지 재발송하지 않는다.
   설정은 `swing_config.json`(사용자 소유 — 공용: 티커/구간/목표/푸시 설정), 상태는 `swing_state.json`
   (봇 전용 — ZONE_ALERTS/매도 플래그)로 분리 — 봇이 상태 파일만 커밋하므로 git 충돌로 알림 상태가
   유실되지 않는다.

@@ -54,6 +54,7 @@ PERSONAL_CONFIG_PATH = "swing_personal.json"   # 🔒 개인 매수 포지션 (B
 DASHBOARD_PATH = "swing_dashboard.html"
 PORTFOLIO_CONFIG_PATH = "portfolio_config.json"
 NY_TZ = ZoneInfo("America/New_York")
+KST_TZ = ZoneInfo("Asia/Seoul")   # 일일 브리핑이 09:00 KST 고정 → 제목 날짜 등 한국 시간 기준 (2026-08-13)
 
 # swing_state.json 에 보관하는 봇 전용 상태 키 (POSITIONS 내부) —
 # swing_config.json(사용자 설정)과 분리해 봇/사용자 커밋 충돌로 상태가 유실되지 않게 한다.
@@ -304,7 +305,8 @@ def send_user_sell_pushes(statuses: list[dict], cfg: dict) -> bool:
     사용자별 태그 필터(swing_sell_{TICKER}_{ACCOUNT})·Liquid 개인화 제거 — 앱이 태그를
     등록하지 않아도 푸시가 동작한다 (태그 누락으로 'All included players are not subscribed'
     0명 응답이 나던 문제 해결). 매도 예정가는 서버 LOTS(swing_personal.json)의 계좌별 목표
-    (매수가 × SWING_TARGET_PCT)를 그대로 사용한다. 계좌별 1일 1회 중복 방지 유지.
+    (매수가 × SWING_TARGET_PCT)를 그대로 사용한다. 계좌별 1회(사이클당) 발송 — 매도 신호가
+    전달된 계좌는 리셋(전 계좌 매도 완료 자동 리셋/수동 --reset) 전까지 재발송하지 않는다 (2026-08-13).
     ⚠️ 지인이 새로 구독하면 본인 매도 정보가 노출될 수 있다 (단독 사용 전제 — AGENTS.md 참조).
     """
     app_id, api_key = _resolve_onesignal(cfg)
@@ -334,8 +336,8 @@ def send_user_sell_pushes(statuses: list[dict], cfg: dict) -> bool:
             continue
         sent_any = False
         for n, target in sorted(targets):
-            if sent.get(str(n)) == today:
-                continue  # 해당 계좌는 오늘 이미 발송 (계좌별 1일 1회)
+            if str(n) in sent:
+                continue  # 이미 매도 신호를 보낸 계좌(매도 완료 취급) — 사이클(리셋) 전까지 재발송 안 함 (2026-08-13)
             if len(targets) > 1:
                 title = f"📈 {ticker} {n}번 계좌 매도 신호"
                 body = (f"{n}번 계좌 매도 예정가(${target:,.2f})에 도달했습니다 — "
@@ -581,8 +583,18 @@ def compute_ticker(ticker: str, pos: dict, cfg: dict, live: bool = False) -> dic
         day_change_pct = (price - prior_close) / prior_close * 100.0
 
     ladder = build_ladder(ath, cfg)
+    # 매수 구간 상태 판정 (2026-08-13) — 현재가 도달 + **이미 매수한 구간** 모두 반영.
+    # 1번 계좌처럼 실제 매수가(예: -15% 구간 $73.49)가 기록된 구간은 현재가가 그 위로
+    # 회복해도 '경과'(앱)로 표시하고, 알림/브리핑에서도 매수 완료 구간을 제외해
+    # 같은 구간의 도달/임박을 다시 알리지 않는다 (다음 미매수 구간부터만 감시).
+    buy_prices = [float(l["buy_price"]) for l in (pos.get("LOTS") or []) if l.get("buy_price")]
+    if pos.get("BUY_PRICE"):
+        buy_prices.append(float(pos["BUY_PRICE"]))   # 구형 단일 경로(하위 호환)
+    lowest_buy = min(buy_prices) if buy_prices else None
     for lvl in ladder:
-        lvl["hit"] = bool(price <= lvl["price"] + 1e-9)
+        lvl["hit"] = bool(price <= lvl["price"] + 1e-9)  # 현재가 도달 (알림/브리핑 판정)
+        lvl["bought"] = bool(lowest_buy is not None and lvl["price"] >= lowest_buy - 1e-9)  # 매수한 구간(계좌 소진)
+        lvl["passed"] = bool(lvl["hit"] or lvl["bought"])  # 표시용 '경과' (앱 대시보드)
 
     hit_levels = [l for l in ladder if l["hit"]]
     deepest_hit = hit_levels[-1]["pct"] if hit_levels else None
@@ -744,10 +756,10 @@ def detect_alerts(st: dict, pos: dict, cfg: dict) -> tuple[list[str], list[str]]
     gap_p = float(cfg.get("IMMINENT_GAP_PCT", 5))
     dd_abs = abs(st["dd_pct"])
 
-    # 1) 새로 도달한 매수 구간
+    # 1) 새로 도달한 매수 구간 — 매수한 계좌(구간)는 제외: 이미 산 구간의 '도달'을 다시 알리지 않는다
     for lvl in st["ladder"]:
         p = lvl["pct"]
-        if lvl["hit"] and p not in zone_alerts["hit"]:
+        if lvl["hit"] and not lvl.get("bought") and p not in zone_alerts["hit"]:
             zone_alerts["hit"].append(p)
             zone_alerts["imminent"] = [x for x in zone_alerts["imminent"] if x != p]
             msg = (f"🔻 **{tick} -{p:.0f}% 매수 구간 도달**\n"
@@ -755,8 +767,8 @@ def detect_alerts(st: dict, pos: dict, cfg: dict) -> tuple[list[str], list[str]]
             msgs.append(msg)
             zone_msgs.append(msg)
 
-    # 2) 다음 구간 임박
-    nxt = st["next_zone"]
+    # 2) 다음 구간 임박 — **다음 미매수 구간** 기준 (매수한 계좌의 구간은 감시 제외, 2026-08-13)
+    nxt = next((l for l in st["ladder"] if not l["hit"] and not l.get("bought")), None)
     if nxt and nxt["pct"] not in zone_alerts["imminent"]:
         remain = nxt["pct"] - dd_abs          # 다음 구간까지 남은 %p
         if 0 <= remain <= gap_p:
@@ -820,7 +832,8 @@ def _ladder_summary(st: dict) -> str:
     if st.get("error"):
         return "-"
     hit = [f"-{l['pct']:.0f}%" for l in st["ladder"] if l["hit"]]
-    nxt = st["next_zone"]
+    # 다음 구간 — 매수한 구간(계좌 소진)은 제외한 다음 미매수 구간 기준 (2026-08-13)
+    nxt = next((l for l in st["ladder"] if not l["hit"] and not l.get("bought")), None)
     parts = []
     if hit:
         parts.append("🟢 " + " · ".join(hit))
@@ -856,18 +869,33 @@ def build_briefing_text(statuses: list[dict], cfg: dict) -> str:
                 sell_txt = "⏳ 매도 대기"
         else:
             sell_txt = "매도 미설정"
-        # 매수 구간 상태 (앱 카드 chip과 동일)
-        hit_cnt = len([l for l in st["ladder"] if l["hit"]])
-        buy_txt = f"🟢 매수 구간 {hit_cnt}개 경과" if hit_cnt else "매수 구간 대기"
+        # 매수 구간 상태 — 매수한 계좌(구간)는 제외하고, **다음 미매수 구간의 도달/임박만** 표시.
+        # 경과 표시(개인 매수가 파생 정보)는 공용 Discord에 노출하지 않으며, 다음 구간이
+        # 대기(도달/임박 아님)면 줄 자체를 생략한다 (2026-08-13).
+        open_zones = [l for l in st["ladder"] if not l.get("bought")]
+        hit_open = [l for l in open_zones if l["hit"]]
+        nxt_zone = next((l for l in open_zones if not l["hit"]), None)
+        buy_txt = None
+        if hit_open:
+            buy_txt = f"🟢 -{hit_open[-1]['pct']:.0f}% 매수 구간 도달"
+        elif nxt_zone:
+            remain = nxt_zone["pct"] - abs(st["dd_pct"])
+            if 0 <= remain <= gap:
+                buy_txt = (f"📡 -{nxt_zone['pct']:.0f}% 매수 구간 임박 "
+                           f"(남은 {remain:.1f}%p)")
         src_txt = f"실시간 {st['as_of']}" if st.get("live") else f"종가 기준 {st['as_of']}"
-        lines.extend([
+        block = [
             f"**{st['ticker']}** · {sell_txt}",
             f"- 현재가 ${st['price']:.2f} ({src_txt})",
             f"- ATH ${st['ath']:.2f} ({st['ath_date']}) → 하락 **{st['dd_pct']:+.1f}%**",
-            f"- {buy_txt}",
+        ]
+        if buy_txt:
+            block.append(f"- {buy_txt}")
+        block += [
             f"- 전고가: ${st['ath']:,.2f} ({st['ath_date']})",
             "",
-        ])
+        ]
+        lines.extend(block)
     return "\n".join(lines).strip()
 
 
@@ -1273,8 +1301,8 @@ _PLAN_JS = """
 
 
 def _lvl_row(lvl: dict, next_fill: float | None = None) -> str:
-    """래더 1줄 — hit: 초록 100% / next: 호박색 진행바(다음 구간 접근도) / wait: 회색."""
-    if lvl["hit"]:
+    """래더 1줄 — passed(경과: 현재가 도달 또는 이미 매수): 초록 100% / next: 호박색 진행바(다음 구간 접근도) / wait: 회색."""
+    if lvl.get("passed"):
         cls, st_txt, fill = "hit", "경과", 100.0
     elif next_fill is not None:
         cls, st_txt, fill = "current", "대기", next_fill
@@ -1296,7 +1324,9 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
     # 사용자별 localStorage 기준으로 JS(_PLAN_JS)가 항상 재판정하므로 서버 값은 필요 없다.
     sell_cnt = sum(1 for s in statuses
                    if s.get("sell_ready") and not s.get("error") and not s.get("personal"))
-    buy_cnt = sum(1 for s in statuses if s.get("deepest_hit") and not s.get("error"))
+    # 매수 경과 — 이미 매수한 구간(개인 LOTS)도 포함 (2026-08-13)
+    buy_cnt = sum(1 for s in statuses
+                  if not s.get("error") and any(l.get("passed") for l in s.get("ladder") or []))
     any_live = any(s.get("live") for s in statuses if not s.get("error"))
     pages_url = (cfg.get("PAGES_URL") or "").strip()
     live_link = (
@@ -1382,8 +1412,9 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
 
 
         # 다음 구간 접근 진행도: 현재 구간 상단(0%) → 다음 구간(100%)
+        # 매수한 구간(계좌 소진)은 제외한 다음 미매수 구간 기준 (2026-08-13)
         step = int(cfg.get("MDD_STEP_PCT", 5))
-        nxt = st["next_zone"]
+        nxt = next((l for l in st["ladder"] if not l["hit"] and not l.get("bought")), None)
         next_fill = None
         if nxt:
             cur_pct = nxt["pct"] - step                       # 방금 도달한 구간 (현재 위치)
@@ -1396,6 +1427,8 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
             _lvl_row(lvl, next_fill if (nxt and lvl["pct"] == nxt["pct"]) else None)
             for lvl in st["ladder"]
         )
+        # 매수 구간 경과 수 — 현재가 도달 + 이미 매수한 구간(개인 LOTS) 포함 (앱 칩/카운트 표시용)
+        passed_cnt = len([l for l in st["ladder"] if l.get("passed")])
 
         # 계좌별 매수 예정가 입력 7행 — 세븐 스플릿 7개 계좌(각 $500). 미입력 계좌는 매수/매도
         # 예정가를 모두 비워두고(현재가 자동 표시 없음), 매수 예정가를 입력한 계좌만 매도 예정가
@@ -1435,8 +1468,8 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
   <div class="price mono">${st["price"]:,.2f}</div>
   <div class="meta">{meta_src}{day_span}</div>
   <div class="row" style="margin-top:10px;justify-content:flex-end">
-    <span class="chip {'green' if st['deepest_hit'] else 'gray'}">
-      {'🟢 매수 구간 ' + str(len([l for l in st['ladder'] if l['hit']])) + '개 경과' if st['deepest_hit'] else '매수 구간 대기'}</span>
+    <span class="chip {'green' if passed_cnt else 'gray'}">
+      {'🟢 매수 구간 ' + str(passed_cnt) + '개 경과' if passed_cnt else '매수 구간 대기'}</span>
   </div>
   <div class="info">📊 전고가 ${st["ath"]:,.2f} ({st["ath_date"]}) 대비 <span class="dd {dd_cls}">{dd_sign}{abs(dd_pct_disp):.1f}%</span></div>
   <div class="plan">
@@ -1448,9 +1481,7 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
     <div class="plan-row">
       <label>📈 예상 수익률</label>
       <div class="plan-pcts">
-        <button type="button" class="pct" data-pct="5">5%</button>
-        <button type="button" class="pct" data-pct="10">10%</button>
-        <button type="button" class="pct" data-pct="15">15%</button>
+        <!-- 예상 수익률 — 사용자 채택값 20% 단일 옵션 (2026-08-13) -->
         <button type="button" class="pct" data-pct="20">20%</button>
       </div>
     </div>
@@ -1686,7 +1717,7 @@ def auto_cycle_reset(st: dict, pos: dict) -> tuple[str | None, bool]:
     """전 계좌 매도 목표 도달(사이클 완료) 시 알림 상태 자동 리셋 (2026-08-11).
 
     LOTS 의 모든 계좌가 매도 목표에 도달(sell_ready)하면 reset_position() 과 동일한
-    초기화(SELL 플래그/ZONE_ALERTS/ATH_CYCLE_BASE)를 자동 수행한다 — 매도 후 수동
+    초기화(SELL 플래그/ZONE_ALERTS/ATH_CYCLE_BASE/SELL_PUSH_LAST_AT)를 자동 수행한다 — 매도 후 수동
     --reset 없이 다음 하락 사이클의 구간 도달/임박 알림이 다시 울리도록 재무장한다.
 
     - '매도 목표 도달'은 신호(종가 기준)일 뿐 실제 체결 여부는 봇이 모르므로,
@@ -1719,6 +1750,7 @@ def auto_cycle_reset(st: dict, pos: dict) -> tuple[str | None, bool]:
     pos["ZONE_ALERTS"] = {"hit": [], "imminent": []}
     pos.pop("ATH_CYCLE_BASE", None)
     pos.pop("ZONE_PUSH_PENDING", None)   # 이전 사이클의 미전송 푸시 대기 큐 정리 (2026-08-11)
+    pos.pop("SELL_PUSH_LAST_AT", None)   # 매도 신호 푸시 재무장 — 새 사이클에서 계좌별 1회 재발송 (2026-08-13)
     pos["CYCLE_RESET_DONE"] = True
     return (f"🔄 **{st['ticker']} 전 계좌 매도 목표 도달 — 새 사이클 자동 리셋 완료**\n"
             "   매수 구간/매도 알림 상태가 초기화되었습니다.\n"
@@ -1735,6 +1767,7 @@ def reset_position(ticker: str) -> None:
     pos["ZONE_ALERTS"] = {"hit": [], "imminent": []}
     pos.pop("ATH_CYCLE_BASE", None)   # 새 사이클 기준도 초기화 (다음 실행에서 재설정)
     pos.pop("ZONE_PUSH_PENDING", None)  # 미전송 매수 구간 푸시 대기 큐 정리 (2026-08-11)
+    pos.pop("SELL_PUSH_LAST_AT", None)  # 매도 신호 푸시 재무장 — 계좌별 1회 발송 후 리셋 시 재발송 허용 (2026-08-13)
     pos["CYCLE_RESET_DONE"] = False  # 자동 리셋 감지 재무장 (2026-08-11)
     save_config(cfg)
     print(f"✅ {ticker} 알림 플래그 초기화 완료 — 새 포지션 진입 후 사용하세요.")
@@ -1785,7 +1818,7 @@ def main() -> None:
     # --monitor 도 live=True 로 계산해도 알림 시점은 변하지 않는다 (2026-08-11).
     statuses = _compute_all(cfg, force=True, live=True)
     webhook, user_id = _resolve_discord(cfg)
-    send_user_sell_pushes(statuses, cfg)   # 사용자별 매도 푸시 (1일 1회, 앱 등록 태그 기준)
+    send_user_sell_pushes(statuses, cfg)   # 사용자별 매도 푸시 (계좌별 사이클당 1회 — 2026-08-13)
 
     # 전 계좌 매도 목표 도달(사이클 완료) → 알림 상태 자동 리셋 — 수동 --reset 불필요 (2026-08-11)
     cycle_msgs: list[str] = []
@@ -1847,7 +1880,8 @@ def main() -> None:
     write_dashboard(statuses, cfg, args.dashboard)
 
     if args.discord:
-        title = f"📈 스윙 투자 알리미 브리핑 — {datetime.now(NY_TZ).strftime('%m-%d')}"
+        # 브리핑 시각이 09:00 KST 고정이므로 제목 날짜도 한국 시간 기준으로 표시 (2026-08-13)
+        title = f"📈 스윙 투자 알리미 브리핑 — {datetime.now(KST_TZ).strftime('%m-%d')}"
         content = build_briefing_text(statuses, cfg)
         if cycle_msgs:
             content = "\n\n".join(cycle_msgs) + "\n\n" + content   # 사이클 자동 리셋 안내 선두
