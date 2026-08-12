@@ -34,8 +34,8 @@ Not lazy about: input validation at trust boundaries, error handling that preven
 - **단일 파일 엔진**: `DCA_MA_strategy.py` — 실전 브리핑 + 백테스트(`--backtest`) + 신호(`--signal`)를 모두 담당.
 - **설정 단일 소스**: `portfolio_config.json` (포지션/시그마/모드 상태). 설정값은 코드에 하드코딩하지 않고 여기에서 읽는다.
 - **스윙 알리미**: `swing_alerter.py` (2026-08-08 신규) — 유튜브 'TQQQ 스윙 투자 전략' 구글 스프레드시트
-  (ATH 대비 MDD 구간 매수 + 매수가 대비 스윙 목표 수익률 매도) 재구현. 사용자별 매도 푸시는 앱이
-  등록한 매도 예정가 태그(`swing_sell_{TICKER}`) 기준으로 OneSignal에 필터 발송(1일 1회).
+  (ATH 대비 MDD 구간 매수 + 매수가 대비 스윙 목표 수익률 매도) 재구현. OneSignal 푸시는
+  **전체 구독자(Subscribed Users = 내 기기) 대상**으로 발송(1일 1회 — 2026-08-12 단독 사용 전환).
   설정은 `swing_config.json`(사용자 소유 — 공용: 티커/구간/목표/푸시 설정), 상태는 `swing_state.json`
   (봇 전용 — ZONE_ALERTS/매도 플래그)로 분리 — 봇이 상태 파일만 커밋하므로 git 충돌로 알림 상태가
   유실되지 않는다.
@@ -43,16 +43,18 @@ Not lazy about: input validation at trust boundaries, error handling that preven
   `swing_personal.json`(사용자 소유, 봇 미기입)에만 기록한다. 세븐 스플릿 7개 계좌는 `LOTS`
   (계좌별 BUY_PRICE/SHARES) 구조로 개별 추적 — `_PERSONAL` 마커가 붙은 포지션은
   Discord 브리핑/대시보드/전역 푸시 등 공용 알림에서 매도 정보가 노출되지 않는다 (매도 미설정으로 표시),
-  콘솔에서만 🔒 개인 라벨로 계좌별 매도 목표를 확인한다. 계좌별 푸시 태그는
-  `swing_sell_{TICKER}_{ACCOUNT}` (앱 입력 기준, 구형 단일 태그는 1번 계좌로 자동 마이그레이션).
-  ⚠️ **전역 OneSignal 푸시 제거 (2026-08-10)**: `--monitor`가 신호 요약을 구독자 전체에게 발송하던
-  동작은 제거됨 — 지인에게 내 매수 정보 기반 신호가 노출되는 것을 차단. 개인 알림은 사용자별 태그
-  푸시(`send_user_sell_pushes`)로만 발송. 다시 전역 푸시를 추가하지 말 것.
-  📣 **매수 구간 푸시 (2026-08-11)**: 매수 구간 도달(🔻)/임박(📡)은 Discord뿐 아니라 앱 구독자
-  (앱을 연 기기 — `swing_zone_{TICKER}` 태그 자동 등록)에게도 사용자별 태그 필터 푸시
-  (`send_zone_pushes`)로 발송 — 디스코드 미가입 지인도 스마트폰으로 수신 가능. 전역 푸시가 아니라
-  태그 필터 기반이라 위 '전역 푸시 금지' 규칙과 충돌하지 않는다. 매수 구간은 ATH(공개 정보) 기준이라
-  개인 정보 노출이 없다. 중복 방지는 `ZONE_ALERTS` 상태(detect_alerts)가 담당 — 신규 이벤트만 푸시하고,
+  콘솔에서만 🔒 개인 라벨로 계좌별 매도 목표를 확인한다. 매도 푸시는 태그 없이 서버 LOTS 매도
+  목표로 전체 구독자에 발송된다 (2026-08-12 단독 사용 전환 — 태그 필터 제거).
+  ⚠️ **OneSignal 푸시 — 단독 사용 전환 (2026-08-10 제거 → 2026-08-12 재허용)**: 2026-08-10에 지인
+  노출 차단 목적으로 전역 푸시를 제거했으나, 2026-08-12 지인 미구독 확인(카카오톡)으로 **이 앱은
+  사용자 본인 전용**으로 운영한다. 이에 따라 `send_user_sell_pushes`/`send_zone_pushes`/모닝
+  리마인더는 **전체 구독자(`Subscribed Users`) = 내 기기** 대상으로 발송한다 (태그 필터/Liquid 제거
+  — 태그 미등록 기기도 수신, 'All included players are not subscribed' 0명 누락 방지).
+  ⚠️ 지인이 새로 구독하면 본인 매수 정보가 노출될 수 있음을 인지할 것.
+  📣 **매수 구간 푸시 (2026-08-11 → 2026-08-12 단독 전환)**: 매수 구간 도달(🔻)/임박(📡)은 Discord뿐
+  아니라 전체 구독자(= 내 기기)에게 `send_zone_pushes`로 발송한다 — `swing_zone_{TICKER}` 태그 필터는
+  단독 사용 전환으로 제거(2026-08-12). 매수 구간은 ATH(공개 정보) 기준이라 개인 정보 노출이 없다.
+  중복 방지는 `ZONE_ALERTS` 상태(detect_alerts)가 담당 — 신규 이벤트만 푸시하고,
   발송 실패 시 `ZONE_PUSH_PENDING` 대기 큐(당일 한정)에 보관해 다음 폴링에서 재시도, 하루 지난 대기분은 폐기한다.
   알림은 Discord, 실시간은 cron-job.org `swing-monitor` 디스패치, 모바일 대시보드는
   `--serve`/`swing_dashboard.html` + GitHub Pages(`gh-pages` 브랜치 자동 배포).

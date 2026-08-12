@@ -4,7 +4,7 @@ name: Morning Reminder
 #   → ① LS증권 타사출고 신청 (TQQQ 6주 → 나무증권 1번)
 #     ② 나무증권 외화이체 (달러 입금 / 기본예탁금 충족)
 # 날짜 가드: 2026-08-12(UTC) 이외엔 no-op — 8/13 이후 이 파일 삭제 가능.
-# 전역 푸시 금지(AGENTS.md) 준수 — 앱이 등록한 개인 태그(swing_sell_*)로만 타겟 (내 기기만 수신).
+# 2026-08-12 단독 사용 전환 — 전체 구독자(Subscribed Users) = 내 기기만 수신 (AGENTS.md 갱신).
 on:
   schedule:
     # 00:05 UTC = 09:05 KST — 정각(00:00) 큐 지연 회피
@@ -60,12 +60,9 @@ jobs:
                   "   (취득단가 $73.97 증빙 먼저 확보)\n"
                   "② 나무증권 외화이체: 달러 입금 (기본예탁금 1천만원)\n"
                   "둘 다 오전 영업시간 안에!"},
-              # 전역 발송 금지 — 내 기기(앱이 등록한 매도 예정가 태그)로만 발송
-              "filters": [
-                  {"field": "tag", "key": "swing_sell_TQQQ", "relation": "exists"},
-                  {"operator": "OR"},
-                  {"field": "tag", "key": "swing_sell_TQQQ_1", "relation": "exists"},
-              ],
+              # 단독 사용 전환(2026-08-12) — 태그 필터 없이 전체 구독자(= 내 기기) 발송.
+              # (태그 필터는 태그 미등록 시 'All included players are not subscribed' 0명 누락 발생)
+              "included_segments": ["Subscribed Users"],
           }
           if pages:
               payload["url"] = pages

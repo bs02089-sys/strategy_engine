@@ -297,12 +297,13 @@ def send_onesignal_push(app_id: str, api_key: str, title: str, body: str,
 
 
 def send_user_sell_pushes(statuses: list[dict], cfg: dict) -> bool:
-    """사용자별 매도 푸시 — 앱이 등록한 계좌별 매도 예정가 태그
-    (swing_sell_{TICKER}_{ACCOUNT})가 현재가 이하인 구독자에게만 발송한다. 1일 1회 중복 방지.
+    """매도 푸시 — 단독 사용 전환(2026-08-12) 후 '전체 구독자(Subscribed Users) = 내 기기' 대상.
 
-    발송 대상 계좌: 서버 LOTS(swing_personal.json)에 기록된 계좌 + 기본 1번 계좌(단일 계좌 사용자용).
-    푸시 본문의 매도 예정가는 Liquid({{ user.tags.swing_sell_{TICKER}_{ACCOUNT} }})로
-    구독자마다 자기 값이 렌더링된다. (OneSignal 공식 개인화 문법)
+    사용자별 태그 필터(swing_sell_{TICKER}_{ACCOUNT})·Liquid 개인화 제거 — 앱이 태그를
+    등록하지 않아도 푸시가 동작한다 (태그 누락으로 'All included players are not subscribed'
+    0명 응답이 나던 문제 해결). 매도 예정가는 서버 LOTS(swing_personal.json)의 계좌별 목표
+    (매수가 × SWING_TARGET_PCT)를 그대로 사용한다. 계좌별 1일 1회 중복 방지 유지.
+    ⚠️ 지인이 새로 구독하면 본인 매도 정보가 노출될 수 있다 (단독 사용 전제 — AGENTS.md 참조).
     """
     app_id, api_key = _resolve_onesignal(cfg)
     if not app_id or not api_key:
@@ -319,34 +320,29 @@ def send_user_sell_pushes(statuses: list[dict], cfg: dict) -> bool:
         sent = pos.get("SELL_PUSH_LAST_AT") or {}
         if isinstance(sent, str):
             sent = {"1": sent}
-        # 발송 계좌 목록 — 서버 LOTS 에 매도 목표가 있는 계좌 + 1번(단일 계좌 사용자 기본값)
-        # 미입력 계좌는 제외 (앱이 태그를 지우므로 발송 대상이 없어도 요청 낭비 방지)
-        accounts = {1}
+        # 발송 대상 계좌 = 서버 LOTS 에 매도 목표가 있는 계좌 (앱 태그 불필요)
+        targets = []
         for lot in st.get("lots") or []:
             if lot.get("account") and lot.get("sell_target"):
-                accounts.add(int(lot["account"]))
+                targets.append((int(lot["account"]), float(lot["sell_target"])))
+        if not targets:
+            continue
         sent_any = False
-        for n in sorted(accounts):
+        for n, target in sorted(targets):
             if sent.get(str(n)) == today:
                 continue  # 해당 계좌는 오늘 이미 발송 (계좌별 1일 1회)
-            # 1번 계좌는 구형 단일 태그(swing_sell_{TICKER})로 발송 — 구버전 앱을 아직 안 연 기기 호환.
-            # 신형 앱은 1번 계좌 값을 단일 태그에도 동일하게 기록하므로 중복 발송이 없다.
-            tag = f"swing_sell_{ticker}" if n == 1 else f"swing_sell_{ticker}_{n}"
-            # 매도 예정가(target) ≤ 현재가 인 구독자만 — OneSignal tag 필터는 <,> 만 지원하므로
-            # target < (현재가+0.01) 을 찾으면 target ≤ 현재가 와 동치 (소수 2자리 가격 기준)
-            filters = [{"field": "tag", "key": tag, "relation": "<",
-                        "value": f"{st['price'] + 0.01:.2f}"}]
-            if len(accounts) > 1:
+            if len(targets) > 1:
                 title = f"📈 {ticker} {n}번 계좌 매도 신호"
-                body = (f"{n}번 계좌 매도 예정가(${{{{ user.tags.{tag} }}}})에 도달했습니다 — "
+                body = (f"{n}번 계좌 매도 예정가(${target:,.2f})에 도달했습니다 — "
                         "매도 검토가 필요해요." + (f"\n앱에서 확인: {pages}" if pages else ""))
             else:
                 title = f"📈 {ticker} 매도 신호"
-                body = (f"내 매도 예정가(${{{{ user.tags.{tag} }}}})에 도달했습니다 — 매도 검토가 필요해요."
+                body = (f"내 매도 예정가(${target:,.2f})에 도달했습니다 — 매도 검토가 필요해요."
                         + (f"\n앱에서 확인: {pages}" if pages else ""))
+            # 필터 없이 전체 구독자 발송 (단독 사용 전제)
             code, resp = send_onesignal_push(
                 app_id, api_key, title=title, body=body,
-                url=pages or None, filters=filters,
+                url=pages or None,
             )
             # 성공(2xx)일 때만 발송일 기록 — 실패 시 당일 재시도 가능 (알림 누락 방지)
             if str(code).startswith("2"):
@@ -362,10 +358,10 @@ def send_user_sell_pushes(statuses: list[dict], cfg: dict) -> bool:
 
 
 def send_zone_pushes(zone_msgs: dict[str, list[str]], cfg: dict) -> None:
-    """매수 구간 도달(🔻)/임박(📡) 푸시 — 앱을 연 구독자(swing_zone_{TICKER} 태그)에게만 필터 발송.
+    """매수 구간 도달(🔻)/임박(📡) 푸시 — 전체 구독자(Subscribed Users = 내 기기) 대상 (2026-08-12 단독 사용 전환).
 
-    전역 푸시가 아니라 태그 필터 기반 — AGENTS.md '전역 푸시 금지' 규칙과 충돌하지 않는다.
-    매수 구간은 ATH(공개 정보) 기준이므로 개인 정보 노출이 없다.
+    swing_zone_{TICKER} 태그 필터 제거 — 앱을 열지 않은 기기도 수신. 매수 구간은 ATH(공개 정보)
+    기준이므로 개인 정보 노출이 없다.
 
     중복 방지/재시도: 새 이벤트는 detect_alerts 의 ZONE_ALERTS 상태가 1회만 생성하고,
     발송 실패(비 2xx) 시 메시지를 ZONE_PUSH_PENDING(봇 상태)에 보관해 다음 폴링에서 재시도한다.
@@ -401,13 +397,11 @@ def send_zone_pushes(zone_msgs: dict[str, list[str]], cfg: dict) -> None:
         # Discord 마크다운(**) 제거 — 푸시 알림 본문 정제. 타이틀은 도달 포함 여부로 아이콘 선택.
         body = "\n".join(msgs).replace("**", "")
         has_hit = any("매수 구간 도달" in m for m in msgs)
-        filters = [{"field": "tag", "key": f"swing_zone_{ticker}", "relation": "exists"}]
         code, resp = send_onesignal_push(
             app_id, api_key,
             title=f"{'🔻' if has_hit else '📡'} {ticker} 매수 구간 신호",
             body=body,
             url=pages or None,
-            filters=filters,
         )
         if str(code).startswith("2"):
             # 성공 → 대기 큐 제거 (신규 메시지는 이미 전송됨 — 재발송 없음)
@@ -1037,14 +1031,8 @@ OneSignalDeferred.push(async function(OneSignal) {
         if (on) btn.classList.add('on'); else btn.classList.remove('on');
       });
     }
-    // 매수 구간 푸시 태그 자동 등록 — 앱을 연 구독자는 swing_zone_{TICKER} 태그를 가져
-    // 서버가 매수 구간 도달(🔻)/임박(📡)을 사용자별 푸시로 발송한다 (전역 푸시 아님 — 2026-08-11).
-    // 구독 전에도 태그는 등록되며, 알림을 허용한 시점부터 바로 수신된다.
-    document.querySelectorAll('.card[data-ticker]').forEach(function(card) {
-      try {
-        OneSignal.User.addTag('swing_zone_' + card.dataset.ticker, '1');
-      } catch (e) { /* OneSignal 미설정 — 무시 */ }
-    });
+    // (2026-08-12 단독 사용 전환: swing_zone_{TICKER} 태그 등록 제거 — 푸시가 태그 필터를
+    // 쓰지 않아 불필요해짐. 전체 구독자 = 내 기기 대상 발송.)
   } catch (e) {
     // init/구독 조회 실패 시 원인을 화면+콘솔에 표시 (스마트폰 PWA에도 보이도록)
     console.error('OneSignal 초기화 실패:', e);
@@ -1892,8 +1880,8 @@ def main() -> None:
                 alerts.extend([f"**{ticker}**"] + msgs)
         if changed:
             save_config(cfg)  # 알림 플래그 영속화 (중복 방지)
-        # 매수 구간 도달/임박 푸시 — Discord(공용)와 별개로 앱 구독자(swing_zone_{TICKER} 태그)에게.
-        # 새 이벤트만 담겨 있어 중복 발송이 없다 (ZONE_ALERTS 상태가 dedup 담당).
+        # 매수 구간 도달/임박 푸시 — 전체 구독자(= 내 기기)에게 (2026-08-12 단독 사용 전환,
+        # swing_zone 태그 필터 제거). 새 이벤트만 담겨 있어 중복 발송이 없다 (ZONE_ALERTS dedup).
         send_zone_pushes(zone_msgs, cfg)
         # 장중 실시간 대시보드 갱신 — 디스패치마다 신선한 HTML 을 만들어 gh-pages 에 재배포한다.
         # Discord 발송보다 먼저 수행해 알림 전송 실패가 대시보드 갱신을 막지 않는다.
