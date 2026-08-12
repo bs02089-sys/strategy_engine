@@ -1,5 +1,5 @@
 {
-    "_NOTE": "나무증권 앱 별도 계좌(스윙 전용) 공용 설정 — 장기 투자(LS증권, DCA_MA_strategy.py + portfolio_config.json)와 분리 운용. [세븐 스플릿 전략] 매수: ATH 대비 -15%~-45% 5% 단위 7구간 (15/20/25/30/35/40/45% — 계좌 1~7번 각 $500 대응), 매도: 매수가 대비 +20% (SWING_TARGET_PCT — 앱 기본 선택값도 이 값을 읽음). 개인 매수 정보(BUY_PRICE/SHARES)는 swing_personal.json 에 기록한다 (공용 알림 노출 방지). ONESIGNAL_APP_ID는 2026-08-12 사용자 실제 앱(c33eb986-...)으로 교정 — fc892714-...는 08-09 오입력이었고 구독자가 없는 잘못된 앱이었다. (JSON 주석 불가로 _NOTE 메타 키로 기록 — 엔진은 무시)",
+    "_NOTE": "나무증권 앱 별도 계좌(스윙 전용) 공용 설정 — 장기 투자(LS증권, DCA_MA_strategy.py + portfolio_config.json)와 분리 운용. [세븐 스플릿 전략] 매수: ATH 대비 -15%~-45% 5% 단위 7구간 (15/20/25/30/35/40/45% — 계좌 1~7번 각 $500 대응), 매도: 매수가 대비 +20% (SWING_TARGET_PCT — 앱 기본 선택값도 이 값을 읽음). 개인 매수 정보(BUY_PRICE/SHARES)는 swing_personal.json 에 기록한다 (공용 알림 노출 방지). ONESIGNAL_APP_ID는 2026-08-12 대시보드 표시 값(fc892714-...)으로 재확정 — c33eb986-...는 사용자 계정/사용자 ID로 앱이 아니어서 원래 값으로 복귀 (구독자 2명은 fc892714 앱에 있음). (JSON 주석 불가로 _NOTE 메타 키로 기록 — 엔진은 무시)",
     "ENABLED": true,
     "MDD_START_PCT": 15,
     "MDD_END_PCT": 45,
@@ -7,7 +7,7 @@
     "SWING_TARGET_PCT": 20,
     "IMMINENT_GAP_PCT": 5,
     "PAGES_URL": "https://bs02089-sys.github.io/strategy_engine/",
-    "ONESIGNAL_APP_ID": "c33eb986-57d3-4266-b378-a959439d508f",
+    "ONESIGNAL_APP_ID": "fc892714-97d9-457a-b3d6-12d25d93cc48",
     "POSITIONS": {
         "TQQQ": {
             "ENABLED": true,
