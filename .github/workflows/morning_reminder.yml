@@ -87,5 +87,5 @@ jobs:
                   r.raise_for_status()
                   break
           else:
-              raise SystemExit("인증 실패 (Basic/Key 모두 401/403) — API 키가 현재 앱(c33eb986)의 키인지 확인")
+              raise SystemExit("인증 실패 (Basic/Key 모두 401/403) — API 키가 현재 앱(fc892714)의 키인지 확인")
           PY
