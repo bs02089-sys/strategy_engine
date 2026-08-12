@@ -76,7 +76,7 @@ Not lazy about: input validation at trust boundaries, error handling that preven
   `SWING_TARGET_PCT`(swing_config.json) 단일 소스. OneSignal 태그 동기화(swing_buy_/swing_sell_
   태그, login/getTags/addTag)는 409/중복 사용자 문제로 전면 제거 — 태그를 다시 추가하지 말 것.
   앱 헤더의 '동기화 코드' UI는 남아 있으나 OneSignal 외부 ID 병합(사용자 통합) 용도일 뿐 값
-  동기화가 아니다 (모닝 리마인더 외부 ID 타깃팅에 사용).
+  동기화가 아니다.
   🔒 코드 입력칸은 마스킹(password) 표시 — 눈 아이콘 토글로 잠시 확인 (어깨 너머 노출 방지, 2026-08-12).
   ⚠️ **봇은 `swing_dashboard.html`을 main에 커밋하지 않는다** — 생성 파일(헤더 시각 등)이 봇/사용자
   양쪽에서 재생성되어 git pull 충돌을 반복하므로, 워크플로우가 생성한 신선한 사본을 `gh-pages`에만

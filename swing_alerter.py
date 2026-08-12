@@ -1221,7 +1221,7 @@ _PLAN_JS = """
 
   // 🔄 동기화 코드 — 두 기기에 같은 코드를 입력하면 OneSignal 외부 ID로 연결된다.
   // (2026-08-12: 태그 동기화 제거 — 기기 간 값 일치는 서버 렌더링(swing_personal.json)이 담당)
-  // 코드는 값 동기화가 아닌 OneSignal 사용자 병합 용도 — 모닝 리마인더의 외부 ID 타깃팅에 쓰인다.
+  // 코드는 값 동기화가 아닌 OneSignal 사용자 병합(외부 ID) 용도 — 동일 코드 기기가 한 사용자로 묶인다.
   var keyInput = document.getElementById('sync-key-input');
   var syncStatus = document.getElementById('sync-status');
   var appliedKey = null;
@@ -1313,7 +1313,7 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
     # 🔄 동기화 코드 행 (2026-08-12) — OneSignal APP_ID 설정 시에만 표시.
     # 두 기기에 같은 코드를 입력하면 OneSignal 외부 ID로 사용자가 병합된다 (태그 동기화 아님 —
     # 기기 간 값 일치는 서버 렌더링(swing_personal.json 단일 소스)이 담당, 2026-08-12).
-    # 코드는 모닝 리마인더의 외부 ID 타깃팅용. 🔒 마스킹(password) 표시 — 눈 아이콘 토글로 확인 (2026-08-12)
+    # 코드는 외부 ID 사용자 병합용. 🔒 마스킹(password) 표시 — 눈 아이콘 토글로 확인 (2026-08-12)
     sync_row = (
         '<div class="sync-row">'
         '<span class="sync-lbl">🔄 동기화 코드</span>'
