@@ -1065,57 +1065,9 @@ OneSignalDeferred.push(async function(OneSignal) {
 _PLAN_JS = """
 <script>
 (function() {
-  // ── OneSignal 태그 일괄 동기화 (2026-08-12) ──
-  // 입력 이벤트마다 개별 addTag를 호출하면 set-property PATCH가 폭주해
-  // OneSignal 서버가 409 Conflict로 거부하던 문제 해결:
-  // 입력 중에는 전송을 미루고, 입력이 멈춘 뒤(0.8s) 변경분만 addTags/removeTags로 한 번에 보낸다.
-  // lastSentTags = 마지막으로 서버에 반영한 값 스냅샷 — 실제로 바뀐 키만 전송 (불필요 PATCH 제거)
-  var lastSentTags = {};
-  var tagTimer = null;
-  function queueTagSync() {
-    if (tagTimer) clearTimeout(tagTimer);
-    tagTimer = setTimeout(flushTagSync, 800);
-  }
-  function flushTagSync() {
-    tagTimer = null;
-    var next = {};
-    document.querySelectorAll('.card[data-ticker]').forEach(function(card) {
-      var t = card.dataset.ticker;
-      var sellPct = parseFloat(localStorage.getItem('swing_sell_' + t));
-      if (isNaN(sellPct)) sellPct = parseFloat(card.dataset.sellDefault) || 10;
-      next['swing_pct_' + t] = String(sellPct);
-      card.querySelectorAll('.plan-acc').forEach(function(row) {
-        var n = row.dataset.acc;
-        var v = parseFloat(row.querySelector('.plan-buy-input').value);
-        if (isNaN(v) || v <= 0) {
-          // ⚠️ 미입력 계좌 — 태그를 건드리지 않는다 (2026-08-12)
-          // OneSignal v16 SDK가 removeTags를 로컬 태그 맵에 빈 문자열("")로 심고,
-          // 이후 set-property 전체 맵 스냅샷에 ""이 포함돼 서버가 409 Conflict로
-          // 모든 태그 업데이트를 거부하던 문제. 새 "" 생성 금지 — 기존 ""은
-          // 브라우저 SDK 캐시(IndexedDB) 정리로만 제거된다.
-          return;
-        }
-        var sell = v * (1 + sellPct / 100);
-        next['swing_buy_' + t + '_' + n] = String(v);
-        next['swing_sell_' + t + '_' + n] = sell.toFixed(2);
-        // 1번 계좌는 구형 단일 태그(swing_sell_{TICKER})에도 동일 기록 —
-        // 아직 새 앱을 열지 않은 기기의 기존 태그와 호환
-        if (n === '1') next['swing_sell_' + t] = sell.toFixed(2);
-      });
-    });
-    // 실제로 바뀐 키만 전송 (lastSentTags 대비) — 빈 문자열 값은 절대 보내지 않는다
-    var add = {};
-    Object.keys(next).forEach(function(k) { if (lastSentTags[k] !== next[k]) add[k] = next[k]; });
-    if (Object.keys(add).length === 0) return;
-    if (!(window.OneSignalDeferred && window.OneSignalDeferred.push)) return;   // SDK 미로드 — 건너뜀
-    window.OneSignalDeferred.push(function(OneSignal) {
-      if (!OneSignal || !OneSignal.User) return;
-      try {
-        if (OneSignal.User.addTags) OneSignal.User.addTags(add);
-      } catch (e) { /* OneSignal 미설정 — 무시 */ }
-    });
-    Object.keys(add).forEach(function(k) { lastSentTags[k] = add[k]; });
-  }
+  // ⚠️ OneSignal 태그 동기화 제거 (2026-08-12) — 서버 렌더링(swing_personal.json 단일 소스)으로
+  // 전환. 태그는 더 이상 기기 간 동기화에 쓰지 않는다 (계정의 중복 사용자로 인한 409와 무관하게
+  // 폰/웹이 항상 같은 값을 표시한다). OneSignal은 알림 푸시 전용으로만 사용.
 
   // 카드별 저장 키: swing_buy_{TICKER}_{ACCOUNT}(계좌별 매수 예정가) / swing_sell_{TICKER}(예상 수익률, 카드 공용)
   function initSwingCard(card) {
@@ -1126,14 +1078,18 @@ _PLAN_JS = """
     var pctBtns = card.querySelectorAll('.pct');
     var chip = card.querySelector('[data-sell-chip]');
 
-    // 예상 수익률 → 서버 SWING_TARGET_PCT 기본값
-    var sellPct = parseFloat(localStorage.getItem('swing_sell_' + ticker));
-    if (isNaN(sellPct)) sellPct = parseFloat(card.dataset.sellDefault) || 10;
+    // 예상 수익률 — 서버 SWING_TARGET_PCT(단일 소스)를 기본값으로. 기기별 localStorage pct로
+    // 매도 예정가가 갈라지던 문제 해소 (2026-08-12). 화면에서 버튼으로 바꾸면 세션 중만 반영되고
+    // 새로고침 시 서버 값으로 복귀한다.
+    var sellPct = parseFloat(card.dataset.sellDefault);
+    if (isNaN(sellPct) || sellPct <= 0) sellPct = 10;
 
-    // 계좌별 초기값 로드 — 1번 계좌는 구형 단일 키(swing_buy_{TICKER}) 폴백 (자동 마이그레이션)
+    // 계좌별 초기값 로드 — 서버가 렌더링한 매수 예정가(data-buy, swing_personal.json 단일 소스) 우선.
+    // 없으면 기기 localStorage 폴백 (1번 계좌는 구형 단일 키 폴백). (2026-08-12 서버 렌더링 전환)
     accRows.forEach(function(row) {
       var n = row.dataset.acc;
-      var v = parseFloat(localStorage.getItem('swing_buy_' + ticker + '_' + n));
+      var v = parseFloat(row.dataset.buy);
+      if (isNaN(v) || v <= 0) v = parseFloat(localStorage.getItem('swing_buy_' + ticker + '_' + n));
       if (isNaN(v) && n === '1') v = parseFloat(localStorage.getItem('swing_buy_' + ticker));
       var input = row.querySelector('.plan-buy-input');
       if (!isNaN(v) && v > 0) input.value = v;
@@ -1216,16 +1172,14 @@ _PLAN_JS = """
 
     function update() {
       if (isNaN(close)) return;   // 가격 데이터 없으면 계산 생략
-      // 예상 수익률은 localStorage가 단일 소스 — 태그 동기화로 재초기화된 뒤에도
-      // 기존(구) 클로저의 update()가 호출되면 최신 값으로 재계산한다 (채택 값이 뒤집히는 것 방지)
-      sellPct = parseFloat(localStorage.getItem('swing_sell_' + ticker));
-      if (isNaN(sellPct)) sellPct = parseFloat(card.dataset.sellDefault) || 10;
+      // sellPct는 initSwingCard의 클로저 값(서버 SWING_TARGET_PCT 단일 소스)을 사용한다 —
+      // 기기별 localStorage 재읽기를 제거해 매도 예정가가 기기마다 갈라지는 문제 방지 (2026-08-12)
       var anyRed = false, anyAmber = false;
       accRows.forEach(function(row) {
         var sellEl = row.querySelector('.acc-sell');
         var r = rowState(row);
         if (!r.active) {
-          // 미입력 — 매도 예정가 비움 (저장/태그 제외 — flushTagSync가 태그 정리)
+          // 미입력 — 매도 예정가 비움 (저장/태그 제외)
           sellEl.textContent = '—';
           localStorage.removeItem('swing_buy_' + ticker + '_' + r.n);
           return;
@@ -1238,7 +1192,6 @@ _PLAN_JS = """
       // 구형 단일 키는 1번 계좌로 마이그레이션 완료 후 정리
       localStorage.removeItem('swing_buy_' + ticker);
       localStorage.setItem('swing_sell_' + ticker, String(sellPct));
-      queueTagSync();   // 🔄 태그 동기화 — 입력이 멈춘 뒤(0.8s) 변경분만 일괄 전송 (409 폭주 방지)
       pctBtns.forEach(function(b) {
         b.classList.toggle('on', parseFloat(b.dataset.pct) === sellPct);
       });
@@ -1246,19 +1199,17 @@ _PLAN_JS = """
       refreshAlarmCount();
     }
 
-    // 이벤트 리스너는 1회만 등록 — 태그 동기화 후 재초기화(adoptTags → initSwingCard) 시 중복 방지
+    // 이벤트 리스너는 1회만 등록 — 중복 등록 방지 (2026-08-12)
     if (!card.dataset.inited) {
       accRows.forEach(function(row) {
         var inp = row.querySelector('.plan-buy-input');
         inp.addEventListener('input', update);
-        // blur/Enter 시에도 재동기화 — 409 등으로 직전 flush가 실패해도 다음 기회 (2026-08-12)
-        inp.addEventListener('change', function() { queueTagSync(); });
       });
       pctBtns.forEach(function(b) {
         b.addEventListener('click', function() {
-          // localStorage에 먼저 기록 후 update() — update()가 localStorage를 재읽으므로
-          // 어느 클로저가 호출돼도 같은 값으로 계산된다 (재초기화 안전).
-          localStorage.setItem('swing_sell_' + ticker, String(parseFloat(b.dataset.pct)));
+          // 세션 중 예상 수익률 임시 변경 — 새로고침하면 서버 SWING_TARGET_PCT로 복귀 (2026-08-12)
+          sellPct = parseFloat(b.dataset.pct);
+          localStorage.setItem('swing_sell_' + ticker, String(sellPct));
           update();
         });
       });
@@ -1267,44 +1218,8 @@ _PLAN_JS = """
     update();
   }
 
-  // OneSignal 태그 → 로컬 채택 — 태그가 있으면 태그 값을 우선 적용 (마지막 변경 기기 기준).
-  // 기기별 localStorage 값과 다를 때만 재초기화해 화면/매도 푸시 태그를 태그 기준으로 맞춘다.
-  function adoptTags(OneSignal) {
-    try {
-      if (!OneSignal || !OneSignal.User || !OneSignal.User.getTags) return;
-      return OneSignal.User.getTags().then(function(tags) {
-        if (!tags) return;
-        // 서버 태그 스냅샷 초기화 — 이미 서버에 있는 값은 재전송하지 않는다 (409 폭주 방지)
-        Object.keys(tags).forEach(function(k) { if (k.indexOf('swing_') === 0) lastSentTags[k] = tags[k]; });
-        var changed = false;
-        document.querySelectorAll('.card[data-ticker]').forEach(function(card) {
-          var t = card.dataset.ticker;
-          var pv = tags['swing_pct_' + t];
-          if (pv !== undefined) {
-            var p = parseFloat(pv);
-            if (!isNaN(p) && p > 0 && p <= 100) {
-              if (localStorage.getItem('swing_sell_' + t) !== String(p)) changed = true;
-              localStorage.setItem('swing_sell_' + t, String(p));
-            }
-          }
-          card.querySelectorAll('.plan-acc').forEach(function(row) {
-            var key = 'swing_buy_' + t + '_' + row.dataset.acc;
-            var tv = tags[key];
-            if (tv !== undefined) {
-              var v = parseFloat(tv);
-              if (!isNaN(v) && v > 0 && localStorage.getItem(key) !== String(v)) {
-                localStorage.setItem(key, String(v));
-                changed = true;
-              }
-            }
-          });
-        });
-        if (changed) document.querySelectorAll('.card[data-ticker]').forEach(initSwingCard);
-      });
-    } catch (e) { /* OneSignal 미설정 — 기기별 동작 유지 */ }
-  }
-
-  // 🔄 동기화 코드 — 두 기기에 같은 코드를 입력하면 OneSignal 외부 ID로 연결돼 태그가 공유된다.
+  // 🔄 동기화 코드 — 두 기기에 같은 코드를 입력하면 OneSignal 외부 ID로 연결된다.
+  // (2026-08-12: 태그 동기화 제거 — 기기 간 값 일치는 서버 렌더링(swing_personal.json)이 담당)
   // 연결된 기기에서는 예상 수익률/매수 예정가 태그가 로컬보다 우선이라 매도 예정가가 자동 일치한다.
   var keyInput = document.getElementById('sync-key-input');
   var syncStatus = document.getElementById('sync-status');
@@ -1325,7 +1240,6 @@ _PLAN_JS = """
         } else if (OneSignal.logout) {
           await OneSignal.logout();          // 코드 삭제 — 연결 해제 (기기별 저장으로 복귀)
         }
-        await adoptTags(OneSignal);          // 연결 직후 태그 반영
         if (syncStatus) syncStatus.textContent = key ? '✓ 연결됨' : '';
       } catch (e) {
         if (syncStatus) syncStatus.textContent = '⚠️ 연결 실패';
@@ -1349,21 +1263,9 @@ _PLAN_JS = """
     });
   }
 
-  // 탭이 다시 보일 때 태그 재동기화 — 세션 중 실패한 flush(409 등)의 재시도 경로 (2026-08-12)
-  document.addEventListener('visibilitychange', function() {
-    if (!document.hidden) queueTagSync();
-  });
-
   // 카드 초기화 — 첫 로드 + 태그 채택 후 재판정
   document.querySelectorAll('.card[data-ticker]').forEach(initSwingCard);
 
-  // SDK init 완료 후 태그 읽기 — 기기별 값이 태그와 다르면 태그를 따르도록 채택
-  if (window.OneSignalDeferred && window.OneSignalDeferred.push) {
-    window.OneSignalDeferred.push(async function(OneSignal) {
-      if (!OneSignal || !OneSignal.User || !OneSignal.User.getTags) return;
-      await adoptTags(OneSignal);
-    });
-  }
 })();
 </script>
 """
@@ -1497,6 +1399,16 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
         # 예정가를 모두 비워두고(현재가 자동 표시 없음), 매수 예정가를 입력한 계좌만 매도 예정가
         # 자동 계산 + OneSignal 태그(swing_sell_{TICKER}_{N}) 동기화. (2026-08-12: 미입력 = 현재가
         # 기준 매도 예정가 표시 제거 — 실제 매수한 계좌만 입력하도록 라벨 변경)
+        # 계좌별 매수 예정가 — 서버가 swing_personal.json(단일 소스)의 실제 매수가를 렌더링해
+        # 폰/웹이 항상 같은 값을 보여준다. (2026-08-12: OneSignal 태그 동기화 대신 서버 렌더링 전환)
+        lot_map = {lot.get("account"): lot for lot in st.get("lots") or []}
+        def _plan_cell(n):
+            lot = lot_map.get(n) or {}
+            bp = lot.get("buy_price")
+            st_sell = lot.get("sell_target")
+            if bp and st_sell:
+                return f' data-buy="{bp:g}"', f' value="{bp:g}"', f'${st_sell:,.2f}'
+            return "", "", "—"
         acc_rows = (
             '    <div class="plan-hd">\n'
             '      <span class="hd-no">#</span>\n'
@@ -1504,12 +1416,12 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
             '      <span class="acc-sell">매도 예정가</span>\n'
             '    </div>\n'
         ) + "\n".join(
-            f'''    <div class="plan-acc" data-acc="{n}">
+            f'''    <div class="plan-acc" data-acc="{n}"{b}>
       <span class="acc-no">{n}</span>
-      <input class="plan-buy-input" type="number" min="0" step="0.01">
-      <span class="acc-sell">—</span>
+      <input class="plan-buy-input" type="number" min="0" step="0.01"{v}>
+      <span class="acc-sell">{s}</span>
     </div>'''
-            for n in range(1, 8)
+            for n, (b, v, s) in ((n, _plan_cell(n)) for n in range(1, 8))
         )
 
         cards.append(f"""
