@@ -11,29 +11,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Search all users and their subscriptions
+      - name: List all users and subscriptions
         run: |
           set -e
-          pip install -q requests
           APP_ID=$(python3 -c "import json; print(json.load(open('swing_config.json')).get('ONESIGNAL_APP_ID',''))")
           python3 - <<EOF
-          import json, os, requests
+          import json, os, urllib.request
 
           app_id = "$APP_ID"
           api_key = os.environ["API_KEY"].strip()
-
-          # 전체 사용자 검색 — 외부 ID/구독 포함 (v2 users/search)
-          resp = requests.post(
-              f"https://api.onesignal.com/apps/{app_id}/users/search",
-              headers={"Authorization": f"Key {api_key}", "Content-Type": "application/json"},
-              json={"limit": 50},
-              timeout=20,
+          req = urllib.request.Request(
+              f"https://api.onesignal.com/apps/{app_id}/users?limit=50",
+              headers={"Authorization": f"Key {api_key}"},
           )
-          print("search HTTP", resp.status_code)
-          if resp.status_code != 200:
-              print(resp.text[:500])
+          try:
+              with urllib.request.urlopen(req, timeout=20) as r:
+                  data = json.load(r)
+                  print("HTTP", r.status)
+          except Exception as e:
+              print("요청 실패:", e)
               raise SystemExit(0)
-          data = resp.json()
           users = data.get("users", [])
           print("사용자 수:", len(users))
           for u in users:
