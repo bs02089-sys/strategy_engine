@@ -7,12 +7,16 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
       - name: Check bs0208 user state
         env:
-          APP_ID: ${{ secrets.ONESIGNAL_APP_ID }}
           API_KEY: ${{ secrets.ONESIGNAL_REST_API_KEY }}
         run: |
           set -e
+          # APP_ID는 swing_config.json(공개값)에서 읽음 — GitHub 시크릿에는 REST 키만 있음
+          APP_ID=$(python3 -c "import json; print(json.load(open('swing_config.json')).get('ONESIGNAL_APP_ID',''))")
+          echo "APP_ID: ${APP_ID:0:8}..."
           # 1) bs0208 (c33eb986) 사용자 상태 — 구독 활성 여부 확인
           echo '=== bs0208 (c33eb986) ==='
           curl -s -X GET "https://api.onesignal.com/apps/${APP_ID}/users/by/onesignal_id/c33eb986-57d3-4266-b378-a959439d508f" \
