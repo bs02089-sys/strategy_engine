@@ -1,5 +1,5 @@
 {
-    "timestamp": "2026-08-11T23:40:07.005448",
+    "timestamp": "2026-08-12T23:41:09.531396",
     "total_score": 6,
     "signals": [
         {
@@ -15,7 +15,7 @@
         {
             "name": "Credit Spread",
             "score": 0,
-            "detail": "HY stable (2.70%) | IG stable (0.78%)"
+            "detail": "HY stable (2.72%) | IG stable (0.79%)"
         },
         {
             "name": "Fed Policy Cycle",
@@ -25,7 +25,7 @@
         {
             "name": "Valuation Overheat",
             "score": 2,
-            "detail": "CAPE 42.24 (Critical) (+2)"
+            "detail": "CAPE 42.34 (Critical) (+2)"
         },
         {
             "name": "Leading Indicators",
@@ -35,7 +35,7 @@
         {
             "name": "Momentum Strategy",
             "score": 0,
-            "detail": "SPX momentum healthy (16.3%) (+0) | Growth sectors lead (+2.8% gap) (+0)"
+            "detail": "SPX momentum healthy (15.9%) (+0) | Growth sectors lead (+0.8% gap) (+0)"
         }
     ]
 }
