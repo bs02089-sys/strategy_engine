@@ -46,18 +46,22 @@ jobs:
           if not api_key:
               raise SystemExit("ONESIGNAL_REST_API_KEY 미설정 — GitHub 시크릿 확인")
 
-          # 🔍 임시 진단 (2026-08-12): 사용자(c33eb986)의 구독 상태 조회
-          uid = "c33eb986-57d3-4266-b378-a959439d508f"
-          for path in (f"/apps/{app_id}/users/onesignal_id/{uid}",
-                       f"/apps/{app_id}/users/onesignal_id/{uid}/subscriptions"):
+          # 🔍 임시 진단 (2026-08-12): 사용자 구독 상태 조회 (올바른 경로 users/by)
+          #   - c33eb986 = OneSignal 사용자 ID (외부 ID bs0208 = 동기화 코드)
+          #   - subscriptions 배열 유무가 'Subscribed Users' 0명 원인 판별 핵심
+          checks = [
+              ("onesignal_id", "c33eb986-57d3-4266-b378-a959439d508f"),
+              ("external_id", "bs0208"),
+          ]
+          for label, val in checks:
               for scheme in ("Key", "Basic"):
                   d = requests.get(
-                      f"https://api.onesignal.com{path}",
+                      f"https://api.onesignal.com/apps/{app_id}/users/by/{label}/{val}",
                       headers={"Authorization": f"{scheme} {api_key}",
                                "Content-Type": "application/json"},
                       timeout=15,
                   )
-                  print(f"  [진단 {scheme}] {path[:70]}... -> HTTP {d.status_code}: {d.text[:1000]}")
+                  print(f"  [진단 {label}={val} {scheme}] HTTP {d.status_code}: {d.text[:1500]}")
                   if d.status_code not in (401, 403):
                       break
 
