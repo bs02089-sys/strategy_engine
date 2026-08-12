@@ -68,6 +68,11 @@ Not lazy about: input validation at trust boundaries, error handling that preven
   (`auto_cycle_reset()` — `CYCLE_RESET_DONE` 플래그로 중복 방지, 매도 미도달 상태가 되면 자동
   재무장). 신고가 갱신(+1%) 리셋과 별개 동작이며, 봇은 여전히 `swing_personal.json`(사용자 소유)을
   절대 쓰지 않는다 — 매도 후 LOTS 정리/재기록은 사용자 몫이다. 전 계좌 매도 시 수동 --reset 은 불필요.
+  🔄 **기기 간 동기화 (2026-08-12)**: 앱 헤더 '동기화 코드'로 두 기기를 OneSignal 외부 ID로 연결하면
+  예상 수익률(`swing_pct_{TICKER}`)·계좌별 매수 예정가(`swing_buy_{TICKER}_{ACCOUNT}`) 태그가 공유되고,
+  페이지 로드 시 태그가 로컬 localStorage보다 우선 채택된다 (마지막 변경 기기 기준). 매수 예정가가
+  OneSignal 사용자 레코드에 저장되지만 공용 알림(Discord 브리핑/전역 푸시) 노출 경로는 아니며, 코드
+  미입력 기기는 기존 기기별 localStorage 동작을 그대로 유지한다 (OneSignal SDK v16 login/logout/getTags).
   ⚠️ **봇은 `swing_dashboard.html`을 main에 커밋하지 않는다** — 생성 파일(헤더 시각 등)이 봇/사용자
   양쪽에서 재생성되어 git pull 충돌을 반복하므로, 워크플로우가 생성한 신선한 사본을 `gh-pages`에만
   배포한다 (`swing_alerter.yml` Sync 단계의 cp 참고 — 미추적 파일이라 `git checkout --` 금지, pathspec 오류).
