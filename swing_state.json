@@ -4,7 +4,7 @@
             "SELL_ALARM_SENT": false,
             "SELL_IMMINENT_SENT": false,
             "SELL_PUSH_LAST_AT": {
-                "1": "2026-08-11"
+                "1": "2026-08-12"
             },
             "ZONE_ALERTS": {
                 "hit": [
@@ -14,7 +14,8 @@
                     20
                 ]
             },
-            "ATH_CYCLE_BASE": 87.02
+            "ATH_CYCLE_BASE": 87.02,
+            "CYCLE_RESET_DONE": false
         }
     }
 }
