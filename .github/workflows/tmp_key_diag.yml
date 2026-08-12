@@ -1,0 +1,52 @@
+name: Temp Key Diag
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    env:
+      ONESIGNAL_REST_API_KEY: ${{ secrets.ONESIGNAL_REST_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Diagnose OneSignal key
+        run: |
+          set -e
+          pip install -q requests
+          python3 - <<'PY'
+          import json, os, requests
+
+          cfg = json.load(open("swing_config.json"))
+          app_id = (cfg.get("ONESIGNAL_APP_ID") or "").strip()
+          api_key = (os.environ.get("ONESIGNAL_REST_API_KEY") or "").strip()
+          print("app_id        :", app_id)
+          print("api_key 길이   :", len(api_key))
+          print("api_key prefix:", api_key[:10], "…" if len(api_key) > 10 else "(짧음!)")
+          print("api_key suffix:", "…" + api_key[-4:] if len(api_key) > 4 else "(없음)")
+
+          # 1) 키 prefix로 인증 방식 결정 확인
+          schemes = (("Key", "Basic") if api_key.startswith("os_v2_") else ("Basic", "Key"))
+          print("시도 순서      :", schemes)
+
+          # 2) 09:11 성공했던 그 요청을 그대로 재실행 (아침 리마인더 payload)
+          payload = {
+              "app_id": app_id,
+              "target_channel": "push",
+              "headings": {"en": "🔔 진단 테스트"},
+              "contents": {"en": "키 진단용 — 무시하세요"},
+              "include_aliases": {"external_id": ["bs0208"]},
+          }
+          for scheme in schemes:
+              r = requests.post(
+                  "https://api.onesignal.com/notifications",
+                  headers={"Authorization": f"{scheme} {api_key}",
+                           "Content-Type": "application/json; charset=utf-8"},
+                  json=payload,
+                  timeout=15,
+              )
+              print(f"[{scheme}] HTTP {r.status_code}: {r.text[:300]}")
+              if r.status_code not in (401, 403):
+                  break
+          PY
