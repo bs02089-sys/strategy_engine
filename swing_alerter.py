@@ -322,10 +322,13 @@ def send_user_sell_pushes(statuses: list[dict], cfg: dict) -> bool:
         sent = pos.get("SELL_PUSH_LAST_AT") or {}
         if isinstance(sent, str):
             sent = {"1": sent}
-        # 발송 대상 계좌 = 서버 LOTS 에 매도 목표가 있는 계좌 (앱 태그 불필요)
+        # 발송 대상 계좌 = 서버 LOTS 중 **매도 목표에 실제 도달한(sell_ready)** 계좌만 (앱 태그 불필요)
+        # ⚠️ sell_ready 조건 필수 (2026-08-12) — 목표 미도달인데 '매도 신호' 푸시가 매일 발송되던 버그 수정:
+        #    기존 코드가 sell_target 만 있으면 무조건 발송해, TQQQ $73.06(목표 $88.76 미만) 상태에서도
+        #    '매도 신호' 푸시가 발화됐다 (구독 후 매일 거짓 신호 수신 위험).
         targets = []
         for lot in st.get("lots") or []:
-            if lot.get("account") and lot.get("sell_target"):
+            if lot.get("account") and lot.get("sell_target") and lot.get("sell_ready"):
                 targets.append((int(lot["account"]), float(lot["sell_target"])))
         if not targets:
             continue
