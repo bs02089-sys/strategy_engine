@@ -139,5 +139,10 @@ Not lazy about: input validation at trust boundaries, error handling that preven
 ### 검증 & 커밋
 - 변경 후 `python3 -m py_compile <file>.py` 로 문법 확인, 가능하면 실제 실행(`--signal` / `--backtest`)으로 동작 확인.
   버그 검토는 코드 리뷰로 수행.
+- **JS 변경 시 (2026-08-14)**: `sw.js`/`OneSignalSDKWorker.js`/`swing_alerter.py` 인라인 대시보드 JS를
+  건드렸으면 반드시 `npm run typecheck` 로 strict 검사를 통과시킨다 (Python 의존성과 별개로
+  Node + typescript 필요 — `npm ci` 후 실행). 대시보드 인라인 JS는 `check_dashboard_js.py` 가
+  `swing_alerter.py` 의 `<script>` 상수를 `.typecheck/` 로 추출해 `tsconfig.dashboard.json` 이 검사한다
+  (tsc 는 HTML 인라인 스크립트를 직접 읽지 못함). `.typecheck/` 는 추출물이라 커밋하지 않는다.
 - 커밋 메시지: `type: 한글 요약 — 상세` 형식 (예: `refactor: ...`, `feat: ...`, `docs: ...`).
 - 언어: 사용자 소통·문서는 한국어, 코드 식별자는 영어.
