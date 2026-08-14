@@ -1032,7 +1032,7 @@ _PUSH_SDK = """
 <script>
 window.OneSignalDeferred = window.OneSignalDeferred || [];
 OneSignalDeferred.push(async function(OneSignal) {
-  const btn = document.getElementById('push-btn');
+  const btn = /** @type {HTMLButtonElement | null} */ (document.getElementById('push-btn'));
   try {
     await OneSignal.init({
       appId: "__OS_APP_ID__",
@@ -1072,9 +1072,11 @@ OneSignalDeferred.push(async function(OneSignal) {
     if (btn) {
       btn.disabled = true;
       btn.textContent = '⚠️ 알림 설정 필요';
-      btn.title = 'OneSignal 대시보드 웹 설정 확인: ' + (e && e.message ? e.message : e);
+      // strict 타입 검사: catch 변수(e)는 unknown — Error 메시지만 안전하게 꺼낸다.
+      const err = /** @type {{message?: string}} */ (e);
+      btn.title = 'OneSignal 대시보드 웹 설정 확인: ' + (err.message ? err.message : String(e));
       // hover 없이도 보이는 화면 배너 (스마트폰/설치형 PWA 대응)
-      const msg = (e && e.message) ? e.message : String(e);
+      const msg = err.message ? err.message : String(e);
       const banner = document.createElement('div');
       banner.className = 'push-err';
       banner.textContent = '🔕 푸시 설정 오류: ' + msg;
@@ -1098,18 +1100,21 @@ _PLAN_JS = """
   // 폰/웹이 항상 같은 값을 표시한다). OneSignal은 알림 푸시 전용으로만 사용.
 
   // 계좌별 초기값: 서버 렌더링(data-buy) 우선, 없으면 기기 localStorage 폴백.
+  /**
+   * @param {HTMLElement} card
+   */
   function initSwingCard(card) {
-    var ticker = card.dataset.ticker;
-    var close = parseFloat(card.dataset.close);
-    var gapPct = parseFloat(card.dataset.gap) || 5;
+    var ticker = card.dataset.ticker || '';
+    var close = parseFloat(card.dataset.close || '');
+    var gapPct = parseFloat(card.dataset.gap || '') || 5;
     var accRows = Array.prototype.slice.call(card.querySelectorAll('.plan-acc'));
-    var pctBtns = card.querySelectorAll('.pct');
-    var chip = card.querySelector('[data-sell-chip]');
+    var pctBtns = /** @type {NodeListOf<HTMLElement>} */ (card.querySelectorAll('.pct'));
+    var chip = /** @type {HTMLElement | null} */ (card.querySelector('[data-sell-chip]'));
 
     // 예상 수익률 — 서버 SWING_TARGET_PCT(단일 소스)를 기본값으로. 기기별 localStorage pct로
     // 매도 예정가가 갈라지던 문제 해소 (2026-08-12). 화면에서 버튼으로 바꾸면 세션 중만 반영되고
     // 새로고침 시 서버 값으로 복귀한다.
-    var sellPct = parseFloat(card.dataset.sellDefault);
+    var sellPct = parseFloat(card.dataset.sellDefault || '');
     if (isNaN(sellPct) || sellPct <= 0) sellPct = 10;
 
     // 계좌별 초기값 로드 — 서버가 렌더링한 매수 예정가(data-buy, swing_personal.json 단일 소스) 우선.
@@ -1117,8 +1122,8 @@ _PLAN_JS = """
     accRows.forEach(function(row) {
       var n = row.dataset.acc;
       var v = parseFloat(row.dataset.buy);
-      if (isNaN(v) || v <= 0) v = parseFloat(localStorage.getItem('swing_buy_' + ticker + '_' + n));
-      if (isNaN(v) && n === '1') v = parseFloat(localStorage.getItem('swing_buy_' + ticker));
+      if (isNaN(v) || v <= 0) v = parseFloat(localStorage.getItem('swing_buy_' + ticker + '_' + n) || '');
+      if (isNaN(v) && n === '1') v = parseFloat(localStorage.getItem('swing_buy_' + ticker) || '');
       var input = row.querySelector('.plan-buy-input');
       if (!isNaN(v) && v > 0) input.value = v;
     });
@@ -1130,6 +1135,9 @@ _PLAN_JS = """
     // 매도 알람/임박 시 스마트폰 진동 (Vibration API) — Android Chrome만 지원, iOS는 미지원(무시).
     // localStorage(swing_vibe_{TICKER})에 직전 상태를 기록해 5분 자동 새로고침 등으로 같은 상태가
     // 반복돼도 재진동하지 않는다. 🚨 매도는 강한 3연타, 🚀 임박은 짧은 2연타.
+    /**
+     * @param {string} stateClass
+     */
     function vibrateSell(stateClass) {
       if (vibed) return;
       vibed = true;
@@ -1149,9 +1157,14 @@ _PLAN_JS = """
 
     // 계좌 1개의 매도 상태 — 서버가 렌더링한 매수 예정가 × (1 + 예상 수익률) 기준으로 재판정.
     // 미입력 계좌(active=false)는 계산에서 제외 — 매도 예정가도 비워둔다 (화면 표시용 판정).
+    /**
+     * @param {HTMLElement} row
+     * @returns {{n: string, active: false, sell: null} | {n: string, active: true, buy: number, sell: number, state: string}}
+     */
     function rowState(row) {
-      var n = row.dataset.acc;
-      var v = parseFloat(row.querySelector('.plan-buy-input').value);
+      var n = row.dataset.acc || '';
+      var buyInput = /** @type {HTMLInputElement | null} */ (row.querySelector('.plan-buy-input'));
+      var v = parseFloat(buyInput ? buyInput.value : '');
       if (isNaN(v) || v <= 0) {
         // 미입력 — 매수/매도 예정가 모두 비움 (매수 예정가 입력 시에만 자동 계산).
         return { n: n, active: false, sell: null };
@@ -1165,6 +1178,10 @@ _PLAN_JS = """
     }
 
     // 카드 상단 칩 — 입력된 계좌 중 하나라도 매도 도달(red) → 🚨, 임박(amber) → 🚀, 없으면 숨김
+    /**
+     * @param {boolean} anyRed
+     * @param {boolean} anyAmber
+     */
     function applyChip(anyRed, anyAmber) {
       if (!chip || isNaN(close)) return;
       chip.classList.remove('red', 'amber', 'gray');
@@ -1222,7 +1239,7 @@ _PLAN_JS = """
       localStorage.removeItem('swing_buy_' + ticker);
       localStorage.setItem('swing_sell_' + ticker, String(sellPct));
       pctBtns.forEach(function(b) {
-        b.classList.toggle('on', parseFloat(b.dataset.pct) === sellPct);
+        b.classList.toggle('on', parseFloat(b.dataset.pct || '') === sellPct);
       });
       applyChip(anyRed, anyAmber);
       refreshAlarmCount();
@@ -1237,7 +1254,7 @@ _PLAN_JS = """
       pctBtns.forEach(function(b) {
         b.addEventListener('click', function() {
           // 세션 중 예상 수익률 임시 변경 — 새로고침하면 서버 SWING_TARGET_PCT로 복귀 (2026-08-12)
-          sellPct = parseFloat(b.dataset.pct);
+          sellPct = parseFloat(b.dataset.pct || '');
           localStorage.setItem('swing_sell_' + ticker, String(sellPct));
           update();
         });
@@ -1250,9 +1267,13 @@ _PLAN_JS = """
   // 🔄 동기화 코드 — 두 기기에 같은 코드를 입력하면 OneSignal 외부 ID로 연결된다.
   // (2026-08-12: 태그 동기화 제거 — 기기 간 값 일치는 서버 렌더링(swing_personal.json)이 담당)
   // 코드는 값 동기화가 아닌 OneSignal 사용자 병합(외부 ID) 용도 — 동일 코드 기기가 한 사용자로 묶인다.
-  var keyInput = document.getElementById('sync-key-input');
-  var syncStatus = document.getElementById('sync-status');
+  const keyInput = /** @type {HTMLInputElement | null} */ (document.getElementById('sync-key-input'));
+  var syncStatus = /** @type {HTMLElement | null} */ (document.getElementById('sync-status'));
+  /** @type {string | null} */
   var appliedKey = null;
+  /**
+   * @param {string} key
+   */
   function applySyncKey(key) {
     key = (key || '').trim();
     localStorage.setItem('swing_sync_key', key);
@@ -1282,7 +1303,7 @@ _PLAN_JS = """
     if (savedKey) applySyncKey(savedKey);    // 저장된 코드 — 로드 시 자동 연결
   }
   // 🔒 코드 마스킹 토글 — 기본은 가려짐(password), 눈 아이콘으로 잠시 표시 (어깨 너머 노출 방지)
-  var syncToggle = document.getElementById('sync-key-toggle');
+  const syncToggle = /** @type {HTMLButtonElement | null} */ (document.getElementById('sync-key-toggle'));
   if (keyInput && syncToggle) {
     syncToggle.addEventListener('click', function() {
       var show = keyInput.type === 'password';
@@ -1293,7 +1314,7 @@ _PLAN_JS = """
   }
 
   // 카드 초기화 — 첫 로드 + 태그 채택 후 재판정
-  document.querySelectorAll('.card[data-ticker]').forEach(initSwingCard);
+  /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll('.card[data-ticker]')).forEach(initSwingCard);
 
 })();
 </script>

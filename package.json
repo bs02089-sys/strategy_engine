@@ -1,6 +1,6 @@
 {
   "scripts": {
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "python3 check_dashboard_js.py && tsc -p tsconfig.json && tsc -p tsconfig.dashboard.json"
   },
   "dependencies": {
     "typescript": "^7.0.2"
