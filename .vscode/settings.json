@@ -9,5 +9,6 @@
     ],
     "python.terminal.activateEnvironment": true,
     "python.terminal.activateEnvInTriggeredTerminal": true,
-    "terminal.integrated.defaultProfile.windows": "WSL"
+    "terminal.integrated.defaultProfile.windows": "WSL",
+    "remote.autoForwardPorts": false
 }
