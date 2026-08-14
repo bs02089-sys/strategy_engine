@@ -17,6 +17,7 @@
 - [백테스트](#-백테스트)
 - [연동 시스템](#-연동-시스템)
 - [관련 문서](#-관련-문서)
+- [AI 에이전트 영어 공부법](#-ai-에이전트-영어-공부법-english_study)
 - [라이선스](#-라이선스)
 
 ---
@@ -178,6 +179,7 @@
 | **signal_report.json** | 시장 리스크 점수 (자동 생성) |
 | **requirements.txt** | Python 의존성 패키지 목록 |
 | **pyrightconfig.json** | Python 타입 검사 설정 (VSCode Pylance) |
+| **english_study/** | 🧑‍🎓 **AI 에이전트 영어 공부법** — 여행 회화 덱 + 복습 CLI (자세한 매뉴얼은 `english_study/README.md`) |
 
 ---
 
@@ -699,6 +701,22 @@ python3 setup_cronjob_org.py   # CRONJOB_ORG_API_KEY/GITHUB_PAT/GITHUB_OWNER/GIT
 - **안드로이드 (Chrome)**: 대시보드 열기 → 메뉴(⋮) → **앱 설치** 또는 **홈 화면에 추가**
 
 설치 후에는 전용 아이콘으로 실행되고 브라우저 주소창 없이 전체 화면(스탠드얼론)으로 열립니다.
+
+---
+
+## 🧑‍🎓 AI 에이전트 영어 공부법 (english_study)
+
+유튜브의 챗봇 기반 영어 공부법과 달리, **코딩 에이전트**(대화 + 코드 실행)를 활용한
+여행 회화 공부 시스템입니다. 역할극은 에이전트와 채팅으로, 반복 학습은 스크립트가 담당합니다.
+
+- **덱**: `english_study/phrases.json` — 공항/호텔/식당/카페/교통/길 찾기/쇼핑/응급/스몰토크 9개 상황 58개 표현
+- **루틴 순서**: `learn`(표현 학습) → 역할극(활용) → `quiz`(확인) → `review`(간격 반복)
+- **학습**: `python3 study.py learn [상황]` — 역할극 전에 상황별 표현을 영어+뜻+팁으로 먼저 읽기
+- **복습**: `python3 study.py review` — Leitner 간격 반복 (1→3→7→14→30일, 틀리면 리셋)
+- **퀴즈**: `python3 study.py quiz [상황]` — 한국어 → 영어 드릴, 틀린 카드는 복습 큐에 자동 등록
+- **진척**: `progress.json` (개인 데이터 — gitignore 대상, 자동 생성)
+
+상세 매뉴얼(하루 루틴 · 역할극 규칙 · 프롬프트 모음): [english_study/README.md](english_study/README.md)
 
 ---
 

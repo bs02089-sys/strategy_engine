@@ -36,6 +36,9 @@ swing_dashboard.html
 # 대시보드 인라인 JS strict 검사 추출물 (check_dashboard_js.py 가 재생성)
 .typecheck/
 
+# 영어 공부 개인 진척 (study.py 가 자동 생성 — 개인 데이터라 추적하지 않는다)
+english_study/progress.json
+
 # ====================== 명시적 허용 ======================
 # Git 관련
 !.gitignore

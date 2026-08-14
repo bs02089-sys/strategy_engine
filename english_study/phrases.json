@@ -1,0 +1,389 @@
+{
+  "situations": [
+    {
+      "id": "airport",
+      "title": "공항 · 입국심사",
+      "phrases": [
+        {
+          "id": "airport-1",
+          "en": "Where is the check-in counter for Korean Air?",
+          "ko": "대한항공 체크인 카운터가 어디예요?",
+          "tip": "Where is the ~ for ~? — 원하는 장소 찾기 기본 패턴"
+        },
+        {
+          "id": "airport-2",
+          "en": "I'd like to check in for the flight to New York.",
+          "ko": "뉴욕행 항공편 체크인을 하려고요.",
+          "tip": "I'd like to ~ — 정중한 요청의 만능 패턴"
+        },
+        {
+          "id": "airport-3",
+          "en": "Can I have a window seat, please?",
+          "ko": "창가 자리로 주시겠어요?",
+          "tip": "Can I have ~? — 부탁할 때. 창가 window seat / 통로 aisle seat"
+        },
+        {
+          "id": "airport-4",
+          "en": "Here's my passport.",
+          "ko": "여권입니다.",
+          "tip": "입국심사에서 여권 내밀며"
+        },
+        {
+          "id": "airport-5",
+          "en": "I'm here for sightseeing.",
+          "ko": "관광하러 왔어요.",
+          "tip": "입국심사 단골 질문 \"Why are you visiting?\"의 답"
+        },
+        {
+          "id": "airport-6",
+          "en": "I'll be staying for about a week.",
+          "ko": "약 일주일 머물 거예요.",
+          "tip": "\"How long will you stay?\"의 답"
+        },
+        {
+          "id": "airport-7",
+          "en": "Where can I pick up my luggage?",
+          "ko": "짐은 어디서 찾나요?",
+          "tip": "luggage = 짐 (baggage와 같은 뜻)"
+        },
+        {
+          "id": "airport-8",
+          "en": "My luggage didn't come out.",
+          "ko": "제 짐이 나오지 않았어요.",
+          "tip": "짐 분실 시 이 말부터 — 직원에게 바로"
+        }
+      ]
+    },
+    {
+      "id": "hotel",
+      "title": "호텔",
+      "phrases": [
+        {
+          "id": "hotel-1",
+          "en": "I have a reservation under the name Kim.",
+          "ko": "김 씨 이름으로 예약했어요.",
+          "tip": "under the name ~ = ~ 이름으로 예약"
+        },
+        {
+          "id": "hotel-2",
+          "en": "What time is check-in?",
+          "ko": "체크인 시간이 몇 시인가요?"
+        },
+        {
+          "id": "hotel-3",
+          "en": "Is breakfast included?",
+          "ko": "조식이 포함되어 있나요?",
+          "tip": "Is ~ included? — 포함 여부 물어볼 때"
+        },
+        {
+          "id": "hotel-4",
+          "en": "Could I get an extra towel, please?",
+          "ko": "수건 하나 더 받을 수 있을까요?",
+          "tip": "Could I get ~? — 호텔에서 가장 자주 쓰는 요청 (extra = 추가)"
+        },
+        {
+          "id": "hotel-5",
+          "en": "The air conditioner isn't working.",
+          "ko": "에어컨이 고장 났어요.",
+          "tip": "The ~ isn't working — 물건 고장 신고 패턴"
+        },
+        {
+          "id": "hotel-6",
+          "en": "Can I check out a little later?",
+          "ko": "체크아웃을 조금 늦게 할 수 있을까요?"
+        },
+        {
+          "id": "hotel-7",
+          "en": "Could you call a taxi for me?",
+          "ko": "택시 좀 불러 주시겠어요?",
+          "tip": "Could you ~ for me? — 부탁의 정중한 패턴"
+        }
+      ]
+    },
+    {
+      "id": "restaurant",
+      "title": "식당",
+      "phrases": [
+        {
+          "id": "restaurant-1",
+          "en": "A table for two, please.",
+          "ko": "두 명 자리 부탁해요.",
+          "tip": "A table for N — 인원수 말할 때"
+        },
+        {
+          "id": "restaurant-2",
+          "en": "Could I see the menu, please?",
+          "ko": "메뉴판 좀 볼 수 있을까요?"
+        },
+        {
+          "id": "restaurant-3",
+          "en": "What do you recommend?",
+          "ko": "뭐가 맛있어요? (추천 좀 해주세요)"
+        },
+        {
+          "id": "restaurant-4",
+          "en": "I'd like to order this one.",
+          "ko": "이걸로 주문할게요.",
+          "tip": "메뉴판 가리키며 this one"
+        },
+        {
+          "id": "restaurant-5",
+          "en": "Could we have some more water?",
+          "ko": "물 좀 더 주시겠어요?"
+        },
+        {
+          "id": "restaurant-6",
+          "en": "Could I get the check, please?",
+          "ko": "계산서 주시겠어요?",
+          "tip": "check = 계산서 (영국식은 bill)"
+        },
+        {
+          "id": "restaurant-7",
+          "en": "Can I pay by card?",
+          "ko": "카드로 계산할 수 있나요?",
+          "tip": "by card = 카드로 / by cash = 현금으로"
+        }
+      ]
+    },
+    {
+      "id": "cafe",
+      "title": "카페 · 테이크아웃",
+      "phrases": [
+        {
+          "id": "cafe-1",
+          "en": "I'd like a latte to go, please.",
+          "ko": "라떼 하나 테이크아웃으로요.",
+          "tip": "to go = 포장 / for here = 매장에서 먹기"
+        },
+        {
+          "id": "cafe-2",
+          "en": "Can I have it with oat milk?",
+          "ko": "오트밀크로 바꿔 주시겠어요?"
+        },
+        {
+          "id": "cafe-3",
+          "en": "Is this seat taken?",
+          "ko": "이 자리 사용 중인가요?",
+          "tip": "taken = 사용 중 (빈자리 물어볼 때)"
+        },
+        {
+          "id": "cafe-4",
+          "en": "Could I have the Wi-Fi password?",
+          "ko": "와이파이 비밀번호 좀 알려주시겠어요?"
+        },
+        {
+          "id": "cafe-5",
+          "en": "Can I get a refill?",
+          "ko": "리필 가능한가요?"
+        },
+        {
+          "id": "cafe-6",
+          "en": "For here or to go?",
+          "ko": "매장에서 드실 건가요, 가져가실 건가요?",
+          "tip": "상대 질문 — 알아듣기용. 매장 = for here"
+        }
+      ]
+    },
+    {
+      "id": "shopping",
+      "title": "쇼핑 · 환불",
+      "phrases": [
+        {
+          "id": "shopping-1",
+          "en": "How much is this?",
+          "ko": "이거 얼마예요?"
+        },
+        {
+          "id": "shopping-2",
+          "en": "Do you have this in a different size?",
+          "ko": "다른 사이즈 있나요?",
+          "tip": "in a different size / color — 사이즈·색상 바꿀 때"
+        },
+        {
+          "id": "shopping-3",
+          "en": "Can I try this on?",
+          "ko": "입어봐도 될까요?",
+          "tip": "try on = 입어 보다 (신발에도 그대로 사용)"
+        },
+        {
+          "id": "shopping-4",
+          "en": "I'm just looking, thanks.",
+          "ko": "그냥 구경 중이에요.",
+          "tip": "점원의 \"Can I help you?\"에 대한 정중한 거절"
+        },
+        {
+          "id": "shopping-5",
+          "en": "Can I get a tax refund?",
+          "ko": "택스 리펀드 받을 수 있나요?",
+          "tip": "tax refund = 세금 환급 (면세 쇼핑)"
+        },
+        {
+          "id": "shopping-6",
+          "en": "I'd like to return this.",
+          "ko": "이거 반품하고 싶어요.",
+          "tip": "return = 반품"
+        }
+      ]
+    },
+    {
+      "id": "directions",
+      "title": "길 찾기",
+      "phrases": [
+        {
+          "id": "directions-1",
+          "en": "Excuse me, how do I get to the station?",
+          "ko": "실례합니다, 역까지 어떻게 가나요?",
+          "tip": "How do I get to ~? — 길 묻기 만능 패턴"
+        },
+        {
+          "id": "directions-2",
+          "en": "Is it far from here?",
+          "ko": "여기서 먼가요?"
+        },
+        {
+          "id": "directions-3",
+          "en": "Could you show me on the map?",
+          "ko": "지도에 표시해 주시겠어요?",
+          "tip": "on the map = 지도 위에 직접 표시"
+        },
+        {
+          "id": "directions-4",
+          "en": "Which way is the beach?",
+          "ko": "해변은 어느 쪽인가요?"
+        },
+        {
+          "id": "directions-5",
+          "en": "Can I walk there?",
+          "ko": "걸어서 갈 수 있나요?"
+        },
+        {
+          "id": "directions-6",
+          "en": "I'm lost. Can you help me?",
+          "ko": "길을 잃었어요. 도와주실 수 있나요?",
+          "tip": "I'm lost = 길을 잃었다 — 혼자 끙끙대지 말고 바로"
+        }
+      ]
+    },
+    {
+      "id": "transport",
+      "title": "교통 (택시 · 버스)",
+      "phrases": [
+        {
+          "id": "transport-1",
+          "en": "How much is a ticket to downtown?",
+          "ko": "시내까지 표가 얼마인가요?",
+          "tip": "a ticket to ~ = ~행 표"
+        },
+        {
+          "id": "transport-2",
+          "en": "Does this bus go to the museum?",
+          "ko": "이 버스 박물관에 가나요?",
+          "tip": "Does this bus go to ~? — 버스 탈 때 필수 확인"
+        },
+        {
+          "id": "transport-3",
+          "en": "Which stop should I get off at?",
+          "ko": "어느 정류장에서 내려야 하나요?",
+          "tip": "get off = (교통수단에서) 내리다"
+        },
+        {
+          "id": "transport-4",
+          "en": "Could you drop me off here?",
+          "ko": "여기서 내려 주시겠어요? (택시)",
+          "tip": "drop off = (차에서) 내려주다"
+        },
+        {
+          "id": "transport-5",
+          "en": "How long does it take?",
+          "ko": "얼마나 걸리나요?",
+          "tip": "How long does it take? — 소요 시간 물을 때"
+        },
+        {
+          "id": "transport-6",
+          "en": "Can I pay with a card on the bus?",
+          "ko": "버스에서 카드 결제 되나요?"
+        }
+      ]
+    },
+    {
+      "id": "emergency",
+      "title": "응급 · 도움",
+      "phrases": [
+        {
+          "id": "emergency-1",
+          "en": "Can you help me, please?",
+          "ko": "도와주실 수 있나요?"
+        },
+        {
+          "id": "emergency-2",
+          "en": "I need a doctor.",
+          "ko": "의사가 필요해요.",
+          "tip": "I need ~ — 급할 때 가장 확실한 표현"
+        },
+        {
+          "id": "emergency-3",
+          "en": "Where is the nearest pharmacy?",
+          "ko": "가장 가까운 약국이 어디인가요?",
+          "tip": "the nearest ~ = 가장 가까운 ~"
+        },
+        {
+          "id": "emergency-4",
+          "en": "I lost my wallet.",
+          "ko": "지갑을 잃어버렸어요.",
+          "tip": "I lost my ~ — 분실 신고 패턴 (passport로 바꿔 쓰기)"
+        },
+        {
+          "id": "emergency-5",
+          "en": "Please call the police.",
+          "ko": "경찰에 연락해 주세요."
+        }
+      ]
+    },
+    {
+      "id": "smalltalk",
+      "title": "스몰토크",
+      "phrases": [
+        {
+          "id": "smalltalk-1",
+          "en": "Where are you from?",
+          "ko": "어디서 오셨어요?",
+          "tip": "상대 질문 — \"I'm from Korea.\"로 답하기"
+        },
+        {
+          "id": "smalltalk-2",
+          "en": "I'm from Korea.",
+          "ko": "한국에서 왔어요."
+        },
+        {
+          "id": "smalltalk-3",
+          "en": "This is my first time here.",
+          "ko": "여기 처음이에요.",
+          "tip": "first time = 처음 (first time in ~로 바꿔 쓰기)"
+        },
+        {
+          "id": "smalltalk-4",
+          "en": "Could you take a picture of us?",
+          "ko": "저희 사진 좀 찍어 주시겠어요?",
+          "tip": "take a picture = 사진 찍다"
+        },
+        {
+          "id": "smalltalk-5",
+          "en": "It's beautiful here.",
+          "ko": "여기 정말 아름답네요.",
+          "tip": "감탄 표현 — It's ~ here"
+        },
+        {
+          "id": "smalltalk-6",
+          "en": "What do you recommend seeing around here?",
+          "ko": "근처에 뭐 보러 가면 좋을까요?"
+        },
+        {
+          "id": "smalltalk-7",
+          "en": "Have a nice day!",
+          "ko": "좋은 하루 보내세요!",
+          "tip": "헤어질 때 만능 인사"
+        }
+      ]
+    }
+  ]
+}
