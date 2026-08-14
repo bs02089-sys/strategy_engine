@@ -144,5 +144,12 @@ Not lazy about: input validation at trust boundaries, error handling that preven
   Node + typescript 필요 — `npm ci` 후 실행). 대시보드 인라인 JS는 `check_dashboard_js.py` 가
   `swing_alerter.py` 의 `<script>` 상수를 `.typecheck/` 로 추출해 `tsconfig.dashboard.json` 이 검사한다
   (tsc 는 HTML 인라인 스크립트를 직접 읽지 못함). `.typecheck/` 는 추출물이라 커밋하지 않는다.
+- **테스트 전략 (2026-08-14 검토 결론)**: pytest/Vitest/Zod 등 테스트·스키마 라이브러리를
+  설치하지 않는다 (YAGNI). 이유: ① JS 는 서비스 워커 52줄 + 화면 표시용뿐이라 테스트할 로직이 없고
+  (진짜 계산은 Python), ② Python 검증은 `py_compile` + 실제 실행으로 충분하며, ③ mock 기반 단위
+  검증이 필요하면 표준 라이브러리 `unittest.mock` 으로 충분 (설치 0건 — ZONE_PUSH_PENDING 재시도 큐
+  검증 사례 참고). **예외 — 테스트를 추가하는 때**: 알림 판정(`detect_alerts`/`build_ladder`) 등에서
+  실제 버그가 재발하면 그 함수만 `unittest` 로 고정(회귀 테스트), 또는 계산 규칙 변경 시 변경 함수부터
+  테스트 작성 후 수정.
 - 커밋 메시지: `type: 한글 요약 — 상세` 형식 (예: `refactor: ...`, `feat: ...`, `docs: ...`).
 - 언어: 사용자 소통·문서는 한국어, 코드 식별자는 영어.
