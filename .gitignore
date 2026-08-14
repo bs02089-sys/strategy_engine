@@ -2,6 +2,7 @@
 # OS / IDE / Python 관련
 .DS_Store
 Thumbs.db
+node_modules/
 config.py
 *.pyc
 __pycache__/
