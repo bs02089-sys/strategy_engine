@@ -8,15 +8,19 @@
 importScripts("https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.sw.js");
 
 // ── PWA 설치 지원 (통과형: 캐시 없음, 항상 최신 대시보드 표시) ──
-self.addEventListener("install", () => {
-  self.skipWaiting();
+// strict 타입 검사: lib.webworker의 self는 WorkerGlobalScope로 선언되어 있어
+// 서비스 워커 전용 API(skipWaiting/clients/FetchEvent)는 ServiceWorkerGlobalScope로 캐스트한다.
+const osWorker = /** @type {ServiceWorkerGlobalScope} */ (/** @type {unknown} */ (self));
+
+osWorker.addEventListener("install", () => {
+  osWorker.skipWaiting();
 });
 
-self.addEventListener("activate", (event) => {
-  event.waitUntil(self.clients.claim());
+osWorker.addEventListener("activate", (event) => {
+  event.waitUntil(osWorker.clients.claim());
 });
 
-self.addEventListener("fetch", (event) => {
+osWorker.addEventListener("fetch", (event) => {
   // navigation(페이지 이동)만 처리 — OneSignal SDK 워커의
   // 내부 요청(push 전달/추적 등)을 가로채지 않도록 다른 요청은 무시
   if (event.request.mode === "navigate") {
