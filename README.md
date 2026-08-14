@@ -159,6 +159,11 @@
 | **swing_personal.json** | 🔒 스윙 알리미 **개인 포지션** (LOTS — 계좌별 BUY_PRICE/SHARES, 공용 알림에 노출 안 됨, 사용자 소유) |
 | **swing_state.json** | 스윙 알리미 봇 상태 (ZONE_ALERTS/매도 플래그 — 봇 전용, 자동 관리) |
 | **swing_dashboard.html** | 스윙 알리미 모바일 대시보드 (자동 생성) |
+| **tsconfig.json** | TypeScript strict 검사 설정 — `sw.js`/`OneSignalSDKWorker.js` (서비스 워커) |
+| **tsconfig.dashboard.json** | TypeScript strict 검사 설정 — 대시보드 인라인 JS (DOM) |
+| **onesignal.d.ts** | OneSignal 웹 푸시 SDK 전역 타입 스텁 (대시보드 JS 검사용) |
+| **check_dashboard_js.py** | 대시보드 인라인 JS 추출 — `swing_alerter.py`의 `<script>` 블록을 `.typecheck/`로 분리 |
+| **package.json** | `npm run typecheck` 스크립트 (typescript 의존성) |
 | **MarketStageSystem.py** | 독립적인 시장 단계 시스템 — 바닥 단계 감지 |
 | **bear_market_signals.py** | 약세장 신호 분석 시스템 |
 | **portfolio_config.json** | 📌 **포트폴리오 설정** — 포지션, Sigma, DCA 파라미터, 모드 상태 |
@@ -380,6 +385,21 @@ python3 DCA_MA_strategy_flowchart.py
 | 예약 실행 | 매일 00:00 UTC = 09:00 KST (월~금) | 스윙 일일 브리핑 + 대시보드 갱신 (한국 아침 9시 고정) |
 | repository_dispatch | 장중 N분 (cron-job.org) | `--monitor` 실시간 알림 (매수 구간 도달/임박/매도) |
 | 수동 실행 | 사용자 요청 시 | workflow_dispatch 수동 실행 |
+
+### TypeScript strict 검사 게이트 (모든 워크플로우 공통)
+
+모든 봇 워크플로우(`swing_alerter.yml`/`dca_ma_strategy.yml`/`bear_market_signals.yml`/`tracker.yml`)는
+봇 실행 전에 **JS 수정 검사 게이트**를 통과해야 합니다 (2026-08-14):
+
+```bash
+npm ci --silent
+npm run typecheck   # tsc strict + checkJs
+```
+
+- **대상**: `sw.js`/`OneSignalSDKWorker.js`(서비스 워커) + `swing_alerter.py`에 인라인된
+  대시보드 JS (`check_dashboard_js.py`가 `.typecheck/`로 추출해 검사)
+- **역할**: JS 수정이 배포(gh-pages) 전에 깨지지 않도록 하는 게이트 — 검사 실패 시
+  해당 워크플로우 실행이 중단되어 잘못된 대시보드 배포를 막는다.
 
 ### 환경 변수 (GitHub Secrets)
 
