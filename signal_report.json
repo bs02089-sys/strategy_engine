@@ -1,11 +1,11 @@
 {
-    "timestamp": "2026-08-13T23:40:40.909564",
+    "timestamp": "2026-08-14T23:21:05.982063",
     "total_score": 6,
     "signals": [
         {
             "name": "Yield Curve Inversion",
             "score": 2,
-            "detail": "Re-steepening in progress (+0.48%p) (+2)"
+            "detail": "Re-steepening in progress (+0.51%p) (+2)"
         },
         {
             "name": "Market Breadth",
@@ -25,7 +25,7 @@
         {
             "name": "Valuation Overheat",
             "score": 2,
-            "detail": "CAPE 42.65 (Critical) (+2)"
+            "detail": "CAPE 42.56 (Critical) (+2)"
         },
         {
             "name": "Leading Indicators",
@@ -35,7 +35,7 @@
         {
             "name": "Momentum Strategy",
             "score": 0,
-            "detail": "SPX momentum healthy (15.8%) (+0) | Growth sectors lead (+0.9% gap) (+0)"
+            "detail": "SPX momentum healthy (14.2%) (+0) | Growth sectors lead (+3.5% gap) (+0)"
         }
     ]
 }
