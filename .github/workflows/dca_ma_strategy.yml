@@ -44,6 +44,12 @@ jobs:
           python -m pip install --upgrade pip -q
           pip install -q -r requirements.txt
 
+      - name: TypeScript strict typecheck (sw.js / OneSignalSDKWorker.js / dashboard inline JS)
+        # JS 수정이 배포 전에 깨지지 않도록 검사 게이트 (swing_alerter.yml 과 동일, 2026-08-14)
+        run: |
+          npm ci --silent
+          npm run typecheck
+
       - name: Run Realtime ATH DCA Monitor (from cron-job.org dispatch)
         if: github.event_name == 'repository_dispatch'
         # tee: Actions 로그에도 표시 + sigma_log.txt 저장 (로그 표시 실패 방지)

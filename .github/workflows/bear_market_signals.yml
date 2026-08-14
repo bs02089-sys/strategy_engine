@@ -23,6 +23,12 @@ jobs:
         with: {python-version: '3.14'}
       - run: pip install -r requirements.txt
       
+      - name: TypeScript strict typecheck (sw.js / OneSignalSDKWorker.js / dashboard inline JS)
+        # JS 수정이 배포 전에 깨지지 않도록 검사 게이트 (2026-08-14)
+        run: |
+          npm ci --silent
+          npm run typecheck
+      
       - name: Run Market Signals
         # tee: Actions 로그에도 표시 + bear_log.txt 저장 (로그 표시 실패 방지)
         run: |
