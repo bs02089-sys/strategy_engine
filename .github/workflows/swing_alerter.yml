@@ -40,6 +40,13 @@ jobs:
           python -m pip install --upgrade pip -q
           pip install -q -r requirements.txt
 
+      - name: TypeScript strict typecheck (sw.js / OneSignalSDKWorker.js / dashboard inline JS)
+        # 대시보드 인라인 JS(swing_alerter.py 상수)까지 npm run typecheck 로 검사 —
+        # JS 수정이 배포 전에 깨지지 않도록 게이트 역할 (2026-08-14)
+        run: |
+          npm ci --silent
+          npm run typecheck
+
       - name: Run Realtime Swing Monitor (from cron-job.org dispatch)
         if: github.event_name == 'repository_dispatch'
         # 실시간 모니터 — 변경분(매수 구간 도달/임박/매도)만 Discord 발송.
