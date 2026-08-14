@@ -159,6 +159,8 @@
 | **swing_personal.json** | 🔒 스윙 알리미 **개인 포지션** (LOTS — 계좌별 BUY_PRICE/SHARES, 공용 알림에 노출 안 됨, 사용자 소유) |
 | **swing_state.json** | 스윙 알리미 봇 상태 (ZONE_ALERTS/매도 플래그 — 봇 전용, 자동 관리) |
 | **swing_dashboard.html** | 스윙 알리미 모바일 대시보드 (자동 생성) |
+| **sw.js** | PWA 서비스 워커 — 통과형 fetch (설치형 앱용, strict 검사 대상) |
+| **OneSignalSDKWorker.js** | OneSignal 웹 푸시 + PWA 통합 서비스 워커 (strict 검사 대상) |
 | **tsconfig.json** | TypeScript strict 검사 설정 — `sw.js`/`OneSignalSDKWorker.js` (서비스 워커) |
 | **tsconfig.dashboard.json** | TypeScript strict 검사 설정 — 대시보드 인라인 JS (DOM) |
 | **onesignal.d.ts** | OneSignal 웹 푸시 SDK 전역 타입 스텁 (대시보드 JS 검사용) |
@@ -175,6 +177,7 @@
 | **market_state.json** | 시장 단계 상태 정보 (자동 생성) |
 | **signal_report.json** | 시장 리스크 점수 (자동 생성) |
 | **requirements.txt** | Python 의존성 패키지 목록 |
+| **pyrightconfig.json** | Python 타입 검사 설정 (VSCode Pylance) |
 
 ---
 
