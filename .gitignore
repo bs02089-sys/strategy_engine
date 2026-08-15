@@ -30,6 +30,9 @@ config_safe_backup.json
 *.log.tmp
 *.cache
 
+# Sigma 갱신 이력 (런타임 자동 생성 — 추적 제외)
+sigma_history.csv
+
 # 스윙 알리미 생성 파일 — 봇이 매번 재생성하므로 추적하지 않는다 (AGENTS.md 규칙: gh-pages에만 배포)
 swing_dashboard.html
 
@@ -53,11 +56,6 @@ english_study/progress.json
 !portfolio_config_DCA_garch.json
 !requirements.txt
 !README.md
-
-# GARCH 실험용 소스 및 설정 파일
-!sigma_DCA_garch_v1.py
-!portfolio_config_DCA_garch.json
-!sigma_history.csv
 
 # GitHub Actions 워크플로우
 !.github/
