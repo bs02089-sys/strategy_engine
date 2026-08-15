@@ -1397,7 +1397,10 @@ def _check_recovery_reentry(ticker: str, pos: dict) -> str | None:
         used = []
     remaining = [s for s in range(1, total_splits + 1) if s not in used]
     if not remaining:
-        return None  # all splits used — wait for a fresh ATH cycle
+        # Defensive: 호출자(_evaluate_strategy_mode)가 전 분할 사용 케이스를
+        # LOC 즉시 복귀로 short-circuit 처리함 (3차 완료 → 사이클 종료,
+        # 2026-08-15) — 이 가드는 안전장치로만 남는다.
+        return None
 
     # 2) Minimum elapsed business days since crash entry
     today = datetime.now(ZoneInfo("America/New_York")).date()
@@ -1487,6 +1490,17 @@ def _evaluate_strategy_mode(ticker: str, pos: dict) -> str:
             return "LOC"
         current_dd, _, _ = dd_info
 
+        # ATH 사이클이 이미 완료(전 분할 사용)된 상태에서는 비상 모드로
+        # 전환해도 발동할 분할이 없으므로 LOC 유지 (3차 완료 → LOC 리셋
+        # 정책 — 예비금 소진 후 무의미한 LOC↔ATH_DCA 플립플롭 방지).
+        used = pos.get("ATH_DCA_USED_SPLITS", []) or []
+        if not isinstance(used, list):
+            used = []
+        total_splits = int(ath_dca.get("SPLITS", 3))
+        remaining = [s for s in range(1, total_splits + 1) if s not in used]
+        if not remaining:
+            return "LOC"
+
         if current_dd >= trigger_1_raw:
             # Record crash-entry date so the recovery re-entry clock starts
             # (only when switching INTO crash mode, not on re-evaluation)
@@ -1497,6 +1511,19 @@ def _evaluate_strategy_mode(ticker: str, pos: dict) -> str:
         return "LOC"
 
     else:  # current_mode == "ATH_DCA"
+        # 3차까지 전부 발동(예비금 소진)하면 사이클 종료 → LOC 즉시 복귀.
+        # LOC 20분할 매수(평균단가 하향)를 신고가 +1% / 곰덫 30영업일 대기
+        # 없이 바로 재개한다. 미사용 분할이 남은 경우에만 기존 회복 조건으로
+        # 복귀한다. (2026-08-15 사용자 정책: 단순화 — 3차 완료 = 사이클 끝)
+        used = pos.get("ATH_DCA_USED_SPLITS", []) or []
+        if not isinstance(used, list):
+            used = []
+        total_splits = int(ath_dca.get("SPLITS", 3))
+        remaining = [s for s in range(1, total_splits + 1) if s not in used]
+        if not remaining:
+            pos["_RECOVERY_REASON"] = "3차 분할 완료 → 사이클 종료, LOC 즉시 복귀"
+            print(f"🔄 {ticker}: ATH_DCA → LOC (3차 완료, 사이클 종료 — LOC 20분할 재개)")
+            return "LOC"
         # Automatic recovery re-entry: switch back to LOC once the market
         # has recovered (backtest-validated). Preserves unused splits so
         # 2차/3차 resume on a re-crash. Falls back to staying in crash mode

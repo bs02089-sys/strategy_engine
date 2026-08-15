@@ -53,7 +53,7 @@
 
 ### 3️⃣ ATH 하락분할 DCA
 - ATH 대비 하락률에 따라 N분할 매수 트리거
-- 설정 예시 (현재 값): TQQQ -35% / -50% / Stage 5 바닥 — 각각 1/3씩
+- 설정 예시 (현재 값): TQQQ -30% / -50% / -65% — 각각 1/3씩
 - 전 사이클 완료 후 신규 ATH 갱신 시 **자동 초기화 및 사이클 재시작**
 - 임박 알림 (목표 임계값 5%p 이내 접근 시)
 
@@ -68,12 +68,12 @@
 ### 5️⃣ 듀얼 모드 전환 + ATH 하락분할 DCA (비상 모드)
 - **LOC 모드** (📗): 평상시 Sigma 기반 LOC 20분할 매수
 - **ATH DCA 모드** (🚨): ATH 하락률이 TRIGGER_1 도달 시 자동 전환 → 3차 분할 매수
-  - 1차/2차: ATH 대비 설정된 % 하락 시 (TQQQ: -35%/-50%)
-  - **3차: MarketStageSystem의 Stage 5 바닥 감지 시 발동**
-- MarketStageSystem.py가 `market_state.json`에 기록한 바닥 단계를 ATH DCA 3차 트리거로 활용
+  - 1차/2차/3차: ATH 대비 설정된 % 하락 시 (TQQQ: -30%/-50%/-65%)
+- MarketStageSystem.py는 바닥/천장 단계 리포트용으로만 동작 (ATH DCA 3차 트리거는 -65% 고정 — 2026-08-15)
 - 전 사이클(3차) 완료 후 신규 ATH 갱신 시 자동 초기화 및 사이클 재시작
 - **비상 모드 종료** (🔄): 시장 회복 감지 시 자동으로 일반 모드(LOC) 복귀
   - 조건 4가지: 잔여 분할 보존 + 진입 후 30영업일 경과 + DD ≤ DD_RATIO×TRIGGER_1 + MA20 > MA60
+  - ⚠️ **예외 (2026-08-15)**: 3차까지 전부 발동(예비금 소진) 시 **사이클 종료 → LOC 즉시 복귀** — 신고가 +1%·곰덫 30일 대기 없이 LOC 20분할 평균단가 매수 재개
   - 파라미터: `RECOVERY_REENTRY` 블록 (ENABLED / DD_RATIO / MIN_DAYS / MA_CONFIRM)
   - 브리핑에 ⏳ 대기 모니터(D+X/30)와 🔔 임박 넛지 알림 제공
 
@@ -234,9 +234,9 @@ pandas_market_calendars  # NYSE 휴장일 계산
             "ATH_DCA": {
                 "ENABLED": true,
                 "SPLITS": 3,
-                "TRIGGER_1": "-35%",
+                "TRIGGER_1": "-30%",
                 "TRIGGER_2": "-50%",
-                "TRIGGER_3": "STAGE5",
+                "TRIGGER_3": "-65%",
                 "STRATEGY": "v2 crash-mode"
             },
             "ATH_DCA_USED_SPLITS": [1],
@@ -260,7 +260,7 @@ pandas_market_calendars  # NYSE 휴장일 계산
 ```
 
 > 참고: `STRATEGY_MODE`는 `"LOC"`(일반) 또는 `"ATH_DCA"`(비상) 중 하나이며,
-> 시스템이 자동으로 전환합니다. `ATH_DCA`의 `TRIGGER_3`는 `"STAGE5"`(시장 바닥 감지)가 기본입니다.
+> 시스템이 자동으로 전환합니다. `ATH_DCA`의 `TRIGGER_1~3`은 하락률(%) 고정 값입니다 (예: `-30%`/`-50%`/`-65%`).
 
 #### 포지션 설정 항목
 

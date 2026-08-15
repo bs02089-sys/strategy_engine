@@ -97,15 +97,17 @@
 │  │                                                                          │
 │  │  LOC → ATH_DCA 전환 조건:                                                 │
 │  │  ├─ ATH_DCA.ENABLED == true                                              │
-│  │  ├─ 현재 ATH DD >= TRIGGER_1 (TQQQ: -35%)                            │
+│  │  ├─ 현재 ATH DD >= TRIGGER_1 (TQQQ: -30%)                            │
 │  │  └─ 모드 전환: STRATEGY_MODE = "ATH_DCA"                                 │
 │  │                                                                          │
 │  │  ATH_DCA → LOC 전환 조건: (자동 비상 모드 종료 — RECOVERY_REENTRY)         │
 │  │  _check_recovery_reentry() — 아래 4조건 모두 충족 시 자동 복귀:             │
 │  │  ├─ ① 잔여 분할 1개 이상 (2차/3차 예비금 보존)                            │
 │  │  ├─ ② 진입일(ATH_DCA_ENTERED_ON)부터 MIN_DAYS(30) 영업일 경과            │
-│  │  ├─ ③ DD ≤ DD_RATIO(0.5) × TRIGGER_1   (TQQQ 17.5%)                   │
-│  │  └─ ④ MA20 > MA60 (불리시 정렬, MA_CONFIRM=true)                         │
+│  │  ├─ ③ DD ≤ DD_RATIO(0.5) × TRIGGER_1   (TQQQ 15%)                     │
+│  │  ├─ ④ MA20 > MA60 (불리시 정렬, MA_CONFIRM=true)                         │
+│  │  └─ ⚠️ 예외 (2026-08-15): 3차까지 전부 발동 시 사이클 종료 → LOC 즉시    │
+│  │     복귀 (신고가 +1% / 30영업일 대기 없음)                                │
 │  │  └─ (사용자 수동 STRATEGY_MODE="LOC" 변경도 동작)                        │
 │  │                                                                          │
 │  ├─ 대기 중 표시: _recovery_wait_line() → ⏳ D+X/MIN_DAYS (하루 1회 dedup)   │
@@ -161,10 +163,10 @@
 │  │  │  check_rotation_exit_signal(pos_cfg, today)                      │ │ │
 │  │  │  └─ 만료 시 "🔴 D+XX Rotation Maturity" 경고                     │ │ │
 │  │  ├──────────────────────────────────────────────────────────────────┤ │ │
-│  │  │  [4-f] (제거됨 — Stage 5는 ATH DCA 3차 트리거로 통합)           │ │ │
-│  │  │  → check_ath_dca_signals() 내부의 STAGE5 타입 트리거로 처리      │ │ │
-│  │  │  ├─ get_bottom_stage() → market_state.json (Stage 0~5)           │ │ │
-│  │  │  └─ Stage 5 시 "🚨 3차 DCA 매수 신호! [Stage 5 Bottom Confirmed]"│ │ │
+│  │  │  [4-f] 3차 트리거 — 고정 하락률 (2026-08-15 STAGE5 → -65%)       │ │ │
+│  │  │  → check_ath_dca_signals() 내부의 PCT 타입 트리거 (1~3차 동일)     │ │ │
+│  │  │  ├─ 1차 -30% / 2차 -50% / 3차 -65% (ATH DD % 기반)              │ │ │
+│  │  │  └─ DD ≥ 임계값 시 "🚨 N차 DCA 매수 신호!"                        │ │ │
 │  │  ├──────────────────────────────────────────────────────────────────┤ │ │
 │  │  │  [4-g] RSI + 거래량 복합 신호                                    │ │ │
 │  │  │  _check_rsi_volume_signal(ticker)                                │ │ │
@@ -568,7 +570,7 @@ jobs:
   🔍 Starting price lookup for TQQQ...
   ✅ TQQQ yfinance success: $42.15 (07-29)
   📊 ATH DCA check: TQQQ - 모든 분할 완료 (사이클 재시작 대기)
-  ⚙️ Mode: LOC → (ATH DD >= 35% 시 자동 전환)
+  ⚙️ Mode: LOC → (ATH DD >= 30% 시 자동 전환)
   ✅ Discord briefing sent successfully.
 
 
