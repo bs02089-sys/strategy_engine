@@ -533,6 +533,9 @@ python3 DCA_MA_strategy.py --signal --discord --all  # TQQQ+SOXL 단일 메시�
 }
 ```
 
+📱 **나무증권 시세포착주문 감시 등록 가이드**: [NAMYU_SWING_SETUP.md](NAMYU_SWING_SETUP.md) —
+매수/매도 감시 조건·가격·수량, 30일 만료 재등록 루틴 (3% 래더 기준).
+
 **🔒 개인 포지션은 `swing_personal.json`에 분리해서 기록합니다** — 세븐 스플릿 7개 계좌는
 `LOTS`(계좌별 로트) 구조로 각 계좌의 실제 매수가/보유수량을 개별 추적합니다 (2026-08-10):
 
