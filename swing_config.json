@@ -1,10 +1,10 @@
 {
-    "_NOTE": "나무증권 앱 별도 계좌(스윙 전용) 공용 설정 — 장기 투자(LS증권, DCA_MA_strategy.py + portfolio_config.json)와 분리 운용. [세븐 스플릿 전략] 매수: ATH 대비 -15%~-33% 3% 단위 7구간 (15/18/21/24/27/30/33% — 계좌 1~7번 각 $500 대응), 매도: 매수가 대비 +20% (SWING_TARGET_PCT — 앱 기본 선택값도 이 값을 읽음). 개인 매수 정보(BUY_PRICE/SHARES)는 swing_personal.json 에 기록한다 (공용 알림 노출 방지). ONESIGNAL_APP_ID는 2026-08-12 대시보드 표시 값(fc892714-...)으로 재확정 — c33eb986-...는 사용자 계정/사용자 ID로 앱이 아니어서 원래 값으로 복귀 (구독자 2명은 fc892714 앱에 있음). (구간 전환 근거: swing_split_backtest.py 10년 백테스트 — 3% 스텝 총수익률 +304.6% vs 기존 5% +247.1%, MDD 유사, 2026-08-15) (JSON 주석 불가로 _NOTE 메타 키로 기록 — 엔진은 무시)",
+    "_NOTE": "나무증권 앱 별도 계좌(스윙 전용) 공용 설정 — 장기 투자(LS증권, DCA_MA_strategy.py + portfolio_config.json)와 분리 운용. [세븐 스플릿 전략] 매수: ATH 대비 -15%~-33% 3% 단위 7구간 (15/18/21/24/27/30/33% — 계좌 1~7번 각 $500 대응), 매도: 매수가 대비 +40% (SWING_TARGET_PCT — 앱 기본 선택값도 이 값을 읽음). 개인 매수 정보(BUY_PRICE/SHARES)는 swing_personal.json 에 기록한다 (공용 알림 노출 방지). ONESIGNAL_APP_ID는 2026-08-12 대시보드 표시 값(fc892714-...)으로 재확정 — c33eb986-...는 사용자 계정/사용자 ID로 앱이 아니어서 원래 값으로 복귀 (구독자 2명은 fc892714 앱에 있음). (구간 전환 근거: swing_split_backtest.py 10년 백테스트 — 3% 스텝 총수익률 +304.6% vs 기존 5% +247.1%, MDD 유사, 2026-08-15) (목표 전환 근거: 2026-08-15 동일 백테스트 목표 수익률 스윕 — +40% 총수익률 +371.5%·MDD -34.1%·Sharpe 0.82 vs 기존 +20% +304.6%·-34.3%·0.78, 모든 지표에서 우월) (목표 상한 경계: 2026-08-15 세밀 그리드(1%p) 검증 — +52%에서 MDD -43.7%로 급락하는 절벽 확인, +51%가 뾰족한 모델 최고치(과최적화 경계)라 +50% 이상 미채택, +40%는 절벽까지 12%p 여유) (JSON 주석 불가로 _NOTE 메타 키로 기록 — 엔진은 무시)",
     "ENABLED": true,
     "MDD_START_PCT": 15,
     "MDD_END_PCT": 33,
     "MDD_STEP_PCT": 3,
-    "SWING_TARGET_PCT": 20,
+    "SWING_TARGET_PCT": 40,
     "IMMINENT_GAP_PCT": 5,
     "PAGES_URL": "https://bs02089-sys.github.io/strategy_engine/",
     "ONESIGNAL_APP_ID": "fc892714-97d9-457a-b3d6-12d25d93cc48",

@@ -58,11 +58,14 @@ KST_TZ = ZoneInfo("Asia/Seoul")   # 일일 브리핑이 09:00 KST 고정 → 제
 
 # swing_state.json 에 보관하는 봇 전용 상태 키 (POSITIONS 내부) —
 # swing_config.json(사용자 설정)과 분리해 봇/사용자 커밋 충돌로 상태가 유실되지 않게 한다.
-_STATE_KEYS = ("SELL_ALARM_SENT", "SELL_IMMINENT_SENT", "SELL_PUSH_LAST_AT", "ZONE_ALERTS", "ATH_CYCLE_BASE", "CYCLE_RESET_DONE", "ZONE_PUSH_PENDING")
+_STATE_KEYS = ("SELL_ALARM_SENT", "SELL_IMMINENT_SENT", "SELL_PUSH_LAST_AT", "SELL_IMMINENT_PUSH_LAST_AT", "ZONE_ALERTS", "ATH_CYCLE_BASE", "CYCLE_RESET_DONE", "ZONE_PUSH_PENDING")
 _STATE_DEFAULTS = {
     "SELL_ALARM_SENT": False,
     "SELL_IMMINENT_SENT": False,
     "SELL_PUSH_LAST_AT": None,
+    # SELL_IMMINENT_PUSH_LAST_AT: 개인 포지션(_PERSONAL) 매도 목표 임박(🚀) 푸시 발송일 — {계좌번호: 날짜}.
+    # 계좌별 1회(사이클당) 발송 — 매도 신호 푸시(SELL_PUSH_LAST_AT)와 동일 패턴 (2026-08-15)
+    "SELL_IMMINENT_PUSH_LAST_AT": None,
     "ZONE_ALERTS": {"hit": [], "imminent": []},
     # ATH_CYCLE_BASE: None — '부재 = 첫 실행' 계약 (save_config 가 None 을 걸러내므로 파일엔 안 쓰임)
     "ATH_CYCLE_BASE": None,
@@ -358,6 +361,75 @@ def send_user_sell_pushes(statuses: list[dict], cfg: dict) -> bool:
             print(f"   📣 {ticker} {n}번 계좌 매도 푸시: HTTP {code} — {resp[:80]}")
         if sent_any:
             pos["SELL_PUSH_LAST_AT"] = sent
+            changed = True
+    if changed:
+        save_config(cfg)
+    return changed
+
+
+def send_sell_imminent_pushes(statuses: list[dict], cfg: dict) -> bool:
+    """매도 목표 임박(🚀) 푸시 — 개인 포지션(_PERSONAL) 전용, 전체 구독자(= 내 기기) 대상 (2026-08-15).
+
+    배경: _PERSONAL 포지션의 매도 임박은 공용 알림(Discord)에서 제외되어 대시보드 칩으로만
+    표시됐다. 나무증권 매도감시를 '목표 임박 시점'에 등록하는 루틴(NAMYU_SWING_SETUP.md ②)의
+    신호가 되도록, 임박(목표까지 IMMINENT_GAP_PCT 이내) 상태를 푸시로 발송한다.
+
+    매도 신호 푸시(send_user_sell_pushes)와 동일한 패턴:
+    - 전체 구독자(Subscribed Users = 내 기기) 발송, 태그 필터 없음 (단독 사용 전제)
+    - 계좌별 사이클당 1회 — SELL_IMMINENT_PUSH_LAST_AT {계좌: 날짜} 로 중복 방지, 성공(2xx)일 때만 기록
+    - 매도 신호(도달, gap=0)와 겹치지 않게 임박은 gap > 0 (미도달)만 대상 — 도달은
+      send_user_sell_pushes 가 계좌별 1회 발송한다.
+    """
+    app_id, api_key = _resolve_onesignal(cfg)
+    if not app_id or not api_key:
+        return False
+    today = datetime.now(NY_TZ).strftime("%Y-%m-%d")
+    gap_p = float(cfg.get("IMMINENT_GAP_PCT", 5))
+    pages = (cfg.get("PAGES_URL") or "").strip()
+    changed = False
+    for st in statuses:
+        if st.get("error"):
+            continue
+        ticker = st["ticker"]
+        pos = cfg["POSITIONS"][ticker]
+        if not pos.get("_PERSONAL"):
+            continue   # 공용 포지션은 기존대로 Discord 경로 (detect_alerts 의 SELL_IMMINENT_SENT)
+        # 발송 대상 계좌 = 서버 LOTS 중 임박(sell_gap_pct ≤ gap_p, 미도달)인 계좌
+        targets = []
+        for lot in st.get("lots") or []:
+            gap = lot.get("sell_gap_pct")
+            if lot.get("account") and lot.get("sell_target") and gap is not None:
+                if 0 < float(gap) <= gap_p:
+                    targets.append((int(lot["account"]), float(lot["sell_target"]), float(gap)))
+        if not targets:
+            continue
+        sent = pos.get("SELL_IMMINENT_PUSH_LAST_AT") or {}
+        if isinstance(sent, str):
+            sent = {"1": sent}   # 구형 단일 날짜 마이그레이션
+        sent_any = False
+        for n, target, gap in sorted(targets):
+            if str(n) in sent:
+                continue   # 이미 임박 푸시를 보낸 계좌 — 사이클(리셋) 전까지 재발송 안 함
+            if len(targets) > 1:
+                title = f"🚀 {ticker} {n}번 계좌 매도 목표 임박"
+                body = (f"{n}번 계좌 매도 예정가(${target:,.2f})까지 {gap:.1f}% 남았습니다 — "
+                        "나무증권 매도감시 등록을 준비하세요." + (f"\n앱에서 확인: {pages}" if pages else ""))
+            else:
+                title = f"🚀 {ticker} 매도 목표 임박"
+                body = (f"매도 예정가(${target:,.2f})까지 {gap:.1f}% 남았습니다 — "
+                        "나무증권 매도감시 등록을 준비하세요." + (f"\n앱에서 확인: {pages}" if pages else ""))
+            # 필터 없이 전체 구독자 발송 (단독 사용 전제 — 매도 신호 푸시와 동일)
+            code, resp = send_onesignal_push(
+                app_id, api_key, title=title, body=body,
+                url=pages or None,
+            )
+            # 성공(2xx)일 때만 발송일 기록 — 실패 시 다음 폴링에서 재시도
+            if str(code).startswith("2"):
+                sent[str(n)] = today
+                sent_any = True
+            print(f"   🚀 {ticker} {n}번 계좌 매도 임박 푸시: HTTP {code} — {resp[:80]}")
+        if sent_any:
+            pos["SELL_IMMINENT_PUSH_LAST_AT"] = sent
             changed = True
     if changed:
         save_config(cfg)
@@ -1502,8 +1574,8 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
     <div class="plan-row">
       <label>📈 예상 수익률</label>
       <div class="plan-pcts">
-        <!-- 예상 수익률 — 사용자 채택값 20% 단일 옵션 (2026-08-13) -->
-        <button type="button" class="pct" data-pct="20">20%</button>
+        <!-- 예상 수익률 — 사용자 채택값 40% 단일 옵션 (2026-08-15) -->
+        <button type="button" class="pct" data-pct="40">40%</button>
       </div>
     </div>
   </div>
@@ -1772,6 +1844,7 @@ def auto_cycle_reset(st: dict, pos: dict) -> tuple[str | None, bool]:
     pos.pop("ATH_CYCLE_BASE", None)
     pos.pop("ZONE_PUSH_PENDING", None)   # 이전 사이클의 미전송 푸시 대기 큐 정리 (2026-08-11)
     pos.pop("SELL_PUSH_LAST_AT", None)   # 매도 신호 푸시 재무장 — 새 사이클에서 계좌별 1회 재발송 (2026-08-13)
+    pos.pop("SELL_IMMINENT_PUSH_LAST_AT", None)   # 매도 임박 푸시 재무장 (2026-08-15)
     pos["CYCLE_RESET_DONE"] = True
     return (f"🔄 **{st['ticker']} 전 계좌 매도 목표 도달 — 새 사이클 자동 리셋 완료**\n"
             "   매수 구간/매도 알림 상태가 초기화되었습니다.\n"
@@ -1789,6 +1862,7 @@ def reset_position(ticker: str) -> None:
     pos.pop("ATH_CYCLE_BASE", None)   # 새 사이클 기준도 초기화 (다음 실행에서 재설정)
     pos.pop("ZONE_PUSH_PENDING", None)  # 미전송 매수 구간 푸시 대기 큐 정리 (2026-08-11)
     pos.pop("SELL_PUSH_LAST_AT", None)  # 매도 신호 푸시 재무장 — 계좌별 1회 발송 후 리셋 시 재발송 허용 (2026-08-13)
+    pos.pop("SELL_IMMINENT_PUSH_LAST_AT", None)  # 매도 임박 푸시 재무장 (2026-08-15)
     pos["CYCLE_RESET_DONE"] = False  # 자동 리셋 감지 재무장 (2026-08-11)
     save_config(cfg)
     print(f"✅ {ticker} 알림 플래그 초기화 완료 — 새 포지션 진입 후 사용하세요.")
@@ -1840,6 +1914,7 @@ def main() -> None:
     statuses = _compute_all(cfg, force=True, live=True)
     webhook, user_id = _resolve_discord(cfg)
     send_user_sell_pushes(statuses, cfg)   # 사용자별 매도 푸시 (계좌별 사이클당 1회 — 2026-08-13)
+    send_sell_imminent_pushes(statuses, cfg)   # 개인 매도 목표 임박 푸시 (계좌별 사이클당 1회 — 2026-08-15)
 
     # 전 계좌 매도 목표 도달(사이클 완료) → 알림 상태 자동 리셋 — 수동 --reset 불필요 (2026-08-11)
     cycle_msgs: list[str] = []

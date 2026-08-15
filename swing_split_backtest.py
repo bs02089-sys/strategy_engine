@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-swing_split_backtest.py — 세븐 스플릿 하락 구간(스텝) 최적화 백테스트 (TQQQ 스윙 알리미용)
-================================================================================
+swing_split_backtest.py — 세븐 스플릿 하락 구간(스텝)/매도 목표 수익률 최적화 백테스트 (TQQQ 스윙 알리미용)
+==========================================================================================================
 
 현재 실전 설정 (swing_config.json):
-  - 매수 구간: ATH 대비 -15% ~ -45%, 5% 스텝 7구간 (15/20/25/30/35/40/45)
-  - 계좌 1~7 각 $500 (세븐 스플릿), 매도 목표: 매수가 대비 +20% (SWING_TARGET_PCT)
+  - 매수 구간: ATH 대비 -15% ~ -33%, 3% 스텝 7구간 (15/18/21/24/27/30/33)
+  - 계좌 1~7 각 $500 (세븐 스플릿), 매도 목표: 매수가 대비 +40% (SWING_TARGET_PCT, 2026-08-15 전환)
 
 이 백테스트의 질문:
   "첫 구간 -15%, 7분할 고정"에서 하락 스텝을 얼마로 잡아야 기회 비용(미투자 캐시)이
@@ -28,6 +28,9 @@ swing_split_backtest.py — 세븐 스플릿 하락 구간(스텝) 최적화 백
 사용법:
   python3 swing_split_backtest.py                     # 스텝 1~6% 스윕 + 비교
   python3 swing_split_backtest.py --steps 3           # 특정 스텝만 스윕
+  python3 swing_split_backtest.py --targets 10,15,20,25,30  # 매도 목표 수익률 스윕 (하락 스텝은 --step 고정)
+  python3 swing_split_backtest.py --grid               # 2차원 그리드 — 스텝(--steps) × 목표(--targets) 동시 스윕
+  python3 swing_split_backtest.py --grid --steps 2,3,4 --targets 30,40,50  # 원하는 조합만
   python3 swing_split_backtest.py --detail 3 5        # 원하는 스텝 상세 리포트
   python3 swing_split_backtest.py --all               # 상세에 전체 거래 로그 포함
   python3 swing_split_backtest.py --no-index          # 나스닥 비교 생략 (다운로드 절약)
@@ -124,7 +127,7 @@ def simulate(closes: np.ndarray, dates: pd.DatetimeIndex, since: str,
     holds = [h for hs in zone_hold.values() for h in hs]
     buys = sum(zone_buys.values())
     return {
-        "step": step_pct, "zones": zones, "n": n,
+        "step": step_pct, "target": target_pct, "zones": zones, "n": n,
         "window_start": dw[0].date(), "window_end": dw[-1].date(),
         "final_value": final_val, "total_return": total_ret, "mdd": mdd,
         "sharpe": sharpe, "buys": buys, "sells": len(sell_log),
@@ -159,43 +162,38 @@ def print_depth_table(title: str, rows: list[dict], max_dd: float) -> None:
         print(f"  {r['depth']:>5.0f}%  {r['days']:>10,}  {r['pct']:>6.1f}%  {r['episodes']:>8}")
 
 
-def main() -> None:
-    ap = argparse.ArgumentParser(description="세븐 스플릿 하락 구간(스텝) 최적화 백테스트 — TQQQ 스윙 알리미용")
-    ap.add_argument("--ticker", default=DEFAULT_TICKER)
-    ap.add_argument("--since", default=DEFAULT_SINCE, help=f"백테스트 시작일 (기본: 최근 10년 = {DEFAULT_SINCE})")
-    ap.add_argument("--start", type=float, default=15.0, help="첫 구간 하락률 %% (기본 15 = -15%%)")
-    ap.add_argument("--splits", type=int, default=7, help="분할 수 (기본 7 = 세븐 스플릿)")
-    ap.add_argument("--target", type=float, default=20.0, help="매도 목표 수익률 %% (기본 20)")
-    ap.add_argument("--amount", type=float, default=AMOUNT, help="계좌당 매수 금액 $ (기본 500)")
-    ap.add_argument("--fee", type=float, default=0.001, help="왕복 수수료 (기본 0.001 = 0.1%%)")
-    ap.add_argument("--steps", default="1,2,3,4,5,6", help="스윕할 스텝 목록 (기본 1,2,3,4,5,6)")
-    ap.add_argument("--detail", type=float, nargs="*", default=None,
-                    help="상세 리포트 스텝 (기본: 3과 5 = 제안안/현재안)")
-    ap.add_argument("--all", action="store_true", help="상세 리포트에 전체 거래 로그 포함")
-    ap.add_argument("--no-index", action="store_true", help="나스닥(^IXIC) 비교 생략")
-    args = ap.parse_args()
+def print_detail_report(r: dict, args, header: str) -> None:
+    """1케이스 상세 리포트 — 구간별 매수횟수/평균매수가/평균보유일 (+ --all 시 거래 로그)."""
+    zs = r["zones"]
+    print(f"\n{'═' * 76}")
+    print(f"  상세 — {header} · {r['window_start']} ~ {r['window_end']}")
+    print(f"{'═' * 76}")
+    print(f"  최종가치 ${r['final_value']:,.0f} · 총수익률 {r['total_return']:+.1f}% · MDD {r['mdd']:.1f}% · "
+          f"Sharpe {r['sharpe']:.2f}")
+    print(f"  매수 {r['buys']}회 / 매도 {r['sells']}회 · 평균 보유 {r['avg_hold_days']:.0f}일 · "
+          f"평균 현금 ${r['avg_cash']:,.0f} (캐시비율 {r['cash_ratio']:.1f}%)")
+    print(f"  {'구간':>6} {'매수횟수':>8} {'평균매수가':>10} {'평균보유일':>10}")
+    for z in zs:
+        px = r["zone_px"][z]
+        hd = r["zone_hold"][z]
+        avg_px = float(np.mean(px)) if px else float("nan")
+        avg_hd = float(np.mean(hd)) if hd else float("nan")
+        print(f"  -{z:>4.0f}% {r['zone_buys'][z]:>8} {avg_px:>10,.2f} {avg_hd:>9.0f}일")
+    if args.all:
+        print("\n  -- 거래 로그 --")
+        for (d, z, px, amt) in r["buy_log"]:
+            print(f"  {d.date()}  BUY  -{z:.0f}%  @ ${px:,.2f}  ${amt:,.0f}")
+        for (d, z, bp, px, pr) in r["sell_log"]:
+            print(f"  {d.date()}  SELL -{z:.0f}%  @ ${px:,.2f}  (매수 ${bp:,.2f} → 회수 ${pr:,.2f})")
 
-    steps = [float(s) for s in args.steps.split(",") if s.strip()]
-    if not steps:
-        print("❌ --steps 가 비어 있습니다.")
-        return
 
-    print(f"📥 {args.ticker} 데이터 다운로드 (배당 조정 종가, 최대 기간)...")
-    closes, dates = fetch_closes(args.ticker)
-    print(f"   데이터 범위: {dates[0].date()} ~ {dates[-1].date()} ({len(dates)} 거래일)")
-
+def run_step_sweep(closes: np.ndarray, dates: pd.DatetimeIndex, args,
+                   steps: list[float], bh_final: float, bh_ret: float, bh_mdd: float) -> None:
+    """하락 스텝 스윕 (기존) — 매도 목표는 --target 고정."""
     print(f"\n{'═' * 76}")
     print(f"  세븐 스플릿 하락 스텝 스윕 — {args.ticker} · {args.since} 이후")
     print(f"  첫 구간 -{args.start:.0f}% · {args.splits}분할 · 계좌당 ${args.amount:.0f} · 매도 목표 +{args.target:.0f}% · 수수료 {args.fee*100:.1f}%")
     print(f"{'═' * 76}")
-
-    # 기준선: 전액 매수 후 보유 (참고용)
-    idx0, cw, dw, _ = window_slice(closes, dates, args.since)
-    bh_shares = args.amount * args.splits * (1 - args.fee) / float(cw[0])
-    bh_peak = np.maximum.accumulate(cw)
-    bh_mdd = float(((cw - bh_peak) / bh_peak).min() * 100)
-    bh_final = bh_shares * float(cw[-1])
-    bh_ret = (bh_final / (args.amount * args.splits) - 1) * 100
 
     results = [simulate(closes, dates, args.since, args.start, s, args.splits,
                         args.target, args.amount, args.fee) for s in steps]
@@ -225,27 +223,204 @@ def main() -> None:
         r = next((x for x in results if x["step"] == step), None)
         if r is None:
             continue
-        zs = r["zones"]
-        print(f"\n{'═' * 76}")
-        print(f"  상세 — 스텝 {step:.0f}% (구간: " + "/".join(f"-{z:.0f}" for z in zs) + f") · {r['window_start']} ~ {r['window_end']}")
-        print(f"{'═' * 76}")
-        print(f"  최종가치 ${r['final_value']:,.0f} · 총수익률 {r['total_return']:+.1f}% · MDD {r['mdd']:.1f}% · "
-              f"Sharpe {r['sharpe']:.2f}")
-        print(f"  매수 {r['buys']}회 / 매도 {r['sells']}회 · 평균 보유 {r['avg_hold_days']:.0f}일 · "
-              f"평균 현금 ${r['avg_cash']:,.0f} (캐시비율 {r['cash_ratio']:.1f}%)")
-        print(f"  {'구간':>6} {'매수횟수':>8} {'평균매수가':>10} {'평균보유일':>10}")
-        for z in zs:
-            px = r["zone_px"][z]
-            hd = r["zone_hold"][z]
-            avg_px = float(np.mean(px)) if px else float("nan")
-            avg_hd = float(np.mean(hd)) if hd else float("nan")
-            print(f"  -{z:>4.0f}% {r['zone_buys'][z]:>8} {avg_px:>10,.2f} {avg_hd:>9.0f}일")
-        if args.all:
-            print("\n  -- 거래 로그 --")
-            for (d, z, px, amt) in r["buy_log"]:
-                print(f"  {d.date()}  BUY  -{z:.0f}%  @ ${px:,.2f}  ${amt:,.0f}")
-            for (d, z, bp, px, pr) in r["sell_log"]:
-                print(f"  {d.date()}  SELL -{z:.0f}%  @ ${px:,.2f}  (매수 ${bp:,.2f} → 회수 ${pr:,.2f})")
+        header = f"스텝 {step:.0f}% (구간: " + "/".join(f"-{z:.0f}" for z in r["zones"]) + ")"
+        print_detail_report(r, args, header)
+
+
+def run_target_sweep(closes: np.ndarray, dates: pd.DatetimeIndex, args,
+                     targets: list[float], bh_final: float, bh_ret: float, bh_mdd: float) -> None:
+    """매도 목표 수익률 스윕 — 하락 스텝(--step) 고정, 목표 수익률만 변화."""
+    step = args.step
+    print(f"\n{'═' * 76}")
+    print(f"  매도 목표 수익률 스윕 — {args.ticker} · {args.since} 이후 · 하락 스텝 {step:.0f}% 고정")
+    print(f"  첫 구간 -{args.start:.0f}% · {args.splits}분할 · 계좌당 ${args.amount:.0f} · 수수료 {args.fee*100:.1f}%")
+    print(f"{'═' * 76}")
+
+    results = [simulate(closes, dates, args.since, args.start, step, args.splits,
+                        t, args.amount, args.fee) for t in targets]
+
+    hdr = (f"  {'목표':>5} {'최종가치':>10} {'총수익률':>9} {'MDD':>7} {'Sharpe':>7} "
+           f"{'매수/매도':>9} {'평균보유':>7} {'캐시비율':>8}")
+    print(hdr)
+    print("  " + "-" * 72)
+    best_ret = max(results, key=lambda r: r["total_return"])
+    best_sharpe = max(results, key=lambda r: r["sharpe"])
+    for r in results:
+        t = r["target"]
+        mark = ""
+        if abs(t - args.target) < 1e-9:
+            mark = " ◀현재"
+        elif r is best_ret:
+            mark = " ◀최적(수익률)"
+        elif r is best_sharpe:
+            mark = " ◀최적(Sharpe)"
+        hold = f"{r['avg_hold_days']:>5.0f}일" if r["avg_hold_days"] is not None else f"{'미도달':>7}"
+        print(f"  +{t:>4.0f}% {r['final_value']:>10,.0f} {r['total_return']:>+8.1f}% {r['mdd']:>6.1f}% "
+              f"{r['sharpe']:>7.2f} {r['buys']:>4}/{r['sells']:<4} {hold} "
+              f"{r['cash_ratio']:>7.1f}%{mark}")
+    print(f"\n  [참고] 전액 매수 후 보유: 최종 ${bh_final:,.0f} (수익 {bh_ret:+.1f}%) · MDD {bh_mdd:.1f}%")
+    print(f"  → 총수익률 최고: +{best_ret['target']:.0f}% (수익 {best_ret['total_return']:+.1f}% · MDD {best_ret['mdd']:.1f}% · "
+          f"Sharpe {best_ret['sharpe']:.2f} · 매도 {best_ret['sells']}회)")
+    print(f"  → Sharpe 최고: +{best_sharpe['target']:.0f}% (Sharpe {best_sharpe['sharpe']:.2f} · 수익 {best_sharpe['total_return']:+.1f}% · "
+          f"MDD {best_sharpe['mdd']:.1f}% · 매도 {best_sharpe['sells']}회)")
+    print(f"  → 목표↑ = 매도 도달 어려움(보유↑·미실현 위험) / 목표↓ = 회전↑(수수료·재진입 위험) — "
+          f"단일 최고점은 과최적화 위험이 있으므로 주변 ±5%p 구간 중 취향 선택 권장")
+
+    # 상세 리포트 — 기본: 현재(--target) + 수익률 최고 + Sharpe 최고 (중복 제외)
+    detail_targets = [args.target]
+    if args.detail is not None:
+        detail_targets = [float(t) for t in args.detail]
+    for r in (best_ret, best_sharpe):
+        if r["target"] not in detail_targets:
+            detail_targets.append(r["target"])
+    for t in detail_targets:
+        r = next((x for x in results if abs(x["target"] - t) < 1e-9), None)
+        if r is None:
+            continue
+        header = f"목표 +{r['target']:.0f}% (스텝 {r['step']:.0f}% · 구간: " + "/".join(f"-{z:.0f}" for z in r["zones"]) + ")"
+        print_detail_report(r, args, header)
+
+
+def run_grid_sweep(closes: np.ndarray, dates: pd.DatetimeIndex, args,
+                   steps: list[float], targets: list[float],
+                   bh_final: float, bh_ret: float, bh_mdd: float) -> None:
+    """2차원 그리드 — 하락 스텝 × 매도 목표 수익률 동시 스윕 (--grid).
+
+    스텝/목표를 따로 최적화하면 상호작용(예: 좁은 스텝 + 높은 목표)을 놓친다.
+    행 = 스텝, 열 = 목표, 셀 = 총수익률%/MDD% — 행 최고에 ★, 현재 실전 설정(3%×+40%)에 ◀.
+    """
+    print(f"\n{'═' * 76}")
+    print(f"  2차원 그리드 — 하락 스텝 × 매도 목표 수익률 — {args.ticker} · {args.since} 이후")
+    print(f"  첫 구간 -{args.start:.0f}% · {args.splits}분할 · 계좌당 ${args.amount:.0f} · 수수료 {args.fee*100:.1f}%")
+    print(f"  행 = 하락 스텝, 열 = 매도 목표 — ★ 행 최고 · ◀ 현재 실전 설정(스텝 {args.step:.0f}% × +{args.target:.0f}%)")
+    print(f"{'═' * 76}")
+
+    grid: dict[tuple[float, float], dict] = {}
+    for s in steps:
+        for t in targets:
+            grid[(s, t)] = simulate(closes, dates, args.since, args.start, s, args.splits,
+                                    t, args.amount, args.fee)
+
+    def _print_matrix(title: str, pick, fmt: str) -> None:
+        """행별 최고값에 ★, 현재 실전 설정 셀에 ◀ 를 붙인 매트릭스 출력."""
+        print(f"\n  [{title}]  (★ = 행 최고)")
+        print(f"  {'스텝':>5}" + "".join(f"{f'+{t:.0f}%':>8}" for t in targets))
+        for s in steps:
+            vals = [pick(grid[(s, t)]) for t in targets]
+            best = max(vals)
+            cells = []
+            for t, v in zip(targets, vals):
+                is_cur = abs(s - args.step) < 1e-9 and abs(t - args.target) < 1e-9
+                mark = "◀" if is_cur else ("★" if v == best else "")
+                cells.append(f"{fmt.format(v=v):>7}" + mark)
+            print(f"  {s:>5g}%" + "".join(cells))
+
+    _print_matrix("총수익률 % (★ = 행에서 수익률 최고)", lambda r: r["total_return"], "{v:+.1f}")
+    _print_matrix("MDD % (★ = 행에서 덜 하락)", lambda r: r["mdd"], "{v:.1f}")
+
+    allr = list(grid.values())
+    best_ret = max(allr, key=lambda r: r["total_return"])
+    best_sharpe = max(allr, key=lambda r: r["sharpe"])
+    best_mdd = max(allr, key=lambda r: r["mdd"])
+    cur = grid.get((args.step, args.target))
+    print(f"\n  [참고] 전액 매수 후 보유: 최종 ${bh_final:,.0f} (수익 {bh_ret:+.1f}%) · MDD {bh_mdd:.1f}%")
+    print(f"  → 전체 최고 총수익률: 스텝 {best_ret['step']:g}% × 목표 +{best_ret['target']:g}% "
+          f"(+{best_ret['total_return']:.1f}% · MDD {best_ret['mdd']:.1f}% · Sharpe {best_ret['sharpe']:.2f})")
+    print(f"  → 전체 최고 Sharpe: 스텝 {best_sharpe['step']:g}% × 목표 +{best_sharpe['target']:g}% "
+          f"(Sharpe {best_sharpe['sharpe']:.2f} · +{best_sharpe['total_return']:.1f}% · MDD {best_sharpe['mdd']:.1f}%)")
+    print(f"  → 전체 최저 MDD(덜 하락): 스텝 {best_mdd['step']:g}% × 목표 +{best_mdd['target']:g}% "
+          f"(MDD {best_mdd['mdd']:.1f}% · +{best_mdd['total_return']:.1f}% · Sharpe {best_mdd['sharpe']:.2f})")
+    if cur is not None:
+        n = len(allr)
+        by_ret = sorted(allr, key=lambda r: -r["total_return"])
+        by_sharpe = sorted(allr, key=lambda r: -r["sharpe"])
+        by_mdd = sorted(allr, key=lambda r: -r["mdd"])
+        rank_ret = next(i for i, r in enumerate(by_ret, 1) if r is cur)
+        rank_sharpe = next(i for i, r in enumerate(by_sharpe, 1) if r is cur)
+        rank_mdd = next(i for i, r in enumerate(by_mdd, 1) if r is cur)
+        print(f"  → 현재 실전 설정(스텝 {args.step:g}% × +{args.target:g}%): "
+              f"+{cur['total_return']:.1f}% · MDD {cur['mdd']:.1f}% · Sharpe {cur['sharpe']:.2f} "
+              f"— 순위 {rank_ret}/{n}(수익률) · {rank_sharpe}/{n}(Sharpe) · {rank_mdd}/{n}(MDD)")
+
+    # 플래토 판정 — 최고 수익률 대비 --plateau-pct(%p) 이내 AND MDD --plateau-mdd 이상(덜 하락)
+    best_val = best_ret["total_return"]
+    pl = sorted((r for r in allr if best_val - r["total_return"] <= args.plateau_pct
+                 and r["mdd"] >= args.plateau_mdd), key=lambda r: -r["total_return"])
+    if pl:
+        pl_steps = sorted({r["step"] for r in pl})
+        pl_targets = sorted({r["target"] for r in pl})
+        print(f"  → 플래토 판정({len(pl)}/{len(allr)} 조합): 최고 수익률 대비 -{args.plateau_pct:g}%p 이내 "
+              f"+ MDD {args.plateau_mdd:g}% 이상")
+        print(f"    경계: 스텝 {pl_steps[0]:g}% ~ {pl_steps[-1]:g}% × 목표 +{pl_targets[0]:g}% ~ +{pl_targets[-1]:g}%")
+        print(f"    조합: " + ", ".join(f"({r['step']:g}%·+{r['target']:g}%)" for r in pl))
+
+    # 상세 — 전체 최고 수익률 조합 + 현재 실전 설정 (중복 제외)
+    detail_rs = []
+    if best_ret not in detail_rs:
+        detail_rs.append(best_ret)
+    if cur is not None and cur not in detail_rs:
+        detail_rs.append(cur)
+    for r in detail_rs:
+        header = f"스텝 {r['step']:g}% × 목표 +{r['target']:g}% (구간: " + \
+            "/".join(f"-{z:g}" for z in r["zones"]) + ")"
+        print_detail_report(r, args, header)
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description="세븐 스플릿 하락 구간(스텝)/매도 목표 수익률 최적화 백테스트 — TQQQ 스윙 알리미용")
+    ap.add_argument("--ticker", default=DEFAULT_TICKER)
+    ap.add_argument("--since", default=DEFAULT_SINCE, help=f"백테스트 시작일 (기본: 최근 10년 = {DEFAULT_SINCE})")
+    ap.add_argument("--start", type=float, default=15.0, help="첫 구간 하락률 %% (기본 15 = -15%%)")
+    ap.add_argument("--splits", type=int, default=7, help="분할 수 (기본 7 = 세븐 스플릿)")
+    ap.add_argument("--target", type=float, default=40.0, help="매도 목표 수익률 %% (기본 40 = 현재 실전 설정)")
+    ap.add_argument("--step", type=float, default=3.0, help="--targets 스윕 시 고정 하락 스텝 %% (기본 3 = 현재 실전 설정)")
+    ap.add_argument("--amount", type=float, default=AMOUNT, help="계좌당 매수 금액 $ (기본 500)")
+    ap.add_argument("--fee", type=float, default=0.001, help="왕복 수수료 (기본 0.001 = 0.1%%)")
+    ap.add_argument("--steps", default="1,2,3,4,5,6", help="스윕할 스텝 목록 (기본 1,2,3,4,5,6)")
+    ap.add_argument("--targets", default=None,
+                    help="스윕할 매도 목표 수익률 목록 (예: 10,15,20,25,30 — 지정 시 하락 스텝은 --step 고정)")
+    ap.add_argument("--grid", action="store_true",
+                    help="2차원 그리드 — 하락 스텝(--steps) × 매도 목표(--targets) 동시 스윕"
+                         " (--targets 미지정 시 기본 10,15,20,25,30,40,50)")
+    ap.add_argument("--plateau-pct", type=float, default=5.0,
+                    help="--grid 플래토 판정: 최고 수익률 대비 이만큼(%%p) 이내 조합만 (기본 5)")
+    ap.add_argument("--plateau-mdd", type=float, default=-36.0,
+                    help="--grid 플래토 판정: MDD 가 이 값 이상(덜 하락)인 조합만 (기본 -36%%)")
+    ap.add_argument("--detail", type=float, nargs="*", default=None,
+                    help="상세 리포트 값 (기본: 스텝 스윕은 3/5, 목표 스윕은 현재+최고)")
+    ap.add_argument("--all", action="store_true", help="상세 리포트에 전체 거래 로그 포함")
+    ap.add_argument("--no-index", action="store_true", help="나스닥(^IXIC) 비교 생략")
+    args = ap.parse_args()
+
+    steps = [float(s) for s in args.steps.split(",") if s.strip()]
+    if not steps:
+        print("❌ --steps 가 비어 있습니다.")
+        return
+
+    print(f"📥 {args.ticker} 데이터 다운로드 (배당 조정 종가, 최대 기간)...")
+    closes, dates = fetch_closes(args.ticker)
+    print(f"   데이터 범위: {dates[0].date()} ~ {dates[-1].date()} ({len(dates)} 거래일)")
+
+    # 기준선: 전액 매수 후 보유 (참고용 — 스윕 차원과 무관)
+    idx0, cw, dw, _ = window_slice(closes, dates, args.since)
+    bh_shares = args.amount * args.splits * (1 - args.fee) / float(cw[0])
+    bh_peak = np.maximum.accumulate(cw)
+    bh_mdd = float(((cw - bh_peak) / bh_peak).min() * 100)
+    bh_final = bh_shares * float(cw[-1])
+    bh_ret = (bh_final / (args.amount * args.splits) - 1) * 100
+
+    if args.grid:
+        grid_targets = ([float(t) for t in args.targets.split(",") if t.strip()]
+                        if args.targets is not None else [10.0, 15.0, 20.0, 25.0, 30.0, 40.0, 50.0])
+        run_grid_sweep(closes, dates, args, steps, grid_targets, bh_final, bh_ret, bh_mdd)
+    elif args.targets is not None:
+        targets = [float(t) for t in args.targets.split(",") if t.strip()]
+        if not targets:
+            print("❌ --targets 가 비어 있습니다.")
+            return
+        run_target_sweep(closes, dates, args, targets, bh_final, bh_ret, bh_mdd)
+    else:
+        run_step_sweep(closes, dates, args, steps, bh_final, bh_ret, bh_mdd)
 
     # 깊이 빈도표 — TQQQ
     t_depths = [15, 18, 20, 21, 24, 27, 30, 33, 35, 40, 45, 50, 60, 70, 80]
