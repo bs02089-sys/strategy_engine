@@ -26,7 +26,7 @@
 # =============================================================================
 """
 📌 DCA MA Strategy는 매일 정해진 시간에 GitHub Actions에서 실행되어,
-   portfolio_config.json에 설정된 포지션(TQQQ, SOXL)의 LOC 매수 목표가를
+   portfolio_config.json에 설정된 포지션(TQQQ)의 LOC 매수 목표가를
    계산하고, RSI+거래량 복합 신호, ATH 하락분할 DCA,
    비상 모드 종료(회복 감지)를 평가하여 디스코드로 종합 브리핑을 전송합니다.
    또한 cron-job.org가 발사하는 repository_dispatch로 장중 실시간 ATH DCA
@@ -97,14 +97,14 @@
 │  │                                                                          │
 │  │  LOC → ATH_DCA 전환 조건:                                                 │
 │  │  ├─ ATH_DCA.ENABLED == true                                              │
-│  │  ├─ 현재 ATH DD >= TRIGGER_1 (TQQQ: -35%, SOXL: -60%)                   │
+│  │  ├─ 현재 ATH DD >= TRIGGER_1 (TQQQ: -35%)                            │
 │  │  └─ 모드 전환: STRATEGY_MODE = "ATH_DCA"                                 │
 │  │                                                                          │
 │  │  ATH_DCA → LOC 전환 조건: (자동 비상 모드 종료 — RECOVERY_REENTRY)         │
 │  │  _check_recovery_reentry() — 아래 4조건 모두 충족 시 자동 복귀:             │
 │  │  ├─ ① 잔여 분할 1개 이상 (2차/3차 예비금 보존)                            │
 │  │  ├─ ② 진입일(ATH_DCA_ENTERED_ON)부터 MIN_DAYS(30) 영업일 경과            │
-│  │  ├─ ③ DD ≤ DD_RATIO(0.5) × TRIGGER_1   (TQQQ 17.5% / SOXL 30%)         │
+│  │  ├─ ③ DD ≤ DD_RATIO(0.5) × TRIGGER_1   (TQQQ 17.5%)                   │
 │  │  └─ ④ MA20 > MA60 (불리시 정렬, MA_CONFIRM=true)                         │
 │  │  └─ (사용자 수동 STRATEGY_MODE="LOC" 변경도 동작)                        │
 │  │                                                                          │
@@ -130,7 +130,7 @@
 │  │  ├─ 📊 Market Risk Score: X / 14 (from signal_report.json)             │ │
 │  │  └─ ─── 40 ───                                                        │ │
 │  │                                                                        │ │
-│  │  ▼ 각 포지션 반복 (TQQQ → SOXL)                                        │ │
+│  │  ▼ 각 포지션 반복 (TQQQ)                                             │ │
 │  │                                                                        │ │
 │  │  ┌──────────────────────────────────────────────────────────────────┐ │ │
 │  │  │  [4-a] 기술적 신호 확인                                          │ │ │
@@ -169,7 +169,7 @@
 │  │  │  [4-g] RSI + 거래량 복합 신호                                    │ │ │
 │  │  │  _check_rsi_volume_signal(ticker)                                │ │ │
 │  │  │  ├─ yfinance 6mo 데이터 다운로드                                  │ │ │
-│  │  │  ├─ RSI 계산 (SOXL: 14일 / TQQQ: 21일)                          │ │ │
+│  │  │  ├─ RSI 계산 (TQQQ: 21일)                                      │ │ │
 │  │  │  ├─ 20일 거래량 이동평균 계산                                     │ │ │
 │  │  │  ├─ Zone 1 검사 (RSI + Volume 조건)                              │ │ │
 │  │  │  ├─ Zone 2 검사 (RSI + Volume 조건)                              │ │ │
@@ -351,7 +351,7 @@ _check_ma_filter()
   └── suspended (ATH_DCA 모드 OFF)
 
 _ma_filter_lines()
-  └── 🟢/🟡 레짐 상태 + 🚨 하향 돌파(전량 청산) / 💰 전액 재매수(TQQQ) / 🔄 DCA 재개(SOXL)
+  └── 🟢/🟡 레짐 상태 + 🚨 하향 돌파(전량 청산) / 💰 재매수(TQQQ, lump 50%) / 🔄 DCA 재개(dca_reset)
 """
 
 # =============================================================================
@@ -362,7 +362,7 @@ _ma_filter_lines()
 
  portfolio_config.json  (읽기/쓰기)
  ├── DISCORD_WEBHOOK, DISCORD_USER_ID
- ├── POSITIONS → TQQQ / SOXL
+ ├── POSITIONS → TQQQ
  │   ├── LOOKBACK_DAYS, ENTRY_MULTIPLIER
  │   ├── VOL_METHOD (EWMA / STD), EWMA_LAMBDA
  │   ├── DAILY_SIGMA (← refresh_sigma_if_stale)
@@ -371,7 +371,7 @@ _ma_filter_lines()
  │   ├── START_DATE
  │   ├── ROTATION_EXIT_DAYS (for ROTATION_3M)
  │   ├── STRATEGY_MODE ⭐ (LOC / ATH_DCA — 자동 관리)
- │   ├── MA_FILTER ⭐신규 (TQQQ: MA20+lump, SOXL: MA250+dca_reset)
+ │   ├── MA_FILTER ⭐신규 (TQQQ: MA20+lump)
  │   │   ├── ENABLED, MA_DAYS, REENTRY, REENTRY_PCT
  │   │   ├── MA_FILTER_STATE {regime, since} (자동 관리)
  │   │   └── MA_FILTER_CONFIG_FINGERPRINT (설정 변경 감지)
@@ -391,10 +391,10 @@ _ma_filter_lines()
  └── LAST_MONTHLY_PING
 
  portfolio_config.json  (읽기 전용, MarketStageSystem.py가 공유)
- └── POSITIONS → SOXL / TQQQ (키 목록을 ticker로 사용)
+ └── POSITIONS → TQQQ (키 목록을 ticker로 사용)
 
  market_state.json  (읽기 전용, MarketStageSystem.py가 작성)
- └── SOXL / TQQQ
+ └── TQQQ
      ├── bottom (0~5)           → All-In 트리거
      └── top (0~5)
 
@@ -422,12 +422,6 @@ _ma_filter_lines()
 ╔══════════════════════════════════════════════════════════════════════╗
 ║                    RSI + Volume Zone 설정                           ║
 ╠══════════════════════════════════════════════════════════════════════╣
-║                                                                      ║
-║   SOXL ──────────────────────────────────────────────────────────   ║
-║     RSI 기간: 14일                                                   ║
-║     Zone 1: RSI  25~34  |  거래량 0.3~0.7× MA20 (저RSI 저볼륨)     ║
-║     Zone 2: RSI  34~40  |  거래량 0.4~0.9× MA20 (중간RSI 중볼륨)   ║
-║     → Sharpe 2.62 | 승률 71% | 12년 백테스트                        ║
 ║                                                                      ║
 ║   TQQQ ──────────────────────────────────────────────────────────   ║
 ║     RSI 기간: 21일                                                   ║
@@ -571,17 +565,10 @@ jobs:
 
 📌 실행 로그 예시 (GitHub Actions Console):
 
-  📊 Auto-updating Sigma for SOXL...
-  📊 Calculating real-time Sigma for SOXL (Lookback: 252/EWMA)...
-  ✅ SOXL Sigma calculation success: 0.0798 (method: EWMA)
   🔍 Starting price lookup for TQQQ...
   ✅ TQQQ yfinance success: $42.15 (07-29)
-  🔍 Starting price lookup for SOXL...
-  ✅ SOXL yfinance success: $12.34 (07-29)
   📊 ATH DCA check: TQQQ - 모든 분할 완료 (사이클 재시작 대기)
   ⚙️ Mode: LOC → (ATH DD >= 35% 시 자동 전환)
-  📊 ATH DCA check: SOXL - 모든 분할 완료 (사이클 재시작 대기)
-  ⚙️ Mode: LOC → (ATH DD >= 60% 시 자동 전환)
   ✅ Discord briefing sent successfully.
 
 
@@ -600,23 +587,11 @@ jobs:
   ▶ 🟡 현금 유지 (MA20 아래 — 매수 금지, 재돌파 대기)
   • 📡 다음 비상 트리거: 2차(-50%)까지 -24.3%p ($43.51)
 
-  🔹 SOXL (Close: $114.72 | 07-31 | LONG_YEAR / D+4)
-  • 📈 전고점: $300.77 (2026-06-22) 기준 하락률 -61.86% / 회복 필요 162.18%
-  • Mode: 🚨 비상 모드 (ATH DCA)
-  • 📉 MA250 레짐 (참고): 🟢 MA 위 — 비상 모드 중 MA 필터 OFF
-  • Signals: Buy[True] / Sell[False] | LOC mechanical strategy active
-  • 🎯 [Action] LOC Buy: **$104.65**
-  ▶ 🟢 보유 유지 (MA250 위 — LOC 분할매수 조건 확인)
-  • 📡 다음 비상 트리거: 2차(-70%)까지 -8.1%p ($90.23)
-
   ────────────────────────────────────────
   📉 ATH Drawdown DCA Monitor
   📊 TQQQ ATH 2차 DCA
      • ATH: $87.02 | 실행: 1/3차 ✅
      • 다음(2차): 추가 +24.3%p 하락 시 ($43.51)
-  📊 SOXL ATH 2차 DCA
-     • ATH: $300.77 | 실행: 1/3차 ✅
-     • 다음(2차): 추가 +8.1%p 하락 시 ($90.23)
 """
 
 # =============================================================================

@@ -21,18 +21,17 @@
 ```
 LOC ─────────────────────────────────▶ ATH_DCA
   (자동) ATH DD >= TRIGGER_1 도달 시
-  TQQQ: -35%  /  SOXL: -60%
+  TQQQ: -35%
 
 ATH_DCA ──────────────────────────────▶ LOC
   (자동) 비상 모드 종료 — 아래 조건이 모두 충족 시 (RECOVERY_REENTRY.ENABLED=true)
     ① 잔여 분할 1개 이상 (2차/3차 예비금 보존)
     ② ATH_DCA_ENTERED_ON(크래시 진입일)부터 MIN_DAYS(30) 영업일 경과
-    ③ DD ≤ DD_RATIO(0.5) × TRIGGER_1   (TQQQ 17.5%, SOXL 30%)
+    ③ DD ≤ DD_RATIO(0.5) × TRIGGER_1   (TQQQ 17.5%)
     ④ MA20 > MA60 (불리시 정렬, MA_CONFIRM=true)
   (수동) 사용자가 STRATEGY_MODE = "LOC"로 변경해도 동작
 
   ⚠️ 비상 모드 종료 시 ATH_DCA_USED_SPLITS는 보존 → 재급락 시 2차/3차 이어서 발동
-  ⚠️ 대기 클록 표시: SOXL ⏳ D+3/30 영업일 (진입 2026-07-28) — 브리핑/실시간 알림에 표시
   ⚠️ TQQQ는 진입 2026-03-27 기준 30영업일 경과 완료 → 대기 표시 없음 (종료 검사 활성)
 ```
 
@@ -56,32 +55,32 @@ ATH_DCA ────────────────────────
 
 ## 3️⃣ 종목별 설정
 
-| 항목 | TQQQ | SOXL |
-|:----|:----:|:----:|
-| **기본 모드** | LOC | LOC |
-| **현재 STRATEGY_MODE** ⚠️스냅샷 | **ATH_DCA** (진입 2026-03-27) | **ATH_DCA** (진입 2026-07-28) |
+| 항목 | TQQQ |
+|:----|:----:|
+| **기본 모드** | LOC |
+| **현재 STRATEGY_MODE** ⚠️스냅샷 | **ATH_DCA** (진입 2026-03-27) |
 
 > ⚠️ 위 "현재 STRATEGY_MODE" 행은 **2026-07-31 기준 스냅샷**입니다. 실제 모드는
 > `portfolio_config.json`의 `STRATEGY_MODE`가 소스이며, 비상 모드 종료로 LOC 복귀 시
 > 자동 갱신됩니다.
-| **LOC 매수** | Sigma × 1.1 | Sigma × 1.1 |
-| **ATH_DCA 1차** | **-35%** | **-60%** |
-| **ATH_DCA 2차** | -50% | -70% |
-| **ATH_DCA 3차** | **Stage 5 바닥 감지** | **Stage 5 바닥 감지** |
-| **MA 레짐 필터** | **MA20** (하향 돌파 → 전량 청산 / 상향 돌파 → 전액 재매수) | **MA250** (하향 돌파 → 전량 청산 / 상향 돌파 → DCA 재개) |
+| **LOC 매수** | Sigma × 1.1 |
+| **ATH_DCA 1차** | **-35%** |
+| **ATH_DCA 2차** | -50% |
+| **ATH_DCA 3차** | **Stage 5 바닥 감지** |
+| **MA 레짐 필터** | **MA20** (하향 돌파 → 전량 청산 / 상향 돌파 → 재매수 50%) |
 
 ---
 
 ### MA 레짐 필터 (Moving-Average Regime Filter — 백테스트 검증 반영)
 
 기존 듀얼 모드에 **종가 × 이동평균(MA) 크로스 레짐 필터**를 얹어 MDD를 낮추는 설계입니다.
-`DCA_MA_strategy.py` 백테스트 검증(TQQQ MA20 +2,138.5% / -41.2%, SOXL MA250 +265.2% / -34.8%)을
+`DCA_MA_strategy.py` 백테스트 검증(TQQQ MA20 +2,138.5% / -41.2%)을
 반영해 실전에 통합되었습니다.
 
 | 구분 | 동작 |
 |:----|:----|
 | **MA 하향 돌파** (종가 < MA) | 📉 **전량 청산 + 매수 금지** — LOC/RSI 매수 신호 생략, 현금 대기 |
-| **MA 상향 돌파** (종가 > MA) | TQQQ: 💰 **전액 재매수**(`REENTRY=lump`, 100%) / SOXL: 🔄 **DCA 재개**(`REENTRY=dca_reset`) |
+| **MA 상향 돌파** (종가 > MA) | 💰 **재매수**(`REENTRY=lump`, 50%) / 🔄 **DCA 재개**(`REENTRY=dca_reset`) |
 | **ATH_DCA 비상 모드** | 🚫 **필터 OFF** — 분할 매수 진행 중에는 개입하지 않음 (레짐 상태만 "참고" 표시) |
 | **비상 모드 종료 → LOC 복귀** | MA 필터 **재활성** |
 
@@ -160,17 +159,9 @@ ATH_DCA ────────────────────────
 |:-----|:----|:--------|
 | **설정 파일** | `portfolio_config.json` + `MarketStage_config.json` | **`portfolio_config.json` 단일 파일** |
 | **Stage 5 역할** | 독립 All-In 메시지 (`_format_all_in_line()`) | **ATH DCA 3차 트리거** (`check_ath_dca_signals()` 통합) |
-| **ALL_IN_PERCENT** | SOXL=30%, TQQQ=50% (잔금 비중) | **제거됨** (3차는 단순 1/3 분할) |
+| **ALL_IN_PERCENT** | TQQQ=50% (잔금 비중) | **제거됨** (3차는 단순 1/3 분할) |
 | **Discord 설정** | 각 파일에서 중복 로드 | **`resolve_discord_config()`** 공유 함수 |
 | **시장 단계 설정** | `MarketStage_config.json` → TICKERS | **`portfolio_config.json` → POSITIONS 키** |
-
-### 트리거 진화 (SOXL 예시)
-
-```
-이전:  1차(-60%) → 2차(-70%) → 3차(-80%) →   + 별도 All-In(30%)
-                    ↓
-변경:  1차(-60%) → 2차(-70%) → 3차(Stage 5 바닥 감지)  ← 통합 완료
-```
 
 ---
 
@@ -209,10 +200,10 @@ ATH_DCA ────────────────────────
 ```
  portfolio_config.json  (읽기/쓰기 — 단일 설정 파일)
  ├── DISCORD_WEBHOOK, DISCORD_USER_ID     (← resolve_discord_config() 공유)
- └── POSITIONS → TQQQ / SOXL
+ └── POSITIONS → TQQQ
      ├── Sigma 관련: LOOKBACK_DAYS, VOL_METHOD, DAILY_SIGMA 등
      ├── STRATEGY_MODE                    (LOC / ATH_DCA — 자동 관리)
-     ├── MA_FILTER: ENABLED, MA_DAYS, REENTRY, REENTRY_PCT   (TQQQ MA20/lump, SOXL MA250/dca_reset)
+     ├── MA_FILTER: ENABLED, MA_DAYS, REENTRY, REENTRY_PCT   (TQQQ MA20/lump)
      ├── MA_FILTER_STATE                   (자동 관리 — {regime, since})
      ├── MA_FILTER_CONFIG_FINGERPRINT      (설정 변경 감지 — 상태 리셋)
      ├── ATH_DCA: ENABLED, SPLITS, TRIGGER_1~3, STRATEGY
@@ -226,7 +217,7 @@ ATH_DCA ────────────────────────
      └── RECOVERY_REENTRY                 (비상 모드 종료: ENABLED/DD_RATIO/MIN_DAYS/MA_CONFIRM)
 
  market_state.json  (읽기 전용 — MarketStageSystem.py가 작성)
- └── SOXL / TQQQ
+ └── TQQQ
      ├── bottom (0~5) → ATH DCA 3차 트리거
      └── top (0~5)
 

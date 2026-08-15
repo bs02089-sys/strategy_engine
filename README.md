@@ -25,7 +25,7 @@
 ## 📌 개요
 
 **DCA MA Strategy**는 매일 미국 장 마감 후 정해진 시간에 자동 실행되어:
-1. 포트폴리오에 등록된 티커(TQQQ, SOXL 등)의 변동성을 계산/갱신
+1. 포트폴리오에 등록된 티커(TQQQ)의 변동성을 계산/갱신
 2. Sigma 기반 LOC 매수 목표가 산출
 3. RSI+거래량 복합 매수 신호 평가 (12년 백테스트 검증)
 4. 듀얼 모드 (LOC 일반 / ATH DCA 비상) 자동 전환
@@ -47,15 +47,13 @@
 - Sigma 갱신 이력은 `sigma_history.csv`에 기록
 
 ### 2️⃣ RSI + 거래량 복합 매수 신호 (12년 백테스트 검증)
-- **SOXL**: RSI(14) — 구간1 RSI 25~34 거래량 0.3~0.7배 / 구간2 RSI 34~40 거래량 0.4~0.9배
-  - 샤프비율 2.62 | 승률 71.4% | 평균 +21.56%
 - **TQQQ**: RSI(21) — 구간1 RSI 25~35 거래량 0.3~0.7배 / 구간2 RSI 35~50 거래량 0.4~1.0배
   - 샤프비율 1.30 | 승률 67.3% | 평균 +7.48%
 - 두 구간 동시 충족 시 **🔥🔥🔥 적극 매수 추천** 플래그 표시
 
 ### 3️⃣ ATH 하락분할 DCA
 - ATH 대비 하락률에 따라 N분할 매수 트리거
-- 설정 예시 (현재 값): TQQQ -35% / -50% / Stage 5 바닥, SOXL -60% / -70% / Stage 5 바닥 — 각각 1/3씩
+- 설정 예시 (현재 값): TQQQ -35% / -50% / Stage 5 바닥 — 각각 1/3씩
 - 전 사이클 완료 후 신규 ATH 갱신 시 **자동 초기화 및 사이클 재시작**
 - 임박 알림 (목표 임계값 5%p 이내 접근 시)
 
@@ -70,7 +68,7 @@
 ### 5️⃣ 듀얼 모드 전환 + ATH 하락분할 DCA (비상 모드)
 - **LOC 모드** (📗): 평상시 Sigma 기반 LOC 20분할 매수
 - **ATH DCA 모드** (🚨): ATH 하락률이 TRIGGER_1 도달 시 자동 전환 → 3차 분할 매수
-  - 1차/2차: ATH 대비 설정된 % 하락 시 (TQQQ: -35%/-50%, SOXL: -60%/-70%)
+  - 1차/2차: ATH 대비 설정된 % 하락 시 (TQQQ: -35%/-50%)
   - **3차: MarketStageSystem의 Stage 5 바닥 감지 시 발동**
 - MarketStageSystem.py가 `market_state.json`에 기록한 바닥 단계를 ATH DCA 3차 트리거로 활용
 - 전 사이클(3차) 완료 후 신규 ATH 갱신 시 자동 초기화 및 사이클 재시작
@@ -82,12 +80,12 @@
 ### 6️⃣ MA 레짐 필터 (백테스트 검증 반영)
 
 기존 전략에 **종가 × 이동평균(MA) 크로스 레짐 필터**를 얹어 MDD를 낮추는 설계입니다.
-`DCA_MA_strategy.py`(TQQQ MA20 +2,138.5%/-41.2%, SOXL MA250 +265.2%/-34.8%)에서
+`DCA_MA_strategy.py`(TQQQ MA20 +2,138.5%/-41.2%)에서
 검증한 설정을 실전 엔진(`DCA_MA_strategy.py`)에 반영했습니다.
 
 | 모드 | MA 필터 동작 |
 |------|-------------|
-| **LOC (일반)** | 🟢 활성 — MA 하향 돌파 → **🚨 전량 청산 + 매수 금지** (LOC/RSI 매수 신호 생략) / MA 상향 돌파 → **💰 전액 재매수**(TQQQ) 또는 **🔄 DCA 재개**(SOXL) |
+| **LOC (일반)** | 🟢 활성 — MA 하향 돌파 → **🚨 전량 청산 + 매수 금지** (LOC/RSI 매수 신호 생략) / MA 상향 돌파 → **💰 전액 재매수**(lump) 또는 **🔄 DCA 재개**(dca_reset) |
 | **ATH_DCA (비상)** | OFF — 분할 매수 진행 중에는 개입하지 않음 (레짐 참고 표시만) |
 | **비상 모드 종료 → LOC 복귀** | 리커버리 리엔트리가 복귀를 판정하면 **MA 필터 다시 활성** |
 
@@ -247,7 +245,7 @@ pandas_market_calendars  # NYSE 휴장일 계산
                 "ENABLED": true,
                 "MA_DAYS": 20,
                 "REENTRY": "lump",
-                "REENTRY_PCT": 1.0
+                "REENTRY_PCT": 0.5
             },
             "RECOVERY_REENTRY": {
                 "ENABLED": true,
@@ -277,7 +275,7 @@ pandas_market_calendars  # NYSE 휴장일 계산
 | `STRATEGY_MODE` | 현재 전략 모드: `LOC` (일반) / `ATH_DCA` (비상) — 자동 관리 |
 | `ATH_DCA` | ATH 대비 하락분할 매수 설정 (`ENABLED`/`SPLITS`/`TRIGGER_1~3`) |
 | `RECOVERY_REENTRY` | 비상 모드 종료 파라미터 (`ENABLED`/`DD_RATIO`/`MIN_DAYS`/`MA_CONFIRM`) |
-| `MA_FILTER` | MA 레짐 필터 (`ENABLED`/`MA_DAYS`/`REENTRY`/`REENTRY_PCT`) — TQQQ: MA20+lump, SOXL: MA250+dca_reset |
+| `MA_FILTER` | MA 레짐 필터 (`ENABLED`/`MA_DAYS`/`REENTRY`/`REENTRY_PCT`) — TQQQ: MA20+lump |
 | `ATH_DCA_ENTERED_ON` | 비상 모드 진입일 — 비상 모드 유지 클럭 기준 (자동 기록) |
 | `ROTATION_EXIT_DAYS` | ROTATION_3M 만기 영업일 수 |
 
@@ -341,9 +339,7 @@ python3 setup_cronjob_org.py --update-schedule  # 폴링 간격 갱신 (POLL_MIN
 ### 백테스트 실행 (MA 레짐 전략)
 
 ```bash
-python3 DCA_MA_strategy.py --backtest                    # TQQQ (MA20 + 올인 재진입)
-python3 DCA_MA_strategy.py --backtest --ticker SOXL      # SOXL (MA250 + DCA 재개)
-python3 DCA_MA_strategy.py --backtest --ticker SOXL --ma 30 --reentry dca_reset  # MDD 절감 대안
+python3 DCA_MA_strategy.py --backtest                    # TQQQ (MA20 + 50% 재진입)
 python3 DCA_MA_strategy.py --backtest --fee 0.001        # 수수료 0.1% 반영
 ```
 
@@ -427,7 +423,7 @@ npm run typecheck   # tsc strict + checkJs
 - LOC 목표가: `전일종가 × (1 - σ × 승수)`
 - 매수 조건: 당일 저가 ≤ LOC 목표가
 
-> 📊 **ATH_DCA 트리거 최적화 분석** — 10년 치 월말 스윕 기반 TQQQ/SOXL 트리거 후보값 비교와
+> 📊 **ATH_DCA 트리거 최적화 분석** — 10년 치 월말 스윕 기반 TQQQ 트리거 후보값 비교와
 > 의사결정 근거는 [TRIGGER_OPTIMIZATION_SUMMARY.md](TRIGGER_OPTIMIZATION_SUMMARY.md) 참고.
 
 > 🧪 **비상 모드 종료 실효성 검증 (2026-08-02)** — 2020 COVID 크래시 포함 구간에서
@@ -463,37 +459,26 @@ npm run typecheck   # tsc strict + checkJs
 
 | 티커 | 기본 설정 | 10년 결과 | 용도 |
 |------|-----------|-----------|------|
-| TQQQ | MA20 + 올인 재진입 100% | +2,138.5% / MDD -41.2% | 수익·MDD 동시 개선 |
-| SOXL | **MA250 + DCA 재개** | **+265.2% / MDD -34.8%** | 수익 3배 (기존과 MDD 동일) |
-| SOXL (대안) | MA30 + DCA 재개 | +49.1% / MDD **-16.2%** | MDD 절감 우선 (전반 -14.8% / 후반 -17.2% 안정) |
+| TQQQ | MA20 + 올인 재진입 50% | +464.5% / MDD **-22.8%** | 안전판 — MDD 절반 (2026-08-15 전환) |
 
 ```bash
 # 백테스트
-python3 DCA_MA_strategy.py --backtest                # TQQQ (MA20 lump)
-python3 DCA_MA_strategy.py --backtest --ticker SOXL  # SOXL (MA30 dca_reset)
-python3 DCA_MA_strategy.py --backtest --ticker SOXL --ma 250 --reentry dca_reset
+python3 DCA_MA_strategy.py --backtest                # TQQQ (MA20 lump 50%)
 python3 DCA_MA_strategy.py --backtest --fee 0.001    # 수수료 0.1% 반영
 
 # 실시간 신호 (장 마감 후) — --discord로 Discord 발송 (GitHub Actions 자동화)
 python3 DCA_MA_strategy.py --signal
-python3 DCA_MA_strategy.py --signal --ticker SOXL
 python3 DCA_MA_strategy.py --signal --discord       # TQQQ 신호를 Discord로
-python3 DCA_MA_strategy.py --signal --discord --ticker SOXL
-python3 DCA_MA_strategy.py --signal --discord --all  # TQQQ+SOXL 단일 메시지 (수동 확인용 — 워크플로우는 브리핑 1건만 발송)
+python3 DCA_MA_strategy.py --signal --discord --all  # 전 종목 단일 메시지 (수동 확인용 — 워크플로우는 브리핑 1건만 발송)
 ```
-
-> ⚠️ **SOXL에 TQQQ식 MA20 올인을 적용하면 MDD가 -84.7%로 폭증합니다.** SOXL은 변동성이
-> 너무 커 짧은 20일선 타이밍이 휩쏘에 걸립니다. 티커별 특성에 맞는 설정을 사용하세요.
 
 ### 실전 반영 — `DCA_MA_strategy.py` MA 레짐 필터
 
 `DCA_MA_strategy.py`에서 검증한 레짐 필터를 **실전 운용 엔진에 통합**했습니다
 (2026-08-02 기준, 알림 신호 방식 — 실제 주문 자동 실행은 없음):
 
-- **TQQQ (MA20 + lump)**: LOC 모드에서 종가가 MA20을 하향 돌파 → **🚨 전량 청산 + 매수 금지**,
-  상향 돌파 → **💰 전액 재매수** 신호
-- **SOXL (MA250 + dca_reset)**: LOC 모드에서 MA250 하향 돌파 → **🚨 전량 청산 + 매수 금지**,
-  상향 돌파 → **🔄 DCA 재개** 신호
+- **TQQQ (MA20 + lump 50%)**: LOC 모드에서 종가가 MA20을 하향 돌파 → **🚨 전량 청산 + 매수 금지**,
+  상향 돌파 → **💰 재매수** (현금 50%) 신호
 - **ATH_DCA 비상 모드 중에는 MA 필터 OFF** — 분할 매수 진행을 방해하지 않음 (레짐 참고 표시만)
 - 비상 모드 종료(리커버리 리엔트리)로 LOC 복귀 후 **MA 필터 다시 활성**
 - 레짐/크로스 상태는 `MA_FILTER_STATE`에 자동 기록 — 크로스 알림은 1회만 발송

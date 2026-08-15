@@ -253,7 +253,7 @@ class DiscordMarketTracker:
 
         for ticker in self.tickers:
             saved = state.get(ticker, {}) if isinstance(state, dict) else {}
-            exh_threshold = 0.16 if ticker in {"SOXL", "TQQQ"} else 0.10
+            exh_threshold = 0.16 if ticker == "TQQQ" else 0.10
             self.bottom_trackers[ticker] = MarketBottomTracker(
                 stage=saved.get("bottom", 0),
                 stage5_entered_date=saved.get("bottom_stage5_date"),

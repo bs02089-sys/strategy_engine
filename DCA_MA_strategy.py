@@ -13,13 +13,12 @@
 전략 모드 (백테스트/신호):
   - --backtest: 시그마 DCA + MA 레짐 필터 백테스트 (티커별 기본 설정)
   - --signal: 실시간 신호 (종가+날짜 · LOC 매수가 · ATH 대비 MDD · 비상 트리거) — 콘솔용
-  - --signal --discord: Discord 발송 | --all: 전 종목(TQQQ+SOXL) 단일 메시지 (수동 확인용)
+  - --signal --discord: Discord 발송 | --all: 전 종목 단일 메시지 (수동 확인용)
 
 Usage:
   python3 DCA_MA_strategy.py                              # 일일 브리핑 (기본)
   python3 DCA_MA_strategy.py --ath-monitor                # 장중 실시간 모니터
   python3 DCA_MA_strategy.py --backtest                   # TQQQ 백테스트 (MA20 lump)
-  python3 DCA_MA_strategy.py --backtest --ticker SOXL     # SOXL 백테스트
   python3 DCA_MA_strategy.py --signal                     # 오늘 신호 (TQQQ)
   python3 DCA_MA_strategy.py --signal --discord --all     # 전 종목 신호 → Discord
 """
@@ -1135,9 +1134,6 @@ def send_monthly_ping_if_due(cfg: dict, webhook: str, user_id: str, now_ny: date
 # RSI + Volume Composite Buy Signal (Verified Optimal Strategy)
 # ═══════════════════════════════════════════════════════════
 #
-# SOXL (12yr backtest, RSI 14): Zone 1 RSI 25~34 Vol 0.3~0.7 | Zone 2 RSI 34~40 Vol 0.4~0.9
-#   → Sharpe 2.62 | WR 71.4% | Avg +21.56%  (vs previous 25~32/32~40: Sharpe 2.46)
-#
 # TQQQ (12yr backtest, RSI 21): Zone 1 RSI 25~35 Vol 0.3~0.7 | Zone 2 RSI 35~50 Vol 0.4~1.0
 #   → Sharpe 1.30 | WR 67.3% | Avg +7.48%   (vs RSI14 D-3:  Sharpe 1.48, RSI21 best: 3.57)
 
@@ -1157,18 +1153,8 @@ def _calculate_rsi(close: pd.Series, period: int = 14) -> pd.Series:
 
 # ── Ticker-specific optimal zones (12-year backtest verified) ────
 # Each ticker has its own RSI period and zone parameters:
-#   - SOXL: RSI(14) — fast enough for 3x semi volatility
 #   - TQQQ: RSI(21) — slower, better for Nasdaq trend filtering
 _TICKER_ZONES: dict = {
-    "SOXL": {
-        "label": "SOXL",
-        "yf_ticker": "SOXL",
-        "rsi_period": 14,
-        # zone1 RSI inclusive [25..34], zone2 RSI strict-lower (34..40]
-        "zone1": {"name": "저RSI 저볼륨",  "rsi": (25, 34), "vol": (0.3, 0.7)},
-        "zone2": {"name": "중간RSI 중볼륨", "rsi": (34, 40), "vol": (0.4, 0.9)},
-        "stats": "Sharpe 2.62 | 승률 71% | 12yr 백테스트",
-    },
     "TQQQ": {
         "label": "TQQQ",
         "yf_ticker": "TQQQ",
@@ -1183,7 +1169,7 @@ _TICKER_ZONES: dict = {
 
 def _check_rsi_volume_signal(ticker: str) -> str | None:
     """
-    Evaluate the composite RSI+Volume entry signal for SOXL or TQQQ.
+    Evaluate the composite RSI+Volume entry signal for TQQQ.
     Returns a formatted Discord line, or None if ticker not supported or data unavailable.
 
     최적 조건이 충족되면 **🔥🔥 적극 매수 추천!** 을 강조 표시합니다.
@@ -1225,7 +1211,7 @@ def _check_rsi_volume_signal(ticker: str) -> str | None:
         if len(prices) < 35 or len(volumes) < 22:
             return None
 
-        # RSI calculation (ticker-specific period: SOXL=14, TQQQ=21)
+        # RSI calculation (ticker-specific period: TQQQ=21)
         rsi_series = _calculate_rsi(prices, rsi_period).dropna()
         if len(rsi_series) < 1:
             return None
@@ -1654,16 +1640,16 @@ def _recovery_nudge_line(ticker: str, pos_cfg: dict, today_ny: date) -> str | No
 # DCA_MA_strategy.py에서 검증된
 # 레짐 필터를 실전에 반영한 것:
 #   - LOC 모드      : MA 하향 돌파 → 전량 청산 + 매수 금지
-#                     MA 상향 돌파 → TQQQ: 전액 재매수 / SOXL: DCA 재개
+#                     MA 상향 돌파 → 전액 재매수 (lump) / DCA 재개 (dca_reset)
 #   - ATH_DCA 비상 모드: MA 필터 OFF (분할 매수 진행 중 개입 안 함)
 #   - 비상 모드 종료(리커버리 리엔트리) → LOC 복귀 후 MA 필터 재활성
 #
 # Config schema (per-position):
 #   "MA_FILTER": {
 #       "ENABLED": true,
-#       "MA_DAYS": 20,          # TQQQ 20 / SOXL 250
-#       "REENTRY": "lump",      # TQQQ: "lump"(전액), SOXL: "dca_reset"(DCA 재개)
-#       "REENTRY_PCT": 1.0       # lump 전액 비율 (선택)
+#       "MA_DAYS": 20,          # 티커별 기본값 (TICKER_DEFAULTS 참고)
+#       "REENTRY": "lump",      # "lump"(전액) 또는 "dca_reset"(DCA 재개)
+#       "REENTRY_PCT": 0.5       # lump 재진입 비율 (TQQQ 현재 50% — 방어적)
 #   }
 # State (auto-managed): pos["MA_FILTER_STATE"] = {"regime", "since"}
 
@@ -2155,8 +2141,7 @@ DATA_START  = "2013-12-01"
 
 # 티커별 기본 설정 (백테스트 검증 기반, CLI로 재정의 가능)
 TICKER_DEFAULTS = {
-    "TQQQ": {"ma_days": 20, "reentry": "lump", "reentry_pct": 1.0},
-    "SOXL": {"ma_days": 250, "reentry": "dca_reset", "reentry_pct": None},
+    "TQQQ": {"ma_days": 20, "reentry": "lump", "reentry_pct": 0.5},
 }
 
 
@@ -2387,7 +2372,7 @@ def current_signal(ticker: str, ma_days: int, reentry: str, reentry_pct: float |
     elif crossed_up:
         if reentry == "lump":
             pct = f"{reentry_pct*100:.0f}%" if reentry_pct else "100%"
-            action = f"🟢 전액 매수 (MA 상향 재돌파 → 현금의 {pct} 올인 재진입)"
+            action = f"🟢 재매수 (MA 상향 재돌파 → 현금의 {pct} 올인 재진입)"
         else:
             action = "🟢 분할매수 재개 (MA 상향 재돌파 → DCA 카운터 리셋)"
         state = "IN_MARKET (방금 재돌파)"

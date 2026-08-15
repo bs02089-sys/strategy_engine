@@ -31,7 +31,7 @@
                 "ENABLED": true,
                 "MA_DAYS": 20,
                 "REENTRY": "lump",
-                "REENTRY_PCT": 1.0
+                "REENTRY_PCT": 0.5
             },
             "RECOVERY_REENTRY": {
                 "ENABLED": true,
@@ -40,57 +40,10 @@
                 "MA_CONFIRM": true
             },
             "ATH_DCA_ENTERED_ON": "2026-03-27",
-            "MA_FILTER_CONFIG_FINGERPRINT": "20|lump|1.0",
+            "MA_FILTER_CONFIG_FINGERPRINT": "20|lump|0.5",
             "MA_FILTER_STATE": {
                 "regime": "above",
                 "since": "2026-08-04"
-            }
-        },
-        "SOXL": {
-            "LOOKBACK_DAYS": 252,
-            "ENTRY_MULTIPLIER": 1.1,
-            "VOL_METHOD": "EWMA",
-            "EWMA_LAMBDA": 0.94,
-            "DAILY_SIGMA": 0.0798,
-            "LAST_SIGMA_UPDATE": "2026-07-25",
-            "LAST_SIGMA_METHOD": "EWMA",
-            "LAST_EWMA_LAMBDA": 0.94,
-            "START_DATE": "2026-07-25",
-            "INVEST_TYPE": "LONG_YEAR",
-            "ALLOCATION_PCT": 90,
-            "STRATEGY_MODE": "ATH_DCA",
-            "ATH_DCA": {
-                "ENABLED": true,
-                "SPLITS": 3,
-                "TRIGGER_1": "-60%",
-                "TRIGGER_2": "-70%",
-                "TRIGGER_3": "STAGE5",
-                "STRATEGY": "v2 crash-mode"
-            },
-            "ATH_DCA_USED_SPLITS": [
-                1
-            ],
-            "ATH_DCA_CONFIG_FINGERPRINT": "3|-60%|-70%|STAGE5|v2 crash-mode",
-            "MA_FILTER": {
-                "ENABLED": true,
-                "MA_DAYS": 250,
-                "REENTRY": "dca_reset"
-            },
-            "RECOVERY_REENTRY": {
-                "ENABLED": true,
-                "DD_RATIO": 0.5,
-                "MIN_DAYS": 30,
-                "MA_CONFIRM": true
-            },
-            "ATH_DCA_ENTERED_ON": "2026-07-28",
-            "ATH_DCA_WAIT_SENT": "2026-08-14|• ⏳ **SOXL 비상 모드 유지:** D+13/30 영업일 (남은 17영업일 | 진입 2026-07-28, 경과 17일)",
-            "MA_FILTER_CONFIG_FINGERPRINT": "250|dca_reset|1.0",
-            "MA_FILTER_STATE": {
-                "regime": "above",
-                "since": "2026-08-02"
-            },
-            "ATH_DCA_IMMINENT_SENT": {
-                "2": 4.7
             }
         }
     },

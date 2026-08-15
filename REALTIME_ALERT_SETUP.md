@@ -177,7 +177,7 @@ python3 setup_cronjob_org.py --update-schedule
   - `run_ath_dca_monitor()`: `--ath-monitor` 플래그로 진입, 전용 디스코드 전송
   - **MA 레짐 크로스 알림** (LOC 모드에서만 작동 — ATH_DCA 비상 모드 중에는 OFF):
     - `_check_ma_filter()`가 종가×MA 크로스를 평가, 레짐 전환 시 1회만 감지
-    - MA **하향 돌파** → 🚨 전량 청산 + 매수 금지 / MA **상향 돌파** → 💰 전액 재매수(TQQQ) / 🔄 DCA 재개(SOXL)
+    - MA **하향 돌파** → 🚨 전량 청산 + 매수 금지 / MA **상향 돌파** → 💰 재매수(TQQQ, lump 50%) / 🔄 DCA 재개(dca_reset)
     - `MA_FILTER_STATE`(`{regime, since}`) 영속화 → 크로스 중복 알림 없음
     - 실시간 모니터가 장중에 돌아도 인트라데이 가격으로 거짓 크로스가 나지 않도록
       미정산 당일 바 제외(`_drop_unsettled_today_bar()` — 종가 확정 후 반영)
@@ -217,11 +217,11 @@ python3 DCA_MA_strategy.py --ath-monitor
 - **노이즈 커밋**: 폴링마다 `sigma_log.txt`가 갱신되고 임박 갭이 바뀌면
   `portfolio_config.json`도 커밋됩니다. 정상 동작이며 저장소 활동 유지에 도움이
   되지만 git 히스토리가 늘어납니다.
-- **MA 레짐 필터**: 실시간 모니터는 ATH DCA 트리거/임박 알림뿐 아니라 **MA 레짐 크로스 알림**(TQQQ MA20 / SOXL MA250)도
+- **MA 레짐 필터**: 실시간 모니터는 ATH DCA 트리거/임박 알림뿐 아니라 **MA 레짐 크로스 알림**(TQQQ MA20)도
   LOC 모드에서 발송합니다. 비상 모드 중에는 필터가 OFF라 "참고" 표시만 됩니다.
-  백테스트 검증(TQQQ MA20 +2,138.5%/-41.2%, SOXL MA250 +265.2%/-34.8%)과 설정값은
+  백테스트 검증(TQQQ MA20 +2,138.5%/-41.2%)과 설정값은
   [README.md](README.md)의 "MA 레짐 필터" 섹션과 `portfolio_config.json`의 `MA_FILTER` 블록을 참고.
-- **트리거 값 근거**: TQQQ `TRIGGER_2=-50%`, SOXL `TRIGGER_2=-70%` 등 트리거 후보값의
+- **트리거 값 근거**: TQQQ `TRIGGER_2=-50%` 등 트리거 후보값의
   최적화 근거(2016~2026 월말 스윕)는 [TRIGGER_OPTIMIZATION_SUMMARY.md](TRIGGER_OPTIMIZATION_SUMMARY.md) 참고.
 - **비상 모드 종료 실효성 검증 (백테스트, 2026-08-02)**: 백테스트로
   크래시→회복 사이클을 검증한 결과, **2020 COVID 크래시 포함 구간에서
