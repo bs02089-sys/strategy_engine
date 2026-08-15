@@ -1,9 +1,9 @@
 {
-    "_NOTE": "나무증권 앱 별도 계좌(스윙 전용) 공용 설정 — 장기 투자(LS증권, DCA_MA_strategy.py + portfolio_config.json)와 분리 운용. [세븐 스플릿 전략] 매수: ATH 대비 -15%~-45% 5% 단위 7구간 (15/20/25/30/35/40/45% — 계좌 1~7번 각 $500 대응), 매도: 매수가 대비 +20% (SWING_TARGET_PCT — 앱 기본 선택값도 이 값을 읽음). 개인 매수 정보(BUY_PRICE/SHARES)는 swing_personal.json 에 기록한다 (공용 알림 노출 방지). ONESIGNAL_APP_ID는 2026-08-12 대시보드 표시 값(fc892714-...)으로 재확정 — c33eb986-...는 사용자 계정/사용자 ID로 앱이 아니어서 원래 값으로 복귀 (구독자 2명은 fc892714 앱에 있음). (JSON 주석 불가로 _NOTE 메타 키로 기록 — 엔진은 무시)",
+    "_NOTE": "나무증권 앱 별도 계좌(스윙 전용) 공용 설정 — 장기 투자(LS증권, DCA_MA_strategy.py + portfolio_config.json)와 분리 운용. [세븐 스플릿 전략] 매수: ATH 대비 -15%~-33% 3% 단위 7구간 (15/18/21/24/27/30/33% — 계좌 1~7번 각 $500 대응), 매도: 매수가 대비 +20% (SWING_TARGET_PCT — 앱 기본 선택값도 이 값을 읽음). 개인 매수 정보(BUY_PRICE/SHARES)는 swing_personal.json 에 기록한다 (공용 알림 노출 방지). ONESIGNAL_APP_ID는 2026-08-12 대시보드 표시 값(fc892714-...)으로 재확정 — c33eb986-...는 사용자 계정/사용자 ID로 앱이 아니어서 원래 값으로 복귀 (구독자 2명은 fc892714 앱에 있음). (구간 전환 근거: swing_split_backtest.py 10년 백테스트 — 3% 스텝 총수익률 +304.6% vs 기존 5% +247.1%, MDD 유사, 2026-08-15) (JSON 주석 불가로 _NOTE 메타 키로 기록 — 엔진은 무시)",
     "ENABLED": true,
     "MDD_START_PCT": 15,
-    "MDD_END_PCT": 45,
-    "MDD_STEP_PCT": 5,
+    "MDD_END_PCT": 33,
+    "MDD_STEP_PCT": 3,
     "SWING_TARGET_PCT": 20,
     "IMMINENT_GAP_PCT": 5,
     "PAGES_URL": "https://bs02089-sys.github.io/strategy_engine/",
