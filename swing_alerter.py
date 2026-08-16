@@ -46,6 +46,7 @@ from zoneinfo import ZoneInfo
 
 import yfinance as yf
 
+
 from DCA_MA_strategy import _send_discord, get_prev_close, resolve_discord_config
 
 CONFIG_PATH = "swing_config.json"
