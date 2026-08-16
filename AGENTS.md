@@ -34,7 +34,10 @@ Not lazy about: input validation at trust boundaries, error handling that preven
 - **단일 파일 엔진**: `LOC_DCA_strategy.py` — 실전 브리핑 + 백테스트(`--backtest`) + 신호(`--signal`)를 모두 담당.
 - **설정 단일 소스**: `portfolio_config.json` (포지션/시그마/LOC 분할 상태). 설정값은 코드에 하드코딩하지 않고 여기에서 읽는다.
 - **스윙 알리미**: `swing_alerter.py` (2026-08-08 신규) — 유튜브 'TQQQ 스윙 투자 전략' 구글 스프레드시트
-  (ATH 대비 MDD 구간 매수 + 매수가 대비 스윙 목표 수익률 매도) 재구현. OneSignal 푸시는
+  (ATH 대비 MDD 구간 매수 + 매수가 대비 스윙 목표 수익률 매도) 재구현. 📋 **운영 루틴은 README
+  '스윙 알리미 운영 루틴' + NAMU_SWING_SETUP.md 참고** (매수 체결 시 LOTS에 계좌 매수가/수량 기록 →
+  나무증권 매수감시/매도감시는 📡/🚀 임박 시점에 등록, 30일 창 — 체결은 나무증권 앱, 알림은 스윙 알리미).
+  OneSignal 푸시는
   **전체 구독자(Subscribed Users = 내 기기) 대상**으로 발송(2026-08-12 단독 사용 전환 — 매도 신호 푸시는
   계좌별 **사이클당 1회**로 변경, 2026-08-13). 매도 신호를 보낸 계좌는 리셋(전 계좌 매도 완료 자동 리셋/수동
   --reset) 전까지 재발송하지 않는다.
