@@ -16,8 +16,9 @@ dollar_alerter.py — 달러(USD/KRW) '매직 스플릿' 환테크 알리미
   - 임박 신호: 트리거/목표까지 IMMINENT_GAP_PCT%p(기본 0.1) 이내
 
 판정 기준:
-  - --monitor(장중)는 **실시간 가격**(yfinance, 15분 지연) 기준 — 은행 환전은
-    평일 영업시간(09:00~16:00 KST)에만 체결 가능하므로 그 시간대에만 신호 판정.
+  - --monitor(장중)는 **실시간 가격**(yfinance, 15분 지연) 기준 — 나무증권
+    달러 환전(주간 09:00~16:00 + 야간 16:00~익일 02:00 KST, 점검 23:50~24:30
+    제외) 가능 시간대에만 신호 판정 (2026-08-17 조사 반영).
   - 브리핑/대시보드는 확정 종가(전일 종가) 기준 트리거 가격을 안내.
 
 파일 구조 (swing_alerter.py 와 동일한 분리 원칙):
@@ -215,15 +216,27 @@ def _resolve_discord(cfg: dict) -> tuple[str, str]:
 # ═══════════════════════════════════════════════════════════
 
 def _bank_hours_open(now: datetime | None = None) -> bool:
-    """은행 환전 영업시간(평일 09:00~16:00 KST) 여부 — 신호 판정 게이트.
+    """나무증권 달러 환전 가능 시간 여부 — 신호 판정 게이트 (2026-08-17 조사 반영).
 
+    - 주간환전 09:00~16:00 + 야간환전 16:00~익일 02:00 (2024-07 외환시장
+      마감 연장 반영) → 평일 09:00 ~ 익일 02:00 KST
+    - 일일 점검 23:50~24:30(익일 00:30) 제외
+    - 금요일 야간 세션은 토요일 02:00까지, 토 02:00 이후·일요일은 휴무
     공휴일은 별도 판정하지 않는다 (swing_alerter 와 동일한 단순화).
     """
     now = now or datetime.now(KST_TZ)
-    if now.weekday() >= 5:
+    wd = now.weekday()  # 0=월 .. 6=일
+    m = now.hour * 60 + now.minute
+    if wd == 6:                    # 일요일 — 휴무
         return False
-    t = now.time()
-    return dtime(9, 0) <= t <= dtime(16, 0)
+    if wd == 0 and m < 540:        # 월요일 새벽(00:00~08:59) — 일요일 무세션
+        return False
+    if wd == 5 and m >= 120:       # 토요일 02:00 이후 — 휴무
+        return False
+    # 주간 09:00(540)~23:50(1430) / 전일 야간 꼬리 00:30(30)~02:00(120)
+    if m >= 540:
+        return m < 1430
+    return 30 <= m < 120
 
 
 def get_live_price(ticker: str) -> float | None:

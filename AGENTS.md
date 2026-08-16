@@ -107,13 +107,16 @@ Not lazy about: input validation at trust boundaries, error handling that preven
   +0.5% (`SELL_TARGET_PCT`) — 백테스트(2004~2026, 스프레드 왕복 0.1% 반영) 결과: '상승 매수/하락 매도'
   해석은 CAGR 음수(패배), **'하락 매수/익절 매도' 해석만** CAGR +4.1% vs 바이앤홀드 +0.8%·MDD -17.2%로
   우위. ⚠️ **'1년 97% 수익률'은 어떤 해석으로도 재현 불가** (최고 연도 +12.8%) — 수수료 0% 가정의
-  회당 +0.5%가 복리로 과대표시된 것으로 판단. 실전 체결은 **은행 영업시간(평일 09~16시 KST)에만**
-  가능하므로 신호 판정도 그 시간대의 실시간 가격 기준 (swing 의 종가 기준 원칙과 다름). 설정
+  회당 +0.5%가 복리로 과대표시된 것으로 판단. 실전 체결은 **나무증권 달러 환전 시간(평일 09:00~익일
+  02:00 KST — 주간 09~16시 + 야간 16~02시, 일일 점검 23:50~24:30 제외, 2024-07 외환시장 마감 연장
+  반영)에만** 가능하므로 신호 판정도 그 시간대의 실시간 가격 기준 (swing 의 종가 기준 원칙과 다름,
+  2026-08-17 조사). 설정
   `dollar_config.json`(공용)/상태 `dollar_state.json`(봇 전용 — 매수 신호는 당일 한정 자동 리셋, 익절은
   계좌별 사이클당 1회)/개인 포지션 `dollar_personal.json`(사용자 소유, 봇 읽기만) 3파일 분리. 대시보드는
   JS 없이 meta refresh(300초) — `dollar_dashboard.html`은 main 에 커밋하지 않고 gh-pages 의 **dollar.html**
   로 배포 (swing 의 index.html 과 충돌 방지). cron-job.org 잡은 `GITHUB_EVENT_TYPE=dollar-monitor` +
-  `UTC_HOURS_START=0 UTC_HOURS_END=7`(은행 영업시간)로 생성 (setup_cronjob_org.py 는 env 기반이라 수정 불필요).
+  `UTC_HOURS_START=0 UTC_HOURS_END=17`(환전 시간 09:00~익일 02:00 KST = UTC 00~17시, 점검 구간은
+  코드 게이트가 제외)로 생성 (setup_cronjob_org.py 는 env 기반이라 수정 불필요).
 - **현재 전략 규칙 (2026-08-16 단일 논리 재구성)**: **순수 LOC 지정가 20분할 DCA** 하나만 사용한다 —
   LOC 매수가 = 전일 종가 × (1 − σ × ENTRY_MULTIPLIER), 사용자가 정규장에서 이 가격으로 LOC 지정가 주문
   ($2,500 × 최대 20차, `LOC_DCA` 블록 설정 — 백테스트 기본값용). ⚠️ **체결 추적은 봇이 하지 않는다

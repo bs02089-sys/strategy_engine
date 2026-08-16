@@ -5,7 +5,7 @@ on:
     # 월~금 00:00 UTC = 09:00 KST — 한국 아침 9시 고정 일일 브리핑 (은행 영업 시작 전)
     - cron: "0 0 * * 1-5"
   repository_dispatch:
-    types: [dollar-monitor]   # cron-job.org 장중 실시간 알림 발사 (은행 영업시간 09~16시 KST 폴링)
+    types: [dollar-monitor]   # cron-job.org 장중 실시간 알림 발사 (나무증권 환전 시간 09:00~익일 02:00 KST 폴링 — 2026-08-17 야간 확장)
   workflow_dispatch:          # 수동 실행 지원
 
 concurrency:

@@ -309,11 +309,11 @@ python3 LOC_DCA_strategy_flowchart.py
 | 트리거 | 시간 (UTC) | 설명 |
 |--------|------------|------|
 | 예약 실행 | 매일 00:00 UTC = 09:00 KST (월~금) | 달러 일일 브리핑 + 대시보드 갱신 (은행 영업 시작 전) |
-| repository_dispatch | 장중 N분 (cron-job.org, `dollar-monitor`) | `--monitor` 실시간 신호 (매수/익절/임박 — 은행 영업시간 09~16시 KST 폴링) |
+| repository_dispatch | 장중 N분 (cron-job.org, `dollar-monitor`) | `--monitor` 실시간 신호 (매수/익절/임박 — 나무증권 달러 환전 시간 09:00~익일 02:00 KST 폴링) |
 | 수동 실행 | 사용자 요청 시 | workflow_dispatch 수동 실행 |
 
-> cron-job.org 잡 생성: `GITHUB_EVENT_TYPE=dollar-monitor JOB_TITLE="Dollar alerter realtime monitor" UTC_HOURS_START=0 UTC_HOURS_END=7 POLL_MINUTES=10 python setup_cronjob_org.py`
-> (은행 영업시간 09~16시 KST = UTC 00~07시 — setup_cronjob_org.py 는 env 기반이라 코드 수정 불필요)
+> cron-job.org 잡 생성: `GITHUB_EVENT_TYPE=dollar-monitor JOB_TITLE="Dollar alerter realtime monitor" UTC_HOURS_START=0 UTC_HOURS_END=17 POLL_MINUTES=10 python setup_cronjob_org.py`
+> (나무증권 환전 시간 09:00~익일 02:00 KST = UTC 00:00~17:00 — 점검 23:50~24:30 KST(14:50~15:30 UTC)는 코드 `_bank_hours_open` 게이트가 제외하므로 UTC_HOURS 는 넓게 잡는다, 2026-08-17 외환시장 연장 조사 반영)
 
 ### TypeScript strict 검사 게이트 (모든 워크플로우 공통)
 
