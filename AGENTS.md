@@ -31,8 +31,8 @@ Not lazy about: input validation at trust boundaries, error handling that preven
 ## 프로젝트 컨벤션 (strategy_engine)
 
 ### 현재 아키텍처
-- **단일 파일 엔진**: `DCA_MA_strategy.py` — 실전 브리핑 + 백테스트(`--backtest`) + 신호(`--signal`)를 모두 담당.
-- **설정 단일 소스**: `portfolio_config.json` (포지션/시그마/모드 상태). 설정값은 코드에 하드코딩하지 않고 여기에서 읽는다.
+- **단일 파일 엔진**: `LOC_DCA_strategy.py` — 실전 브리핑 + 백테스트(`--backtest`) + 신호(`--signal`)를 모두 담당.
+- **설정 단일 소스**: `portfolio_config.json` (포지션/시그마/LOC 분할 상태). 설정값은 코드에 하드코딩하지 않고 여기에서 읽는다.
 - **스윙 알리미**: `swing_alerter.py` (2026-08-08 신규) — 유튜브 'TQQQ 스윙 투자 전략' 구글 스프레드시트
   (ATH 대비 MDD 구간 매수 + 매수가 대비 스윙 목표 수익률 매도) 재구현. OneSignal 푸시는
   **전체 구독자(Subscribed Users = 내 기기) 대상**으로 발송(2026-08-12 단독 사용 전환 — 매도 신호 푸시는
@@ -100,7 +100,11 @@ Not lazy about: input validation at trust boundaries, error handling that preven
   양쪽에서 재생성되어 git pull 충돌을 반복하므로, 워크플로우가 생성한 신선한 사본을 `gh-pages`에만
   배포한다 (`swing_alerter.yml` Sync 단계의 cp 참고 — 미추적 파일이라 `git checkout --` 금지, pathspec 오류).
   **아래 '스윙 봇(swing)' 제거 항목과 무관한 별개 기능**이며 혼동하지 말 것.
-- **현재 전략 규칙**: LOC ↔ ATH_DCA 듀얼 모드 · MA 레짐 필터(LOC 모드 한정) · ATH 하락분할 DCA(3분할: 1차 -30% / 2차 -50% / 3차 -65% 고정 — 2026-08-15 STAGE5에서 고정 % 전환, 1차 -35%→-30%)· 비상 모드 종료(RECOVERY_REENTRY: 미사용 분할 ≥1 + 30영업일 + DD ≤ TRIGGER_1×50% + MA20>MA60 — 단, 3차까지 전부 발동(예비금 소진) 시 예외로 즉시 LOC 복귀, 2026-08-15).
+- **현재 전략 규칙 (2026-08-16 단일 논리 재구성)**: **순수 LOC 지정가 20분할 DCA** 하나만 사용한다 —
+  LOC 매수가 = 전일 종가 × (1 − σ × ENTRY_MULTIPLIER), 당일 저가 ≤ LOC → 1차 체결 ($2,500 × 최대 20차,
+  `LOC_DCA` 블록 설정). 체결 상태는 `LOC_DCA_USED_SPLITS`(체결일 목록)에 영속화(같은 날 중복 방지),
+  설정 변경 시 자동 리셋, 20차 소진 시 매수 중단. **매도 규칙 없음** — 순수 적립 전용.
+  MA 레짐 필터·RSI+볼륨·ATH_DCA 비상 모드·STAGE5·회복 재진입·실시간 모니터(`--ath-monitor`)는 전부 삭제(아래 제거 목록).
 - **신호 시스템**: 브리핑의 ▶ 실행 액션 라인은 신호이며 실제 체결은 사용자 수동 매매 — 엔진은 주문을 자동 실행하지 않는다.
 
 ### 제거된 기능 — 재도입 금지
@@ -123,6 +127,15 @@ Not lazy about: input validation at trust boundaries, error handling that preven
   (`_fetch_finnhub_quote`/`realtime_prices` 파라미터)와 `FINNHUB_API_KEY` 시크릿 참조를 전면 삭제.
   이유: 키가 채팅·git 이력에 노출된 데다 삭제된 시크릿 참조 시 워크플로우가 실패하므로.
   모든 가격 판정은 yfinance(15분 지연) 기준. 다시 추가하거나 시크릿 참조를 부활시키지 말 것.
+- **MA 레짐 필터 / RSI+볼륨 / ATH_DCA 듀얼 모드 (2026-08-16)**: 로직을 섞는 방식은 효율이 낮고
+  오버피팅 문제가 있다는 판단(사용자)으로 **순수 LOC 20분할 DCA 단일 논리로 재구성**하며 전부 삭제.
+  관련 코드(`check_ath_dca_signals`/`_check_ma_filter`/`_check_rsi_volume_signal`/`_check_recovery_reentry`/
+  `_evaluate_strategy_mode`/`run_ath_dca_monitor` 계열, `STRATEGY_MODE`/`ATH_DCA`/`MA_FILTER`/`RECOVERY_REENTRY`
+  설정 블록, `--ath-monitor` CLI)와 문서(DUAL_MODE_SUMMARY.md·TRIGGER_OPTIMIZATION_SUMMARY.md·
+  REALTIME_ALERT_SETUP.md 삭제, README/STRATEGY_RULES/플로우차트/AGENTS.md 정리)를 모두 정리함.
+  ⚠️ **cron-job.org 원격 ATH DCA 잡("ATH DCA realtime monitor")은 콘솔에서 수동 삭제 필요** —
+  `--ath-monitor` 분기 삭제로 코드만으로는 사라지지 않는다 (FVG 원격 잡과 동일 케이스).
+  다시 추가하거나 문서에 언급하지 말 것.
 - **FVG 봇 (fvg)**: 2026-08-08 제거. 유튜브 FVG/CHoCH 데이 트레이딩 전략 이식 봇(`fvg_signal_bot.py`)과
   백테스트(`fvg_bot_backtest.py`)·실전 평가(`fvg_bot_eval.py`)·로컬 크론(`setup_fvg_cron.py`/`fvg_local_cron.sh`),
   GHA 워크플로우(`fvg_signal.yml`/`fvg_eval.yml`), 나무증권 가이드(`FVG_NAMYU_SETUP.md`),
@@ -136,7 +149,8 @@ Not lazy about: input validation at trust boundaries, error handling that preven
 ### 문서 규율
 - `STRATEGY_RULES.md`는 **순수 규칙만** — 백테스트 근거·성과 수치·미사용 기능 노트를 넣지 않는다.
 - 기능/로직 제거 시 모든 문서(README · 플로우차트 · 요약 문서)에서 함께 정리한다.
-- `DCA_MA_strategy_flowchart.py`는 플로우차트 문서, `DUAL_MODE_SUMMARY.md`·`TRIGGER_OPTIMIZATION_SUMMARY.md`는 설계/분석 문서.
+- `LOC_DCA_strategy_flowchart.py`는 플로우차트 문서. (설계/분석 문서 DUAL_MODE_SUMMARY.md·TRIGGER_OPTIMIZATION_SUMMARY.md는
+  2026-08-16 듀얼 모드/ATH_DCA 삭제로 함께 제거됨 — 재생성 금지)
 
 ### 검증 & 커밋
 - 변경 후 `python3 -m py_compile <file>.py` 로 문법 확인, 가능하면 실제 실행(`--signal` / `--backtest`)으로 동작 확인.

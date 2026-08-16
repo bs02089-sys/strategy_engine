@@ -9,7 +9,7 @@ import yfinance as yf
 from datetime import datetime
 from typing import Optional, Dict
 
-from DCA_MA_strategy import load_portfolio, resolve_discord_config
+from LOC_DCA_strategy import load_portfolio, resolve_discord_config
 
 # ====================== 설정 ======================
 STATE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "market_state.json")

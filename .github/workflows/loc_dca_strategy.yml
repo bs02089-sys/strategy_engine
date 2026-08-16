@@ -1,16 +1,10 @@
-name: DCA MA Strategy
+name: DCA LOC Strategy
 
 on:
   schedule:
-    # 월~금 23:30 UTC = 19:30 ET (장 마감 후) — 브리핑 + MA 레짐 신호 통합 발송
+    # 월~금 23:30 UTC = 19:30 ET (장 마감 후) — 브리핑 + LOC 20분할 신호 발송
     - cron: "30 23 * * 1-5"
-  repository_dispatch:
-    types: [ath-dca-monitor]  # cron-job.org 실시간 알림 발사
   workflow_dispatch:           # 수동 실행 지원
-
-concurrency:
-  group: dca-ma-strategy       # 야간 브리핑 ↔ 실시간 폴링 직렬화
-  cancel-in-progress: false
 
 jobs:
   run-dca-ma:
@@ -50,21 +44,13 @@ jobs:
           npm ci --silent
           npm run typecheck
 
-      - name: Run Realtime ATH DCA Monitor (from cron-job.org dispatch)
-        if: github.event_name == 'repository_dispatch'
-        # tee: Actions 로그에도 표시 + sigma_log.txt 저장 (로그 표시 실패 방지)
-        run: |
-          set -o pipefail
-          python DCA_MA_strategy.py --ath-monitor 2>&1 | tee sigma_log.txt
-
-      - name: Run Daily Briefing (통합 메시지 — MA 레짐 신호 포함)
-        if: github.event_name != 'repository_dispatch'
+      - name: Run Daily Briefing (통합 메시지 — LOC 20분할 신호 포함)
         # 23:30 UTC — 통합 브리핑 1건만 Discord 발송 (신호 메시지는 브리핑에 통합)
         # --signal은 콘솔 로그 확인용으로만 실행 (Discord 중복 발송 없음)
         run: |
           set -o pipefail
-          python DCA_MA_strategy.py 2>&1 | tee sigma_log.txt
-          python DCA_MA_strategy.py --signal --all 2>&1 | tee -a sigma_log.txt
+          python LOC_DCA_strategy.py 2>&1 | tee sigma_log.txt
+          python LOC_DCA_strategy.py --signal --all 2>&1 | tee -a sigma_log.txt
 
       - name: Show log on failure
         if: failure()

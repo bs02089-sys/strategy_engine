@@ -1,6 +1,10 @@
-# DCA MA Strategy
+# DCA LOC Strategy
 
 미국 주식 시장 **Sigma 기반 LOC 매수 목표가 자동 계산** 및 **디스코드 브리핑 자동 발송** 시스템입니다.
+
+> ⚠️ **2026-08-16 단일 논리 재구성**: 이동평균선(MA 레짐 필터/MA 정렬) · RSI+거래량 ·
+> ATH 하락분할 DCA(비상 모드) · STAGE5 · 회복 재진입 · 실시간 모니터(`--ath-monitor`)를
+> **전부 삭제**하고, **순수 LOC 지정가 20분할 매수** 하나로 통일했습니다. (상세: [STRATEGY_RULES.md](STRATEGY_RULES.md))
 
 ---
 
@@ -24,17 +28,13 @@
 
 ## 📌 개요
 
-**DCA MA Strategy**는 매일 미국 장 마감 후 정해진 시간에 자동 실행되어:
+**DCA LOC Strategy**는 매일 미국 장 마감 후 정해진 시간에 자동 실행되어:
 1. 포트폴리오에 등록된 티커(TQQQ)의 변동성을 계산/갱신
 2. Sigma 기반 LOC 매수 목표가 산출
-3. RSI+거래량 복합 매수 신호 평가 (12년 백테스트 검증)
-4. 듀얼 모드 (LOC 일반 / ATH DCA 비상) 자동 전환
-5. ATH 하락분할 DCA 트리거 모니터링 (3차 분할, STAGE5 바닥 통합)
-6. 비상 모드 종료 — 시장 회복 감지 시 일반 모드(LOC) 자동 복귀
-7. MA 레짐 필터 — 종가×MA 크로스 기반 추세 필터 (LOC 모드: 전량 청산/재진입 신호)
-8. 로테이션 포지션 만기 관리
-9. 종합 브리핑을 **Discord**로 전송
-10. 장중 실시간 ATH DCA 알림 (cron-job.org → GitHub Actions, `--ath-monitor`)
+3. **LOC 체결 감지** — 당일 저가 ≤ LOC → 20분할 중 1차 체결 처리 (신호)
+4. LOC 20분할 진행 상태(N/20차) · 잔여 예산 브리핑
+5. 로테이션 포지션 만기 관리
+6. 종합 브리핑을 **Discord**로 전송
 
 ---
 
@@ -46,61 +46,23 @@
 - 설정된 LOOKBACK_DAYS 기준으로 변동성 자동 갱신 (90일 주기, 또는 설정 변경 시 즉시 갱신)
 - Sigma 갱신 이력은 `sigma_history.csv`에 기록
 
-### 2️⃣ RSI + 거래량 복합 매수 신호 (12년 백테스트 검증)
-- **TQQQ**: RSI(21) — 구간1 RSI 25~35 거래량 0.3~0.7배 / 구간2 RSI 35~50 거래량 0.4~1.0배
-  - 샤프비율 1.30 | 승률 67.3% | 평균 +7.48%
-- 두 구간 동시 충족 시 **🔥🔥🔥 적극 매수 추천** 플래그 표시
+### 2️⃣ 순수 LOC 지정가 20분할 DCA (단일 논리 — 2026-08-16)
+- **LOC 매수가** = 전일 종가 × (1 − σ × `ENTRY_MULTIPLIER`) — 유일한 매수 논리
+- **당일 저가 ≤ LOC** → 1차 체결 ($2,500 × 최대 **20차** — 적립 전용, 매도 없음)
+- 체결 상태는 `LOC_DCA_USED_SPLITS`(체결일 목록)에 영속화 — 같은 날 중복 감지 방지,
+  `LOC_DCA` 설정(SPLITS/BUY_AMOUNT) 변경 시 자동 리셋
+- **20차 전부 소진 → 매수 중단** (수동 재개: `--reset-splits`)
+- 브리핑에 🚨 체결 신호 / 📊 대기 상태 / 💰 잔여 예산 표시
 
-### 3️⃣ ATH 하락분할 DCA
-- ATH 대비 하락률에 따라 N분할 매수 트리거
-- 설정 예시 (현재 값): TQQQ -30% / -50% / -65% — 각각 1/3씩
-- 전 사이클 완료 후 신규 ATH 갱신 시 **자동 초기화 및 사이클 재시작**
-- 임박 알림 (목표 임계값 5%p 이내 접근 시)
-
-### 4️⃣ 포지션 유형별 전략
+### 3️⃣ 포지션 유형별 전략
 
 | 유형 | 전략 |
 |------|------|
-| **LONG_YEAR** | 기계적 LOC 전략 — 무조건 매수 신호 활성 |
-| **ROTATION_3M** | MA20/MA60 추세 기반 매수/매도 신호 + 만기 초기화 |
-| **END_DEC** | MA20/MA60 추세 기반 매수/매도 신호 |
+| **LONG_YEAR** | 기계적 LOC 전략 — 무조건 매수 신호 활성 (TQQQ) |
+| **ROTATION_3M** | 기계적 LOC 전략 + 만기 초기화 (MA 신호 제거 — 2026-08-16) |
+| **END_DEC** | 기계적 LOC 전략 (MA 신호 제거 — 2026-08-16) |
 
-### 5️⃣ 듀얼 모드 전환 + ATH 하락분할 DCA (비상 모드)
-- **LOC 모드** (📗): 평상시 Sigma 기반 LOC 20분할 매수
-- **ATH DCA 모드** (🚨): ATH 하락률이 TRIGGER_1 도달 시 자동 전환 → 3차 분할 매수
-  - 1차/2차/3차: ATH 대비 설정된 % 하락 시 (TQQQ: -30%/-50%/-65%)
-- MarketStageSystem.py는 바닥/천장 단계 리포트용으로만 동작 (ATH DCA 3차 트리거는 -65% 고정 — 2026-08-15)
-- 전 사이클(3차) 완료 후 신규 ATH 갱신 시 자동 초기화 및 사이클 재시작
-- **비상 모드 종료** (🔄): 시장 회복 감지 시 자동으로 일반 모드(LOC) 복귀
-  - 조건 4가지: 잔여 분할 보존 + 진입 후 30영업일 경과 + DD ≤ DD_RATIO×TRIGGER_1 + MA20 > MA60
-  - ⚠️ **예외 (2026-08-15)**: 3차까지 전부 발동(예비금 소진) 시 **사이클 종료 → LOC 즉시 복귀** — 신고가 +1%·곰덫 30일 대기 없이 LOC 20분할 평균단가 매수 재개
-  - 파라미터: `RECOVERY_REENTRY` 블록 (ENABLED / DD_RATIO / MIN_DAYS / MA_CONFIRM)
-  - 브리핑에 ⏳ 대기 모니터(D+X/30)와 🔔 임박 넛지 알림 제공
-
-### 6️⃣ MA 레짐 필터 (백테스트 검증 반영)
-
-기존 전략에 **종가 × 이동평균(MA) 크로스 레짐 필터**를 얹어 MDD를 낮추는 설계입니다.
-`DCA_MA_strategy.py`(TQQQ MA20 +2,138.5%/-41.2%)에서
-검증한 설정을 실전 엔진(`DCA_MA_strategy.py`)에 반영했습니다.
-
-| 모드 | MA 필터 동작 |
-|------|-------------|
-| **LOC (일반)** | 🟢 활성 — MA 하향 돌파 → **🚨 전량 청산 + 매수 금지** (LOC/RSI 매수 신호 생략) / MA 상향 돌파 → **💰 전액 재매수**(lump) 또는 **🔄 DCA 재개**(dca_reset) |
-| **ATH_DCA (비상)** | OFF — 분할 매수 진행 중에는 개입하지 않음 (레짐 참고 표시만) |
-| **비상 모드 종료 → LOC 복귀** | 리커버리 리엔트리가 복귀를 판정하면 **MA 필터 다시 활성** |
-
-- 크로스 신호는 레짐 전환 시 **1회만** 발송 (상태 자동 영속화 → 중복 알림 없음)
-- 실시간 모니터(`--ath-monitor`)에서도 크로스 알림 발송
-- 설정: `MA_FILTER` 블록 (아래 [설정 파일](#-설정-파일-단일-파일) 참고)
-
-### 7️⃣ 장중 실시간 ATH DCA 알림 (--ath-monitor)
-- GitHub Actions `schedule` 크론은 best-effort라 피크 시간대에 수 분~수 시간 지연될 수 있음
-- **cron-job.org**(정확한 N분 알람)가 `repository_dispatch` 이벤트를 발사 → 워크플로우가 `--ath-monitor` 분기로 즉시 실행
-- yfinance 종가 기준으로 🚨 트리거 / 📡 임박(5%p)만 전송 (중복 제거: 갭이 1.0%p 이상 좁혀질 때만 재알림). Finnhub 키 의존 제거 (2026-08)
-- 설정 자동화: `setup_cronjob_org.py` (생성 / --list / --test-dispatch / --update-pat / --update-schedule)
-- 상세 가이드: `REALTIME_ALERT_SETUP.md`
-
-### 8️⃣ Discord 브리핑
+### 4️⃣ Discord 브리핑
 - 매일 정해진 시간에 Discord Webhook으로 종합 브리핑 전송
 - 각 티커별: 현재가, Sigma, LOC 목표가, 전고점 대비 하락률/회복률, 매수/매도 신호
 - 매월 1일 월간 작동 확인 Ping 전송
@@ -114,34 +76,29 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│              GitHub Actions (스케줄러 + 실시간)                  │
+│              GitHub Actions (스케줄러)                           │
 │  야간 실행: 매일 23:30 UTC — 통합 브리핑 1건 (월~금)         │
-│  실시간 알림: cron-job.org → repository_dispatch (장중 N분)    │
 └─────────────────┬───────────────────────────────────────────────┘
                   │ 실행
 ┌─────────────────▼───────────────────────────────────────────────┐
-│                  DCA_MA_strategy.py                            │
+│                  LOC_DCA_strategy.py                            │
 │                                                                  │
 │  1. portfolio_config.json 불러오기                                │
 │  2. Sigma 갱신 (오래되었거나 설정 변경 시)                       │
 │  3. 전일 종가 및 LOC 목표가 계산 (티커별)                        │
-│  4. RSI+거래량 복합 신호 확인                                    │
-│  5. ATH 하락분할 DCA 트리거 확인                                 │
-│  6. 로테이션 만기 확인                                           │
-│  7. 시장 바닥 단계 확인                                          │
-│  8. 비상 모드 종료 평가 + 대기 모니터                             │
-│  9. 브리핑 작성 → Discord 전송                                  │
-│  10. 월간 Ping (매월 1일)                                        │
-│  (--ath-monitor: yfinance 종가 → 🚨/📡 알림만 전송)            │
-└──────┬──────────────┬──────────────┬──────────────┬──────────────┘
+│  4. LOC 체결 감지 — 당일 저가 ≤ LOC → 분할 1차 사용               │
+│  5. 로테이션 만기 확인                                           │
+│  6. 브리핑 작성 → Discord 전송 (LOC 20분할 상태 포함)            │
+│  7. 월간 Ping (매월 1일)                                        │
+└──────┬──────────────┬──────────────┬──────────────┐
        │              │              │              │
        ▼              ▼              ▼              ▼
 ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐
-│yfinance    │ │Discord     │ │market_state│ │signal_repo-│
-│(실시간     │ │Webhook     │ │.json       │ │rt.json     │
-│시세/변동성)│ │(브리핑     │ │(단계 정보) │ │(리스크 점수│
-└────────────┘ │전송)       │ └────────────┘ │)           │
-              └────────────┘                └────────────┘
+│yfinance    │ │Discord     │ │signal_repo-│ │LOC_DCA_    │
+│(종가/변동성)│ │Webhook     │ │rt.json     │ │USED_SPLITS │
+└────────────┘ │(브리핑     │ │(리스크 점수│ │(체결 이력) │
+              └────────────┘ │)           │ └────────────┘
+                             └────────────┘
 ```
 
 ---
@@ -150,9 +107,9 @@
 
 | 파일 | 설명 |
 |------|------|
-| **DCA_MA_strategy.py** | 📌 **통합 완결판** — 실전 엔진(LOC 목표가/ATH DCA/MA 레짐 필터/Discord 브리핑/`--ath-monitor`) + 백테스트 + `--signal` 실시간 신호 |
-| **DCA_MA_strategy_flowchart.py** | 시스템 전체 플로우차트 문서 |
-| **setup_cronjob_org.py** | cron-job.org 실시간 알림 설정 자동화 (생성/--list/--test-dispatch/--update-pat/--update-schedule) |
+| **LOC_DCA_strategy.py** | 📌 **통합 완결판** — 실전 엔진(순수 LOC 20분할 매수/Discord 브리핑) + 백테스트 + `--signal` 실시간 신호 + `--reset-splits` |
+| **LOC_DCA_strategy_flowchart.py** | 시스템 전체 플로우차트 문서 |
+| **setup_cronjob_org.py** | cron-job.org 실시간 알림 설정 자동화 (생성/--list/--test-dispatch/--update-pat/--update-schedule) — 스윙 알리미(swing-monitor) 전용 |
 | **swing_alerter.py** | 🆕 **스윙 투자 알리미** — MDD 구간 매수/매도 알림 + 모바일 대시보드 (유튜브 TQQQ 스윙 전략 재구현) |
 | **swing_config.json** | 스윙 알리미 공용 설정 (사용자 소유 — MDD 구간/목표/포지션/푸시) |
 | **swing_personal.json** | 🔒 스윙 알리미 **개인 포지션** (LOTS — 계좌별 BUY_PRICE/SHARES, 공용 알림에 노출 안 됨, 사용자 소유) |
@@ -167,10 +124,10 @@
 | **package.json** | `npm run typecheck` 스크립트 (typescript 의존성) |
 | **MarketStageSystem.py** | 독립적인 시장 단계 시스템 — 바닥 단계 감지 |
 | **bear_market_signals.py** | 약세장 신호 분석 시스템 |
-| **portfolio_config.json** | 📌 **포트폴리오 설정** — 포지션, Sigma, DCA 파라미터, 모드 상태 |
-| **TRIGGER_OPTIMIZATION_SUMMARY.md** | ATH_DCA 트리거 최적화 분석 — 바닥 분포 · 후보값 스윕 · 의사결정 근거 |
-| **DUAL_MODE_SUMMARY.md** | 듀얼 모드(LOC ↔ ATH_DCA) 구조 요약 문서 |
-| **REALTIME_ALERT_SETUP.md** | 실시간 ATH DCA 알림 설정 가이드 |
+| **portfolio_config.json** | 📌 **포트폴리오 설정** — 포지션, Sigma, LOC 분할 파라미터 |
+| ~~TRIGGER_OPTIMIZATION_SUMMARY.md~~ | (제거됨 — ATH_DCA 전략 삭제, 2026-08-16) |
+| ~~DUAL_MODE_SUMMARY.md~~ | (제거됨 — 듀얼 모드 삭제, 2026-08-16) |
+| ~~REALTIME_ALERT_SETUP.md~~ | (제거됨 — 실시간 ATH DCA 모니터 삭제, 2026-08-16) |
 | ~~MarketStage_config.json~~ | (제거됨 — portfolio_config.json으로 통합) |
 | **sigma_history.csv** | Sigma 갱신 이력 (런타임 자동 생성 — 추적 제외) |
 | **market_state.json** | 시장 단계 상태 정보 (자동 생성) |
@@ -226,41 +183,25 @@ pandas_market_calendars  # NYSE 휴장일 계산
             "ENTRY_MULTIPLIER": 1.1,
             "VOL_METHOD": "EWMA",
             "EWMA_LAMBDA": 0.94,
-            "DAILY_SIGMA": 0.0355,
+            "DAILY_SIGMA": 0.043,
+            "LAST_SIGMA_UPDATE": "2026-08-15",
             "START_DATE": "2026-07-25",
             "INVEST_TYPE": "LONG_YEAR",
             "ALLOCATION_PCT": 10,
-            "STRATEGY_MODE": "ATH_DCA",
-            "ATH_DCA": {
-                "ENABLED": true,
-                "SPLITS": 3,
-                "TRIGGER_1": "-30%",
-                "TRIGGER_2": "-50%",
-                "TRIGGER_3": "-65%",
-                "STRATEGY": "v2 crash-mode"
+            "LOC_DCA": {
+                "SPLITS": 20,
+                "BUY_AMOUNT": 2500
             },
-            "ATH_DCA_USED_SPLITS": [1],
-            "ATH_DCA_ENTERED_ON": "2026-03-27",
-            "MA_FILTER": {
-                "ENABLED": true,
-                "MA_DAYS": 20,
-                "REENTRY": "lump",
-                "REENTRY_PCT": 0.5
-            },
-            "RECOVERY_REENTRY": {
-                "ENABLED": true,
-                "DD_RATIO": 0.5,
-                "MIN_DAYS": 30,
-                "MA_CONFIRM": true
-            }
+            "LOC_DCA_USED_SPLITS": [],
+            "LOC_DCA_CONFIG_FINGERPRINT": "20|2500.0"
         }
     },
     "STRATEGY": { "CYCLE_YEARS": 2, "BUY_DURATION_DAYS": 252, "HOLD_DURATION_DAYS": 252 }
 }
 ```
 
-> 참고: `STRATEGY_MODE`는 `"LOC"`(일반) 또는 `"ATH_DCA"`(비상) 중 하나이며,
-> 시스템이 자동으로 전환합니다. `ATH_DCA`의 `TRIGGER_1~3`은 하락률(%) 고정 값입니다 (예: `-30%`/`-50%`/`-65%`).
+> 참고: `LOC_DCA_USED_SPLITS`(체결일 목록)와 `LOC_DCA_CONFIG_FINGERPRINT`는
+> 엔진이 자동 관리합니다. 설정(SPLITS/BUY_AMOUNT)을 바꾸면 사용 이력이 자동 리셋됩니다.
 
 #### 포지션 설정 항목
 
@@ -272,11 +213,9 @@ pandas_market_calendars  # NYSE 휴장일 계산
 | `EWMA_LAMBDA` | EWMA 감쇠 계수 (기본 0.94) |
 | `INVEST_TYPE` | 투자 유형: `LONG_YEAR` / `ROTATION_3M` / `END_DEC` |
 | `ALLOCATION_PCT` | 포트폴리오 내 비중 |
-| `STRATEGY_MODE` | 현재 전략 모드: `LOC` (일반) / `ATH_DCA` (비상) — 자동 관리 |
-| `ATH_DCA` | ATH 대비 하락분할 매수 설정 (`ENABLED`/`SPLITS`/`TRIGGER_1~3`) |
-| `RECOVERY_REENTRY` | 비상 모드 종료 파라미터 (`ENABLED`/`DD_RATIO`/`MIN_DAYS`/`MA_CONFIRM`) |
-| `MA_FILTER` | MA 레짐 필터 (`ENABLED`/`MA_DAYS`/`REENTRY`/`REENTRY_PCT`) — TQQQ: MA20+lump |
-| `ATH_DCA_ENTERED_ON` | 비상 모드 진입일 — 비상 모드 유지 클럭 기준 (자동 기록) |
+| `LOC_DCA` | LOC 20분할 설정 (`SPLITS`=20, `BUY_AMOUNT`=2500) — 단일 논리 |
+| `LOC_DCA_USED_SPLITS` | 체결일 목록 (자동 관리 — 같은 날 중복 방지) |
+| `LOC_DCA_CONFIG_FINGERPRINT` | LOC_DCA 설정 변경 감지 (변경 시 사용 이력 리셋) |
 | `ROTATION_EXIT_DAYS` | ROTATION_3M 만기 영업일 수 |
 
 ### LOC 목표가 계산식
@@ -296,14 +235,15 @@ LOC 목표가 = 전일종가 × (1 - sigma × ENTRY_MULTIPLIER)
 
 ```bash
 # LOC 브리핑 생성 및 Discord 전송 (기본 실행)
-python3 DCA_MA_strategy.py
+python3 LOC_DCA_strategy.py
 
-# 장중 실시간 ATH DCA 알림 (cron-job.org dispatch에서 호출)
-python3 DCA_MA_strategy.py --ath-monitor
+# LOC 분할 사용 이력 초기화 (20분할 재개)
+python3 LOC_DCA_strategy.py --reset-splits
+python3 LOC_DCA_strategy.py --reset-splits --ticker TQQQ   # 특정 티커만
 
 # 특정 함수만 테스트
 python3 -c "
-from DCA_MA_strategy import get_prev_close, calculate_loc_price
+from LOC_DCA_strategy import get_prev_close, calculate_loc_price
 import json
 with open('portfolio_config.json') as f:
     cfg = json.load(f)
@@ -316,56 +256,38 @@ print(f'TQQQ LOC 목표가: \${loc}')
 "
 ```
 
-### cron-job.org 설정 (실시간 알림)
+> 참고: cron-job.org 실시간 알림(`setup_cronjob_org.py`)은 이제 **스윙 알리미 전용**입니다
+> (ATH DCA 실시간 모니터 삭제 — 2026-08-16). 스윙 잡 생성은 아래
+> [스윙 알리미 실시간 알림](#실시간-알림-cron-joborg) 섹션 참고.
+
+### 백테스트 실행 (순수 LOC 20분할)
 
 ```bash
-# 환경변수 (.env 파일도 지원)
-export CRONJOB_ORG_API_KEY=xxx   # cron-job.org 콘솔 Settings → API key
-export GITHUB_PAT=xxx            # GitHub PAT (Contents: Read and write)
-export GITHUB_OWNER=bs02089-sys
-export GITHUB_REPO=strategy_engine
-
-# ATH DCA 실시간 모니터 (장중 10분)
-python3 setup_cronjob_org.py --dry-run          # 생성 전 미리보기
-python3 setup_cronjob_org.py                    # 실제 생성 (장중 10분 간격 기본)
-
-# 공통 관리
-python3 setup_cronjob_org.py --list             # 등록된 잡 목록
-python3 setup_cronjob_org.py --test-dispatch    # 테스트 dispatch 1회
-python3 setup_cronjob_org.py --update-pat       # 크론잡에 저장된 PAT 갱신 (토큰 재발급 시)
-python3 setup_cronjob_org.py --update-schedule  # 폴링 간격 갱신 (POLL_MINUTES/UTC_HOURS 반영)
+python3 LOC_DCA_strategy.py --backtest                    # TQQQ (LOC 20분할)
+python3 LOC_DCA_strategy.py --backtest --fee 0.001        # 수수료 0.1% 반영
 ```
 
-### 백테스트 실행 (MA 레짐 전략)
-
-```bash
-python3 DCA_MA_strategy.py --backtest                    # TQQQ (MA20 + 50% 재진입)
-python3 DCA_MA_strategy.py --backtest --fee 0.001        # 수수료 0.1% 반영
-```
-
-상세 사용법(신호 모드 포함): [MA 레짐 전략](#ma-레짐-전략-dca_ma_strategypy)
+상세 사용법(신호 모드 포함): [LOC 20분할 전략](#loc-20분할-전략-loc_dca_strategypy)
 
 ### 플로우차트 문서 보기
 
 ```bash
-python3 DCA_MA_strategy_flowchart.py
+python3 LOC_DCA_strategy_flowchart.py
 ```
 
 ---
 
 ## 🤖 GitHub Actions 자동화
 
-### `dca_ma_strategy.yml` — 통합: 정기 브리핑 + MA 레짐 신호 + 실시간 ATH DCA 알림
+### `loc_dca_strategy.yml` — 정기 브리핑 + LOC 20분할 신호
 
 | 트리거 | 시간 (UTC) | 설명 |
 |--------|------------|------|
-| 예약 실행 | 매일 23:30 (월~금) | 장 마감 후 **통합 브리핑 1건** 발송 (MA 레짐 신호는 브리핑에 통합) |
-| repository_dispatch | 장중 N분 (cron-job.org) | `--ath-monitor` 실시간 알림 (🚨/📡) |
+| 예약 실행 | 매일 23:30 (월~금) | 장 마감 후 **통합 브리핑 1건** 발송 (LOC 20분할 신호는 브리핑에 통합) |
 | 수동 실행 | 사용자 요청 시 | workflow_dispatch 수동 실행 |
 
-> - 23:30 UTC 실행 시 `DCA_MA_strategy.py`(통합 브리핑) 1건만 Discord로 발송합니다. MA 레짐 실행 액션(▶)과 비상 트리거(📡)가 티커 블록에 포함되며, `--signal`은 콘솔 로그 확인용으로만 실행됩니다.
-> - 신호 메시지: 종가·날짜 · LOC 매수가 · 레짐 상태 · 액션을 한 번에 전송.
-> - `concurrency` 그룹으로 야간 실행과 실시간 폴링이 동시에 돌지 않게 직렬화됩니다.
+> - 23:30 UTC 실행 시 `LOC_DCA_strategy.py`(통합 브리핑) 1건만 Discord로 발송합니다. LOC 실행 액션(▶)과 체결 신호(🚨)가 티커 블록에 포함되며, `--signal`은 콘솔 로그 확인용으로만 실행됩니다.
+> - 신호 메시지: 종가·날짜 · LOC 매수가 · 분할 진행 상태(N/20차) · 액션을 한 번에 전송.
 
 ### `bear_market_signals.yml` — 약세장 신호
 
@@ -389,7 +311,7 @@ python3 DCA_MA_strategy_flowchart.py
 
 ### TypeScript strict 검사 게이트 (모든 워크플로우 공통)
 
-모든 봇 워크플로우(`swing_alerter.yml`/`dca_ma_strategy.yml`/`bear_market_signals.yml`/`tracker.yml`)는
+모든 봇 워크플로우(`swing_alerter.yml`/`loc_dca_strategy.yml`/`bear_market_signals.yml`/`tracker.yml`)는
 봇 실행 전에 **JS 수정 검사 게이트**를 통과해야 합니다 (2026-08-14):
 
 ```bash
@@ -413,77 +335,48 @@ npm run typecheck   # tsc strict + checkJs
 
 ## 📊 백테스트
 
-백테스트는 **`DCA_MA_strategy.py`** 하나로 수행합니다 — 기존 시그마 DCA 엔진(승수 1.1,
-매수 $2,500×20) + MA 레짐 필터를 티커별 기본 설정으로 검증하고,
-`--signal`로 실시간 신호도 확인합니다 (상세: [MA 레짐 전략](#ma-레짐-전략-dca_ma_strategypy)).
+백테스트는 **`LOC_DCA_strategy.py`** 하나로 수행합니다 — **순수 LOC 20분할 DCA**(승수 1.1,
+매수 $2,500×20, MA 필터 없음)를 검증하고, `--signal`로 실시간 신호도 확인합니다
+(상세: [LOC 20분할 전략](#loc-20분할-전략-loc_dca_strategypy)).
 
 ### 사용 기술
 - 일간 로그수익률 기반 변동성(σ) 계산
 - EWMA(λ=0.94) 가중치 적용
 - LOC 목표가: `전일종가 × (1 - σ × 승수)`
-- 매수 조건: 당일 저가 ≤ LOC 목표가
+- 매수 조건: 당일 저가 ≤ LOC 목표가 (최대 20차 — 적립 전용, 매도 없음)
 
-> 📊 **ATH_DCA 트리거 최적화 분석** — 10년 치 월말 스윕 기반 TQQQ 트리거 후보값 비교와
-> 의사결정 근거는 [TRIGGER_OPTIMIZATION_SUMMARY.md](TRIGGER_OPTIMIZATION_SUMMARY.md) 참고.
+### LOC 20분할 전략 (`LOC_DCA_strategy.py`)
 
-> 🧪 **비상 모드 종료 실효성 검증 (2026-08-02)** — 2020 COVID 크래시 포함 구간에서
-> TQQQ가 현행 대비 **+4.67%p**(+136.17% vs +131.50%) 우위를
-> 기록했습니다. 단, 크래시 후 **잔여 현금(예비금)이 남아있을 때만** 효과가 있으므로 예비금 보존이
-> 핵심입니다. 상세는 [DUAL_MODE_SUMMARY.md](DUAL_MODE_SUMMARY.md) 참고.
-
-### TQQQ MA 교차 그리드 탐색 (탐색 완료 — 툴 정리됨)
-
-유튜브 스타일 "단기/장기 MA 크로스" 전수 탐색(9,009개 조합)은 완료 후 파일을 정리했습니다.
-
-> 📊 **검증 결과 (2026-08-02)**: 10년 구간 수익률 최고 조합은 **20일/22일**(+2,628%, MDD -58%),
-> MDD 최소 조합은 **8일/73일**(MDD -37.5%, +952%), 저빈도 균형 추천 **7일/104일**(+1,842%, MDD -40.6%, 연 3.7회).
-> 유튜버 기준 **6/107**은 수익률 82위/9,009·MDD 상위 35위로 전략이 유효함을 확인.
-> 하이브리드(예비금 + 급락 분할매수)는 예비금 기회비용과 나이프 잡기 효과로 **수익률이 절반 수준으로
-> 낮아지고 MDD만 개선**되므로, MDD 축소가 목표일 때만 적합합니다.
-
-### 기존 전략 + MA 필터 오버레이 (탐색 완료 — 툴 정리됨)
-
-기존 시그마 DCA 엔진(승수 1.1, 매수 $2,500×20)에 **MA 레짐 필터(청산형)** 를
-얹는 일선 탐색은 완료 후 파일을 정리했습니다. 재진입 방식: `dca_reset`(DCA 재개) / `lump`(올인 재진입).
-
-> 🎯 **검증 결과 (2026-08-02)**: 기준선(MA 필터 없음)은 +273.7% / MDD **-49.1%**.
-> **MA 20일선 + 올인 재진입**이 최적으로 **+2,138.5% / MDD -41.2%** (MDD 7.9p 개선 + 수익 7.8배,
-> Calmar 5.6→51.9). 전반/후반기 MDD도 각각 -26.6%/-33.7%로 안정적.
-> 단, "기존 DCA 성격 유지"(dca_reset) 방식은 MDD를 줄이되(MA5~30: -1~-21%) 수익까지 같이
-> 줄어듭니다(MA5~30: +9~33%). 즉 **MDD와 수익을 동시에 얻으려면 MA20 + 올인 재진입**이 유일한
-> 답이며, 이는 사실상 "가격-20일선 크로스" 전략에 수렴합니다.
-
-### MA 레짐 전략 (`DCA_MA_strategy.py`)
-
-실전 엔진 + 백테스트/신호를 통합한 **완결판 단일 파일**입니다. MA 레짐 전략 티커별 기본 설정:
+실전 엔진 + 백테스트/신호를 통합한 **완결판 단일 파일**입니다. 티커별 기본 설정:
 
 | 티커 | 기본 설정 | 10년 결과 | 용도 |
 |------|-----------|-----------|------|
-| TQQQ | MA20 + 올인 재진입 50% | +464.5% / MDD **-22.8%** | 안전판 — MDD 절반 (2026-08-15 전환) |
+| TQQQ | LOC 20분할 ($2,500×20, 승수 1.1) | +1,271.3% / MDD **-81.7%** (2026-08-16 재측정) | 순수 적립 — 매도 규칙 없음 |
 
 ```bash
 # 백테스트
-python3 DCA_MA_strategy.py --backtest                # TQQQ (MA20 lump 50%)
-python3 DCA_MA_strategy.py --backtest --fee 0.001    # 수수료 0.1% 반영
+python3 LOC_DCA_strategy.py --backtest                # TQQQ (LOC 20분할)
+python3 LOC_DCA_strategy.py --backtest --fee 0.001    # 수수료 0.1% 반영
 
 # 실시간 신호 (장 마감 후) — --discord로 Discord 발송 (GitHub Actions 자동화)
-python3 DCA_MA_strategy.py --signal
-python3 DCA_MA_strategy.py --signal --discord       # TQQQ 신호를 Discord로
-python3 DCA_MA_strategy.py --signal --discord --all  # 전 종목 단일 메시지 (수동 확인용 — 워크플로우는 브리핑 1건만 발송)
+python3 LOC_DCA_strategy.py --signal
+python3 LOC_DCA_strategy.py --signal --discord       # TQQQ 신호를 Discord로
+python3 LOC_DCA_strategy.py --signal --discord --all  # 전 종목 단일 메시지 (수동 확인용 — 워크플로우는 브리핑 1건만 발송)
+
+# 분할 사용 이력 초기화
+python3 LOC_DCA_strategy.py --reset-splits           # 20분할 재개
 ```
 
-### 실전 반영 — `DCA_MA_strategy.py` MA 레짐 필터
+### 실전 반영 — 순수 LOC 20분할 (2026-08-16)
 
-`DCA_MA_strategy.py`에서 검증한 레짐 필터를 **실전 운용 엔진에 통합**했습니다
-(2026-08-02 기준, 알림 신호 방식 — 실제 주문 자동 실행은 없음):
+MA/RSI/ATH_DCA 등 로직을 섞던 방식을 버리고 **하나의 논리**로 재구성했습니다
+(알림 신호 방식 — 실제 주문 자동 실행은 없음):
 
-- **TQQQ (MA20 + lump 50%)**: LOC 모드에서 종가가 MA20을 하향 돌파 → **🚨 전량 청산 + 매수 금지**,
-  상향 돌파 → **💰 재매수** (현금 50%) 신호
-- **ATH_DCA 비상 모드 중에는 MA 필터 OFF** — 분할 매수 진행을 방해하지 않음 (레짐 참고 표시만)
-- 비상 모드 종료(리커버리 리엔트리)로 LOC 복귀 후 **MA 필터 다시 활성**
-- 레짐/크로스 상태는 `MA_FILTER_STATE`에 자동 기록 — 크로스 알림은 1회만 발송
-- 일일 브리핑의 `• 📉 **MA{n} 레짐:**` 라인과 실시간 모니터(`--ath-monitor`)의 🚨/💰/🔄 크로스
-  알림으로 확인 가능
+- **LOC 매수가** = 전일 종가 × (1 − σ × 승수) — 당일 저가 ≤ LOC → **1차 체결**
+- $2,500 × **최대 20차** — 20차 소진 시 매수 중단 (적립 전용)
+- 체결 상태는 `LOC_DCA_USED_SPLITS`(체결일 목록)에 자동 기록 — 같은 날 중복 신호 방지
+- 일일 브리핑의 `• 🎯 [Action] LOC Buy:` 라인과 `📉 LOC 20분할 DCA Monitor` 섹션으로 확인
+- **매도 규칙 없음** — 순수 적립 (매도 신호 자체가 발생하지 않음)
 
 ---
 
@@ -713,19 +606,20 @@ python3 setup_cronjob_org.py   # CRONJOB_ORG_API_KEY/GITHUB_PAT/GITHUB_OWNER/GIT
 
 ## 🔗 연동 시스템
 
-### MarketStageSystem.py (portfolio_config.json 공유)
+### MarketStageSystem.py (독립 실행)
 - `portfolio_config.json`의 `POSITIONS` 키에서 티커 목록을 읽어 시장 바닥 단계(0~5) 감지
-- `DCA_MA_strategy`와 **설정 파일 공유** (`resolve_discord_config()` 공유)
-- 감지된 바닥 단계(Stage 5)는 `market_state.json`에 기록 → **ATH DCA 3차 트리거로 사용**
+- `LOC_DCA_strategy`와 **설정 파일 공유** (`resolve_discord_config()` 공유)
+- 감지된 바닥 단계는 `market_state.json`에 기록 — **DCA 엔진의 매수 트리거로는 사용하지 않음** (2026-08-16 이후)
 
 ### bear_market_signals.py (독립 실행)
 - 약세장 신호를 분석하여 `signal_report.json`에 리스크 점수 기록
 - 시장 리스크 점수(0~14)를 브리핑에 포함
 
-### cron-job.org (외부 스케줄러 — 실시간 알림)
+### cron-job.org (외부 스케줄러 — 스윙 알리미 실시간 알림)
 - GitHub Actions `schedule` 크론의 best-effort 지연을 우회하는 정확한 N분 알람
-- `repository_dispatch`(event_type: `ath-dca-monitor`)로 워크플로우 즉시 실행
-- 설정 자동화: `setup_cronjob_org.py` — 상세: `REALTIME_ALERT_SETUP.md`
+- `repository_dispatch`(event_type: `swing-monitor`)로 스윙 알리미 워크플로우 즉시 실행
+- 설정 자동화: `setup_cronjob_org.py` — 상세: [스윙 실시간 알림](#실시간-알림-cron-joborg)
+- ⚠️ 기존 ATH DCA 실시간 잡("ATH DCA realtime monitor")은 **cron-job.org 콘솔에서 수동 삭제 필요** (2026-08-16 — `--ath-monitor` 삭제)
 
 ---
 
@@ -736,7 +630,7 @@ python3 setup_cronjob_org.py   # CRONJOB_ORG_API_KEY/GITHUB_PAT/GITHUB_OWNER/GIT
 - **yfinance 캐시 전략**: 서로 다른 period 파라미터로 호출하여 캐시 충돌 방지
 - **정산 버퍼**: 장 마감 후 15분 버퍼 — 미정산 데이터 사용 방지
 - **Sigma 갱신 주기**: 90일(약 63거래일) 또는 설정(VOL_METHOD/EWMA_LAMBDA) 변경 시
-- **실시간 알림**: GitHub Actions 스케줄은 60일간 활동 없으면 자동 비활성화되지만,
+- **실시간 알림 (스윙 전용)**: GitHub Actions 스케줄은 60일간 활동 없으면 자동 비활성화되지만,
   cron-job.org 폴링이 매일 커밋을 만들어내므로 자연히 유지됩니다.
 
 ---
@@ -745,9 +639,9 @@ python3 setup_cronjob_org.py   # CRONJOB_ORG_API_KEY/GITHUB_PAT/GITHUB_OWNER/GIT
 
 | 문서 | 설명 |
 |------|------|
-| [TRIGGER_OPTIMIZATION_SUMMARY.md](TRIGGER_OPTIMIZATION_SUMMARY.md) | ATH_DCA 트리거 최적화 분석 — 바닥 분포 · 후보값 스윕 · 의사결정 근거 |
-| [DUAL_MODE_SUMMARY.md](DUAL_MODE_SUMMARY.md) | 듀얼 모드(LOC ↔ ATH_DCA) 시스템 전체 구조 요약 |
-| [REALTIME_ALERT_SETUP.md](REALTIME_ALERT_SETUP.md) | 실시간 ATH DCA 알림 설정 가이드 |
+| [STRATEGY_RULES.md](STRATEGY_RULES.md) | 전략 규칙 (순수 LOC 20분할 DCA) |
+| [LOC_DCA_strategy_flowchart.py](LOC_DCA_strategy_flowchart.py) | 시스템 전체 플로우차트 |
+| [NAMYU_SWING_SETUP.md](NAMYU_SWING_SETUP.md) | 나무증권 시세포착주문 감시 등록 가이드 (스윙 알리미) |
 
 ---
 

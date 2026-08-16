@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """
 ─────────────────────────────────────────────────────────────
-cron-job.org 실시간 ATH DCA 알림 — 설정 자동화 스크립트
+cron-job.org 실시간 알림 — 설정 자동화 스크립트 (스윙 알리미 전용)
 ─────────────────────────────────────────────────────────────
-REALTIME_ALERT_SETUP.md의 수동 설정 절차를 자동화합니다.
 cron-job.org REST API(https://api.cron-job.org)를 사용해 GitHub
-`repository_dispatch`(event_type: ath-dca-monitor)를 호출하는 크론잡을
-만듭니다. 이 워크플로우는 github.com/.../dispatches 엔드포인트를 호출해
-GitHub Actions의 `dca_ma_strategy.yml`(--ath-monitor 분기)를 실행시킵니다.
+`repository_dispatch`(event_type: swing-monitor)를 호출하는 크론잡을
+만듭니다. 이 크론잡은 github.com/.../dispatches 엔드포인트를 호출해
+GitHub Actions의 `swing_alerter.yml`(--monitor 분기)을 실행시킵니다.
+
+⚠️ 2026-08-16: ATH DCA 실시간 모니터(--ath-monitor) 삭제로 기본 대상이
+스윙 알리미로 전환됨. 기존 "ATH DCA realtime monitor" 원격 잡은
+cron-job.org 콘솔에서 수동 삭제 필요.
 
 사용 환경변수 (.env 파일 지원 — python-dotenv):
   CRONJOB_ORG_API_KEY   cron-job.org 콘솔 Settings에서 발급한 API 키
@@ -16,26 +19,23 @@ GitHub Actions의 `dca_ma_strategy.yml`(--ath-monitor 분기)를 실행시킵니
   GITHUB_REPO           저장소 이름 (예: strategy_engine)
 
 선택 환경변수 (기본값 사용 가능):
-  GITHUB_EVENT_TYPE     기본값: ath-dca-monitor
-  GITHUB_WORKFLOW_PATH  검증할 워크플로우 경로 (기본: .github/workflows/dca_ma_strategy.yml)
+  GITHUB_EVENT_TYPE     기본값: swing-monitor
+  GITHUB_WORKFLOW_PATH  검증할 워크플로우 경로 (기본: .github/workflows/swing_alerter.yml)
   POLL_MINUTES          기본값: 10
   UTC_HOURS_START       기본값: 13  (UTC, 장중 포함 09:00~17:00 ET 근처)
   UTC_HOURS_END         기본값: 21  (UTC)
-  JOB_TITLE             기본값: "ATH DCA realtime monitor"
+  JOB_TITLE             기본값: "Swing alerter realtime monitor"
 
 사용법:
-  python setup_cronjob_org.py              # ATH DCA 실시간 모니터 잡 생성
+  python setup_cronjob_org.py              # 스윙 실시간 모니터 잡 생성
   python setup_cronjob_org.py --dry-run    # 페이로드만 출력 (API 미호출, 시크릿 마스킹)
   python setup_cronjob_org.py --list       # 기존 잡 목록 조회
   python setup_cronjob_org.py --test-dispatch  # 테스트 dispatch 1회 발사
   python setup_cronjob_org.py --update-pat # 크론잡에 저장된 GITHUB_PAT를 새 토큰으로 갱신
   python setup_cronjob_org.py --update-schedule  # 크론잡 폴링 간격 갱신 (POLL_MINUTES/UTC_HOURS 반영)
 
-스윙 알리미 전용 잡 (2026-08 추가):
-  GITHUB_EVENT_TYPE=swing-monitor \
-  GITHUB_WORKFLOW_PATH=.github/workflows/swing_alerter.yml \
-  JOB_TITLE="Swing alerter realtime monitor" \
-  python setup_cronjob_org.py   # swing-monitor 디스패치 잡 생성
+스윙 알리미 잡 (기본값):
+  python setup_cronjob_org.py               # swing-monitor 디스패치 잡 생성
 """
 import base64
 import copy
@@ -55,7 +55,7 @@ except ImportError:
 
 CRONJOB_API_BASE = "https://api.cron-job.org"
 GITHUB_API_BASE = "https://api.github.com"
-WORKFLOW_PATH = ".github/workflows/dca_ma_strategy.yml"
+WORKFLOW_PATH = ".github/workflows/swing_alerter.yml"
 
 # cron-job.org jobDetails에 포함된 응답 전용(읽기 전용) 필드 — PATCH 시 제거해야 400을 피한다
 READONLY_JOB_FIELDS = (
@@ -168,7 +168,7 @@ def verify_github(owner: str, repo: str, pat: str, event_type: str,
     """부작용 없는 GitHub 검증: PAT 인증 + 워크플로우 트리거 존재 확인.
 
     dispatch를 실제로 발사하지 않습니다(발사는 --test-dispatch 전용).
-    workflow_path: 검증할 워크플로우 파일 (기본 dca_ma_strategy.yml).
+    workflow_path: 검증할 워크플로우 파일 (기본 swing_alerter.yml).
     """
     headers = _github_headers(pat)
 
@@ -314,10 +314,10 @@ def main() -> None:
     # ── 대상 잡 ──
     # GITHUB_WORKFLOW_PATH 로 다른 워크플로우(예: swing_alerter.yml) 검증도 지원
     workflow_path = _env("GITHUB_WORKFLOW_PATH", WORKFLOW_PATH)
-    default_event_type = "ath-dca-monitor"
+    default_event_type = "swing-monitor"
     default_poll = "10"
-    default_title = "ATH DCA realtime monitor"
-    job_desc_tpl = "장중 매 {m}분 ATH DCA 실시간 알림"
+    default_title = "Swing alerter realtime monitor"
+    job_desc_tpl = "장중 매 {m}분 스윙 실시간 알림"
 
     event_type = _env("GITHUB_EVENT_TYPE", default_event_type)
     poll_minutes = int(_env("POLL_MINUTES", default_poll))

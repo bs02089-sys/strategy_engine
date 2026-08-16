@@ -22,7 +22,7 @@
     (봇이 상태 파일만 커밋 → git 충돌로 알림 상태가 유실되지 않음)
 
 기존 인프라 재사용:
-  - DCA_MA_strategy.py 의 get_prev_close / _send_discord / resolve_discord_config
+  - LOC_DCA_strategy.py 의 get_prev_close / _send_discord / resolve_discord_config
   - GitHub Actions + cron-job.org (repository_dispatch) 실시간 폴링 패턴
 
 사용법:
@@ -47,7 +47,7 @@ from zoneinfo import ZoneInfo
 import yfinance as yf
 
 
-from DCA_MA_strategy import _send_discord, get_prev_close, resolve_discord_config
+from LOC_DCA_strategy import _send_discord, get_prev_close, resolve_discord_config
 
 CONFIG_PATH = "swing_config.json"
 STATE_PATH = "swing_state.json"        # 봇 전용 상태 파일 (ZONE_ALERTS/매도 플래그) — 설정과 분리

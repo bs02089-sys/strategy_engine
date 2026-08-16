@@ -14,34 +14,12 @@
             "START_DATE": "2026-07-25",
             "INVEST_TYPE": "LONG_YEAR",
             "ALLOCATION_PCT": 10,
-            "STRATEGY_MODE": "LOC",
-            "ATH_DCA": {
-                "ENABLED": true,
-                "SPLITS": 3,
-                "TRIGGER_1": "-30%",
-                "TRIGGER_2": "-50%",
-                "TRIGGER_3": "-65%",
-                "STRATEGY": "v2 crash-mode"
+            "LOC_DCA": {
+                "SPLITS": 20,
+                "BUY_AMOUNT": 2500
             },
-            "ATH_DCA_USED_SPLITS": [],
-            "ATH_DCA_CONFIG_FINGERPRINT": "3|-30%|-50%|-65%|v2 crash-mode",
-            "MA_FILTER": {
-                "ENABLED": true,
-                "MA_DAYS": 20,
-                "REENTRY": "lump",
-                "REENTRY_PCT": 0.5
-            },
-            "RECOVERY_REENTRY": {
-                "ENABLED": true,
-                "DD_RATIO": 0.5,
-                "MIN_DAYS": 30,
-                "MA_CONFIRM": true
-            },
-            "MA_FILTER_CONFIG_FINGERPRINT": "20|lump|0.5",
-            "MA_FILTER_STATE": {
-                "regime": "above",
-                "since": "2026-08-04"
-            }
+            "LOC_DCA_USED_SPLITS": [],
+            "LOC_DCA_CONFIG_FINGERPRINT": "20|2500.0"
         }
     },
     "STRATEGY": {
