@@ -315,6 +315,48 @@ python3 LOC_DCA_strategy_flowchart.py
 > cron-job.org 잡 생성: `GITHUB_EVENT_TYPE=dollar-monitor JOB_TITLE="Dollar alerter realtime monitor" UTC_HOURS_START=0 UTC_HOURS_END=17 POLL_MINUTES=10 python setup_cronjob_org.py`
 > (나무증권 환전 시간 09:00~익일 02:00 KST = UTC 00:00~17:00 — 점검 23:50~24:30 KST(14:50~15:30 UTC)는 코드 `_bank_hours_open` 게이트가 제외하므로 UTC_HOURS 는 넓게 잡는다, 2026-08-17 외환시장 연장 조사 반영)
 
+### 달러 알리미 운영 루틴
+
+> 알림은 신호일 뿐 — **실제 체결(환전)은 나무증권 앱에서 수동**으로 합니다.
+> 개인 포지션 기록은 `dollar_personal.json` 한 곳뿐 (봇은 읽기만 — 절대 쓰지 않음).
+
+**① 매수 체결 시 — 3개 값 채우기** (`POSITIONS → USDKRW=X → LOTS → ACCOUNT 1`)
+
+| 필드 | 내용 | 예시 |
+|------|------|------|
+| `BUY_PRICE` | 매수 환율 (원/USD) | `1416.48` |
+| `SHARES` | 보유 달러 수량 | `100` |
+| `BUY_DATE` | 매수일 | `"2026-08-17"` |
+
+**② 매도 완료 시 — 3개 값 비우기** (`null` 또는 키 삭제)
+
+| 필드 | 값 |
+|------|-----|
+| `BUY_PRICE` | `null` |
+| `SHARES` | `null` |
+| `BUY_DATE` | `null` |
+
+- ⚠️ 정리하지 않으면 봇이 **매도한 포지션을 계속 보유로 표시**하고, 가격이 목표 아래로
+  빠지면 재무장해 거짓 익절/임박 푸시가 울릴 수 있습니다.
+- 봇 신호 상태(익절/탈출 플래그)는 **자동 리셋** — 기록할 것 없음 (전 계좌 익절 시
+  `auto_cycle_reset`, 새 `BUY_DATE` 기록 시 탈출 신호 자동 재무장).
+- 상태가 꼬이면 수동 초기화: `python3 dollar_alerter.py --reset USDKRW=X`
+
+**③ 신호 종류 (푸시 = 전체 구독자 = 내 기기)**
+
+| 신호 | 의미 | 대응 |
+|------|------|------|
+| 📡 매수 임박 | 트리거까지 0.2%p 이내 | RP 해지하고 현금 대기 |
+| 🔻 매수 신호 | 전일 종가 대비 -0.3%~-0.5% 하락 | 환전 (목표: 매수가 대비 +0.3% 익절, 60영업일 초과 시 ⏰ 탈출) |
+| 🚀 익절 임박 | 익절 목표까지 0.2%p 이내 | 매도 준비 |
+| 🚨 익절 신호 | 매수가 대비 +0.3% 도달 | 매도 후 LOTS 3개 비우기 |
+| ⏰ 탈출 신호 | 보유 60영업일 초과 — 갇힘 | 시장가로 정리 후 LOTS 3개 비우기 |
+| 🔄 사이클 완료 | 전 계좌 익절 → 자동 리셋 | 기록 불필요 (다음 매수부터 새 사이클) |
+
+**④ 참고**
+- 실시간 신호 판정은 **나무증권 달러 환전 시간(평일 09:00~익일 02:00 KST)** 동안만 (그 외엔 확정 종가 기준).
+- 대시보드: `python3 dollar_alerter.py --serve` 또는 GitHub Pages `dollar.html` (장중 자동 갱신).
+
 ### TypeScript strict 검사 게이트 (모든 워크플로우 공통)
 
 모든 봇 워크플로우(`swing_alerter.yml`/`loc_dca_strategy.yml`/`bear_market_signals.yml`/`tracker.yml`)는

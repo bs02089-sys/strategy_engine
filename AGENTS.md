@@ -123,7 +123,11 @@ Not lazy about: input validation at trust boundaries, error handling that preven
   반영)에만** 가능하므로 신호 판정도 그 시간대의 실시간 가격 기준 (swing 의 종가 기준 원칙과 다름,
   2026-08-17 조사). 설정
   `dollar_config.json`(공용)/상태 `dollar_state.json`(봇 전용 — 매수 신호는 당일 한정 자동 리셋, 익절은
-  계좌별 사이클당 1회)/개인 포지션 `dollar_personal.json`(사용자 소유, 봇 읽기만) 3파일 분리. 대시보드는
+  계좌별 사이클당 1회)/개인 포지션 `dollar_personal.json`(사용자 소유, 봇 읽기만) 3파일 분리.
+  📋 **운영 루틴 (README.md '달러 알리미 운영 루틴' 참고)**: 매수 체결 시 LOTS에 BUY_PRICE/SHARES/
+  BUY_DATE 3개를 채우고, 매도(익절/탈출) 완료 시 3개를 비운다(null) — 봇 신호 상태 리셋은 자동
+  (auto_cycle_reset, 새 BUY_DATE 기록 시 탈출 신호 자동 재무장), 슬롯을 안 비우면 매도된 포지션에
+  거짓 익절/임박 푸시가 울릴 수 있음. 대시보드는
   JS 없이 meta refresh(300초) — `dollar_dashboard.html`은 main 에 커밋하지 않고 gh-pages 의 **dollar.html**
   로 배포 (swing 의 index.html 과 충돌 방지). cron-job.org 잡은 `GITHUB_EVENT_TYPE=dollar-monitor` +
   `UTC_HOURS_START=0 UTC_HOURS_END=17`(환전 시간 09:00~익일 02:00 KST = UTC 00~17시, 점검 구간은
