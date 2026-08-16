@@ -4,7 +4,7 @@
     "BUY_DROP_PCT": 0.3,
     "BUY_BAND_PCT": 0.5,
     "SELL_TARGET_PCT": 0.3,
-    "IMMINENT_GAP_PCT": 0.1,
+    "IMMINENT_GAP_PCT": 0.2,
     "PAGES_URL": "",
     "ONESIGNAL_APP_ID": "fc892714-97d9-457a-b3d6-12d25d93cc48",
     "POSITIONS": {

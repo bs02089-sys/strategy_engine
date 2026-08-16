@@ -15,7 +15,7 @@ dollar_alerter.py — 달러(USD/KRW) '매직 스플릿' 환테크 알리미
     (밴드 BUY_BAND_PCT%(기본 0.5)보다 깊은 급락은 신호 제외 — 설정으로 해제 가능)
   - 익절 신호: 계좌별 매수가 대비 +SELL_TARGET_PCT%(기본 0.3) 도달 (2026-08-17
     그리드 최적화: 0.3% 익절이 수익 동일 + 보유 기간 절반 + Sharpe 개선)
-  - 임박 신호: 트리거/목표까지 IMMINENT_GAP_PCT%p(기본 0.1) 이내
+  - 임박 신호: 트리거/목표까지 IMMINENT_GAP_PCT%p(기본 0.2) 이내
 
 판정 기준:
   - --monitor(장중)는 **실시간 가격**(yfinance, 15분 지연) 기준 — 나무증권
@@ -82,7 +82,7 @@ DEFAULT_CFG = {
     "BUY_DROP_PCT": 0.3,             # 매수 트리거: 전일 종가 대비 하락 % (백테스트 검증값)
     "BUY_BAND_PCT": 0.5,             # 매수 밴드 상한 % (0 = 무제한 — 급락도 신호)
     "SELL_TARGET_PCT": 0.3,          # 익절 목표: 매수가 대비 상승 % (그리드 최적값 — 0.5 대비 보유 절반·Sharpe 개선)
-    "IMMINENT_GAP_PCT": 0.1,         # 임박 알림 %p (트리거/목표까지)
+    "IMMINENT_GAP_PCT": 0.2,         # 임박 알림 %p (트리거/목표까지)
     "PAGES_URL": "",                 # GitHub Pages 주소 — 설정 시 대시보드에 라이브 링크 표시
     "ONESIGNAL_APP_ID": "",          # OneSignal 웹 푸시 앱 ID (공개값)
     "POSITIONS": {},
@@ -284,7 +284,7 @@ def compute_ticker(ticker: str, pos: dict, cfg: dict, live: bool = False) -> dic
     buy_drop = float(cfg.get("BUY_DROP_PCT", 0.3)) / 100.0
     buy_band = float(cfg.get("BUY_BAND_PCT", 0.5)) / 100.0
     sell_target_pct = float(cfg.get("SELL_TARGET_PCT", 0.3)) / 100.0
-    gap_pct = float(cfg.get("IMMINENT_GAP_PCT", 0.1))
+    gap_pct = float(cfg.get("IMMINENT_GAP_PCT", 0.2))
 
     buy_trigger = price * (1 - buy_drop)
     buy_band_lo = price * (1 - buy_band) if buy_band > 0 else None
@@ -383,7 +383,7 @@ def detect_alerts(st: dict, pos: dict, cfg: dict) -> tuple[list[str], list[str],
         state["BUY_IMMINENT_SENT"] = False
         state["BUY_IMMINENT_DATE"] = today
 
-    gap = float(cfg.get("IMMINENT_GAP_PCT", 0.1))
+    gap = float(cfg.get("IMMINENT_GAP_PCT", 0.2))
     cur = st.get("live_price") or st["price"]
     drop = float(cfg.get("BUY_DROP_PCT", 0.3))
     tgt = st["sell_target_pct"]
