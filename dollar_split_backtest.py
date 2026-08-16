@@ -58,7 +58,8 @@ import yfinance as yf
 TICKER = "USDKRW=X"
 DEFAULT_SINCE = (date.today() - timedelta(days=3650)).isoformat()   # 최근 10년 (프로젝트 기본)
 INITIAL = 1_000_000.0   # 가상 초기 자산(원) — 비율 기준이라 금액 무관
-SPREAD_DEFAULT = 0.001  # 왕복 0.1% = 나무증권 편도 1% × (1 - 95% 우대) = 편도 0.05% × 2
+SPREAD_DEFAULT = 0.0    # 왕복 0% = 나무 멤버스 환전 우대 100% (직접 환전 — 2026-08-17 사용자 앱 확인)
+                        # 비교: 95% 우대(왕복 0.1%)는 --spread 0.1 로 확인 (CAGR +4.1% · 회당 +0.40%)
 
 
 def fetch_ohlc(ticker: str) -> pd.DataFrame:
@@ -353,7 +354,7 @@ def main() -> None:
     ap.add_argument("--entry-hi", type=float, default=0.7, help="인용 그대로(up) 블록의 진입 밴드 상한 %% (기본 0.7)")
     ap.add_argument("--exit", type=float, default=0.3, help="인용 그대로(up) 블록의 매도 풀백 %% (기본 0.3)")
     ap.add_argument("--spread", type=float, default=SPREAD_DEFAULT * 100,
-                    help="왕복 환전 스프레드 %% (기본 0.1 = 나무증권 편도 1%% × 95%% 우대 잔여 0.05%% × 2)")
+                    help="왕복 환전 스프레드 %% (기본 0 = 나무 멤버스 100%% 우대 — 비교: 95%% 우대는 0.1)")
     ap.add_argument("--no-band", action="store_true", help="진입 밴드 상한 필터 해제 — 밴드 밖 급등/급락일에도 매수")
     ap.add_argument("--all", action="store_true", help="기본 설정의 거래 로그 포함")
     args = ap.parse_args()
