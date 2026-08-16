@@ -405,7 +405,8 @@ def detect_alerts(st: dict, pos: dict, cfg: dict) -> tuple[list[str], list[str],
         state["BUY_IMMINENT_SENT"] = True
         msg = (f"📡 **{ticker} 매수 트리거 임박**\n"
                f"현재가 {cur:,.2f}원 | 트리거 {st['buy_trigger']:,.2f}원 "
-               f"(남은 {st['buy_gap_pct']:.2f}%p)")
+               f"(남은 {st['buy_gap_pct']:.2f}%p)\n"
+               f"▶ RP 해지하고 현금 대기 — 신호 도달 시 바로 환전")
         msgs.append(msg)
         buy_msgs.append(msg)
 
