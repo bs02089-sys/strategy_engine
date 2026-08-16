@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta http-equiv="refresh" content="300">
+<title>달러 매직 스플릿</title>
+<style>
+:root{--bg:#0b0e14;--card:#141a26;--border:#20293b;--text:#e6edf3;--muted:#8b949e;
+--green:#3fb950;--green-dim:#12281c;--red:#f85149;--red-dim:#2d1517;
+--amber:#d29922;--amber-dim:#2a2112;--blue:#58a6ff;--blue-dim:#12253d}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{background:var(--bg);color:var(--text);
+font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Noto Sans KR","Malgun Gothic",sans-serif}
+body{max-width:640px;margin:0 auto;padding:0 14px 40px;font-size:16px}
+header{position:sticky;top:0;z-index:5;background:rgba(11,14,20,.92);backdrop-filter:blur(8px);
+padding:16px 0 12px;border-bottom:1px solid var(--border);margin-bottom:14px}
+header h1{font-size:21px;letter-spacing:-.3px}
+header .sub{color:var(--muted);font-size:13px;margin-top:4px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:16px;margin-bottom:16px}
+.row{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.tick{font-size:19px;font-weight:800}
+.chip{font-size:12px;padding:5px 10px;border-radius:999px;font-weight:700}
+.chip.gray{background:#1c2533;color:var(--muted)}
+.chip.green{background:var(--green-dim);color:var(--green)}
+.chip.red{background:var(--red-dim);color:var(--red)}
+.chip.amber{background:var(--amber-dim);color:var(--amber)}
+.price{font-size:38px;font-weight:800;margin:10px 0 2px}
+.price .unit{font-size:15px;color:var(--muted);font-weight:400;margin-left:4px}
+.meta{color:var(--muted);font-size:13px}
+.info{background:#0f1420;border:1px solid var(--border);border-radius:12px;
+padding:10px 12px;margin-top:12px;font-size:15px;line-height:1.7}
+.info b{color:var(--text)}
+.lots-title{margin-top:14px;margin-bottom:4px;font-size:16px;font-weight:700}
+.lot{display:flex;align-items:center;justify-content:space-between;gap:8px;
+padding:8px 0;border-bottom:1px solid #1a2231;font-size:14px}
+.lot:last-child{border-bottom:none}
+.lot .acc{font-weight:700;color:var(--muted)}
+.lot .val{color:var(--muted);font-size:12px}
+footer{color:var(--muted);font-size:12px;text-align:center;margin-top:8px}
+</style>
+</head>
+<body>
+<header>
+  <h1>💵 달러 매직 스플릿</h1>
+  <div class="sub">USD/KRW 환테크 알리미 · 2026-08-16 19:22</div>
+</header>
+
+        <div class="card">
+          <div class="row">
+            <span class="tick">USD/KRW</span>
+            <span class='chip gray'>⏳ 대기</span>
+          </div>
+          <div class="price">1,416.85<span class="unit">원</span></div>
+          <div class="meta">종가 08-14 · 전일 종가 1,416.85원
+            · 전일 대비 +0.03%</div>
+          <div class="info">매수 트리거 <b>1,412.60원</b> 이하
+            (전일 종가 대비 -0.3%~-0.5%)<br>
+            익절 목표 <b>매수가 대비 +0.5%</b> ·
+            권장 금액 약 500,000원</div>
+          
+        </div>
+<footer>신호는 알림일 뿐 — 실제 체결은 은행 앱에서 수동으로 하세요.</footer>
+</body>
+</html>
