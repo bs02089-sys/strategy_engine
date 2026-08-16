@@ -28,9 +28,9 @@ dollar_split_backtest.py — 달러(USD/KRW) '매직 스플릿' 매매 전략 �
                             -0.3~0.5% 하락일 종가 매수 / +0.3~0.7% 상승일 종가 매도
 
 비용:
-  - --spread: 왕복 환전 스프레드 (기본 0.1% = 나무증권 환전 수수료 편도 1% × (1-95% 우대)
-    = 편도 0.05% × 2, 매수/매도 각각 절반씩 적용). 스프레드 0% (수수료 면제) ~ 1% (우대 없음) 스윕 제공.
-    ※ 나무증권 스프레드는 기준환율의 1% (편도) — 95% 우대 시 편도 0.05%.
+  - --spread: 왕복 환전 스프레드 (기본 0% = 나무 멤버스 환전 우대 100%, 직접 환전 — 2026-08-17
+    사용자 앱 확인). 매수/매도 각각 절반씩 적용. 95% 우대(왕복 0.1%) 비교는 --spread 0.1 로.
+    ※ 나무증권 스프레드는 기준환율의 1% (편도) — 95% 우대 시 편도 0.05%, 100% 우대 시 0.
 
 데이터:
   - yfinance USDKRW=X 일봉 (2003-12-01 ~ 오늘, 야후 원달러 시장환율).
@@ -44,6 +44,8 @@ dollar_split_backtest.py — 달러(USD/KRW) '매직 스플릿' 매매 전략 �
 사용법:
   python3 dollar_split_backtest.py                      # 기본: 인트라데이 그리드 + 스프레드 스윕 + 연도별 표
   python3 dollar_split_backtest.py --since 2004-01-01   # 전체 20년+ 검증
+  python3 dollar_split_backtest.py --grid               # 2차원 그리드 — 매수 하락률 × 익절 상승률 최적화
+  python3 dollar_split_backtest.py --grid --drops 0.2,0.3,0.5 --targets 0.5,1.0,1.5  # 원하는 조합만
   python3 dollar_split_backtest.py --mode close         # 종가 기준 해석 비교
   python3 dollar_split_backtest.py --mode close --direction down  # 세븐 스플릿 정통(하락 매수)
   python3 dollar_split_backtest.py --all                # 기본 설정 거래 로그 포함
@@ -343,9 +345,99 @@ def run_intraday_block(w: pd.DataFrame, direction: str, rows: list[float], cols:
             print(f"  {d.date()}  SELL  매수 {bp:,.2f} → 매도 {spx:,.2f}  ({net*100:+.2f}% · {hold}일)")
 
 
+def run_dollar_grid(w: pd.DataFrame, spread: float, bh: dict, args, drops: list[float],
+                    targets: list[float]) -> None:
+    """2차원 그리드 — 매수 하락률 × 익절 상승률 동시 스윕 (--grid).
+
+    박성현 숫자(0.3%/0.5%) 전제 없이 전 구간을 탐색한다. 방향은 하락 매수/익절 매도
+    고정, 밴드(급락 제외) 상한 = 트리거 + 0.2%p. 현재 실전 설정(0.3% × +0.5%)이
+    그리드 셀로 포함된다. 셀 = 총수익률/MDD/Sharpe/평균 보유일.
+    """
+    print(f"\n{'═' * 78}")
+    print(f"  2차원 그리드 — 매수 하락률 × 익절 상승률 — {w.index[0].date()} ~ {w.index[-1].date()}")
+    print(f"  스프레드 {args.spread:.2f}% · 밴드(급락 제외) = 트리거 +0.2%p · 방향: 하락 매수 / 익절 매도")
+    print(f"  행 = 매수 하락%, 열 = 익절 상승% — ★ 행 최고 · ◀ 현재 실전 설정(0.3% × +0.5%)")
+    print(f"{'═' * 78}")
+
+    grid: dict[tuple[float, float], dict] = {}
+    for d in drops:
+        for t in targets:
+            res = simulate_intraday(w, "down", d / 100.0, (d + 0.2) / 100.0,
+                                    t / 100.0, spread, band=True)
+            s = summarize(res)
+            holds = [tr[4] for tr in res["trades"]]
+            s["median_hold"] = float(np.median(holds)) if holds else 0.0
+            s["quick3"] = sum(1 for h in holds if h <= 3) / len(holds) * 100 if holds else 0.0
+            s["calmar"] = s["cagr"] / abs(s["mdd"]) if s["mdd"] < 0 else 0.0
+            s["drop"], s["target"] = d, t
+            grid[(d, t)] = s
+
+    def _print_matrix(title: str, pick, fmt: str, low_best: bool = False) -> None:
+        """행별 최고값에 ★, 현재 실전 설정 셀에 ◀ 를 붙인 매트릭스 출력."""
+        print(f"\n  [{title}]  (★ = 행 최고)")
+        print(f"  {'하락':>5}" + "".join(f"{f'+{t:.1f}%':>8}" for t in targets))
+        for d in drops:
+            vals = [pick(grid[(d, t)]) for t in targets]
+            best = min(vals) if low_best else max(vals)
+            cells = []
+            for t, v in zip(targets, vals):
+                is_cur = abs(d - 0.3) < 1e-9 and abs(t - 0.5) < 1e-9
+                mark = "◀" if is_cur else ("★" if v == best else "")
+                cells.append(f"{fmt.format(v=v):>7}" + mark)
+            print(f"  {d:>5g}%" + "".join(cells))
+
+    _print_matrix("총수익률 % (★ = 행 최고)", lambda s: s["total_ret"], "{v:+.1f}")
+    _print_matrix("MDD % (★ = 행에서 덜 하락)", lambda s: s["mdd"], "{v:.1f}")
+    _print_matrix("Sharpe (★ = 행 최고)", lambda s: s["sharpe"], "{v:.2f}")
+    _print_matrix("평균 보유 일수 (★ = 행에서 최단)", lambda s: s["avg_hold"], "{v:.0f}", low_best=True)
+
+    allr = list(grid.values())
+    best_ret = max(allr, key=lambda r: r["total_ret"])
+    best_sharpe = max(allr, key=lambda r: r["sharpe"])
+    best_calmar = max(allr, key=lambda r: r["calmar"])
+    best_mdd = max(allr, key=lambda r: r["mdd"])
+    best_short = min(allr, key=lambda r: r["avg_hold"])
+    cur = grid.get((0.3, 0.5))
+    print(f"\n  [참고] 바이앤홀드: CAGR {bh['cagr']:+.1f}% · MDD {bh['mdd']:.1f}%")
+    print(f"  → 최고 총수익률 : -{best_ret['drop']:g}% × +{best_ret['target']:g}% "
+          f"(+{best_ret['total_ret']:.1f}% · MDD {best_ret['mdd']:.1f}% · Sharpe {best_ret['sharpe']:.2f} · 평균 {best_ret['avg_hold']:.0f}일)")
+    print(f"  → 최고 Sharpe   : -{best_sharpe['drop']:g}% × +{best_sharpe['target']:g}% "
+          f"(Sharpe {best_sharpe['sharpe']:.2f} · +{best_sharpe['total_ret']:.1f}% · MDD {best_sharpe['mdd']:.1f}% · 평균 {best_sharpe['avg_hold']:.0f}일)")
+    print(f"  → 최고 Calmar   : -{best_calmar['drop']:g}% × +{best_calmar['target']:g}% "
+          f"(Calmar {best_calmar['calmar']:.2f} · +{best_calmar['total_ret']:.1f}% · MDD {best_calmar['mdd']:.1f}% · 평균 {best_calmar['avg_hold']:.0f}일)")
+    print(f"  → 최저 MDD      : -{best_mdd['drop']:g}% × +{best_mdd['target']:g}% "
+          f"(MDD {best_mdd['mdd']:.1f}% · +{best_mdd['total_ret']:.1f}% · Sharpe {best_mdd['sharpe']:.2f} · 평균 {best_mdd['avg_hold']:.0f}일)")
+    print(f"  → 최단 평균 보유: -{best_short['drop']:g}% × +{best_short['target']:g}% "
+          f"(평균 {best_short['avg_hold']:.0f}일 · 중앙값 {best_short['median_hold']:.0f}일 · +{best_short['total_ret']:.1f}% · MDD {best_short['mdd']:.1f}%)")
+    if cur is not None:
+        n = len(allr)
+        by_ret = sorted(allr, key=lambda r: -r["total_ret"])
+        by_sharpe = sorted(allr, key=lambda r: -r["sharpe"])
+        by_hold = sorted(allr, key=lambda r: r["avg_hold"])
+        rank_ret = next(i for i, r in enumerate(by_ret, 1) if r is cur)
+        rank_sharpe = next(i for i, r in enumerate(by_sharpe, 1) if r is cur)
+        rank_hold = next(i for i, r in enumerate(by_hold, 1) if r is cur)
+        print(f"  → 현재 실전 설정(0.3% × +0.5%): +{cur['total_ret']:.1f}% · MDD {cur['mdd']:.1f}% · "
+              f"Sharpe {cur['sharpe']:.2f} · 평균 보유 {cur['avg_hold']:.0f}일 — "
+              f"순위 {rank_ret}/{n}(수익률) · {rank_sharpe}/{n}(Sharpe) · {rank_hold}/{n}(최단보유)")
+
+    # 빠른 회전 균형 — 평균 보유 7일 이하 중 최고 Sharpe ("못 파는 케이스" 회피 관점)
+    quick = [r for r in allr if r["avg_hold"] <= 7]
+    if quick:
+        best_q = max(quick, key=lambda r: r["sharpe"])
+        print(f"  → 빠른 회전(평균 보유 ≤7일) 중 최고 Sharpe: -{best_q['drop']:g}% × +{best_q['target']:g}% "
+              f"(Sharpe {best_q['sharpe']:.2f} · +{best_q['total_ret']:.1f}% · MDD {best_q['mdd']:.1f}% · "
+              f"평균 {best_q['avg_hold']:.0f}일 · 3일 내 청산 {best_q['quick3']:.0f}%)")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="달러(USD/KRW) '매직 스플릿' 매매 전략 백테스트 — 97% 수익률 주장 검증")
     ap.add_argument("--since", default=DEFAULT_SINCE, help=f"백테스트 시작일 (기본: 최근 10년 = {DEFAULT_SINCE})")
+    ap.add_argument("--grid", action="store_true", help="2차원 그리드 — 매수 하락률 × 익절 상승률 동시 스윕 (박성현 숫자 전제 없음)")
+    ap.add_argument("--drops", default="0.1,0.2,0.3,0.4,0.5,0.7,1.0,1.5,2.0",
+                    help="--grid 매수 하락률 목록 %% (기본: 0.1~2.0)")
+    ap.add_argument("--targets", default="0.3,0.5,0.7,1.0,1.5,2.0,3.0",
+                    help="--grid 익절 상승률 목록 %% (기본: 0.3~3.0)")
     ap.add_argument("--mode", choices=["intraday", "close"], default="intraday",
                     help="해석 모드 — intraday(기본: 장중 트리거 근사) / close(일별 종가 기준)")
     ap.add_argument("--direction", choices=["up", "down"], default="up",
@@ -373,6 +465,14 @@ def main() -> None:
     print(f"  [참고] 바이앤홀드(달러 보유, 스프레드 1회성 반영): {bh['total_ret']:+.1f}% · CAGR {bh['cagr']:+.1f}% · "
           f"MDD {bh['mdd']:.1f}% · Sharpe {bh['sharpe']:.2f}")
     print(f"{'═' * 78}")
+
+    if args.grid:
+        # ── 그리드 최적화: 매수 하락률 × 익절 상승률 (박성현 숫자 전제 없음) ──
+        drops = [float(x) for x in args.drops.split(",") if x.strip()]
+        targets = [float(x) for x in args.targets.split(",") if x.strip()]
+        run_dollar_grid(w, spread, bh, args, drops, targets)
+        print()
+        return
 
     if args.mode == "intraday":
         # ① 인용 그대로: +0.3~0.7% 상승 매수 / -0.3~0.5% 풀백 매도
