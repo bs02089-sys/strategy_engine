@@ -8,26 +8,25 @@
   (--ath-monitor) 를 전부 삭제하고, **하나의 논리**만 남긴다:
 
     전일 종가 × (1 − σ × ENTRY_MULTIPLIER) = LOC 매수가
-    당일 저가 ≤ LOC → 1차 체결 ($2,500 × 최대 20차 — 적립 전용, 매도 없음)
+    정규장에서 이 가격으로 LOC 지정가 주문 → 체결 여부는 증권앱 + 엑셀에서 관리
 
 실전 엔진 (기본 실행):
-  - 일일 Discord 브리핑: LOC 매수가 · 20분할 진행 상태(N/20차) · 체결 신호 ·
-    Sigma 자동 갱신 · 로테이션 초기화 · 전고점 대비 하락률
-  - LOC 체결 감지: 당일 저가 ≤ LOC 면 분할 1회 사용 처리(LOC_DCA_USED_SPLITS
-    영속화 — 재체결 중복 방지, 20차 소진 시 매수 중단)
+  - 일일 Discord 브리핑: **LOC 매수가** · Sigma 자동 갱신 · 로테이션 초기화 ·
+    전고점 대비 하락률
+  - ⚠️ 체결 추적은 봇이 하지 않는다 (2026-08-16) — 사용자가 정규장에서 LOC 지정가
+    주문을 걸고, 다음 날 증권앱에서 체결 여부를 확인해 엑셀에 기록한다.
+    분할 예산/회차 표시는 엑셀이 단일 소스이므로 브리핑에 포함하지 않는다.
 
 전략 모드 (백테스트/신호):
   - --backtest: 시그마 LOC 20분할 백테스트 (MA 필터 없음 — 단일 전략)
-  - --signal: 실시간 신호 (종가 · LOC 매수가 · 분할 진행 상태) — 콘솔용
+  - --signal: 실시간 신호 (종가 · LOC 매수가 · 오늘 LOC 도달 여부) — 콘솔용
   - --signal --discord: Discord 발송 | --all: 전 종목 단일 메시지 (수동 확인용)
-  - --reset-splits: LOC_DCA_USED_SPLITS 초기화 (사용자 수동 리셋)
 
 Usage:
   python3 LOC_DCA_strategy.py                              # 일일 브리핑 (기본)
   python3 LOC_DCA_strategy.py --backtest                   # TQQQ 백테스트 (LOC 20분할)
   python3 LOC_DCA_strategy.py --signal                     # 오늘 신호 (TQQQ)
   python3 LOC_DCA_strategy.py --signal --discord --all     # 전 종목 신호 → Discord
-  python3 LOC_DCA_strategy.py --reset-splits               # 분할 사용 이력 초기화
 """
 import csv
 import os
@@ -61,10 +60,6 @@ _DISCORD_CONTENT_LIMIT = 4096
 NY_MARKET_CLOSE_HOUR            = 16
 NY_MARKET_CLOSE_MINUTE          = 0
 NY_CLOSE_SETTLE_BUFFER_MINUTES  = 15
-
-# LOC 20분할 기본값 (portfolio_config.json의 LOC_DCA 블록이 단일 소스 — 없으면 이 값)
-DEFAULT_LOC_SPLITS    = 20
-DEFAULT_LOC_BUY_AMOUNT = 2500.0
 
 
 # ════════════════════════════════════════════
@@ -533,159 +528,17 @@ def calculate_final_loc(base_price: float) -> float:
 # ═══════════════════════════════════════════════════════════
 # 하나의 논리만 사용한다:
 #   LOC 매수가 = 전일 종가 × (1 − σ × ENTRY_MULTIPLIER)
-#   당일 저가 ≤ LOC → 1차 체결 ($2,500 × 최대 20차 — 적립 전용, 매도 없음)
+#   정규장에서 이 가격으로 LOC 지정가 주문 → 체결 여부는 증권앱 + 엑셀에서 관리.
 #
 # Config schema (per-position):
 #   "LOC_DCA": {
-#       "SPLITS": 20,          # 총 분할 수
-#       "BUY_AMOUNT": 2500     # 차수당 매수 금액
+#       "SPLITS": 20,          # 총 분할 수 (백테스트 기본값)
+#       "BUY_AMOUNT": 2500     # 차수당 매수 금액 (백테스트 기본값)
 #   }
-# State (auto-managed): pos["LOC_DCA_USED_SPLITS"] = ["YYYY-MM-DD", ...]
-
-def _loc_dca_config(pos: dict) -> tuple[int, float]:
-    """(splits, buy_amount) — LOC_DCA 블록에서 읽고, 없으면 기본값."""
-    loc_dca = pos.get("LOC_DCA", {}) or {}
-    splits = int(loc_dca.get("SPLITS", DEFAULT_LOC_SPLITS))
-    buy_amount = float(loc_dca.get("BUY_AMOUNT", DEFAULT_LOC_BUY_AMOUNT))
-    if splits < 1:
-        splits = DEFAULT_LOC_SPLITS
-    if buy_amount <= 0:
-        buy_amount = DEFAULT_LOC_BUY_AMOUNT
-    return splits, buy_amount
-
-
-def _loc_dca_fingerprint(pos: dict) -> str:
-    """LOC_DCA 설정(SPLITS/BUY_AMOUNT) 변경 감지 — 변경 시 사용 이력 리셋."""
-    splits, buy_amount = _loc_dca_config(pos)
-    return f"{splits}|{buy_amount}"
-
-
-def _fetch_last_session_bars(ticker: str):
-    """마지막 확정 세션 2개의 (close, low) 조회 — LOC 체결 판정용.
-
-    Returns (last_close, last_low, prev_close, last_date) or None on failure.
-    - last_close/last_low/last_date: 마지막 확정 세션의 종가/저가/날짜
-    - prev_close: 그 직전 세션의 종가 (LOC 매수가 계산 기준 — 백테스트와 동일)
-    """
-    try:
-        stock = yf.Ticker(ticker)
-        hist = stock.history(period="10d", interval="1d", auto_adjust=False)
-        if hist.empty:
-            return None
-        closes = hist["Close"].dropna()
-        lows = hist["Low"].dropna()
-        if len(closes) < 2 or len(lows) < 2:
-            return None
-        last_idx = closes.index[-1]
-        last_date = last_idx.date() if isinstance(last_idx, pd.Timestamp) else pd.Timestamp(last_idx).date()
-        return (
-            float(closes.iloc[-1]),
-            float(lows.iloc[-1]),
-            float(closes.iloc[-2]),
-            last_date,
-        )
-    except Exception as exc:
-        print(f"  ⚠️ {ticker} LOC session bar fetch failed: {exc}")
-        return None
-
-
-def check_loc_dca_signals(cfg: dict) -> list[str]:
-    """
-    LOC 체결 감지 — 당일 저가 ≤ LOC 매수가면 분할 1회 사용 처리.
-
-    백테스트와 동일한 판정 기준:
-      loc = 전일 종가 × (1 − σ × ENTRY_MULTIPLIER), 당일 저가 ≤ loc → 체결.
-    상태는 pos["LOC_DCA_USED_SPLITS"] (체결일 목록)에 영속화되며(호출자가
-    save_portfolio로 저장) 같은 가격 수준에 연속으로 걸려도 매일 1차씩
-    소진된다 — 20차 소진 시 매수 중단 신호를 낸다.
-    LOC_DCA 설정(SPLITS/BUY_AMOUNT) 변경 시 사용 이력을 자동 리셋한다.
-
-    Returns: 🚨 체결/📊 상태 메시지 리스트 (브리핑에 포함).
-    """
-    messages = []
-    positions = cfg.get("POSITIONS", {})
-
-    for ticker, pos in positions.items():
-        splits, buy_amount = _loc_dca_config(pos)
-
-        # 설정 변경 감지 → 사용 이력 리셋 (새 파라미터가 즉시 적용되도록)
-        current_fp = _loc_dca_fingerprint(pos)
-        stored_fp = pos.get("LOC_DCA_CONFIG_FINGERPRINT")
-        if stored_fp is not None and stored_fp != current_fp:
-            pos["LOC_DCA_USED_SPLITS"] = []
-            pos["LOC_DCA_CONFIG_FINGERPRINT"] = current_fp
-            messages.append(
-                f"🔄 **{ticker} LOC 분할 설정 변경 감지 → 사용 이력 초기화됨**\n"
-                f"   • 기존: {stored_fp} → 변경: {current_fp}"
-            )
-        elif stored_fp is None:
-            pos["LOC_DCA_CONFIG_FINGERPRINT"] = current_fp
-
-        used = pos.get("LOC_DCA_USED_SPLITS", []) or []
-        if not isinstance(used, list):
-            used = []
-        used = [str(d) for d in used]
-
-        if len(used) >= splits:
-            messages.append(
-                f"✅ **{ticker} LOC {splits}차 전부 사용 — 매수 중단** "
-                f"(적립 완료, 신규 신호 없음)"
-            )
-            continue
-
-        bars = _fetch_last_session_bars(ticker)
-        if bars is None:
-            continue
-        _, last_low, prev_close, last_date = bars
-
-        multiplier = float(pos.get("ENTRY_MULTIPLIER", 1.1))
-        sigma = pos.get("DAILY_SIGMA")
-        if sigma is None:
-            continue
-        loc_price = _calculate_loc_from_sigma(prev_close, sigma, multiplier)
-
-        # 체결 판정은 마지막 확정 세션(장 마감 후 실행이므로 보통 오늘) 기준.
-        # 같은 세션 중복 감지 방지 — 해당 날짜가 이미 기록되어 있으면 스킵.
-        fill_key = last_date.strftime("%Y-%m-%d")
-        if fill_key in used:
-            continue
-
-        if last_low <= loc_price:
-            used.append(fill_key)
-            pos["LOC_DCA_USED_SPLITS"] = sorted(used)
-            nxt = len(used)
-            remaining = splits - nxt
-            remaining_budget = remaining * buy_amount
-            messages.append(
-                f"🚨 **{ticker} LOC {nxt}차 매수 신호!** 🔥\n"
-                f"   • 당일 저가: \\\\${last_low:.2f} ≤ LOC \\\\${loc_price:.2f} (전일 종가 \\\\${prev_close:.2f} 기준)\n"
-                f"   • 분할: {nxt}/{splits}차 (잔여 {remaining}차 · 예산 \\\\${remaining_budget:,.0f})\n"
-                f"   • **매수 실행 권장!** (${buy_amount:,.0f}×{nxt}차 누적)"
-            )
-        else:
-            messages.append(
-                f"📊 **{ticker} LOC 대기:** 마지막 세션({last_date.strftime('%m-%d')}) 저가 \\\\${last_low:.2f} "
-                f"> LOC \\\\${loc_price:.2f} (전일 종가 \\\\${prev_close:.2f} 기준) "
-                f"· 분할 {len(used)}/{splits}차 사용 · 다음 체결 대기"
-            )
-
-    return messages
-
-
-def reset_loc_splits(ticker: str | None = None) -> None:
-    """--reset-splits: LOC_DCA_USED_SPLITS 수동 초기화 (20분할 재개)."""
-    cfg = load_portfolio()
-    positions = cfg.get("POSITIONS", {})
-    targets = [ticker.upper()] if ticker else list(positions.keys())
-    for t in targets:
-        if t not in positions:
-            print(f"⚠️ {t} 포지션 없음 — 초기화 생략")
-            continue
-        used = positions[t].pop("LOC_DCA_USED_SPLITS", None)
-        positions[t].pop("LOC_DCA_CONFIG_FINGERPRINT", None)
-        count = len(used) if isinstance(used, list) else 0
-        print(f"🔄 {t} LOC 분할 사용 이력 초기화 완료 (기존 {count}차 → 0차)")
-    save_portfolio(cfg)
+#
+# ⚠️ 체결 추적은 봇이 하지 않는다 (2026-08-16): 분할 예산/회차는 사용자의
+#   엑셀이 단일 소스이며, 봇이 주문을 실제로 걸었는지 알 수 없어 자동 카운터는
+#   현실과 어긋날 수 있기 때문. 브리핑은 LOC 매수가 신호만 제공한다.
 
 
 # ═══════════════════════════════════════════════════════════
@@ -850,46 +703,20 @@ def send_monthly_ping_if_due(cfg: dict, webhook: str, user_id: str, now_ny: date
 # Briefing Builder
 # ═══════════════════════════════════════════════════════════
 
-def _loc_action_line(ticker: str, prev_close: float, cfg: dict) -> list[str]:
-    """LOC 매수가 라인 + 20분할 진행 상태 라인 생성.
+def _loc_action_line(ticker: str, prev_close: float, cfg: dict) -> str:
+    """LOC 매수가 라인 — 단일 논리의 유일한 실행 신호.
 
-    - 🎯 [Action] LOC Buy: 매수가 (분할 N/20차 · 잔여 M차)
-    - 💰 분할 예산: 차수당 금액 × 잔여 차수
-
-    오늘 체결 여부는 check_loc_dca_signals()가 LOC_DCA_USED_SPLITS에 이미
-    반영해 두므로 (브리핑 전 실행) 여기서는 상태 표시만 한다.
+    분할 회차/예산은 표시하지 않는다 (사용자 엑셀이 단일 소스 — 2026-08-16).
     """
     base_loc = calculate_loc_price(ticker, prev_close, cfg)
     final_loc = calculate_final_loc(base_loc)
 
-    pos_cfg = cfg.setdefault("POSITIONS", {}).setdefault(ticker, {})
-    splits, buy_amount = _loc_dca_config(pos_cfg)
-    used = pos_cfg.get("LOC_DCA_USED_SPLITS", []) or []
-    if not isinstance(used, list):
-        used = []
-    used_count = len(used)
-    remaining = max(0, splits - used_count)
-
-    lines = []
-    loc_label = f"~~${base_loc:.2f}~~ ➡ **${final_loc:.2f}** (Risk Discount)" if base_loc != final_loc else f"**${final_loc:.2f}**"
-    if remaining > 0:
-        lines.append(
-            f"• 🎯 **[Action] LOC Buy:** {loc_label} — 분할 {used_count}/{splits}차 "
-            f"(잔여 {remaining}차)"
-        )
-        lines.append(
-            f"• 💰 **분할 예산:** ${buy_amount:,.0f} × {remaining}차 = "
-            f"**${buy_amount * remaining:,.0f}** 남음"
-        )
-    else:
-        lines.append(
-            f"• 🎯 **[Action] LOC Buy:** {loc_label} — 분할 {splits}/{splits}차 "
-            f"**전부 사용 (매수 중단)**"
-        )
-    return lines
+    if base_loc != final_loc:
+        return f"• 🎯 **[Action] LOC Buy:** ~~${base_loc:.2f}~~ ➡ **${final_loc:.2f}** (Risk Discount)"
+    return f"• 🎯 **[Action] LOC Buy:** **${final_loc:.2f}**"
 
 
-def _build_briefing_lines(now_ny: datetime, cfg: dict, loc_messages: list[str]) -> list[str]:
+def _build_briefing_lines(now_ny: datetime, cfg: dict) -> list[str]:
     lines = [f"🌙 **U.S. Market LOC Portfolio Briefing** ({now_ny.strftime('%Y-%m-%d %H:%M %Z')})"]
     today_ny = now_ny.date()
 
@@ -913,20 +740,12 @@ def _build_briefing_lines(now_ny: datetime, cfg: dict, loc_messages: list[str]) 
         if drawdown_line:
             lines.append(drawdown_line)
 
-        # LOC 매수가 + 20분할 진행 상태 (단일 논리)
-        lines.extend(_loc_action_line(ticker, prev_close, cfg))
+        # LOC 매수가 (단일 논리 — 유일한 실행 신호)
+        lines.append(_loc_action_line(ticker, prev_close, cfg))
 
         rotation_due, elapsed_bd, exit_days = check_rotation_exit_signal(pos_cfg, today_ny)
         if rotation_due:
             lines.append(f"• 🔴 **[D+{exit_days} Rotation Maturity] Period expired — Review for sell! (Elapsed: {elapsed_bd} days)**")
-
-    # ── LOC 20분할 체결/상태 모니터 ──
-    if loc_messages:
-        lines.append("")
-        lines.append("─" * 40)
-        lines.append("📉 **LOC 20분할 DCA Monitor**")
-        for msg in loc_messages:
-            lines.append(msg)
 
     return lines
 
@@ -943,15 +762,12 @@ def execute_daily_briefing() -> None:
 
     status_messages = reset_matured_rotation_positions(cfg, now_ny.date()) + refresh_sigma_if_stale(cfg)
 
-    # LOC 체결 감지 (LOC_DCA_USED_SPLITS 갱신 — 브리핑 전에 실행해 상태 반영)
-    loc_messages = check_loc_dca_signals(cfg)
-
     # Keep these visible in the GitHub Actions run log even though they no
     # longer appear in the Discord notification content.
     for msg in status_messages:
         print(msg)
 
-    briefing_lines = _build_briefing_lines(now_ny, cfg, loc_messages)
+    briefing_lines = _build_briefing_lines(now_ny, cfg)
 
     # Persist ALL config changes (sigma updates, rotation resets, LOC DCA state)
     save_portfolio(cfg)
@@ -1128,11 +944,11 @@ def load_data(ticker: str, end: date | None = None) -> pd.DataFrame:
     return df
 
 
-def current_signal(ticker: str, entry_multiplier: float, splits: int, buy_amount: float,
-                   loc_used: int) -> dict:
+def current_signal(ticker: str, entry_multiplier: float) -> dict:
     """최신 데이터 기준 순수 LOC 신호 산출.
 
-    loc = 전일 종가 × (1 − σ × 승수). 당일 저가 ≤ loc → 체결 상태.
+    loc = 전일 종가 × (1 − σ × 승수). 당일 저가 ≤ loc → "LOC 도달" 상태
+    (체결 여부는 증권앱 확인 — 봇은 추적하지 않음, 2026-08-16).
     """
     df = load_data(ticker)
     closes = df["Close"]
@@ -1159,19 +975,13 @@ def current_signal(ticker: str, entry_multiplier: float, splits: int, buy_amount
         sigma, _ = _calculate_volatility_from_closes(lookback_window, LOOKBACK_DAYS, VOL_METHOD, EWMA_LAMBDA)
         loc_price = _calculate_loc_from_sigma(prev_close, sigma, entry_multiplier)
 
-    used = min(loc_used, splits)
-    remaining = max(0, splits - used)
     triggered = loc_price is not None and last_low <= loc_price
-
-    if used >= splits:
-        state = "DONE"
-        action = "🔴 매수 중단 (20차 전부 사용 — 적립 완료)"
-    elif triggered:
+    if triggered:
         state = "TRIGGERED"
-        action = f"🟢 오늘 LOC 도달 — {used + 1}차 매수 실행"
+        action = "🟢 오늘 LOC 도달 — 체결 여부를 증권앱에서 확인"
     else:
         state = "WAIT"
-        action = f"🟡 대기 — LOC ${loc_price:.2f} 이하 시 {used + 1}차 매수" if loc_price else "🟡 대기 — LOC 계산 불가"
+        action = f"🟡 대기 — LOC ${loc_price:.2f} 이하 시 지정가 주문" if loc_price else "🟡 대기 — LOC 계산 불가"
 
     return {
         "ticker": ticker, "as_of": last_date,
@@ -1179,10 +989,6 @@ def current_signal(ticker: str, entry_multiplier: float, splits: int, buy_amount
         "today_low": last_low, "loc": loc_price,
         "sigma": sigma,
         "state": state, "action": action,
-        "splits_used": used, "splits_total": splits,
-        "splits_remaining": remaining,
-        "buy_amount": buy_amount,
-        "remaining_budget": remaining * buy_amount,
     }
 
 
@@ -1191,7 +997,7 @@ def current_signal(ticker: str, entry_multiplier: float, splits: int, buy_amount
 # ══════════════════════════════════════════════════════════
 def parse_args(argv: list[str]) -> dict:
     opts = {"ticker": "TQQQ", "signal": False, "discord": False, "all": False,
-            "fee": 0.0, "reset_splits": False}
+            "fee": 0.0}
     i = 0
     while i < len(argv):
         a = argv[i]
@@ -1205,23 +1011,18 @@ def parse_args(argv: list[str]) -> dict:
             opts["all"] = True; i += 1; continue
         if a == "--fee" and i + 1 < len(argv):
             opts["fee"] = float(argv[i + 1]); i += 2; continue
-        if a == "--reset-splits":
-            opts["reset_splits"] = True; i += 1; continue
         i += 1
     return opts
 
 
 def _signal_discord_block(sig: dict) -> str:
-    """티커별 Discord 블록 — 종가(날짜), LOC 매수가, 분할 진행 상태, 상태, 액션."""
+    """티커별 Discord 블록 — 종가(날짜), LOC 매수가, 오늘 LOC 도달 여부, 액션."""
     loc_part = f"LOC 매수: ${sig['loc']:.2f} | " if sig["loc"] else "LOC 매수: — | "
     lines = [
         f"**{sig['ticker']} LOC 20분할 전략 신호**",
         f"종가 ${sig['close']:.2f} ({sig['as_of']}) | 저가 ${sig['today_low']:.2f}",
     ]
-    lines.append(
-        f"{loc_part}분할: {sig['splits_used']}/{sig['splits_total']}차 "
-        f"(잔여 {sig['splits_remaining']}차 · 예산 ${sig['remaining_budget']:,.0f})"
-    )
+    lines.append(f"{loc_part}상태: {sig['state']}")
     lines.append(f"▶ {sig['action']}")
     return "\n".join(lines)
 
@@ -1260,10 +1061,6 @@ def main():
             print(f"  당일 저가     : ${sig['today_low']:.2f}")
             if sig["loc"]:
                 print(f"  LOC 매수      : ${sig['loc']:.2f}")
-            print(f"  분할 진행     : {sig['splits_used']}/{sig['splits_total']}차 "
-                  f"(잔여 {sig['splits_remaining']}차)")
-            print(f"  잔여 예산     : ${sig['remaining_budget']:,.0f} "
-                  f"(${sig['buy_amount']:,.0f}×{sig['splits_remaining']}차)")
             print(f"  현재 상태     : {sig['state']}")
             print(f"\n  ▶ {sig['action']}")
             print("\n" + "═" * 72)
@@ -1302,25 +1099,13 @@ def main():
 def _resolve_signal(ticker: str, opts: dict) -> dict:
     """티커별 순수 LOC 신호 dict 산출."""
     cfg = load_config(ticker)
-    try:
-        with open("portfolio_config.json", "r", encoding="utf-8") as f:
-            pos = json.load(f).get("POSITIONS", {}).get(ticker, {})
-        used_list = pos.get("LOC_DCA_USED_SPLITS", []) or []
-        loc_used = len(used_list) if isinstance(used_list, list) else 0
-    except Exception:
-        loc_used = 0
-
-    return current_signal(ticker, cfg["entry_multiplier"], cfg["splits"],
-                          cfg["buy_amount"], loc_used)
+    return current_signal(ticker, cfg["entry_multiplier"])
 
 
 if __name__ == "__main__":
     # ── 통합 CLI 라우팅 ──────────────────────────────────────────
     strategy_flags = ("--signal", "--discord", "--all", "--backtest", "--ticker", "--fee")
-    opts = parse_args(sys.argv[1:])
-    if opts["reset_splits"]:
-        reset_loc_splits(opts["ticker"])
-    elif any(flag in sys.argv for flag in strategy_flags):
+    if any(flag in sys.argv for flag in strategy_flags):
         main()                         # 전략 CLI — 신호(--signal/--discord) / 백테스트(--backtest)
     else:
         execute_daily_briefing()       # 일일 Discord 브리핑 (기본)

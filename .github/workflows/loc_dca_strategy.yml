@@ -1,4 +1,4 @@
-name: DCA LOC Strategy
+name: LOC DCA Strategy
 
 on:
   schedule:
@@ -7,7 +7,7 @@ on:
   workflow_dispatch:           # 수동 실행 지원
 
 jobs:
-  run-dca-ma:
+  run-loc-dca:
     runs-on: ubuntu-latest
     permissions:
       contents: write

@@ -17,9 +17,7 @@
             "LOC_DCA": {
                 "SPLITS": 20,
                 "BUY_AMOUNT": 2500
-            },
-            "LOC_DCA_USED_SPLITS": [],
-            "LOC_DCA_CONFIG_FINGERPRINT": "20|2500.0"
+            }
         }
     },
     "STRATEGY": {

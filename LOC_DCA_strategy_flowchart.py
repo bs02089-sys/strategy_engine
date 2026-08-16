@@ -84,25 +84,16 @@
                                    │
                                    ▼
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│  [4] LOC 체결 감지 ⭐ 단일 논리 ⭐                                            │
-│  check_loc_dca_signals(cfg)                                                  │
-│  └─ 각 포지션 LOC_DCA 설정 읽기 (SPLITS=20, BUY_AMOUNT=2500)                │
-│     ├─ 설정 변경 감지 (LOC_DCA_CONFIG_FINGERPRINT) → 사용 이력 리셋           │
-│     ├─ LOC_DCA_USED_SPLITS 개수 >= SPLITS?                                   │
-│     │  └─ YES → "✅ N차 전부 사용 — 매수 중단"                                │
-│     ├─ _fetch_last_session_bars(ticker) ← yfinance 10d                      │
-│     │  └─ (last_close, last_low, prev_close, last_date)                     │
-│     ├─ loc = prev_close × (1 − σ × ENTRY_MULTIPLIER)                        │
-│     ├─ last_low <= loc?                                                     │
-│     │  ├─ YES → LOC_DCA_USED_SPLITS에 last_date 추가                        │
-│     │  │        → "🚨 LOC N차 매수 신호!" (잔여 차수/예산 표시)             │
-│     │  └─ NO  → "📊 LOC 대기" (저가 vs LOC 표시)                            │
-│     └─ 같은 세션(last_date) 중복 감지 → 재체결 방지                          │
+│  [4] LOC 매수가 계산 ⭐ 단일 논리 ⭐                                            │
+│  calculate_loc_price(ticker, prev_close, cfg)                                │
+│  └─ loc = 전일 종가 × (1 − σ × ENTRY_MULTIPLIER)                             │
+│     └─ 사용자가 정규장에서 이 가격으로 LOC 지정가 주문                      │
+│        (체결 추적은 봇이 안 함 — 증권앱 + 엑셀이 단일 소스, 2026-08-16)     │
 └──────────────────────────────────┬───────────────────────────────────────────┘
                                    │
                                    ▼
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│  [5] 디스코드 브리핑 생성 ← _build_briefing_lines(now_ny, cfg, loc_messages) │
+│  [5] 디스코드 브리핑 생성 ← _build_briefing_lines(now_ny, cfg)               │
 │  ┌────────────────────────────────────────────────────────────────────────┐ │
 │  │  제목: "🌙 U.S. Market LOC Portfolio Briefing (YYYY-MM-DD HH:MM EST)" │ │
 │  │  ├─ 📊 Market Risk Score: X / 14 (from signal_report.json)             │ │
@@ -122,19 +113,16 @@
 │  │  │  └─ calculate_drawdown_and_recovery()                          │ │ │
 │  │  │     → "전고점 $XX 기준 하락률 -XX% / 회복필요 XX%"             │ │ │
 │  │  ├──────────────────────────────────────────────────────────────────┤ │ │
-│  │  │  [5-c] LOC 매수가 + 분할 상태 (_loc_action_line)              │ │ │
+│  │  │  [5-c] LOC 매수가 (_loc_action_line)                           │ │ │
 │  │  │  calculate_loc_price(ticker, prev_close, cfg)                  │ │ │
-│  │  │  ├─ "🎯 [Action] LOC Buy: $XX — 분할 N/20차 (잔여 M차)"        │ │ │
-│  │  │  └─ "💰 분할 예산: $2,500 × M차 = $XX 남음"                   │ │ │
+│  │  │  └─ "🎯 [Action] LOC Buy: $XX" (분할 회차/예산 표시 없음 —     │ │ │
+│  │  │     사용자 엑셀이 단일 소스, 2026-08-16)                       │ │ │
 │  │  ├──────────────────────────────────────────────────────────────────┤ │ │
 │  │  │  [5-d] Rotation 만료 체크                                      │ │ │
 │  │  │  check_rotation_exit_signal(pos_cfg, today)                    │ │ │
 │  │  │  └─ 만료 시 "🔴 D+XX Rotation Maturity" 경고                   │ │ │
 │  │  └──────────────────────────────────────────────────────────────────┘ │ │
 │  └────────────────────────────────────────────────────────────────────────┘ │
-│                                                                              │
-│  ▼ LOC 모니터 섹션: "📉 LOC 20분할 DCA Monitor"                              │
-│     [4]에서 생성한 🚨 체결 신호 / 📊 대기 상태 / ✅ 소진 메시지 포함          │
 └──────────────────────────────────┬───────────────────────────────────────────┘
                                    │
                                    ▼
@@ -163,9 +151,8 @@
 
 📌 CLI 서브모드:
   - --backtest       : 순수 LOC 20분할 백테스트 (MA 필터 없음 — 단일 전략)
-  - --signal         : 실시간 신호 (종가/LOC/분할 상태) — 콘솔용
+  - --signal         : 실시간 신호 (종가/LOC/오늘 LOC 도달 여부) — 콘솔용
   - --signal --discord [--all] : Discord 발송 (전 종목 단일 메시지)
-  - --reset-splits   : LOC_DCA_USED_SPLITS 초기화 (20분할 재개, --ticker 선택)
 """
 
 # =============================================================================
@@ -188,12 +175,6 @@ LOC_DCA_strategy.py (직접 실행)
 │       │   └── _calculate_sigma_from_closes()
 │       │       └── _get_recent_log_returns()
 │       └── log_sigma_update()                 → sigma_history.csv
-│
-├── check_loc_dca_signals() ⭐ 단일 논리 — LOC 체결 감지
-│   ├── _loc_dca_config()                      (SPLITS/BUY_AMOUNT 읽기)
-│   ├── _loc_dca_fingerprint()                 (설정 변경 감지 → 이력 리셋)
-│   ├── _fetch_last_session_bars()             ← yfinance API (10d)
-│   └── _calculate_loc_from_sigma()            loc = prev_close × (1 − σ×승수)
 │
 ├── _build_briefing_lines()                    ← 브리핑 생성
 │   ├── get_market_score()                     ← signal_report.json
@@ -228,12 +209,9 @@ LOC_DCA_strategy.py (직접 실행)
 
 --signal:
   main() → _resolve_signal(ticker, opts)
-        → current_signal(ticker, entry_multiplier, splits, buy_amount, loc_used)
+        → current_signal(ticker, entry_multiplier)
             ├── load_data(ticker)              ← yfinance API
             └── _calculate_loc_from_sigma()
-
---reset-splits:
-  reset_loc_splits(ticker) → LOC_DCA_USED_SPLITS 초기화 → save_portfolio()
 """
 
 # =============================================================================
@@ -250,10 +228,9 @@ LOC_DCA_strategy.py (직접 실행)
  │   ├── DAILY_SIGMA (← refresh_sigma_if_stale)
  │   ├── LAST_SIGMA_UPDATE, LAST_SIGMA_METHOD, LAST_EWMA_LAMBDA
  │   ├── ALLOCATION_PCT, INVEST_TYPE, START_DATE
- │   ├── LOC_DCA ⭐ (SPLITS=20, BUY_AMOUNT=2500 — 단일 논리 설정)
- │   ├── LOC_DCA_USED_SPLITS (체결일 목록 — 자동 관리)
- │   └── LOC_DCA_CONFIG_FINGERPRINT (설정 변경 감지 → 이력 리셋)
- └── LAST_MONTHLY_PING
+ │   ├── LOC_DCA ⭐ (SPLITS=20, BUY_AMOUNT=2500 — 백테스트 기본값)
+ │   └── LAST_MONTHLY_PING
+ ⚠️ 체결 추적/분할 예산은 봇이 저장하지 않음 (사용자 엑셀이 단일 소스 — 2026-08-16)
 
  portfolio_config.json  (읽기 전용, MarketStageSystem.py가 공유 — 키 목록만 사용)
 
@@ -263,7 +240,6 @@ LOC_DCA_strategy.py (직접 실행)
 
  yfinance API (외부 데이터)
  ├── 1mo 데이터 → get_prev_close() (최종 종가)
- ├── 10d 데이터 → _fetch_last_session_bars() (LOC 체결 판정 — 저가/전일 종가)
  ├── 252d+ 데이터 → get_period_ath() / get_realtime_sigma() / recompute_sigma_for_ticker()
  └── 백테스트/신호 → load_data() (Close + Low)
 
@@ -284,9 +260,9 @@ LOC_DCA_strategy.py (직접 실행)
 ║     LOC 매수가 = 전일 종가 × (1 − σ × ENTRY_MULTIPLIER)             ║
 ║                                                                      ║
 ║   체결 규칙:                                                          ║
-║     당일 저가 ≤ LOC → 1차 체결 ($2,500 × 최대 20차)                 ║
-║     체결일 목록(LOC_DCA_USED_SPLITS) 영속화 — 같은 날 중복 방지      ║
-║     20차 전부 소진 → 매수 중단 (수동 재개: --reset-splits)           ║
+║     정규장에서 LOC 가격으로 지정가 주문 ($2,500 × 최대 20차)        ║
+║     체결 여부는 증권앱 확인 + 엑셀 컬러 표시 (봇 미추적 — 2026-08-16)║
+║     분할 예산/회차는 엑셀이 단일 소스                                 ║
 ║                                                                      ║
 ║   매도 규칙: 없음 (순수 적립 전용)                                    ║
 ║                                                                      ║
@@ -377,12 +353,7 @@ jobs:
 
   🔹 TQQQ (Close: $76.79 | 08-14 | LONG_YEAR / D+15)
   • 📈 전고점: $87.02 (2026-06-02) 기준 하락률 -11.76% / 회복 필요 13.32%
-  • 🎯 [Action] LOC Buy: **$73.16** — 분할 0/20차 (잔여 20차)
-  • 💰 분할 예산: $2,500 × 20차 = **$50,000** 남음
-
-  ────────────────────────────────────────
-  📉 LOC 20분할 DCA Monitor
-  📊 TQQQ LOC 대기: 마지막 세션(08-14) 저가 $75.94 > LOC $73.50 (전일 종가 $77.15 기준) · 분할 0/20차 사용 · 다음 체결 대기
+  • 🎯 [Action] LOC Buy: **$73.16**
 """
 
 # =============================================================================

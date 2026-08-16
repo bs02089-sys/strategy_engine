@@ -31,10 +31,9 @@
 **DCA LOC Strategy**는 매일 미국 장 마감 후 정해진 시간에 자동 실행되어:
 1. 포트폴리오에 등록된 티커(TQQQ)의 변동성을 계산/갱신
 2. Sigma 기반 LOC 매수 목표가 산출
-3. **LOC 체결 감지** — 당일 저가 ≤ LOC → 20분할 중 1차 체결 처리 (신호)
-4. LOC 20분할 진행 상태(N/20차) · 잔여 예산 브리핑
-5. 로테이션 포지션 만기 관리
-6. 종합 브리핑을 **Discord**로 전송
+3. 정규장 **LOC 지정가 주문 신호** — 체결 추적은 증권앱 + 엑셀에서 관리 (봇 미추적)
+4. 로테이션 포지션 만기 관리
+5. 종합 브리핑을 **Discord**로 전송
 
 ---
 
@@ -48,11 +47,9 @@
 
 ### 2️⃣ 순수 LOC 지정가 20분할 DCA (단일 논리 — 2026-08-16)
 - **LOC 매수가** = 전일 종가 × (1 − σ × `ENTRY_MULTIPLIER`) — 유일한 매수 논리
-- **당일 저가 ≤ LOC** → 1차 체결 ($2,500 × 최대 **20차** — 적립 전용, 매도 없음)
-- 체결 상태는 `LOC_DCA_USED_SPLITS`(체결일 목록)에 영속화 — 같은 날 중복 감지 방지,
-  `LOC_DCA` 설정(SPLITS/BUY_AMOUNT) 변경 시 자동 리셋
-- **20차 전부 소진 → 매수 중단** (수동 재개: `--reset-splits`)
-- 브리핑에 🚨 체결 신호 / 📊 대기 상태 / 💰 잔여 예산 표시
+- 정규장에서 이 가격으로 **LOC 지정가 주문** → 체결 여부는 증권앱 + 엑셀로 관리 ($2,500 × 최대 **20차** — 적립 전용, 매도 없음)
+- ⚠️ **체결 추적은 봇이 하지 않음 (2026-08-16)** — 분할 예산/회차는 사용자 **엑셀이 단일 소스** (봇은 실제 주문 여부를 알 수 없어 자동 카운터가 부정확)
+- 브리핑은 **LOC 매수가 하나만** 제공 (`🎯 [Action] LOC Buy: $X`)
 
 ### 3️⃣ 포지션 유형별 전략
 
@@ -86,7 +83,7 @@
 │  1. portfolio_config.json 불러오기                                │
 │  2. Sigma 갱신 (오래되었거나 설정 변경 시)                       │
 │  3. 전일 종가 및 LOC 목표가 계산 (티커별)                        │
-│  4. LOC 체결 감지 — 당일 저가 ≤ LOC → 분할 1차 사용               │
+│  4. LOC 매수가 계산 — 정규장 지정가 주문 신호                   │
 │  5. 로테이션 만기 확인                                           │
 │  6. 브리핑 작성 → Discord 전송 (LOC 20분할 상태 포함)            │
 │  7. 월간 Ping (매월 1일)                                        │
@@ -107,7 +104,7 @@
 
 | 파일 | 설명 |
 |------|------|
-| **LOC_DCA_strategy.py** | 📌 **통합 완결판** — 실전 엔진(순수 LOC 20분할 매수/Discord 브리핑) + 백테스트 + `--signal` 실시간 신호 + `--reset-splits` |
+| **LOC_DCA_strategy.py** | 📌 **통합 완결판** — 실전 엔진(순수 LOC 20분할 매수/Discord 브리핑) + 백테스트 + `--signal` 실시간 신호 |
 | **LOC_DCA_strategy_flowchart.py** | 시스템 전체 플로우차트 문서 |
 | **setup_cronjob_org.py** | cron-job.org 실시간 알림 설정 자동화 (생성/--list/--test-dispatch/--update-pat/--update-schedule) — 스윙 알리미(swing-monitor) 전용 |
 | **swing_alerter.py** | 🆕 **스윙 투자 알리미** — MDD 구간 매수/매도 알림 + 모바일 대시보드 (유튜브 TQQQ 스윙 전략 재구현) |
@@ -191,17 +188,15 @@ pandas_market_calendars  # NYSE 휴장일 계산
             "LOC_DCA": {
                 "SPLITS": 20,
                 "BUY_AMOUNT": 2500
-            },
-            "LOC_DCA_USED_SPLITS": [],
-            "LOC_DCA_CONFIG_FINGERPRINT": "20|2500.0"
+            }
         }
     },
     "STRATEGY": { "CYCLE_YEARS": 2, "BUY_DURATION_DAYS": 252, "HOLD_DURATION_DAYS": 252 }
 }
 ```
 
-> 참고: `LOC_DCA_USED_SPLITS`(체결일 목록)와 `LOC_DCA_CONFIG_FINGERPRINT`는
-> 엔진이 자동 관리합니다. 설정(SPLITS/BUY_AMOUNT)을 바꾸면 사용 이력이 자동 리셋됩니다.
+> 참고: `LOC_DCA` 블록(SPLITS/BUY_AMOUNT)은 **백테스트 기본값**용입니다.
+> 실전 체결 추적·분할 예산은 봇이 하지 않으며 **사용자 엑셀이 단일 소스**입니다 (2026-08-16).
 
 #### 포지션 설정 항목
 
@@ -213,9 +208,7 @@ pandas_market_calendars  # NYSE 휴장일 계산
 | `EWMA_LAMBDA` | EWMA 감쇠 계수 (기본 0.94) |
 | `INVEST_TYPE` | 투자 유형: `LONG_YEAR` / `ROTATION_3M` / `END_DEC` |
 | `ALLOCATION_PCT` | 포트폴리오 내 비중 |
-| `LOC_DCA` | LOC 20분할 설정 (`SPLITS`=20, `BUY_AMOUNT`=2500) — 단일 논리 |
-| `LOC_DCA_USED_SPLITS` | 체결일 목록 (자동 관리 — 같은 날 중복 방지) |
-| `LOC_DCA_CONFIG_FINGERPRINT` | LOC_DCA 설정 변경 감지 (변경 시 사용 이력 리셋) |
+| `LOC_DCA` | LOC 20분할 설정 (`SPLITS`=20, `BUY_AMOUNT`=2500) — 백테스트 기본값 |
 | `ROTATION_EXIT_DAYS` | ROTATION_3M 만기 영업일 수 |
 
 ### LOC 목표가 계산식
@@ -236,10 +229,6 @@ LOC 목표가 = 전일종가 × (1 - sigma × ENTRY_MULTIPLIER)
 ```bash
 # LOC 브리핑 생성 및 Discord 전송 (기본 실행)
 python3 LOC_DCA_strategy.py
-
-# LOC 분할 사용 이력 초기화 (20분할 재개)
-python3 LOC_DCA_strategy.py --reset-splits
-python3 LOC_DCA_strategy.py --reset-splits --ticker TQQQ   # 특정 티커만
 
 # 특정 함수만 테스트
 python3 -c "
@@ -286,8 +275,8 @@ python3 LOC_DCA_strategy_flowchart.py
 | 예약 실행 | 매일 23:30 (월~금) | 장 마감 후 **통합 브리핑 1건** 발송 (LOC 20분할 신호는 브리핑에 통합) |
 | 수동 실행 | 사용자 요청 시 | workflow_dispatch 수동 실행 |
 
-> - 23:30 UTC 실행 시 `LOC_DCA_strategy.py`(통합 브리핑) 1건만 Discord로 발송합니다. LOC 실행 액션(▶)과 체결 신호(🚨)가 티커 블록에 포함되며, `--signal`은 콘솔 로그 확인용으로만 실행됩니다.
-> - 신호 메시지: 종가·날짜 · LOC 매수가 · 분할 진행 상태(N/20차) · 액션을 한 번에 전송.
+> - 23:30 UTC 실행 시 `LOC_DCA_strategy.py`(통합 브리핑) 1건만 Discord로 발송합니다. LOC 실행 액션(▶)이 티커 블록에 포함되며, `--signal`은 콘솔 로그 확인용으로만 실행됩니다.
+> - 신호 메시지: 종가·날짜 · LOC 매수가 · 오늘 LOC 도달 여부 · 액션을 한 번에 전송.
 
 ### `bear_market_signals.yml` — 약세장 신호
 
@@ -362,9 +351,6 @@ python3 LOC_DCA_strategy.py --backtest --fee 0.001    # 수수료 0.1% 반영
 python3 LOC_DCA_strategy.py --signal
 python3 LOC_DCA_strategy.py --signal --discord       # TQQQ 신호를 Discord로
 python3 LOC_DCA_strategy.py --signal --discord --all  # 전 종목 단일 메시지 (수동 확인용 — 워크플로우는 브리핑 1건만 발송)
-
-# 분할 사용 이력 초기화
-python3 LOC_DCA_strategy.py --reset-splits           # 20분할 재개
 ```
 
 ### 실전 반영 — 순수 LOC 20분할 (2026-08-16)
@@ -374,8 +360,8 @@ MA/RSI/ATH_DCA 등 로직을 섞던 방식을 버리고 **하나의 논리**로 
 
 - **LOC 매수가** = 전일 종가 × (1 − σ × 승수) — 당일 저가 ≤ LOC → **1차 체결**
 - $2,500 × **최대 20차** — 20차 소진 시 매수 중단 (적립 전용)
-- 체결 상태는 `LOC_DCA_USED_SPLITS`(체결일 목록)에 자동 기록 — 같은 날 중복 신호 방지
-- 일일 브리핑의 `• 🎯 [Action] LOC Buy:` 라인과 `📉 LOC 20분할 DCA Monitor` 섹션으로 확인
+- **체결 추적 없음 (2026-08-16)** — 정규장 지정가 주문 후 체결 여부는 증권앱 확인 + 엑셀 기록 (봇 미추적)
+- 일일 브리핑은 `• 🎯 [Action] LOC Buy:` 라인 하나로 **LOC 매수가만** 안내 (분할 예산/회차 표시 없음)
 - **매도 규칙 없음** — 순수 적립 (매도 신호 자체가 발생하지 않음)
 
 ---
