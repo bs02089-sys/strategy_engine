@@ -43,6 +43,7 @@ import datetime as _dt
 import json
 import os
 import sys
+from typing import Any
 
 import requests
 
@@ -207,7 +208,7 @@ def test_dispatch(owner: str, repo: str, pat: str, event_type: str) -> None:
         raise SystemExit(f"❌ 테스트 dispatch 실패 ({resp.status_code}): {resp.text[:300]}")
 
 
-def list_jobs(cronjob_api_key: str) -> list[dict]:
+def list_jobs(cronjob_api_key: str) -> list[dict[str, Any]]:
     """cron-job.org 잡 목록 조회. 성공 시 잡 목록 반환."""
     resp = requests.get(
         f"{CRONJOB_API_BASE}/jobs",
@@ -219,13 +220,13 @@ def list_jobs(cronjob_api_key: str) -> list[dict]:
     return resp.json().get("jobs", [])
 
 
-def print_jobs(jobs: list[dict]) -> None:
+def print_jobs(jobs: list[dict[str, Any]]) -> None:
     if not jobs:
         print("📭 등록된 크론잡이 없습니다.")
         return
     print(f"📋 등록된 크론잡 ({len(jobs)}개):")
     for j in jobs:
-        status_code = j.get("lastStatus")
+        status_code = int(j.get("lastStatus") or 0)
         status_txt = LAST_STATUS_TEXT.get(status_code, f"알 수 없음({status_code})")
         print(
             f"  - [{j.get('jobId')}] {j.get('title', '(제목 없음)')} "
@@ -239,7 +240,7 @@ def print_jobs(jobs: list[dict]) -> None:
         print(f"      다음 실행: {_fmt_epoch(j.get('nextExecution'))}")
 
 
-def find_existing_job(jobs: list[dict], dispatches_url: str, job_title: str) -> int | None:
+def find_existing_job(jobs: list[dict[str, Any]], dispatches_url: str, job_title: str) -> int | None:
     """목록 응답에서 URL+제목이 일치하는 잡의 jobId 반환 (없으면 None).
 
     cron-job.org의 GET /jobs 응답은 평면 구조(jobId/url/title이 최상위)라

@@ -1,0 +1,113 @@
+name: Dollar Alerter
+
+on:
+  schedule:
+    # 월~금 00:00 UTC = 09:00 KST — 한국 아침 9시 고정 일일 브리핑 (은행 영업 시작 전)
+    - cron: "0 0 * * 1-5"
+  repository_dispatch:
+    types: [dollar-monitor]   # cron-job.org 장중 실시간 알림 발사 (은행 영업시간 09~16시 KST 폴링)
+  workflow_dispatch:          # 수동 실행 지원
+
+concurrency:
+  group: dollar-alerter       # 일일 브리핑 ↔ 실시간 폴링 직렬화
+  cancel-in-progress: false
+
+jobs:
+  run-dollar-alerter:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+      DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
+      ONESIGNAL_APP_ID: ${{ secrets.ONESIGNAL_APP_ID }}
+      ONESIGNAL_REST_API_KEY: ${{ secrets.ONESIGNAL_REST_API_KEY }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Sync with latest remote (start from newest state)
+        run: git pull --rebase
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip -q
+          pip install -q -r requirements.txt
+
+      - name: Run Realtime Dollar Monitor (from cron-job.org dispatch)
+        if: github.event_name == 'repository_dispatch'
+        # 장중 실시간 모니터 — 신규 매수/익절/임박 신호만 푸시 + Discord 발송.
+        # --monitor 가 실시간 가격을 반영한 대시보드 HTML 도 저장한다
+        # → Sync 단계가 /tmp 로 보존해 Deploy 단계가 gh-pages 에 재배포.
+        run: |
+          set -o pipefail
+          python dollar_alerter.py --monitor 2>&1 | tee dollar_log.txt
+
+      - name: Run Daily Dollar Briefing
+        if: github.event_name != 'repository_dispatch'
+        # 일일 브리핑 + 대시보드 HTML 갱신 (모바일 확인용)
+        run: |
+          set -o pipefail
+          python dollar_alerter.py --discord 2>&1 | tee dollar_log.txt
+
+      - name: Show log on failure
+        if: failure()
+        run: cat dollar_log.txt
+
+      - name: Sync and Notify
+        if: always()
+        run: |
+          git config --global user.name "Dollar Bot"
+          git config --global user.email "bot@example.com"
+
+          # 대시보드는 main에 커밋하지 않는다 — 생성 파일(헤더 시각 등)이 봇/사용자
+          # 양쪽에서 재생성되어 git pull 충돌을 반복하는 문제 방지 (swing 과 동일 규칙).
+          # 신선한 사본은 /tmp로 보존해 Deploy 단계가 gh-pages에만 반영한다.
+          [ -f "dollar_dashboard.html" ] && cp dollar_dashboard.html /tmp/dollar_dash.html
+
+          # 봇 전용 상태 파일만 커밋 — 설정(dollar_config.json)/개인 포지션(dollar_personal.json)은
+          # 사용자 소유라 건드리지 않는다.
+          [ -f "dollar_state.json" ] && git add dollar_state.json
+
+          git commit -m "update: dollar-state $(date +'%Y-%m-%d')" || echo "No changes to commit"
+          # -X theirs: 안전망 — 상태가 별도 파일(dollar_state.json)에 있어 사용자 설정과
+          # 충돌할 일이 없지만, 만에 하나를 대비해 원격(사람) 버전을 유지한다.
+          git pull --rebase -X theirs || true
+          git push
+
+      - name: Deploy Dashboard to GitHub Pages (gh-pages branch)
+        # 일일/수동/장중 디스패치 모두 재배포 — 장중 실시간 가격을 스마트폰 앱에서 보려면
+        # 디스패치마다 신선한 대시보드를 gh-pages 에 올려야 한다.
+        # ⚠️ swing 대시보드는 index.html 로 배포되므로 달러는 dollar.html 로 분리 배포
+        #    (서로 덮어쓰지 않도록 — https://{user}.github.io/{repo}/dollar.html)
+        if: always()
+        run: |
+          set -e
+          # 대시보드 생성이 실패한 실행에선 배포를 건너뛴다 — 이전 gh-pages 유지
+          [ -f /tmp/dollar_dash.html ] || { echo "대시보드 없음 — 배포 생략"; exit 0; }
+          git config --global user.name "Dollar Bot"
+          git config --global user.email "bot@example.com"
+
+          git fetch origin gh-pages:refs/remotes/origin/gh-pages 2>/dev/null || true
+          if git rev-parse --verify origin/gh-pages >/dev/null 2>&1; then
+            git checkout -B gh-pages origin/gh-pages
+          else
+            git checkout --orphan gh-pages
+            git rm -rf --quiet . 2>/dev/null || true
+          fi
+
+          cp /tmp/dollar_dash.html dollar.html
+          git add dollar.html
+          if git diff --quiet --cached origin/gh-pages >/dev/null 2>&1; then
+            echo "변경 없음 — 배포 생략"
+          else
+            git commit -m "deploy: dollar dashboard $(date +'%Y-%m-%d')"
+            git push origin gh-pages --force
+          fi
+          git checkout main || true

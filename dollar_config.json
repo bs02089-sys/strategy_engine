@@ -1,0 +1,17 @@
+{
+    "_NOTE": "달러(USD/KRW) 매직 스플릿 환테크 알리미 공용 설정 — [전략] 매수: 전일 종가 대비 -0.3%~-0.5% 하락 시 신호 (BUY_DROP_PCT/BUY_BAND_PCT), 매도: 매수가 대비 +0.5% 익절 (SELL_TARGET_PCT). 백테스트 검증 근거: dollar_split_backtest.py — 세븐 스플릿 정통(하락 매수/익절 매도) 2004~2026 CAGR +4.1% vs 바이앤홀드 +0.8%, MDD -17.2% (스프레드 왕복 0.1% 반영). 개인 매수 정보(BUY_PRICE/SHARES)는 dollar_personal.json 에 기록한다 (봇은 읽기만). (JSON 주석 불가로 _NOTE 메타 키로 기록 — 엔진은 무시)",
+    "ENABLED": true,
+    "BUY_DROP_PCT": 0.3,
+    "BUY_BAND_PCT": 0.5,
+    "SELL_TARGET_PCT": 0.5,
+    "IMMINENT_GAP_PCT": 0.1,
+    "BUY_AMOUNT_KRW": 500000,
+    "PAGES_URL": "",
+    "ONESIGNAL_APP_ID": "fc892714-97d9-457a-b3d6-12d25d93cc48",
+    "POSITIONS": {
+        "USDKRW=X": {
+            "ENABLED": true,
+            "LABEL": "USD/KRW"
+        }
+    }
+}

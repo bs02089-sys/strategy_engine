@@ -112,6 +112,12 @@
 | **swing_personal.json** | 🔒 스윙 알리미 **개인 포지션** (LOTS — 계좌별 BUY_PRICE/SHARES, 공용 알림에 노출 안 됨, 사용자 소유) |
 | **swing_state.json** | 스윙 알리미 봇 상태 (ZONE_ALERTS/매도 플래그 — 봇 전용, 자동 관리) |
 | **swing_dashboard.html** | 스윙 알리미 모바일 대시보드 (자동 생성) |
+| **dollar_split_backtest.py** | 🆕 달러(USD/KRW) 매직 스플릿 전략 백테스트 — '97% 수익률' 주장 검증 (검증 결과: 세븐 스플릿 정통 해석만 바이앤홀드 우위) |
+| **dollar_alerter.py** | 🆕 **달러 매직 스플릿 알리미** — 전일 종가 대비 -0.3% 하락 매수 신호 / 매수가 대비 +0.5% 익절 신호 + 모바일 대시보드 |
+| **dollar_config.json** | 달러 알리미 공용 설정 (사용자 소유 — 매수/익절 파라미터/푸시) |
+| **dollar_personal.json** | 🔒 달러 알리미 **개인 포지션** (LOTS — 계좌별 BUY_PRICE/SHARES, 사용자 소유) |
+| **dollar_state.json** | 달러 알리미 봇 상태 (매수/익절 신호 플래그 — 봇 전용, 자동 관리) |
+| **dollar_dashboard.html** | 달러 알리미 모바일 대시보드 (자동 생성) |
 | **sw.js** | PWA 서비스 워커 — 통과형 fetch (설치형 앱용, strict 검사 대상) |
 | **OneSignalSDKWorker.js** | OneSignal 웹 푸시 + PWA 통합 서비스 워커 (strict 검사 대상) |
 | **tsconfig.json** | TypeScript strict 검사 설정 — `sw.js`/`OneSignalSDKWorker.js` (서비스 워커) |
@@ -297,6 +303,17 @@ python3 LOC_DCA_strategy_flowchart.py
 | 예약 실행 | 매일 00:00 UTC = 09:00 KST (월~금) | 스윙 일일 브리핑 + 대시보드 갱신 (한국 아침 9시 고정) |
 | repository_dispatch | 장중 N분 (cron-job.org) | `--monitor` 실시간 알림 (매수 구간 도달/임박/매도) |
 | 수동 실행 | 사용자 요청 시 | workflow_dispatch 수동 실행 |
+
+### `dollar_alerter.yml` — 달러 매직 스플릿 알리미
+
+| 트리거 | 시간 (UTC) | 설명 |
+|--------|------------|------|
+| 예약 실행 | 매일 00:00 UTC = 09:00 KST (월~금) | 달러 일일 브리핑 + 대시보드 갱신 (은행 영업 시작 전) |
+| repository_dispatch | 장중 N분 (cron-job.org, `dollar-monitor`) | `--monitor` 실시간 신호 (매수/익절/임박 — 은행 영업시간 09~16시 KST 폴링) |
+| 수동 실행 | 사용자 요청 시 | workflow_dispatch 수동 실행 |
+
+> cron-job.org 잡 생성: `GITHUB_EVENT_TYPE=dollar-monitor JOB_TITLE="Dollar alerter realtime monitor" UTC_HOURS_START=0 UTC_HOURS_END=7 POLL_MINUTES=10 python setup_cronjob_org.py`
+> (은행 영업시간 09~16시 KST = UTC 00~07시 — setup_cronjob_org.py 는 env 기반이라 코드 수정 불필요)
 
 ### TypeScript strict 검사 게이트 (모든 워크플로우 공통)
 
