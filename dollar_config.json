@@ -5,7 +5,6 @@
     "BUY_BAND_PCT": 0.5,
     "SELL_TARGET_PCT": 0.5,
     "IMMINENT_GAP_PCT": 0.1,
-    "BUY_AMOUNT_KRW": 500000,
     "PAGES_URL": "",
     "ONESIGNAL_APP_ID": "fc892714-97d9-457a-b3d6-12d25d93cc48",
     "POSITIONS": {

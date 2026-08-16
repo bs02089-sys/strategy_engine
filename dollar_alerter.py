@@ -80,7 +80,6 @@ DEFAULT_CFG = {
     "BUY_BAND_PCT": 0.5,             # 매수 밴드 상한 % (0 = 무제한 — 급락도 신호)
     "SELL_TARGET_PCT": 0.5,          # 익절 목표: 매수가 대비 상승 % (백테스트 검증값)
     "IMMINENT_GAP_PCT": 0.1,         # 임박 알림 %p (트리거/목표까지)
-    "BUY_AMOUNT_KRW": 500000,        # 매수 신호 시 권장 환전 금액(원)
     "PAGES_URL": "",                 # GitHub Pages 주소 — 설정 시 대시보드에 라이브 링크 표시
     "ONESIGNAL_APP_ID": "",          # OneSignal 웹 푸시 앱 ID (공개값)
     "POSITIONS": {},
@@ -381,7 +380,7 @@ def detect_alerts(st: dict, pos: dict, cfg: dict) -> tuple[list[str], list[str],
         msg = (f"🔻 **{ticker} 매수 신호**\n"
                f"현재가 {cur:,.2f}원 ≤ 트리거 {st['buy_trigger']:,.2f}원 "
                f"(전일 종가 {st['price']:,.2f}원 대비 -{drop:g}%){band_txt}\n"
-               f"▶ 약 {float(cfg.get('BUY_AMOUNT_KRW', 500000)):,.0f}원 환전 → "
+               f"▶ 환전 → "
                f"매수가 대비 +{tgt:g}% 에서 익절")
         msgs.append(msg)
         buy_msgs.append(msg)
@@ -486,8 +485,7 @@ def build_briefing_text(statuses: list[dict], cfg: dict) -> str:
             for l in open_lots:
                 lines.append(f"  · {l['account']}번 — 매수 {l['buy_price']:,.2f}원 → "
                              f"익절 목표 {l['sell_target']:,.2f}원 (+{tgt:g}%) {_sell_chip(l)}")
-        lines.append(f"- ▶ 실행: 오늘 {st['buy_trigger']:,.2f}원 이하로 내려가면 "
-                     f"약 {float(cfg.get('BUY_AMOUNT_KRW', 500000)):,.0f}원 환전 → "
+        lines.append(f"- ▶ 실행: 오늘 {st['buy_trigger']:,.2f}원 이하로 내려가면 환전 → "
                      f"매수가 대비 +{tgt:g}% 에서 익절")
         lines.append("")
     return "\n".join(lines).strip()
@@ -598,8 +596,7 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str) -> str:
             {f'· 전일 대비 {st['day_change_pct']:+.2f}%' if st['day_change_pct'] is not None else ''}</div>
           <div class="info">매수 트리거 <b>{st['buy_trigger']:,.2f}원</b> 이하
             (전일 종가 대비 -{float(cfg.get('BUY_DROP_PCT', 0.3)):g}%{band_txt})<br>
-            익절 목표 <b>매수가 대비 +{st['sell_target_pct']:g}%</b> ·
-            권장 금액 약 {float(cfg.get('BUY_AMOUNT_KRW', 500000)):,.0f}원</div>
+            익절 목표 <b>매수가 대비 +{st['sell_target_pct']:g}%</b></div>
           {lots_block}
         </div>""")
     pages = (cfg.get("PAGES_URL") or "").strip()
