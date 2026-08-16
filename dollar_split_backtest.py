@@ -74,6 +74,13 @@ def fetch_ohlc(ticker: str) -> pd.DataFrame:
     if df.index.tz is not None:
         df.index = df.index.tz_localize(None)
     df = df[~df.index.duplicated(keep="last")].sort_index()
+    # 데이터 글리치 방어 (2026-08-17 확인) — yfinance USDKRW=X 에 고가 오류 바 1건:
+    # 2008-03-17 High=21,353 (실제 ~988). 고저비 >15% 는 σ 0.6% 환율 일봉에서 비현실적
+    # → High 를 max(Open, Close) 로 보정. 익절/LOC 판정이 고가에 의존하므로 허위 체결 방지.
+    # (기존 실전 설정 0.3%/0.3% 결과에는 영향 없음 — 392회·CAGR +5.2% 동일 확인)
+    bad = df["High"] / df["Low"] > 1.15
+    if bad.any():
+        df.loc[bad, "High"] = np.maximum(df.loc[bad, "Open"], df.loc[bad, "Close"])
     return df
 
 

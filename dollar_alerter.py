@@ -15,6 +15,10 @@ dollar_alerter.py — 달러(USD/KRW) '매직 스플릿' 환테크 알리미
     (밴드 BUY_BAND_PCT%(기본 0.5)보다 깊은 급락은 신호 제외 — 설정으로 해제 가능)
   - 익절 신호: 계좌별 매수가 대비 +SELL_TARGET_PCT%(기본 0.3) 도달 (2026-08-17
     그리드 최적화: 0.3% 익절이 수익 동일 + 보유 기간 절반 + Sharpe 개선)
+  - 탈출 신호: 보유 영업일이 MAX_HOLD_DAYS(기본 60) 이상이면 ⏰ 갇힘 정리 신호
+    (2026-08-17 백테스트 채택 — 타임스톱 30~90일이 CAGR/MDD/Sharpe 전부 개선:
+    무기한 대비 22.6년 CAGR +5.2→+6.0% · MDD -14.2→-10.5% · Sharpe 0.65→0.93,
+    30일은 회전이 빠르지만 약세장 churn 으로 장기 MDD 열위 → 60일 선정)
   - 임박 신호: 트리거/목표까지 IMMINENT_GAP_PCT%p(기본 0.2) 이내
 
 판정 기준:
@@ -41,7 +45,7 @@ import json
 import os
 import socket
 import time
-from datetime import datetime, time as dtime
+from datetime import date, datetime, timedelta, time as dtime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from zoneinfo import ZoneInfo
 
@@ -61,7 +65,7 @@ NY_TZ = ZoneInfo("America/New_York")
 # dollar_state.json 에 보관하는 봇 전용 상태 키 (POSITIONS 내부) —
 # dollar_config.json(사용자 설정)과 분리해 봇/사용자 커밋 충돌로 상태가 유실되지 않게 한다.
 _STATE_KEYS = ("BUY_SIGNAL_SENT", "BUY_SIGNAL_DATE", "BUY_IMMINENT_SENT", "BUY_IMMINENT_DATE",
-               "SELL_SIGNAL_SENT", "SELL_IMMINENT_SENT", "CYCLE_RESET_DONE")
+               "SELL_SIGNAL_SENT", "SELL_IMMINENT_SENT", "ESCAPE_SIGNAL_DATE", "CYCLE_RESET_DONE")
 _STATE_DEFAULTS = {
     # 매수 신호/임박은 '당일 한정' — 발송일(BUY_*_DATE)이 바뀌면 자동 리셋되어
     # 새 전일 종가 기준의 새 신호를 받을 수 있다 (2026-08-17)
@@ -73,6 +77,8 @@ _STATE_DEFAULTS = {
     # 전 계좌 익절 완료(사이클 완료) 시 auto_cycle_reset 이 리셋 (수동 --reset 도 가능)
     "SELL_SIGNAL_SENT": {},
     "SELL_IMMINENT_SENT": {},
+    # 탈출 신호 — {계좌번호: 발송한 매수일(BUY_DATE)} — 매수일이 바뀌면(새 매수) 자동 재무장
+    "ESCAPE_SIGNAL_DATE": {},
     "CYCLE_RESET_DONE": False,
 }
 
@@ -82,6 +88,7 @@ DEFAULT_CFG = {
     "BUY_DROP_PCT": 0.3,             # 매수 트리거: 전일 종가 대비 하락 % (백테스트 검증값)
     "BUY_BAND_PCT": 0.5,             # 매수 밴드 상한 % (0 = 무제한 — 급락도 신호)
     "SELL_TARGET_PCT": 0.3,          # 익절 목표: 매수가 대비 상승 % (그리드 최적값 — 0.5 대비 보유 절반·Sharpe 개선)
+    "MAX_HOLD_DAYS": 60,             # 보유 한도 영업일 (0 = 해제) — 초과 시 ⏰ 탈출 신호 (갇힘 정리, 2026-08-17 백테스트 채택)
     "IMMINENT_GAP_PCT": 0.2,         # 임박 알림 %p (트리거/목표까지)
     "PAGES_URL": "",                 # GitHub Pages 주소 — 설정 시 대시보드에 라이브 링크 표시
     "ONESIGNAL_APP_ID": "",          # OneSignal 웹 푸시 앱 ID (공개값)
@@ -139,16 +146,18 @@ def _normalize_lots(pp: dict) -> list[dict]:
             sh = lot.get("SHARES")
             if bp is None and sh is None:
                 continue  # 미입력 계좌 — 건너뜀
-            out.append({
-                "account": int(lot.get("ACCOUNT") or i),
-                "buy_price": float(bp) if bp is not None else None,
-                "shares": float(sh) if sh is not None else 0.0,
-            })
+        bd = lot.get("BUY_DATE")
+        out.append({
+            "account": int(lot.get("ACCOUNT") or i),
+            "buy_price": float(bp) if bp is not None else None,
+            "shares": float(sh) if sh is not None else 0.0,
+            "buy_date": str(bd).strip() if bd is not None else None,
+        })
         return out
     if pp.get("BUY_PRICE") is not None:
         # 구형 단일 키 → 1번 계좌 로트로 승격 (하위 호환)
         return [{"account": 1, "buy_price": float(pp["BUY_PRICE"]),
-                 "shares": float(pp.get("SHARES") or 0)}]
+                 "shares": float(pp.get("SHARES") or 0), "buy_date": None}]
     return []
 
 
@@ -241,6 +250,17 @@ def _bank_hours_open(now: datetime | None = None) -> bool:
     return 30 <= m < 120
 
 
+def _business_days_between(d0: date, d1: date) -> int:
+    """두 날짜 사이 영업일(월~금) 수 — 백테스트의 '거래일' 의미와 동일."""
+    days = 0
+    d = d0
+    while d < d1:
+        if d.weekday() < 5:
+            days += 1
+        d += timedelta(days=1)
+    return days
+
+
 def get_live_price(ticker: str) -> float | None:
     """실시간 가격 (yfinance, 15분 지연) — fast_info 우선, 1분봉 폴백.
 
@@ -311,7 +331,8 @@ def compute_ticker(ticker: str, pos: dict, cfg: dict, live: bool = False) -> dic
         sh = float(lot.get("shares") or 0)
         ls = {"account": lot.get("account"), "buy_price": None, "shares": sh,
               "sell_target": None, "sell_ready": False, "sell_gap_pct": None,
-              "exp_profit_krw": None}
+              "exp_profit_krw": None, "buy_date": lot.get("buy_date"),
+              "hold_days": None, "escape_ready": False}
         if bp:
             bp = float(bp)
             s_target = bp * (1 + sell_target_pct)
@@ -320,6 +341,17 @@ def compute_ticker(ticker: str, pos: dict, cfg: dict, live: bool = False) -> dic
             ls.update(buy_price=bp, sell_target=s_target, sell_ready=s_ready,
                       sell_gap_pct=s_gap,
                       exp_profit_krw=(s_target - bp) * sh if sh > 0 else None)
+            # 보유 기간 → 탈출 판정 (MAX_HOLD_DAYS 영업일 초과 = 갇힘 정리)
+            max_hold = int(cfg.get("MAX_HOLD_DAYS", 60) or 0)
+            bd = ls["buy_date"]
+            if max_hold > 0 and bd:
+                try:
+                    d0 = date.fromisoformat(bd)
+                    d1 = datetime.now(KST_TZ).date()
+                    ls["hold_days"] = _business_days_between(d0, d1)
+                    ls["escape_ready"] = ls["hold_days"] >= max_hold
+                except ValueError:
+                    pass
         lot_stats.append(ls)
 
     st.update({
@@ -392,11 +424,13 @@ def detect_alerts(st: dict, pos: dict, cfg: dict) -> tuple[list[str], list[str],
     if st["hit_buy"] and not state["BUY_SIGNAL_SENT"]:
         state["BUY_SIGNAL_SENT"] = True
         band_txt = f" (밴드 -{float(cfg.get('BUY_BAND_PCT', 0.5)):g}% 초과 급락 제외)" if st["buy_band_lo"] else ""
+        max_hold = int(cfg.get("MAX_HOLD_DAYS", 60) or 0)
+        esc_txt = f" (보유 {max_hold}영업일 초과 시 ⏰ 탈출)" if max_hold > 0 else ""
         msg = (f"🔻 **{ticker} 매수 신호**\n"
                f"현재가 {cur:,.2f}원 ≤ 트리거 {st['buy_trigger']:,.2f}원 "
                f"(전일 종가 {st['price']:,.2f}원 대비 -{drop:g}%){band_txt}\n"
                f"▶ 환전 → "
-               f"매수가 대비 +{tgt:g}% 에서 익절")
+               f"매수가 대비 +{tgt:g}% 에서 익절{esc_txt}")
         msgs.append(msg)
         buy_msgs.append(msg)
 
@@ -433,6 +467,23 @@ def detect_alerts(st: dict, pos: dict, cfg: dict) -> tuple[list[str], list[str],
                    f"(남은 {lot['sell_gap_pct']:.2f}%p)")
             msgs.append(msg)
             sell_msgs.append(msg)
+
+    # 4) 탈출 신호 — 보유 영업일 ≥ MAX_HOLD_DAYS (갇힘 정리, 계좌별 매수 사이클당 1회)
+    esc_date = state["ESCAPE_SIGNAL_DATE"]
+    max_hold = int(cfg.get("MAX_HOLD_DAYS", 60) or 0)
+    for lot in st["lots"]:
+        if max_hold <= 0 or lot["sell_target"] is None or not lot.get("escape_ready"):
+            continue
+        acc = str(lot["account"])
+        if esc_date.get(acc) != lot.get("buy_date"):
+            esc_date[acc] = lot.get("buy_date")
+            msg = (f"⏰ **{ticker} 탈출 신호 — {lot['account']}번 계좌**\n"
+                   f"매수일 {lot['buy_date']} · 보유 {lot['hold_days']}영업일 ≥ {max_hold}일 한도 "
+                   f"— 익절 미도달\n"
+                   f"현재가 {cur:,.2f}원 (매수가 {lot['buy_price']:,.2f}원)\n"
+                   f"▶ 시장가로 탈출(갇힘 정리) 후 dollar_personal.json 의 LOTS 갱신")
+            msgs.append(msg)
+            sell_msgs.append(msg)
     return msgs, buy_msgs, sell_msgs
 
 
@@ -453,6 +504,7 @@ def auto_cycle_reset(st: dict, pos: dict) -> tuple[str | None, bool]:
         if not state.get("CYCLE_RESET_DONE"):
             state["SELL_SIGNAL_SENT"] = {}
             state["SELL_IMMINENT_SENT"] = {}
+            state["ESCAPE_SIGNAL_DATE"] = {}
             state["CYCLE_RESET_DONE"] = True
             return (f"🔄 **{st['ticker']} 사이클 완료 — 전 계좌 익절 목표 도달**\n"
                     f"익절 알림 상태 자동 리셋 완료. 다음 매수 신호부터 새 사이클 시작."), True
@@ -468,11 +520,13 @@ def auto_cycle_reset(st: dict, pos: dict) -> tuple[str | None, bool]:
 # ═══════════════════════════════════════════════════════════
 
 def _sell_chip(lot: dict, gap_pct: float = 0.1) -> str:
-    """계좌 1개의 익절 상태 칩."""
+    """계좌 1개의 익절/탈출 상태 칩."""
     if lot.get("sell_target") is None:
         return "매도 미설정"
     if lot["sell_ready"]:
         return "🚨 익절 도달"
+    if lot.get("escape_ready"):
+        return "⏰ 탈출"
     if lot.get("sell_gap_pct") is not None and lot["sell_gap_pct"] <= gap_pct:
         return "🚀 임박"
     return "⏳ 대기"
@@ -499,8 +553,9 @@ def build_briefing_text(statuses: list[dict], cfg: dict) -> str:
         if open_lots:
             lines.append(f"- 보유 계좌 {len(open_lots)}개:")
             for l in open_lots:
+                hold_txt = f" · 보유 {l['hold_days']}일" if l.get("hold_days") else ""
                 lines.append(f"  · {l['account']}번 — 매수 {l['buy_price']:,.2f}원 → "
-                             f"익절 목표 {l['sell_target']:,.2f}원 (+{tgt:g}%) {_sell_chip(l)}")
+                             f"익절 목표 {l['sell_target']:,.2f}원 (+{tgt:g}%){hold_txt} {_sell_chip(l)}")
         lines.append(f"- ▶ 실행: 오늘 {st['buy_trigger']:,.2f}원 이하로 내려가면 환전 → "
                      f"매수가 대비 +{tgt:g}% 에서 익절")
         lines.append("")
@@ -524,6 +579,7 @@ def print_console(statuses: list[dict], cfg: dict) -> None:
                 continue
             print(f"  {l['account']}번 계좌: 매수 {l['buy_price']:,.2f}원 → 익절 {l['sell_target']:,.2f}원 "
                   f"(+{st['sell_target_pct']:g}%) {_sell_chip(l)}"
+                  + (f" · 보유 {l['hold_days']}일" if l.get("hold_days") else "")
                   + (f" · 예상수익 {l['exp_profit_krw']:,.0f}원" if l.get("exp_profit_krw") else ""))
     print()
 
@@ -591,11 +647,13 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str) -> str:
         for l in st["lots"]:
             if l["sell_target"] is None:
                 continue
-            chip_cls = {"🚨 익절 도달": "red", "🚀 임박": "amber", "⏳ 대기": "gray"}.get(_sell_chip(l), "gray")
+            chip_cls = {"🚨 익절 도달": "red", "🚀 임박": "amber", "⏰ 탈출": "red",
+                        "⏳ 대기": "gray"}.get(_sell_chip(l), "gray")
+            hold_txt = f" · 보유 {l['hold_days']}일" if l.get("hold_days") else ""
             lot_rows.append(
                 f"<div class='lot'><span class='acc'>{l['account']}번</span>"
                 f"<span class='val'>매수 {l['buy_price']:,.2f}원 → 익절 {l['sell_target']:,.2f}원 "
-                f"(+{st['sell_target_pct']:g}%)</span>"
+                f"(+{st['sell_target_pct']:g}%){hold_txt}</span>"
                 f"<span class='chip {chip_cls}'>{_sell_chip(l)}</span></div>")
         lots_block = ""
         if lot_rows:

@@ -113,9 +113,9 @@
 | **swing_state.json** | 스윙 알리미 봇 상태 (ZONE_ALERTS/매도 플래그 — 봇 전용, 자동 관리) |
 | **swing_dashboard.html** | 스윙 알리미 모바일 대시보드 (자동 생성) |
 | **dollar_split_backtest.py** | 🆕 달러(USD/KRW) 매직 스플릿 전략 백테스트 — '97% 수익률' 주장 검증 (검증 결과: 세븐 스플릿 정통 해석만 바이앤홀드 우위) |
-| **dollar_alerter.py** | 🆕 **달러 매직 스플릿 알리미** — 전일 종가 대비 -0.3% 하락 매수 신호 / 매수가 대비 +0.3% 익절 신호 + 모바일 대시보드 |
-| **dollar_config.json** | 달러 알리미 공용 설정 (사용자 소유 — 매수/익절 파라미터/푸시) |
-| **dollar_personal.json** | 🔒 달러 알리미 **개인 포지션** (LOTS — 계좌별 BUY_PRICE/SHARES, 사용자 소유) |
+| **dollar_alerter.py** | 🆕 **달러 매직 스플릿 알리미** — 전일 종가 대비 -0.3% 하락 매수 신호 / 매수가 대비 +0.3% 익절 신호 / 보유 60영업일 초과 ⏰ 탈출 신호 + 모바일 대시보드 |
+| **dollar_config.json** | 달러 알리미 공용 설정 (사용자 소유 — 매수/익절/탈출 파라미터/푸시) |
+| **dollar_personal.json** | 🔒 달러 알리미 **개인 포지션** (LOTS — 계좌별 BUY_PRICE/SHARES/BUY_DATE, 사용자 소유) |
 | **dollar_state.json** | 달러 알리미 봇 상태 (매수/익절 신호 플래그 — 봇 전용, 자동 관리) |
 | **dollar_dashboard.html** | 달러 알리미 모바일 대시보드 (자동 생성) |
 | **sw.js** | PWA 서비스 워커 — 통과형 fetch (설치형 앱용, strict 검사 대상) |
