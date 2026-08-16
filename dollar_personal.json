@@ -1,5 +1,5 @@
 {
-    "_NOTE": "🔒 개인 매수 포지션 — 공용 설정(dollar_config.json)과 분리된 개인 파일. 매수 체결 후 BUY_PRICE(매수 환율, 원/USD)/SHARES(보유 달러 수량)를 기록하면 익절 목표(매수가 × 1.005, SELL_TARGET_PCT)가 자동 계산된다. 봇은 이 파일을 읽기만 하고 절대 쓰지 않는다. (2026-08-17: 사용자 단순화 결정 — 슬롯 1개만 운영. 매수마다 ACCOUNT 1의 BUY_PRICE/SHARES를 덮어쓰고, 익절 완료 시 봇(auto_cycle_reset)이 신호 상태를 자동 리셋하므로 같은 슬롯으로 무한 반복 가능. 매도 후 LOTS 정리/재기록은 사용자 몫) (JSON 주석 불가로 _NOTE 메타 키로 기록 — 엔진은 무시)",
+    "_NOTE": "🔒 개인 매수 포지션 — 공용 설정(dollar_config.json)과 분리된 개인 파일. 매수 체결 후 BUY_PRICE(매수 환율, 원/USD)/SHARES(보유 달러 수량)를 기록하면 익절 목표(매수가 × 1.003, SELL_TARGET_PCT — 2026-08-17 0.5→0.3 그리드 최적화 전환)가 자동 계산된다. 봇은 이 파일을 읽기만 하고 절대 쓰지 않는다. (2026-08-17: 사용자 단순화 결정 — 슬롯 1개만 운영. 매수마다 ACCOUNT 1의 BUY_PRICE/SHARES를 덮어쓰고, 익절 완료 시 봇(auto_cycle_reset)이 신호 상태를 자동 리셋하므로 같은 슬롯으로 무한 반복 가능. 매도 후 LOTS 정리/재기록은 사용자 몫) (JSON 주석 불가로 _NOTE 메타 키로 기록 — 엔진은 무시)",
     "POSITIONS": {
         "USDKRW=X": {
             "LOTS": [

@@ -425,8 +425,8 @@ def run_ladder_compare(w: pd.DataFrame, spread: float, bh: dict, args) -> None:
     print(f"  단일(전액 1회) vs 3분할 래더(1/3씩) — 각 로트는 자기 매수가 기준 익절")
     print(f"{'═' * 78}")
     configs = [
-        ("단일 진입 × +0.3% 익절", [0.3], [0.3]),
-        ("단일 진입 × +0.5% 익절 (현재 실전)", [0.3], [0.5]),
+        ("단일 진입 × +0.3% 익절 (현재 실전)", [0.3], [0.3]),
+        ("단일 진입 × +0.5% 익절 (구 실전)", [0.3], [0.5]),
         ("3분할 진입 × 로트별 +0.3%", [0.3, 0.6, 0.9], [0.3]),
         ("3분할 진입 × 계단 +0.3/+0.5/+0.7%", [0.3, 0.6, 0.9], [0.3, 0.5, 0.7]),
         ("3분할 진입 × 로트별 +0.5%", [0.3, 0.6, 0.9], [0.5]),
@@ -445,13 +445,13 @@ def run_dollar_grid(w: pd.DataFrame, spread: float, bh: dict, args, drops: list[
     """2차원 그리드 — 매수 하락률 × 익절 상승률 동시 스윕 (--grid).
 
     박성현 숫자(0.3%/0.5%) 전제 없이 전 구간을 탐색한다. 방향은 하락 매수/익절 매도
-    고정, 밴드(급락 제외) 상한 = 트리거 + 0.2%p. 현재 실전 설정(0.3% × +0.5%)이
+    고정, 밴드(급락 제외) 상한 = 트리거 + 0.2%p. 현재 실전 설정(0.3% × +0.3%)이
     그리드 셀로 포함된다. 셀 = 총수익률/MDD/Sharpe/평균 보유일.
     """
     print(f"\n{'═' * 78}")
     print(f"  2차원 그리드 — 매수 하락률 × 익절 상승률 — {w.index[0].date()} ~ {w.index[-1].date()}")
     print(f"  스프레드 {args.spread:.2f}% · 밴드(급락 제외) = 트리거 +0.2%p · 방향: 하락 매수 / 익절 매도")
-    print(f"  행 = 매수 하락%, 열 = 익절 상승% — ★ 행 최고 · ◀ 현재 실전 설정(0.3% × +0.5%)")
+    print(f"  행 = 매수 하락%, 열 = 익절 상승% — ★ 행 최고 · ◀ 현재 실전 설정(0.3% × +0.3%)")
     print(f"{'═' * 78}")
 
     grid: dict[tuple[float, float], dict] = {}
@@ -476,7 +476,7 @@ def run_dollar_grid(w: pd.DataFrame, spread: float, bh: dict, args, drops: list[
             best = min(vals) if low_best else max(vals)
             cells = []
             for t, v in zip(targets, vals):
-                is_cur = abs(d - 0.3) < 1e-9 and abs(t - 0.5) < 1e-9
+                is_cur = abs(d - 0.3) < 1e-9 and abs(t - 0.3) < 1e-9
                 mark = "◀" if is_cur else ("★" if v == best else "")
                 cells.append(f"{fmt.format(v=v):>7}" + mark)
             print(f"  {d:>5g}%" + "".join(cells))
@@ -492,7 +492,7 @@ def run_dollar_grid(w: pd.DataFrame, spread: float, bh: dict, args, drops: list[
     best_calmar = max(allr, key=lambda r: r["calmar"])
     best_mdd = max(allr, key=lambda r: r["mdd"])
     best_short = min(allr, key=lambda r: r["avg_hold"])
-    cur = grid.get((0.3, 0.5))
+    cur = grid.get((0.3, 0.3))
     print(f"\n  [참고] 바이앤홀드: CAGR {bh['cagr']:+.1f}% · MDD {bh['mdd']:.1f}%")
     print(f"  → 최고 총수익률 : -{best_ret['drop']:g}% × +{best_ret['target']:g}% "
           f"(+{best_ret['total_ret']:.1f}% · MDD {best_ret['mdd']:.1f}% · Sharpe {best_ret['sharpe']:.2f} · 평균 {best_ret['avg_hold']:.0f}일)")
@@ -512,7 +512,7 @@ def run_dollar_grid(w: pd.DataFrame, spread: float, bh: dict, args, drops: list[
         rank_ret = next(i for i, r in enumerate(by_ret, 1) if r is cur)
         rank_sharpe = next(i for i, r in enumerate(by_sharpe, 1) if r is cur)
         rank_hold = next(i for i, r in enumerate(by_hold, 1) if r is cur)
-        print(f"  → 현재 실전 설정(0.3% × +0.5%): +{cur['total_ret']:.1f}% · MDD {cur['mdd']:.1f}% · "
+        print(f"  → 현재 실전 설정(0.3% × +0.3%): +{cur['total_ret']:.1f}% · MDD {cur['mdd']:.1f}% · "
               f"Sharpe {cur['sharpe']:.2f} · 평균 보유 {cur['avg_hold']:.0f}일 — "
               f"순위 {rank_ret}/{n}(수익률) · {rank_sharpe}/{n}(Sharpe) · {rank_hold}/{n}(최단보유)")
 
@@ -584,9 +584,9 @@ def main() -> None:
                            spread, not args.no_band, bh, args,
                            "인용 그대로: +0.3~0.7% 상승 매수 / -0.3~0.5% 풀백 매도",
                            "풀백")
-        # ② 세븐 스플릿 정통: -0.3~0.5% 하락 매수 / +0.3~0.7% 상승 익절
+        # ② 세븐 스플릿 정통: -0.3~0.5% 하락 매수 / +0.3~0.7% 상승 익절 (기본 0.3 — 그리드 최적)
         run_intraday_block(w, "down", [0.3, 0.4], [0.3, 0.5, 0.7],
-                           0.5, 0.3, 0.5,
+                           0.5, 0.3, 0.3,
                            spread, not args.no_band, bh, args,
                            "세븐 스플릿 정통: -0.3~0.5% 하락 매수 / +0.3~0.7% 상승 익절",
                            "익절")
