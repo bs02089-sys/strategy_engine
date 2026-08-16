@@ -46,6 +46,7 @@ dollar_split_backtest.py — 달러(USD/KRW) '매직 스플릿' 매매 전략 �
   python3 dollar_split_backtest.py --since 2004-01-01   # 전체 20년+ 검증
   python3 dollar_split_backtest.py --grid               # 2차원 그리드 — 매수 하락률 × 익절 상승률 최적화
   python3 dollar_split_backtest.py --grid --drops 0.2,0.3,0.5 --targets 0.5,1.0,1.5  # 원하는 조합만
+  python3 dollar_split_backtest.py --split              # 분할 진입(래더) × 로트별 익절 비교 (단일 vs 3분할)
   python3 dollar_split_backtest.py --mode close         # 종가 기준 해석 비교
   python3 dollar_split_backtest.py --mode close --direction down  # 세븐 스플릿 정통(하락 매수)
   python3 dollar_split_backtest.py --all                # 기본 설정 거래 로그 포함
@@ -345,6 +346,100 @@ def run_intraday_block(w: pd.DataFrame, direction: str, rows: list[float], cols:
             print(f"  {d.date()}  SELL  매수 {bp:,.2f} → 매도 {spx:,.2f}  ({net*100:+.2f}% · {hold}일)")
 
 
+def simulate_ladder(df: pd.DataFrame, buy_levels: list[float], sell_levels: list[float],
+                    spread: float, initial: float = INITIAL) -> dict:
+    """분할 진입(래더) + 로트별 익절 시뮬레이터.
+
+    - buy_levels: 전일 종가 대비 하락% 목록 (오름차순, 예: [0.3, 0.6, 0.9]).
+      각 레벨에서 예산 1/N 씩 지정가(전일종가×(1−레벨))로 진입 — 당일 저가가 레벨
+      이하로 내려가면 체결. 단, 기존 밴드(급락 제외)와 동일하게 레벨+0.2%p 보다 깊은
+      급락일은 그 레벨을 스킵 (예: -1% 급락일엔 -0.3/-0.6 레벨 스킵, -0.9~-1.1 구간만
+      체결) — 급락일 칼날 매수 방지 (simulate_intraday 의 band 와 동일 원칙).
+    - sell_levels: 로트별 익절 상승% (각 로트는 자기 매수가 대비 이 % 도달 시 개별 매도).
+      길이가 buy_levels 보다 짧으면 마지막 값으로 나머지 채움 (swing LOTS 구조와 동일).
+    - spread: 왕복 스프레드 (매수/매도 각 절반).
+    전 로트 청산(사이클 완료) 시 재무장 — 다음 진입부터 새 사이클.
+    """
+    closes = df["Close"].to_numpy(float)
+    highs = df["High"].to_numpy(float)
+    lows = df["Low"].to_numpy(float)
+    opens = df["Open"].to_numpy(float)
+    dates = df.index
+    n = len(df)
+    nl = len(buy_levels)
+    sell_lv = (sell_levels + [sell_levels[-1]] * nl)[:nl]
+    cash = initial
+    lots: list[dict] = []          # 체결 순서대로 {units, entry, date}
+    trades: list[tuple] = []       # (매도일, 매수가, 매도가, 순수익률, 보유일)
+    next_lv = 0                    # 다음 진입 레벨 (로트 부분 매도 후에도 재사용 금지)
+    cycle_budget = initial / nl    # 사이클 예산 = 사이클 시작 시점 현금 ÷ 분할 수 (수익 재투자)
+    equity = np.empty(n)
+    for i in range(n):
+        o, h, l, c = opens[i], highs[i], lows[i], closes[i]
+        ref = closes[i - 1] if i > 0 else c
+        # 0) 새 사이클 시작(전 로트 미보유) → 예산 갱신 (복리: 이전 사이클 수익 포함)
+        if not lots and next_lv == 0:
+            cycle_budget = cash / nl
+        # ① 진입 — next_lv 부터, 당일 저가가 레벨 트리거 이하이고 밴드(레벨+0.2%p) 이상인 레벨
+        #    (급락일엔 깊은 레벨만 체결 — 칼날 매수 방지, simulate_intraday 의 band 와 동일 원칙)
+        j = next_lv
+        while j < nl and l <= ref * (1 - buy_levels[j] / 100.0) \
+                and l >= ref * (1 - (buy_levels[j] + 0.2) / 100.0):
+            px = min(o, ref * (1 - buy_levels[j] / 100.0))
+            lots.append({"units": cycle_budget / (px * (1 + spread / 2)),
+                         "entry": px, "date": i})
+            cash -= cycle_budget
+            next_lv += 1
+            j += 1
+        # ② 익절 — 각 로트가 자기 목표(매수가 대비 +sell_lv) 도달 시 개별 매도
+        #    (당일 매수분은 제외 — 다음 날부터 익절 체크, simulate_intraday 와 동일 보수성)
+        remaining: list[dict] = []
+        for idx, lot in enumerate(lots):
+            if lot["date"] == i:
+                remaining.append(lot)
+                continue
+            tgt = lot["entry"] * (1 + sell_lv[idx] / 100.0)
+            if h >= tgt:
+                proceeds = lot["units"] * tgt * (1 - spread / 2)
+                cash += proceeds
+                net = (tgt * (1 - spread / 2)) / (lot["entry"] * (1 + spread / 2)) - 1
+                trades.append((dates[i], lot["entry"], tgt, net, i - lot["date"]))
+            else:
+                remaining.append(lot)
+        lots = remaining
+        # ③ 전 로트 청산(사이클 완료) → 재무장
+        if not lots:
+            next_lv = 0
+        equity[i] = cash + sum(lot["units"] * c for lot in lots)
+    open_val = sum(lot["units"] * float(closes[-1]) * (1 - spread / 2) for lot in lots)
+    open_trade = (dates[lots[0]["date"]], lots[0]["entry"], float(closes[-1]),
+                  open_val) if lots else None
+    return {"equity": equity, "dates": dates, "trades": trades,
+            "open_trade": open_trade, "params": dict(buy=buy_levels, sell=sell_lv)}
+
+
+def run_ladder_compare(w: pd.DataFrame, spread: float, bh: dict, args) -> None:
+    """분할 진입/분할 청산 비교 — 단일 vs 3분할 래더 (--split)."""
+    print(f"\n{'═' * 78}")
+    print(f"  분할 진입 × 로트별 익절 비교 — {w.index[0].date()} ~ {w.index[-1].date()} · 스프레드 {args.spread:.2f}%")
+    print(f"  단일(전액 1회) vs 3분할 래더(1/3씩) — 각 로트는 자기 매수가 기준 익절")
+    print(f"{'═' * 78}")
+    configs = [
+        ("단일 진입 × +0.3% 익절", [0.3], [0.3]),
+        ("단일 진입 × +0.5% 익절 (현재 실전)", [0.3], [0.5]),
+        ("3분할 진입 × 로트별 +0.3%", [0.3, 0.6, 0.9], [0.3]),
+        ("3분할 진입 × 계단 +0.3/+0.5/+0.7%", [0.3, 0.6, 0.9], [0.3, 0.5, 0.7]),
+        ("3분할 진입 × 로트별 +0.5%", [0.3, 0.6, 0.9], [0.5]),
+    ]
+    print(f"  {'설정':<34}  {'총수익률':>8}  {'CAGR':>6}  {'MDD':>6}  {'Sharpe':>6}  {'거래':>5}  {'평균보유':>7}  {'미청산':>5}")
+    for name, buys, sells in configs:
+        s = summarize(simulate_ladder(w, buys, sells, spread))
+        open_n = "O" if s["open"] else "-"
+        print(f"  {name:<34}  {s['total_ret']:>+7.1f}%  {s['cagr']:>+5.1f}%  {s['mdd']:>5.1f}%  "
+              f"{s['sharpe']:>5.2f}  {s['trades']:>5}  {s['avg_hold']:>6.0f}일  {open_n:>5}")
+    print(f"\n  [참고] 바이앤홀드: CAGR {bh['cagr']:+.1f}% · MDD {bh['mdd']:.1f}%")
+
+
 def run_dollar_grid(w: pd.DataFrame, spread: float, bh: dict, args, drops: list[float],
                     targets: list[float]) -> None:
     """2차원 그리드 — 매수 하락률 × 익절 상승률 동시 스윕 (--grid).
@@ -438,6 +533,8 @@ def main() -> None:
                     help="--grid 매수 하락률 목록 %% (기본: 0.1~2.0)")
     ap.add_argument("--targets", default="0.3,0.5,0.7,1.0,1.5,2.0,3.0",
                     help="--grid 익절 상승률 목록 %% (기본: 0.3~3.0)")
+    ap.add_argument("--split", action="store_true",
+                    help="분할 진입(래더) × 로트별 익절 비교 — 단일 vs 3분할")
     ap.add_argument("--mode", choices=["intraday", "close"], default="intraday",
                     help="해석 모드 — intraday(기본: 장중 트리거 근사) / close(일별 종가 기준)")
     ap.add_argument("--direction", choices=["up", "down"], default="up",
@@ -471,6 +568,12 @@ def main() -> None:
         drops = [float(x) for x in args.drops.split(",") if x.strip()]
         targets = [float(x) for x in args.targets.split(",") if x.strip()]
         run_dollar_grid(w, spread, bh, args, drops, targets)
+        print()
+        return
+
+    if args.split:
+        # ── 분할 진입 × 로트별 익절 비교 ──
+        run_ladder_compare(w, spread, bh, args)
         print()
         return
 
