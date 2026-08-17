@@ -27,13 +27,13 @@
 """
 📌 DCA LOC Strategy는 매일 정해진 시간에 GitHub Actions에서 실행되어,
    portfolio_config.json에 설정된 포지션(TQQQ)의 LOC 매수 목표가를 계산하고,
-   **당일 저가 ≤ LOC → 5분할 중 1차 체결**을 감지해 디스코드로 종합 브리핑을
-   전송합니다. 로직을 섞지 않고 **하나의 논리**(LOC 지정가 5분할 적립)만 사용합니다.
+   **당일 종가(마감가) ≤ LOC → 5분할 중 1차 체결**을 감지해 디스코드로 종합 브리핑을
+   전송합니다. (LOC 지정가 = 장 마감가 ≤ 지정가일 때만 체결 — 판정은 종가 기준, 2026-08-17 수정) 로직을 섞지 않고 **하나의 논리**(LOC 지정가 5분할 적립)만 사용합니다.
 
 🔗 연동 시스템:
   - bear_market_signals.py → signal_report.json (시장 리스크 점수 — 참고용)
   - MarketStageSystem.py → market_state.json (바닥 단계 — 매수 트리거로 미사용)
-  - yfinance → 종가/저가/변동성 데이터 (15분 지연)
+  - yfinance → 종가/변동성 데이터 (15분 지연)
 """
 
 # =============================================================================
@@ -230,7 +230,7 @@ LOC_DCA_strategy.py (직접 실행)
  │   ├── DAILY_SIGMA (← refresh_sigma_if_stale)
  │   ├── LAST_SIGMA_UPDATE, LAST_SIGMA_METHOD, LAST_EWMA_LAMBDA
  │   ├── ALLOCATION_PCT, INVEST_TYPE, START_DATE
- │   ├── LOC_DCA ⭐ (SPLITS=5, BUY_AMOUNT=10000 — 백테스트 기본값)
+ │   ├── LOC_DCA ⭐ (SPLITS=5 — 백테스트 기본값, 차수당 $10,000은 코드 상수)
  │   └── LAST_MONTHLY_PING
  ⚠️ 체결 추적/분할 예산은 봇이 저장하지 않음 (사용자 엑셀이 단일 소스 — 2026-08-16)
 
@@ -243,7 +243,7 @@ LOC_DCA_strategy.py (직접 실행)
  yfinance API (외부 데이터)
  ├── 1mo 데이터 → get_prev_close() (최종 종가)
  ├── 252d+ 데이터 → get_period_ath() / get_realtime_sigma() / recompute_sigma_for_ticker()
- └── 백테스트/신호 → load_data() (Close + Low)
+ └── 백테스트/신호 → load_data() (Close — LOC 마감가 체결)
 
  Discord Webhook (외부 출력)
  └── Embed 메시지 → 디스코드 채널
@@ -343,7 +343,7 @@ jobs:
 
   🔍 Starting price lookup for TQQQ...
   ✅ TQQQ yfinance success: $76.79 (08-14)
-  📊 TQQQ LOC 대기: 마지막 세션(08-14) 저가 $75.94 > LOC $73.50 ...
+  📊 TQQQ LOC 대기: 마지막 세션(08-14) 종가 $76.79 > LOC $73.50 ...
   ✅ Discord briefing sent successfully.
 
 

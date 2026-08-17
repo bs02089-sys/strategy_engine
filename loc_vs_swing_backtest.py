@@ -19,7 +19,8 @@ loc_vs_swing_backtest.py — 장기 축적형 매수 조건 비교: LOC_DCA(시�
 
 전략 규칙 (실전 엔진과 동일):
   - LOC: 매일 loc = 전일 종가 × (1−σ×승수), σ = EWMA(λ=0.94, 252일 로그수익률).
-         당일 저가 ≤ loc → 매수 (체결가 = min(종가, loc)), $budget/splits × 최대 splits 회
+         당일 종가 ≤ loc → 매수 (LOC 지정가 — 마감가 체결: 장 마감가 ≤ 지정가일 때만
+         체결, 체결가 = 종가), $budget/splits × 최대 splits 회
   - 스윙: ATH = 배당 조정 종가 롤링 역대 최고가. 종가 ≤ ATH × (1−구간%) 도달 시 매수
          (확정 종가 기준 — 실시간 값 미사용, 엔진 동일), 구간당 $budget/7.
          구간은 사이클당 1회 매수, ATH +1% 갱신 시 새 사이클 → 전 구간 재무장·재매수.
@@ -56,13 +57,13 @@ DATA_START = "2013-12-01"   # LOC 엔진 DATA_START 와 동일 — 워밍업(σ 
 
 def load_ohlc(ticker: str, end: date) -> pd.DataFrame:
     """OHLC 다운로드 — LOC 엔진 load_data 와 동일 규칙(TEST_START 필터만 제거해
-    윈도우 이전 워밍업 데이터를 확보). Close/Low 로 시뮬레이션한다."""
+    윈도우 이전 워밍업 데이터를 확보). Close 로 시뮬레이션한다 (LOC — 마감가 체결, Low 불필요)."""
     raw = yf.download(ticker, start=DATA_START,
                       end=(end + timedelta(days=1)).isoformat(),
                       auto_adjust=True, progress=False)
     if isinstance(raw.columns, pd.MultiIndex):
         raw.columns = raw.columns.get_level_values(0)
-    df = raw[["Close", "Low"]].dropna().copy()
+    df = raw[["Close"]].dropna().copy()
     if df.index.tz is not None:
         df.index = df.index.tz_localize(None)
     df = df[~df.index.duplicated(keep="last")].sort_index()
@@ -101,7 +102,6 @@ def simulate_loc(df: pd.DataFrame, w0: int, budget: float, splits: int,
     buy_end: 매수 허용 마지막 인덱스 (기본 None = 윈도우 전체) — '1년 매수 후 홀딩' 모델용.
     """
     closes = df["Close"].to_numpy(dtype=float)
-    lows = df["Low"].to_numpy(dtype=float)
     dates = df.index
     n = wend if wend is not None else len(df)
     buy_limit = buy_end if buy_end is not None else n
@@ -118,7 +118,6 @@ def simulate_loc(df: pd.DataFrame, w0: int, budget: float, splits: int,
 
     for i in range(w0, n):
         prev_close = float(closes[i - 1])
-        today_low = float(lows[i])
         today_close = float(closes[i])
         # 1e-9 엡실론: 마지막 회차가 부동소수점 오차(예: $50,000/3, /6)로 매수 누락되지 않게
         if i < buy_limit and cash >= buy_amount - 1e-9 and buys < splits:
@@ -126,8 +125,8 @@ def simulate_loc(df: pd.DataFrame, w0: int, budget: float, splits: int,
                 pd.Series(closes[i - LOOKBACK_DAYS: i]), LOOKBACK_DAYS, VOL_METHOD, EWMA_LAMBDA
             )
             loc_price = _calculate_loc_from_sigma(prev_close, sigma, multiplier)
-            if today_low <= loc_price:
-                buy_price = min(today_close, loc_price)
+            if today_close <= loc_price:      # LOC: 장 마감가 ≤ 지정가일 때만 체결
+                buy_price = today_close       # 체결가 = 마감가 (LOC_DCA_strategy.backtest 와 동일)
                 amt = min(buy_amount, cash)
                 shares += amt * (1 - fee_rate) / buy_price
                 cash -= amt
@@ -615,8 +614,8 @@ def main() -> None:
         print(f"  최초 {loc_log[0]['date'].date()} @ ${loc_log[0]['price']:,.2f} · "
               f"최후 {loc_log[-1]['date'].date()} @ ${loc_log[-1]['price']:,.2f} · "
               f"평균 ${avg_loc:,.2f}{dep} — 최종 종가 ${loc['last_close']:,.2f}")
-    print(f"\n  ⚠️ 참고: 스윙은 종가 도달 기준(확정 종가), LOC는 당일 저가 기준(장중 지정가) — "
-          f"각 실전 엔진의 판정 규칙을 그대로 사용했습니다.\n")
+    print(f"\n  ⚠️ 참고: 스윙·LOC 모두 종가(확정 종가/마감가) 기준 — 각 실전 엔진의 판정 규칙을 "
+          f"그대로 사용했습니다. LOC 지정가는 장 마감가 ≤ 지정가일 때만 체결됩니다 (2026-08-17 수정).\n")
 
 
 if __name__ == "__main__":

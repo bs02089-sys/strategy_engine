@@ -1,11 +1,11 @@
 {
-    "_NOTE": "LOC DCA 전략(LOC_DCA_strategy.py)의 단일 설정 파일 — 포지션/시그마/LOC 분할 상태. [TQQQ 설정] ENTRY_MULTIPLIER: 전일 종가 대비 σ×1.1 만큼 하락한 가격이 LOC 매수가 (LOC 목표가 = 전일종가 × (1 − σ × 승수)), VOL_METHOD/EWMA_LAMBDA: 변동성 계산 방식(EWMA 권장), ALLOCATION_PCT: TQQQ의 포트폴리오 내 비중(30 = 30% — 정보용 메타데이터, 엔진 계산에는 미사용), LOC_DCA(SPLITS=5/BUY_AMOUNT=10000): 백테스트 기본값용. ⚠️ 실전 체결 추적·분할 예산은 봇이 하지 않으며 사용자 엑셀이 단일 소스 (2026-08-16). (JSON 주석 불가로 _NOTE 메타 키로 기록 — 엔진은 무시)",
+    "_NOTE": "LOC DCA 전략(LOC_DCA_strategy.py)의 단일 설정 파일 — 포지션/시그마/LOC 분할 상태. [TQQQ 설정] ENTRY_MULTIPLIER: 전일 종가 대비 σ×1.43 만큼 하락한 가격이 LOC 매수가 (LOC 목표가 = 전일종가 × (1 − σ × 승수) — LOC 지정가는 장 마감가 ≤ 매수가일 때 체결, 2026-08-17 종가 기준 수정), VOL_METHOD/EWMA_LAMBDA: 변동성 계산 방식(EWMA 권장), ALLOCATION_PCT: TQQQ의 포트폴리오 내 비중(30 = 30% — 정보용 메타데이터, 엔진 계산에는 미사용), LOC_DCA(SPLITS=5): 백테스트 기본값용(분할 수 — 차수당 금액 $10,000은 코드 상수, 예산은 사용자 엑셀 단일 소스). ⚠️ 실전 체결 추적·분할 예산은 봇이 하지 않으며 사용자 엑셀이 단일 소스 (2026-08-16). (JSON 주석 불가로 _NOTE 메타 키로 기록 — 엔진은 무시)",
     "DISCORD_WEBHOOK": "",
     "DISCORD_USER_ID": "",
     "POSITIONS": {
         "TQQQ": {
             "LOOKBACK_DAYS": 252,
-            "ENTRY_MULTIPLIER": 1.1,
+            "ENTRY_MULTIPLIER": 1.43,
             "VOL_METHOD": "EWMA",
             "EWMA_LAMBDA": 0.94,
             "DAILY_SIGMA": 0.043,
@@ -16,8 +16,7 @@
             "INVEST_TYPE": "LONG_YEAR",
             "ALLOCATION_PCT": 30,
             "LOC_DCA": {
-                "SPLITS": 5,
-                "BUY_AMOUNT": 10000
+                "SPLITS": 5
             }
         }
     },

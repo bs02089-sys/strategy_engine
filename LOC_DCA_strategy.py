@@ -565,8 +565,8 @@ def calculate_final_loc(base_price: float) -> float:
 # Config schema (per-position):
 #   "LOC_DCA": {
 #       "SPLITS": 5,           # 총 분할 수 (백테스트 기본값)
-#       "BUY_AMOUNT": 10000    # 차수당 매수 금액 (백테스트 기본값)
 #   }
+#   차수당 매수 금액($10,000)은 코드 상수 BUY_AMOUNT — 예산은 사용자 엑셀 단일 소스 (2026-08-17)
 #
 # ⚠️ 체결 추적은 봇이 하지 않는다 (2026-08-16): 분할 예산/회차는 사용자의
 #   엑셀이 단일 소스이며, 봇이 주문을 실제로 걸었는지 알 수 없어 자동 카운터는
@@ -826,12 +826,12 @@ def execute_daily_briefing() -> None:
 # 전략 모드 — 백테스트 + 실시간 신호
 # ═══════════════════════════════════════════════════════════
 INITIAL_CASH   = 50_000.0
-BUY_AMOUNT     = 10_000.0
+BUY_AMOUNT     = 10_000.0   # 차수당 매수 금액 — 백테스트 기본값 (예산은 사용자 엑셀 단일 소스, 2026-08-17)
 MAX_BUYS       = 5
 LOOKBACK_DAYS  = 252
 VOL_METHOD     = "EWMA"
 EWMA_LAMBDA    = 0.94
-DEFAULT_MULTIPLIER = 1.1
+DEFAULT_MULTIPLIER = 1.43   # 진입 승수 기본값 (config 미보유 시 폴백 — 2026-08-17 1.1→1.43 전환)
 TEST_START  = date(2016, 8, 2)
 TEST_END    = date(2026, 8, 2)
 DATA_START  = "2013-12-01"
@@ -846,7 +846,7 @@ def load_config(ticker: str) -> dict:
         return {
             "entry_multiplier": float(pos.get("ENTRY_MULTIPLIER", DEFAULT_MULTIPLIER)),
             "splits": int(pos.get("LOC_DCA", {}).get("SPLITS", MAX_BUYS)),
-            "buy_amount": float(pos.get("LOC_DCA", {}).get("BUY_AMOUNT", BUY_AMOUNT)),
+            "buy_amount": BUY_AMOUNT,  # 차수당 금액 — config 미보유, 코드 상수만 사용 (예산은 엑셀 단일 소스)
         }
     except Exception:
         return {
@@ -868,12 +868,12 @@ def backtest(df: pd.DataFrame,
     """
     순수 LOC 5분할 DCA 백테스트 (단일 논리 — MA 필터/RSI/ATH_DCA 없음).
 
-    규칙: 매일 loc = 전일 종가 × (1 − σ × 승수), 당일 저가 ≤ loc → 1차 매수
-    ($10,000 기본), 최대 5차. 매도 없음 — 적립 전용.
+    규칙: 매일 loc = 전일 종가 × (1 − σ × 승수), 당일 종가 ≤ loc → 1차 매수
+    (LOC 지정가 — 마감가 체결: 장 마감가 ≤ 지정가일 때만 체결, 2026-08-17 수정),
+    $10,000 기본, 최대 5차. 매도 없음 — 적립 전용.
     fee_rate → 매매 체결금액 대비 수수료(0.001 = 0.1%)
     """
     closes = df["Close"].to_numpy(dtype=float)
-    lows = df["Low"].to_numpy(dtype=float)
     dates_idx = df.index
     n = len(df)
 
@@ -888,20 +888,19 @@ def backtest(df: pd.DataFrame,
 
     for i in range(start_idx, n):
         prev_close = float(closes[i - 1])
-        today_low = float(lows[i])
         today_close = float(closes[i])
         today_date: pd.Timestamp = dates_idx[i]
 
-        # DCA 매수 — 당일 저가 ≤ LOC 면 1차 체결 (최대 max_buys)
+        # DCA 매수 — LOC(마감가): 당일 종가 ≤ LOC 면 1차 체결 (최대 max_buys)
         if cash >= buy_amount and buys < max_buys:
             lookback_window = pd.Series(closes[i - LOOKBACK_DAYS: i])
             sigma, _ = _calculate_volatility_from_closes(
                 lookback_window, LOOKBACK_DAYS, VOL_METHOD, EWMA_LAMBDA
             )
             loc_price = _calculate_loc_from_sigma(prev_close, sigma, entry_multiplier)
-            triggered = today_low <= loc_price
+            triggered = today_close <= loc_price   # LOC: 장 마감가가 지정가 이하일 때만 체결
             if triggered:
-                buy_price = min(today_close, loc_price)
+                buy_price = today_close            # 체결가 = 마감가 (종가 ≤ loc 이므로 min(종가, loc) == 종가)
                 amt = min(buy_amount, cash)
                 shares += amt * (1 - fee_rate) / buy_price
                 cash -= amt
@@ -962,7 +961,7 @@ def _resolve_discord() -> tuple[str, str]:
 
 
 def load_data(ticker: str, end: date | None = None) -> pd.DataFrame:
-    """티커 종가/저가 조회. end 미지정 시 오늘까지(실시간 신호용);
+    """티커 종가 조회 (LOC는 마감가 체결 — Low 불필요). end 미지정 시 오늘까지(실시간 신호용);
     백테스트는 TEST_END(고정 검증 윈도우)를 명시적으로 전달해 재현성을 유지한다."""
     if end is None:
         # NY(거래일) 기준 날짜 — GHA 러너(UTC)와의 날짜 불일치 방지
@@ -973,7 +972,7 @@ def load_data(ticker: str, end: date | None = None) -> pd.DataFrame:
                       auto_adjust=True, progress=False)
     if isinstance(raw.columns, pd.MultiIndex):
         raw.columns = raw.columns.get_level_values(0)
-    df = raw[["Close", "Low"]].dropna().copy()
+    df = raw[["Close"]].dropna().copy()
     if df.index.tz is not None:
         df.index = df.index.tz_localize(None)
     df = df[~df.index.duplicated(keep="last")].sort_index()
@@ -984,16 +983,15 @@ def load_data(ticker: str, end: date | None = None) -> pd.DataFrame:
 def current_signal(ticker: str, entry_multiplier: float) -> dict:
     """최신 데이터 기준 순수 LOC 신호 산출.
 
-    loc = 전일 종가 × (1 − σ × 승수). 당일 저가 ≤ loc → "LOC 도달" 상태
-    (체결 여부는 증권앱 확인 — 봇은 추적하지 않음, 2026-08-16).
+    loc = 전일 종가 × (1 − σ × 승수). 당일 종가 ≤ loc → "LOC 도달" 상태
+    (LOC 지정가 — 마감가 체결: 장 마감가 ≤ 지정가일 때만 체결, 2026-08-17 수정.
+     체결 여부는 증권앱 확인 — 봇은 추적하지 않음, 2026-08-16).
     """
     df = load_data(ticker)
     closes = df["Close"]
-    lows = df["Low"]
 
     last_close = float(closes.iloc[-1])
     prev_close = float(closes.iloc[-2])
-    last_low = float(lows.iloc[-1])
     last_date = closes.index[-1].date()
 
     try:
@@ -1012,7 +1010,7 @@ def current_signal(ticker: str, entry_multiplier: float) -> dict:
         sigma, _ = _calculate_volatility_from_closes(lookback_window, LOOKBACK_DAYS, VOL_METHOD, EWMA_LAMBDA)
         loc_price = _calculate_loc_from_sigma(prev_close, sigma, entry_multiplier)
 
-    triggered = loc_price is not None and last_low <= loc_price
+    triggered = loc_price is not None and last_close <= loc_price   # 마감가(종가) ≤ LOC
     if triggered:
         state = "TRIGGERED"
         action = "🟢 오늘 LOC 도달 — 체결 여부를 증권앱에서 확인"
@@ -1023,7 +1021,7 @@ def current_signal(ticker: str, entry_multiplier: float) -> dict:
     return {
         "ticker": ticker, "as_of": last_date,
         "close": last_close, "prev_close": prev_close,
-        "today_low": last_low, "loc": loc_price,
+        "loc": loc_price,
         "sigma": sigma,
         "state": state, "action": action,
     }
@@ -1057,7 +1055,7 @@ def _signal_discord_block(sig: dict) -> str:
     loc_part = f"LOC 매수: ${sig['loc']:.2f} | " if sig["loc"] else "LOC 매수: — | "
     lines = [
         f"**{sig['ticker']} LOC 5분할 전략 신호**",
-        f"종가 ${sig['close']:.2f} ({sig['as_of']}) | 저가 ${sig['today_low']:.2f}",
+        f"종가 ${sig['close']:.2f} ({sig['as_of']}) | 판정: 마감가 ≤ LOC 매수가",
     ]
     lines.append(f"{loc_part}상태: {sig['state']}")
     lines.append(f"▶ {sig['action']}")
@@ -1095,7 +1093,7 @@ def main():
             print("═" * 72)
             print(f"  기준일        : {sig['as_of']}")
             print(f"  종가          : ${sig['close']:.2f} (전일 ${sig['prev_close']:.2f})")
-            print(f"  당일 저가     : ${sig['today_low']:.2f}")
+            print(f"  판정 기준     : 마감가(종가) ≤ LOC 매수가")
             if sig["loc"]:
                 print(f"  LOC 매수      : ${sig['loc']:.2f}")
             print(f"  현재 상태     : {sig['state']}")
