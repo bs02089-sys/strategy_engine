@@ -1,7 +1,7 @@
 {
     "POSITIONS": {
         "USDKRW=X": {
-            "BUY_SIGNAL_SENT": false,
+            "BUY_SIGNAL_SENT": true,
             "BUY_SIGNAL_DATE": "2026-08-18",
             "BUY_IMMINENT_SENT": true,
             "BUY_IMMINENT_DATE": "2026-08-18",
