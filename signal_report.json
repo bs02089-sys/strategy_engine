@@ -1,41 +1,48 @@
 {
-    "timestamp": "2026-08-14T23:21:05.982063",
+    "timestamp": "2026-08-17T17:26:14.823758",
     "total_score": 6,
     "signals": [
         {
             "name": "Yield Curve Inversion",
             "score": 2,
-            "detail": "Re-steepening in progress (+0.51%p) (+2)"
+            "detail": "Re-steepening in progress (+0.51%p) (+2)",
+            "group": "leading"
         },
         {
             "name": "Market Breadth",
             "score": 0,
-            "detail": "Market breadth stable (+0) | Market balance maintained (+0)"
+            "detail": "Market breadth stable (+0) | Market balance maintained (+0)",
+            "group": "confirm"
         },
         {
             "name": "Credit Spread",
             "score": 0,
-            "detail": "HY stable (2.71%) | IG stable (0.79%)"
+            "detail": "HY stable (2.71%) | IG stable (0.79%)",
+            "group": "confirm"
         },
         {
             "name": "Fed Policy Cycle",
             "score": 2,
-            "detail": "High risk zone: 2m since most recent cut (2026-05)"
+            "detail": "High risk zone: 2m since most recent cut (2026-05)",
+            "group": "leading"
         },
         {
             "name": "Valuation Overheat",
             "score": 2,
-            "detail": "CAPE 42.56 (Critical) (+2)"
+            "detail": "CAPE 42.56 (Critical) (+2)",
+            "group": "leading"
         },
         {
             "name": "Leading Indicators",
             "score": 0,
-            "detail": "LEI stable (+0) | Sahm Rule normal (-0.03%p) (+0)"
+            "detail": "LEI stable (+0) | Sahm Rule normal (-0.03%p) (+0)",
+            "group": "confirm"
         },
         {
             "name": "Momentum Strategy",
             "score": 0,
-            "detail": "SPX momentum healthy (14.2%) (+0) | Growth sectors lead (+3.5% gap) (+0)"
+            "detail": "SPX momentum healthy (14.2%) (+0) | Growth sectors lead (+3.5% gap) (+0)",
+            "group": "confirm"
         }
     ]
 }
