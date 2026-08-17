@@ -2,7 +2,7 @@ name: LOC DCA Strategy
 
 on:
   schedule:
-    # 월~금 23:30 UTC = 19:30 ET (장 마감 후) — 브리핑 + LOC 20분할 신호 발송
+    # 월~금 23:30 UTC = 19:30 ET (장 마감 후) — 브리핑 + LOC 5분할 신호 발송
     - cron: "30 23 * * 1-5"
   workflow_dispatch:           # 수동 실행 지원
 
@@ -44,7 +44,7 @@ jobs:
           npm ci --silent
           npm run typecheck
 
-      - name: Run Daily Briefing (통합 메시지 — LOC 20분할 신호 포함)
+      - name: Run Daily Briefing (통합 메시지 — LOC 5분할 신호 포함)
         # 23:30 UTC — 통합 브리핑 1건만 Discord 발송 (신호 메시지는 브리핑에 통합)
         # --signal은 콘솔 로그 확인용으로만 실행 (Discord 중복 발송 없음)
         run: |

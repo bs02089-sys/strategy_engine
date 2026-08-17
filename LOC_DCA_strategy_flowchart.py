@@ -4,8 +4,8 @@
   DCA LOC Strategy — 전체 시스템 플로우차트
 ══════════════════════════════════════════════════════════════════════
   파일: LOC_DCA_strategy.py
-  최종 업데이트: 2026-08-16
-  전략: 순수 LOC 지정가 20분할 DCA (단일 논리)
+  최종 업데이트: 2026-08-17
+  전략: 순수 LOC 지정가 5분할 DCA (단일 논리 — 2026-08-17 20→5분할 전환)
     - MA 레짐 필터 / RSI+볼륨 / ATH_DCA 비상 모드 / STAGE5 / 회복 재진입
       / 실시간 모니터(--ath-monitor) 전부 삭제 (2026-08-16)
 ══════════════════════════════════════════════════════════════════════
@@ -15,7 +15,7 @@
   2. 전체 실행 흐름도
   3. 함수 호출 관계도
   4. 데이터 파일 의존성
-  5. LOC 20분할 규칙 (단일 논리)
+  5. LOC 5분할 규칙 (단일 논리)
   6. GitHub Actions 워크플로우
   7. 파일 구성도
 ══════════════════════════════════════════════════════════════════════
@@ -27,8 +27,8 @@
 """
 📌 DCA LOC Strategy는 매일 정해진 시간에 GitHub Actions에서 실행되어,
    portfolio_config.json에 설정된 포지션(TQQQ)의 LOC 매수 목표가를 계산하고,
-   **당일 저가 ≤ LOC → 20분할 중 1차 체결**을 감지해 디스코드로 종합 브리핑을
-   전송합니다. 로직을 섞지 않고 **하나의 논리**(LOC 지정가 20분할 적립)만 사용합니다.
+   **당일 저가 ≤ LOC → 5분할 중 1차 체결**을 감지해 디스코드로 종합 브리핑을
+   전송합니다. 로직을 섞지 않고 **하나의 논리**(LOC 지정가 5분할 적립)만 사용합니다.
 
 🔗 연동 시스템:
   - bear_market_signals.py → signal_report.json (시장 리스크 점수 — 참고용)
@@ -97,6 +97,8 @@
 │  ┌────────────────────────────────────────────────────────────────────────┐ │
 │  │  제목: "🌙 U.S. Market LOC Portfolio Briefing (YYYY-MM-DD HH:MM EST)" │ │
 │  │  ├─ 📊 Market Risk Score: X / 14 (from signal_report.json)             │ │
+│  │  ├─ 🎯 [국면 판정] … → LOC_DCA/스윙 유리 (2026-08-17 추가)            │ │
+│  │  │     선행(고점 경고) a/6 · 확인(하락 진행) b/8                     │ │
 │  │  └─ ─── 40 ───                                                        │ │
 │  │                                                                        │ │
 │  │  ▼ 각 포지션 반복 (TQQQ)                                             │ │
@@ -150,7 +152,7 @@
         └───────────┘
 
 📌 CLI 서브모드:
-  - --backtest       : 순수 LOC 20분할 백테스트 (MA 필터 없음 — 단일 전략)
+  - --backtest       : 순수 LOC 5분할 백테스트 (MA 필터 없음 — 단일 전략)
   - --signal         : 실시간 신호 (종가/LOC/오늘 LOC 도달 여부) — 콘솔용
   - --signal --discord [--all] : Discord 발송 (전 종목 단일 메시지)
 """
@@ -228,7 +230,7 @@ LOC_DCA_strategy.py (직접 실행)
  │   ├── DAILY_SIGMA (← refresh_sigma_if_stale)
  │   ├── LAST_SIGMA_UPDATE, LAST_SIGMA_METHOD, LAST_EWMA_LAMBDA
  │   ├── ALLOCATION_PCT, INVEST_TYPE, START_DATE
- │   ├── LOC_DCA ⭐ (SPLITS=20, BUY_AMOUNT=2500 — 백테스트 기본값)
+ │   ├── LOC_DCA ⭐ (SPLITS=5, BUY_AMOUNT=10000 — 백테스트 기본값)
  │   └── LAST_MONTHLY_PING
  ⚠️ 체결 추적/분할 예산은 봇이 저장하지 않음 (사용자 엑셀이 단일 소스 — 2026-08-16)
 
@@ -248,11 +250,11 @@ LOC_DCA_strategy.py (직접 실행)
 """
 
 # =============================================================================
-# 5. LOC 20분할 규칙 (단일 논리)
+# 5. LOC 5분할 규칙 (단일 논리)
 # =============================================================================
 """
 ╔══════════════════════════════════════════════════════════════════════╗
-║                    순수 LOC 지정가 20분할 DCA                      ║
+║                    순수 LOC 지정가 5분할 DCA                       ║
 ╠══════════════════════════════════════════════════════════════════════╣
 ║                                                                      ║
 ║   매수가 기준:                                                        ║
@@ -260,7 +262,7 @@ LOC_DCA_strategy.py (직접 실행)
 ║     LOC 매수가 = 전일 종가 × (1 − σ × ENTRY_MULTIPLIER)             ║
 ║                                                                      ║
 ║   체결 규칙:                                                          ║
-║     정규장에서 LOC 가격으로 지정가 주문 ($2,500 × 최대 20차)        ║
+║     정규장에서 LOC 가격으로 지정가 주문 ($10,000 × 최대 5차)        ║
 ║     체결 여부는 증권앱 확인 + 엑셀 컬러 표시 (봇 미추적 — 2026-08-16)║
 ║     분할 예산/회차는 엑셀이 단일 소스                                 ║
 ║                                                                      ║
@@ -305,7 +307,7 @@ jobs:
         run: |
           npm ci --silent
           npm run typecheck
-      - name: Run Daily Briefing (통합 메시지 — LOC 20분할 신호 포함)
+      - name: Run Daily Briefing (통합 메시지 — LOC 5분할 신호 포함)
         run: |
           set -o pipefail
           python LOC_DCA_strategy.py 2>&1 | tee sigma_log.txt
@@ -334,7 +336,7 @@ jobs:
 📌 워크플로우 실행 순서 (23:00~23:30 UTC, 월~금):
   1. 23:00 UTC — bear_market_signals.yml   (시장 리스크 평가)
   2. 23:14 UTC — tracker.yml               (시장 단계 추적 — DCA와 독립)
-  3. 23:30 UTC — loc_dca_strategy.yml       (통합 브리핑 1건 — LOC 20분할 신호 포함)
+  3. 23:30 UTC — loc_dca_strategy.yml       (통합 브리핑 1건 — LOC 5분할 신호 포함)
 
 
 📌 실행 로그 예시 (GitHub Actions Console):
@@ -349,6 +351,8 @@ jobs:
 
   🌙 U.S. Market LOC Portfolio Briefing (2026-08-14 19:30 EDT)
   📊 Market Risk Score: 6 / 14
+  🎯 [국면 판정] 고점 + 강세장 지속 → LOC_DCA 매수 조건 유리
+  • 선행(고점 경고) 6/6 · 확인(하락 진행) 0/8
   ────────────────────────────────────────
 
   🔹 TQQQ (Close: $76.79 | 08-14 | LONG_YEAR / D+15)
@@ -362,7 +366,7 @@ jobs:
 """
 📁 strategy_engine/
 │
-├── 📄 LOC_DCA_strategy.py              ★ 완결판 (실전 엔진 — 순수 LOC 20분할 + 백테스트 + 신호)
+├── 📄 LOC_DCA_strategy.py              ★ 완결판 (실전 엔진 — 순수 LOC 5분할 + 백테스트 + 신호)
 ├── 📄 LOC_DCA_strategy_flowchart.py    ★ 본 문서
 ├── 📄 setup_cronjob_org.py              cron-job.org 실시간 알림 설정 자동화 (스윙 전용)
 ├── 📄 swing_alerter.py                  스윙 투자 알리미 (별도 전략 — LOC와 무관)
@@ -370,7 +374,7 @@ jobs:
 ├── 📄 bear_market_signals.py            약세장 신호 분석
 │
 ├── 📄 portfolio_config.json             ★ 포트폴리오 설정 (핵심 설정 파일)
-├── 📄 STRATEGY_RULES.md                 전략 규칙 (순수 LOC 20분할)
+├── 📄 STRATEGY_RULES.md                 전략 규칙 (순수 LOC 5분할)
 ├── 📄 market_state.json                 시장 상태 저장 (자동 생성)
 ├── 📄 signal_report.json                신호 리포트 (자동 생성)
 ├── 📄 sigma_history.csv                 Sigma 변경 이력 (런타임 자동 생성 — 추적 제외)
@@ -380,7 +384,7 @@ jobs:
 ├── 📄 cape_cache.json                   CAPE 캐시 (bear_market_signals.py)
 │
 └── 📁 .github/workflows/
-    ├── loc_dca_strategy.yml           ★ 브리핑 + LOC 20분할 신호 (23:30 UTC)
+    ├── loc_dca_strategy.yml           ★ 브리핑 + LOC 5분할 신호 (23:30 UTC)
     ├── bear_market_signals.yml         신호 분석 자동 실행 (23:00 UTC)
     ├── tracker.yml                     시장 단계 추적 자동 실행 (23:14 UTC)
     └── swing_alerter.yml               스윙 알리미 (00:00 UTC + 실시간 dispatch)

@@ -13,6 +13,16 @@ System Overview:
   6. Leading Indicators        - USSLIND levels & Sahm Rule (0.5%p threshold)
   7. Momentum Strategy Signal  - SPX 200-day return & Sector rotation
 
+Regime Assessment (2026-08-17, loc_vs_swing_backtest.py 결론 연계):
+  Total Risk Score(0~14)를 시장 국면 판정에 사용해 'LOC_DCA / 스윙 중 유리한 매수 조건'을
+  함께 출력한다. 7개 시그널을 두 그룹으로 나눈다:
+    - 선행 그룹 (고점 경고, 0~6): Yield Curve · Fed Policy · Valuation(CAPE)
+    - 확인 그룹 (하락 진행, 0~8): Breadth · Credit Spread · Leading Ind. · Momentum
+  판정 규칙 (백테스트 롤링 검증 기준):
+    - 확인 0점 + 선행 ≥4 → '고점 + 강세장 지속' → LOC_DCA 유리 (2017-06 유형, 전환 모니터링)
+    - 확인 0점 + 선행 <4 → '안정적 강세장'   → LOC_DCA 유리
+    - 확인 1점 이상 (하락 진행 조짐) → '하락 전환/진행' → 스윙 유리 (2021-08 유형)
+
 Dependencies:
     pip install yfinance pandas requests
 
@@ -113,6 +123,7 @@ class SignalResult:
     triggered: bool
     score: int          # 0=Normal, 1=Caution, 2=Warning
     detail: str
+    group: str = "confirm"   # "leading"=고점 경고 / "confirm"=하락 진행 (백테스트 연계용)
 
 
 # ─────────────────────────────────────────────
@@ -138,7 +149,7 @@ def signal_yield_curve() -> SignalResult:
     except Exception as e:
         notes.append(get_error_message(e, "Yield Curve"))
     
-    return SignalResult("Yield Curve Inversion", score_total >= 1, score_total, " | ".join(notes))
+    return SignalResult("Yield Curve Inversion", score_total >= 1, score_total, " | ".join(notes), group="leading")
 
 
 def signal_market_breadth() -> SignalResult:
@@ -166,7 +177,7 @@ def signal_market_breadth() -> SignalResult:
     except Exception as e:
         notes.append(get_error_message(e, "Market Breadth"))
 
-    return SignalResult("Market Breadth", score_total >= 1, score_total, " | ".join(notes))
+    return SignalResult("Market Breadth", score_total >= 1, score_total, " | ".join(notes), group="confirm")
 
 
 def _spread_signal(series: pd.Series, warn: float, caution: float, widen_warn: float, label: str) -> tuple[int, str]:
@@ -196,7 +207,7 @@ def signal_credit_spread() -> SignalResult:
     except Exception as e:
         notes.append(get_error_message(e, "Credit Spread"))
 
-    return SignalResult("Credit Spread", score_total >= 1, score_total, " | ".join(notes))
+    return SignalResult("Credit Spread", score_total >= 1, score_total, " | ".join(notes), group="confirm")
 
 
 def signal_fed_cycle() -> SignalResult:
@@ -233,7 +244,7 @@ def signal_fed_cycle() -> SignalResult:
     except Exception as e:
         notes.append(get_error_message(e, "Fed Cycle"))
     
-    return SignalResult("Fed Policy Cycle", score_total >= 1, score_total, " | ".join(notes))
+    return SignalResult("Fed Policy Cycle", score_total >= 1, score_total, " | ".join(notes), group="leading")
 
 
 def _save_cape_cache(cape: float) -> None:
@@ -292,7 +303,7 @@ def signal_valuation() -> SignalResult:
             from_cache = True
         else:
             notes.append(get_error_message(Exception("No data from multpl.com or cache"), "Valuation"))
-            return SignalResult("Valuation Overheat", False, 0, " | ".join(notes))
+            return SignalResult("Valuation Overheat", False, 0, " | ".join(notes), group="leading")
 
     # CAPE 값 평가
     source_tag = " (cached)" if from_cache else ""
@@ -307,7 +318,7 @@ def signal_valuation() -> SignalResult:
     if from_cache:
         notes.append("⚠️ 실시간 조회 실패, 캐시 데이터 사용")
 
-    return SignalResult("Valuation Overheat", score_total >= 1, score_total, " | ".join(notes))
+    return SignalResult("Valuation Overheat", score_total >= 1, score_total, " | ".join(notes), group="leading")
 
 
 def signal_leading_indicators() -> SignalResult:
@@ -332,7 +343,7 @@ def signal_leading_indicators() -> SignalResult:
     except Exception as e:
         notes.append("LEI/Sahm data error")
 
-    return SignalResult("Leading Indicators", score_total >= 1, score_total, " | ".join(notes))
+    return SignalResult("Leading Indicators", score_total >= 1, score_total, " | ".join(notes), group="confirm")
 
 
 def signal_momentum_breakdown() -> SignalResult:
@@ -367,21 +378,67 @@ def signal_momentum_breakdown() -> SignalResult:
     except Exception as e:
         notes.append(get_error_message(e, "Momentum"))
 
-    return SignalResult("Momentum Strategy", score_total >= 1, score_total, " | ".join(notes))
+    return SignalResult("Momentum Strategy", score_total >= 1, score_total, " | ".join(notes), group="confirm")
 
 
 # ─────────────────────────────────────────────
 # Reporter
 # ─────────────────────────────────────────────
 
+def assess_regime(results: list) -> dict:
+    """시장 국면 판정 — 백테스트 결론(loc_vs_swing_backtest.py, 2026-08-17) 연계.
+
+    시그널을 두 그룹으로 나눈다:
+      - 선행 그룹 (고점 경고, 0~6): Yield Curve / Fed Policy / Valuation(CAPE)
+        → '고점 부근'을 알린다 (CAPE 과열·금리 인하 직후·커브 재급등)
+      - 확인 그룹 (하락 진행, 0~8): Breadth / Credit Spread / Leading Ind. / Momentum
+        → '하락이 실제 진행 중인지'를 확인한다
+
+    판정 규칙 (롤링 검증 기준):
+      - 확인 0점 + 선행 ≥4 → '고점 + 강세장 지속' → LOC_DCA 유리 (2017-06 유형, 전환 모니터링)
+      - 확인 0점 + 선행 <4 → '안정적 강세장'   → LOC_DCA 유리
+      - 확인 1점 이상 → '하락 전환/진행' → 스윙 유리 (2021-08 유형)
+    """
+    leading = sum(r.score for r in results if r.group == "leading")
+    confirm = sum(r.score for r in results if r.group == "confirm")
+    if confirm == 0:
+        if leading >= 4:
+            regime = "고점 + 강세장 지속"
+            note = ("고점 경고(선행)가 최고치에 가깝고 하락 진행은 아직 없음 — LOC 즉시 투입이 유리하나, "
+                    "2017-06 → 2021-08 전환 직전일 수 있어 확인 그룹(모멘텀·breadth·스프레드·LEI) 매일 모니터링 필요")
+        else:
+            regime = "안정적 강세장"
+            note = "고점 경고·하락 진행 모두 없음 — LOC 즉시 투입이 유리"
+        favorite = "LOC_DCA"
+    elif confirm <= 2:
+        regime = "고점 + 하락 전환 초기"
+        favorite = "스윙"
+        note = ("하락 진행 신호 일부 발동 — LOC는 고점 부근에서 분할을 소진할 위험, "
+                "스윙의 ATH 하락 구간 매수가 유리해짐")
+    else:
+        regime = "하락 진행"
+        favorite = "스윙"
+        note = "하락 진행 신호 다수 — 스윙의 ATH 하락 구간 매수가 유리 (2021-08 유형)"
+    return {"leading": leading, "confirm": confirm, "regime": regime,
+            "favorite": favorite, "note": note}
+
+
 def print_report(results: list):
     print(f"\n{'='*72}\n Summary Report: Bear Market Early Warning System\n Generated: {datetime.datetime.now():%Y-%m-%d %H:%M:%S}\n{'='*72}")
     for r in results:
         status = 'Triggered' if r.triggered else 'Stable'
         print(f"{r.name:<30} | {r.score}/2 | {status}")
-    
+
     total = sum(r.score for r in results)
     print(f"\nTotal Risk Score: {total} / 14")
+    print("=" * 72)
+
+    # ── 국면 판정 (loc_vs_swing_backtest.py 결론 연계, 2026-08-17) ──
+    reg = assess_regime(results)
+    print(f"\n [국면 판정] {reg['regime']} → {reg['favorite']} 매수 조건 유리")
+    print(f"  선행(고점 경고) {reg['leading']}/6 : Yield Curve · Fed Policy · Valuation(CAPE)")
+    print(f"  확인(하락 진행) {reg['confirm']}/8 : Breadth · Credit Spread · Leading Ind. · Momentum")
+    print(f"  → {reg['note']}")
     print("=" * 72)
 
 
@@ -389,7 +446,8 @@ def save_report_to_json(results: list, filename="signal_report.json"):
     data = {
         "timestamp": datetime.datetime.now().isoformat(),
         "total_score": sum(r.score for r in results),
-        "signals": [{"name": r.name, "score": r.score, "detail": r.detail} for r in results]
+        "signals": [{"name": r.name, "score": r.score, "detail": r.detail,
+                      "group": r.group} for r in results]   # group: LOC 브리핑이 국면 판정 재현용
     }
     # Atomic write — prevents corrupt signal_report.json on crash
     report_path = os.path.join(os.path.dirname(__file__), filename)

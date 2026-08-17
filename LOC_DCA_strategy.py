@@ -1,6 +1,6 @@
 """
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  Sigma LOC DCA 통합 엔진 — 순수 LOC 지정가 20분할 매수
+  Sigma LOC DCA 통합 엔진 — 순수 LOC 지정가 5분할 매수
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 2026-08-16 재구성 — 단일 논리 원칙:
   이동평균선(MA 레짐 필터/MA20>MA60 정렬) · RSI+볼륨 · ATH 하락분할 DCA
@@ -18,13 +18,13 @@
     분할 예산/회차 표시는 엑셀이 단일 소스이므로 브리핑에 포함하지 않는다.
 
 전략 모드 (백테스트/신호):
-  - --backtest: 시그마 LOC 20분할 백테스트 (MA 필터 없음 — 단일 전략)
+  - --backtest: 시그마 LOC 5분할 백테스트 (MA 필터 없음 — 단일 전략)
   - --signal: 실시간 신호 (종가 · LOC 매수가 · 오늘 LOC 도달 여부) — 콘솔용
   - --signal --discord: Discord 발송 | --all: 전 종목 단일 메시지 (수동 확인용)
 
 Usage:
   python3 LOC_DCA_strategy.py                              # 일일 브리핑 (기본)
-  python3 LOC_DCA_strategy.py --backtest                   # TQQQ 백테스트 (LOC 20분할)
+  python3 LOC_DCA_strategy.py --backtest                   # TQQQ 백테스트 (LOC 5분할)
   python3 LOC_DCA_strategy.py --signal                     # 오늘 신호 (TQQQ)
   python3 LOC_DCA_strategy.py --signal --discord --all     # 전 종목 신호 → Discord
 """
@@ -518,13 +518,45 @@ def get_market_score(filepath="signal_report.json"):
         return 0
 
 
+_LEADING_SIGNALS = {"Yield Curve Inversion", "Fed Policy Cycle", "Valuation Overheat"}
+
+
+def _signal_group(name: str) -> str:
+    """group 필드가 없는 구버전 signal_report.json 을 위한 이름 기반 보정."""
+    return "leading" if name in _LEADING_SIGNALS else "confirm"
+
+
+def get_market_regime(filepath="signal_report.json") -> dict | None:
+    """signal_report.json 기반 시장 국면 판정 — bear_market_signals.assess_regime 규칙 재사용.
+
+    브리핑/신호에 'LOC_DCA vs 스윙 중 유리한 매수 조건'을 함께 표시한다 (2026-08-17).
+    리포트가 없거나 파싱 실패 시 None (블록 생략).
+    """
+    try:
+        from bear_market_signals import SignalResult, assess_regime
+        if not os.path.exists(filepath):
+            return None
+        with open(filepath, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        results = [
+            SignalResult(s["name"], int(s["score"]) > 0, int(s["score"]), s.get("detail", ""),
+                         s.get("group") or _signal_group(s["name"]))
+            for s in data.get("signals", [])
+        ]
+        if not results:
+            return None
+        return assess_regime(results)
+    except Exception:
+        return None
+
+
 def calculate_final_loc(base_price: float) -> float:
     """Returns base LOC price without risk discount (disabled by user request)."""
     return base_price
 
 
 # ═══════════════════════════════════════════════════════════
-# LOC DCA — 순수 LOC 지정가 20분할 매수 (단일 논리)
+# LOC DCA — 순수 LOC 지정가 5분할 매수 (단일 논리)
 # ═══════════════════════════════════════════════════════════
 # 하나의 논리만 사용한다:
 #   LOC 매수가 = 전일 종가 × (1 − σ × ENTRY_MULTIPLIER)
@@ -532,8 +564,8 @@ def calculate_final_loc(base_price: float) -> float:
 #
 # Config schema (per-position):
 #   "LOC_DCA": {
-#       "SPLITS": 20,          # 총 분할 수 (백테스트 기본값)
-#       "BUY_AMOUNT": 2500     # 차수당 매수 금액 (백테스트 기본값)
+#       "SPLITS": 5,           # 총 분할 수 (백테스트 기본값)
+#       "BUY_AMOUNT": 10000    # 차수당 매수 금액 (백테스트 기본값)
 #   }
 #
 # ⚠️ 체결 추적은 봇이 하지 않는다 (2026-08-16): 분할 예산/회차는 사용자의
@@ -722,6 +754,11 @@ def _build_briefing_lines(now_ny: datetime, cfg: dict) -> list[str]:
 
     market_score = get_market_score()
     lines.append(f"📊 **Market Risk Score:** {market_score} / 14")
+    # 국면 판정 — LOC_DCA vs 스윙 중 유리한 매수 조건 (bear_market_signals 규칙 재사용)
+    regime = get_market_regime()
+    if regime:
+        lines.append(f"🎯 **[국면 판정] {regime['regime']} → {regime['favorite']} 매수 조건 유리**")
+        lines.append(f"• 선행(고점 경고) {regime['leading']}/6 · 확인(하락 진행) {regime['confirm']}/8")
     lines.append("─" * 40)
 
     positions = cfg.get("POSITIONS", {})
@@ -754,7 +791,7 @@ def _build_briefing_lines(now_ny: datetime, cfg: dict) -> list[str]:
 # Execution Loop
 # ═══════════════════════════════════════════════════════════
 def execute_daily_briefing() -> None:
-    """일일 브리핑 — 순수 LOC 20분할 운용 (기본 실행)"""
+    """일일 브리핑 — 순수 LOC 5분할 운용 (기본 실행)"""
     now_ny = datetime.now(ZoneInfo("America/New_York"))
 
     cfg = load_portfolio()
@@ -775,7 +812,7 @@ def execute_daily_briefing() -> None:
     _send_discord(
         webhook_url=webhook,
         user_id=user_id,
-        title=f"📋 AI & Semi Portfolio Briefing (LOC 20분할)",
+        title=f"📋 AI & Semi Portfolio Briefing (LOC 5분할)",
         content="\n".join(briefing_lines)
     )
 
@@ -789,8 +826,8 @@ def execute_daily_briefing() -> None:
 # 전략 모드 — 백테스트 + 실시간 신호
 # ═══════════════════════════════════════════════════════════
 INITIAL_CASH   = 50_000.0
-BUY_AMOUNT     = 2_500.0
-MAX_BUYS       = 20
+BUY_AMOUNT     = 10_000.0
+MAX_BUYS       = 5
 LOOKBACK_DAYS  = 252
 VOL_METHOD     = "EWMA"
 EWMA_LAMBDA    = 0.94
@@ -820,7 +857,7 @@ def load_config(ticker: str) -> dict:
 
 
 # ══════════════════════════════════════════════════════════
-# Backtest Engine (순수 LOC 20분할 — MA 필터 없음)
+# Backtest Engine (순수 LOC 5분할 — MA 필터 없음)
 # ══════════════════════════════════════════════════════════
 def backtest(df: pd.DataFrame,
              entry_multiplier: float = DEFAULT_MULTIPLIER,
@@ -829,10 +866,10 @@ def backtest(df: pd.DataFrame,
              max_buys: int = MAX_BUYS,
              fee_rate: float = 0.0) -> dict:
     """
-    순수 LOC 20분할 DCA 백테스트 (단일 논리 — MA 필터/RSI/ATH_DCA 없음).
+    순수 LOC 5분할 DCA 백테스트 (단일 논리 — MA 필터/RSI/ATH_DCA 없음).
 
     규칙: 매일 loc = 전일 종가 × (1 − σ × 승수), 당일 저가 ≤ loc → 1차 매수
-    ($2,500 기본), 최대 20차. 매도 없음 — 적립 전용.
+    ($10,000 기본), 최대 5차. 매도 없음 — 적립 전용.
     fee_rate → 매매 체결금액 대비 수수료(0.001 = 0.1%)
     """
     closes = df["Close"].to_numpy(dtype=float)
@@ -1019,7 +1056,7 @@ def _signal_discord_block(sig: dict) -> str:
     """티커별 Discord 블록 — 종가(날짜), LOC 매수가, 오늘 LOC 도달 여부, 액션."""
     loc_part = f"LOC 매수: ${sig['loc']:.2f} | " if sig["loc"] else "LOC 매수: — | "
     lines = [
-        f"**{sig['ticker']} LOC 20분할 전략 신호**",
+        f"**{sig['ticker']} LOC 5분할 전략 신호**",
         f"종가 ${sig['close']:.2f} ({sig['as_of']}) | 저가 ${sig['today_low']:.2f}",
     ]
     lines.append(f"{loc_part}상태: {sig['state']}")
@@ -1054,7 +1091,7 @@ def main():
         for t in tickers:
             sig = _resolve_signal(t, opts)
             print("\n" + "═" * 72)
-            print(f"  📡 {sig['ticker']} LOC 20분할 전략 — 현재 신호")
+            print(f"  📡 {sig['ticker']} LOC 5분할 전략 — 현재 신호")
             print("═" * 72)
             print(f"  기준일        : {sig['as_of']}")
             print(f"  종가          : ${sig['close']:.2f} (전일 ${sig['prev_close']:.2f})")
@@ -1071,7 +1108,7 @@ def main():
             webhook, user_id = _resolve_discord()
             content = "\n\n".join(discord_blocks)
             print(content)  # Actions 로그 기록용 — 발송 실패/이미지 전달 시에도 확인 가능
-            title = "📡 LOC 20분할 전략 신호 (전 종목)" if opts["all"] else f"📡 {tickers[0]} 신호"
+            title = "📡 LOC 5분할 전략 신호 (전 종목)" if opts["all"] else f"📡 {tickers[0]} 신호"
             _send_discord(webhook, user_id, title, content)
         return
 
@@ -1082,7 +1119,7 @@ def main():
                  buy_amount=cfg["buy_amount"], max_buys=cfg["splits"], fee_rate=fee)
 
     print("\n" + "═" * 84)
-    print(f"  📊 {ticker} — 순수 LOC 20분할 DCA 백테스트  |  ${INITIAL_CASH:,.0f} / {years:.1f}년")
+    print(f"  📊 {ticker} — 순수 LOC 5분할 DCA 백테스트  |  ${INITIAL_CASH:,.0f} / {years:.1f}년")
     print("═" * 84)
     print(f"  설정: 승수 {cfg['entry_multiplier']} | 매수 ${cfg['buy_amount']:,.0f}×{cfg['splits']} "
           f"| 수수료 {fee*100:.2f}% | MA 필터 없음 (단일 논리)")
@@ -1092,7 +1129,7 @@ def main():
     print(f"  최종 ${r['final_value']:,.0f} | 매수 {r['buys']}회 (총 ${r['total_spent']:,.0f}) "
           f"| 잔여 현금 ${r['remaining_cash']:,.0f} | 보유 {r['final_shares']:.2f}주")
     print("─" * 84)
-    print(f"\n  📌 매도 규칙 없음 — 순수 적립 전용 (20차 소진 후 매수 중단)\n")
+    print(f"\n  📌 매도 규칙 없음 — 순수 적립 전용 (5차 소진 후 매수 중단)\n")
     print("═" * 84)
 
 

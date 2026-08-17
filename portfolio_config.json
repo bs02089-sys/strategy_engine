@@ -15,8 +15,8 @@
             "INVEST_TYPE": "LONG_YEAR",
             "ALLOCATION_PCT": 10,
             "LOC_DCA": {
-                "SPLITS": 20,
-                "BUY_AMOUNT": 2500
+                "SPLITS": 5,
+                "BUY_AMOUNT": 10000
             }
         }
     },

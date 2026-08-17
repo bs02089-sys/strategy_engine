@@ -135,9 +135,13 @@ Not lazy about: input validation at trust boundaries, error handling that preven
   로 배포 (swing 의 index.html 과 충돌 방지). cron-job.org 잡은 `GITHUB_EVENT_TYPE=dollar-monitor` +
   `UTC_HOURS_START=0 UTC_HOURS_END=17`(환전 시간 09:00~익일 02:00 KST = UTC 00~17시, 점검 구간은
   코드 게이트가 제외)로 생성 (setup_cronjob_org.py 는 env 기반이라 수정 불필요).
-- **현재 전략 규칙 (2026-08-16 단일 논리 재구성)**: **순수 LOC 지정가 20분할 DCA** 하나만 사용한다 —
-  LOC 매수가 = 전일 종가 × (1 − σ × ENTRY_MULTIPLIER), 사용자가 정규장에서 이 가격으로 LOC 지정가 주문
-  ($2,500 × 최대 20차, `LOC_DCA` 블록 설정 — 백테스트 기본값용). ⚠️ **체결 추적은 봇이 하지 않는다
+- **현재 전략 규칙 (2026-08-16 단일 논리 재구성 · 2026-08-17 20→5분할 전환)**: **순수 LOC 지정가 5분할 DCA**
+  하나만 사용한다 — LOC 매수가 = 전일 종가 × (1 − σ × ENTRY_MULTIPLIER), 사용자가 정규장에서 이 가격으로
+  LOC 지정가 주문 ($10,000 × 최대 5차, `LOC_DCA` 블록 설정 — 백테스트 기본값용). 5분할 채택 근거:
+  `loc_vs_swing_backtest.py --sweep-splits` (2026-08-17) — LOC 추천 국면(강세장)에서 분할 수가 적을수록
+  평균 수익률이 높고(1분할 +438% > 5분할 +423% > 20분할 +405%), MDD는 분할 수와 무관(-75.7% 동일),
+  실용 균형 5~10분할 중 5분할은 평균·크래시 윈도우 모두 5~10 구간 내 최고. 20분할은 고점에서 4개월 만에
+  소진되는 약점이 드러나 폐기 (하락장 최적은 52분할이지 20분할이 아님). ⚠️ **체결 추적은 봇이 하지 않는다
   (2026-08-16)**: 체결 여부는 증권앱 확인 + **엑셀 컬러 표시**로 관리하며, 분할 예산/회차는 엑셀이
   단일 소스 — 브리핑은 LOC 매수가 하나만 제공한다 (자동 카운터는 실제 주문 여부를 모르므로 폐기).
   **매도 규칙 없음** — 순수 적립 전용.
@@ -165,7 +169,8 @@ Not lazy about: input validation at trust boundaries, error handling that preven
   이유: 키가 채팅·git 이력에 노출된 데다 삭제된 시크릿 참조 시 워크플로우가 실패하므로.
   모든 가격 판정은 yfinance(15분 지연) 기준. 다시 추가하거나 시크릿 참조를 부활시키지 말 것.
 - **MA 레짐 필터 / RSI+볼륨 / ATH_DCA 듀얼 모드 (2026-08-16)**: 로직을 섞는 방식은 효율이 낮고
-  오버피팅 문제가 있다는 판단(사용자)으로 **순수 LOC 20분할 DCA 단일 논리로 재구성**하며 전부 삭제.
+  오버피팅 문제가 있다는 판단(사용자)으로 **순수 LOC DCA 단일 논리로 재구성**하며 전부 삭제
+  (당시 20분할 채택 → 2026-08-17 5분할로 전환, 재구성 자체는 유지).
   관련 코드(`check_ath_dca_signals`/`_check_ma_filter`/`_check_rsi_volume_signal`/`_check_recovery_reentry`/
   `_evaluate_strategy_mode`/`run_ath_dca_monitor` 계열, `STRATEGY_MODE`/`ATH_DCA`/`MA_FILTER`/`RECOVERY_REENTRY`
   설정 블록, `--ath-monitor` CLI)와 문서(DUAL_MODE_SUMMARY.md·TRIGGER_OPTIMIZATION_SUMMARY.md·

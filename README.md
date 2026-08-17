@@ -4,7 +4,8 @@
 
 > ⚠️ **2026-08-16 단일 논리 재구성**: 이동평균선(MA 레짐 필터/MA 정렬) · RSI+거래량 ·
 > ATH 하락분할 DCA(비상 모드) · STAGE5 · 회복 재진입 · 실시간 모니터(`--ath-monitor`)를
-> **전부 삭제**하고, **순수 LOC 지정가 20분할 매수** 하나로 통일했습니다. (상세: [STRATEGY_RULES.md](STRATEGY_RULES.md))
+> **전부 삭제**하고, **순수 LOC 지정가 5분할 매수** 하나로 통일했습니다. (상세: [STRATEGY_RULES.md](STRATEGY_RULES.md))
+> 2026-08-17 — 분할 수 20→**5로 전환** (백테스트 `--sweep-splits` 결론: 강세장=LOC 추천 국면에서 5~10분할이 평균 수익률 최고)
 
 ---
 
@@ -45,9 +46,9 @@
 - 설정된 LOOKBACK_DAYS 기준으로 변동성 자동 갱신 (90일 주기, 또는 설정 변경 시 즉시 갱신)
 - Sigma 갱신 이력은 `sigma_history.csv`에 기록
 
-### 2️⃣ 순수 LOC 지정가 20분할 DCA (단일 논리 — 2026-08-16)
+### 2️⃣ 순수 LOC 지정가 5분할 DCA (단일 논리 — 2026-08-16, 분할 20→5 전환 2026-08-17)
 - **LOC 매수가** = 전일 종가 × (1 − σ × `ENTRY_MULTIPLIER`) — 유일한 매수 논리
-- 정규장에서 이 가격으로 **LOC 지정가 주문** → 체결 여부는 증권앱 + 엑셀로 관리 ($2,500 × 최대 **20차** — 적립 전용, 매도 없음)
+- 정규장에서 이 가격으로 **LOC 지정가 주문** → 체결 여부는 증권앱 + 엑셀로 관리 ($10,000 × 최대 **5차** — 적립 전용, 매도 없음)
 - ⚠️ **체결 추적은 봇이 하지 않음 (2026-08-16)** — 분할 예산/회차는 사용자 **엑셀이 단일 소스** (봇은 실제 주문 여부를 알 수 없어 자동 카운터가 부정확)
 - 브리핑은 **LOC 매수가 하나만** 제공 (`🎯 [Action] LOC Buy: $X`)
 
@@ -85,7 +86,7 @@
 │  3. 전일 종가 및 LOC 목표가 계산 (티커별)                        │
 │  4. LOC 매수가 계산 — 정규장 지정가 주문 신호                   │
 │  5. 로테이션 만기 확인                                           │
-│  6. 브리핑 작성 → Discord 전송 (LOC 20분할 상태 포함)            │
+│  6. 브리핑 작성 → Discord 전송 (LOC 5분할 상태 포함)            │
 │  7. 월간 Ping (매월 1일)                                        │
 └──────┬──────────────┬──────────────┬──────────────┐
        │              │              │              │
@@ -104,7 +105,7 @@
 
 | 파일 | 설명 |
 |------|------|
-| **LOC_DCA_strategy.py** | 📌 **통합 완결판** — 실전 엔진(순수 LOC 20분할 매수/Discord 브리핑) + 백테스트 + `--signal` 실시간 신호 |
+| **LOC_DCA_strategy.py** | 📌 **통합 완결판** — 실전 엔진(순수 LOC 5분할 매수/Discord 브리핑) + 백테스트 + `--signal` 실시간 신호 |
 | **LOC_DCA_strategy_flowchart.py** | 시스템 전체 플로우차트 문서 |
 | **setup_cronjob_org.py** | cron-job.org 실시간 알림 설정 자동화 (생성/--list/--test-dispatch/--update-pat/--update-schedule) — 스윙 알리미(swing-monitor) 전용 |
 | **swing_alerter.py** | 🆕 **스윙 투자 알리미** — MDD 구간 매수/매도 알림 + 모바일 대시보드 (유튜브 TQQQ 스윙 전략 재구현) |
@@ -112,6 +113,7 @@
 | **swing_personal.json** | 🔒 스윙 알리미 **개인 포지션** (LOTS — 계좌별 BUY_PRICE/SHARES, 공용 알림에 노출 안 됨, 사용자 소유) |
 | **swing_state.json** | 스윙 알리미 봇 상태 (ZONE_ALERTS/매도 플래그 — 봇 전용, 자동 관리) |
 | **swing_dashboard.html** | 스윙 알리미 모바일 대시보드 (자동 생성) |
+| **loc_vs_swing_backtest.py** | 🆕 장기 적립형 매수 조건 비교 백테스트 — LOC_DCA(시그마) vs 스윙(ATH 하락 구간, 40% 매도 제외 무매도 축적, 사이클 재투입) |
 | **dollar_split_backtest.py** | 🆕 달러(USD/KRW) 매직 스플릿 전략 백테스트 — '97% 수익률' 주장 검증 (검증 결과: 세븐 스플릿 정통 해석만 바이앤홀드 우위) |
 | **dollar_alerter.py** | 🆕 **달러 매직 스플릿 알리미** — 전일 종가 대비 -0.3% 하락 매수 신호 / 매수가 대비 +0.3% 익절 신호 / 보유 60영업일 초과 ⏰ 탈출 신호 + 모바일 대시보드 |
 | **dollar_config.json** | 달러 알리미 공용 설정 (사용자 소유 — 매수/익절/탈출 파라미터/푸시) |
@@ -192,8 +194,8 @@ pandas_market_calendars  # NYSE 휴장일 계산
             "INVEST_TYPE": "LONG_YEAR",
             "ALLOCATION_PCT": 10,
             "LOC_DCA": {
-                "SPLITS": 20,
-                "BUY_AMOUNT": 2500
+                "SPLITS": 5,
+                "BUY_AMOUNT": 10000
             }
         }
     },
@@ -214,7 +216,7 @@ pandas_market_calendars  # NYSE 휴장일 계산
 | `EWMA_LAMBDA` | EWMA 감쇠 계수 (기본 0.94) |
 | `INVEST_TYPE` | 투자 유형: `LONG_YEAR` / `ROTATION_3M` / `END_DEC` |
 | `ALLOCATION_PCT` | 포트폴리오 내 비중 |
-| `LOC_DCA` | LOC 20분할 설정 (`SPLITS`=20, `BUY_AMOUNT`=2500) — 백테스트 기본값 |
+| `LOC_DCA` | LOC 5분할 설정 (`SPLITS`=5, `BUY_AMOUNT`=10000) — 백테스트 기본값 |
 | `ROTATION_EXIT_DAYS` | ROTATION_3M 만기 영업일 수 |
 
 ### LOC 목표가 계산식
@@ -255,14 +257,14 @@ print(f'TQQQ LOC 목표가: \${loc}')
 > (ATH DCA 실시간 모니터 삭제 — 2026-08-16). 스윙 잡 생성은 아래
 > [스윙 알리미 실시간 알림](#실시간-알림-cron-joborg) 섹션 참고.
 
-### 백테스트 실행 (순수 LOC 20분할)
+### 백테스트 실행 (순수 LOC 5분할)
 
 ```bash
-python3 LOC_DCA_strategy.py --backtest                    # TQQQ (LOC 20분할)
+python3 LOC_DCA_strategy.py --backtest                    # TQQQ (LOC 5분할)
 python3 LOC_DCA_strategy.py --backtest --fee 0.001        # 수수료 0.1% 반영
 ```
 
-상세 사용법(신호 모드 포함): [LOC 20분할 전략](#loc-20분할-전략-loc_dca_strategypy)
+상세 사용법(신호 모드 포함): [LOC 5분할 전략](#loc-5분할-전략-loc_dca_strategypy)
 
 ### 플로우차트 문서 보기
 
@@ -274,11 +276,11 @@ python3 LOC_DCA_strategy_flowchart.py
 
 ## 🤖 GitHub Actions 자동화
 
-### `loc_dca_strategy.yml` — 정기 브리핑 + LOC 20분할 신호
+### `loc_dca_strategy.yml` — 정기 브리핑 + LOC 5분할 신호
 
 | 트리거 | 시간 (UTC) | 설명 |
 |--------|------------|------|
-| 예약 실행 | 매일 23:30 (월~금) | 장 마감 후 **통합 브리핑 1건** 발송 (LOC 20분할 신호는 브리핑에 통합) |
+| 예약 실행 | 매일 23:30 (월~금) | 장 마감 후 **통합 브리핑 1건** 발송 (LOC 5분할 신호는 브리핑에 통합) |
 | 수동 실행 | 사용자 요청 시 | workflow_dispatch 수동 실행 |
 
 > - 23:30 UTC 실행 시 `LOC_DCA_strategy.py`(통합 브리핑) 1건만 Discord로 발송합니다. LOC 실행 액션(▶)이 티커 블록에 포함되며, `--signal`은 콘솔 로그 확인용으로만 실행됩니다.
@@ -427,27 +429,27 @@ npm run typecheck   # tsc strict + checkJs
 
 ## 📊 백테스트
 
-백테스트는 **`LOC_DCA_strategy.py`** 하나로 수행합니다 — **순수 LOC 20분할 DCA**(승수 1.1,
-매수 $2,500×20, MA 필터 없음)를 검증하고, `--signal`로 실시간 신호도 확인합니다
-(상세: [LOC 20분할 전략](#loc-20분할-전략-loc_dca_strategypy)).
+백테스트는 **`LOC_DCA_strategy.py`** 하나로 수행합니다 — **순수 LOC 5분할 DCA**(승수 1.1,
+매수 $10,000×5, MA 필터 없음)를 검증하고, `--signal`로 실시간 신호도 확인합니다
+(상세: [LOC 5분할 전략](#loc-5분할-전략-loc_dca_strategypy)).
 
 ### 사용 기술
 - 일간 로그수익률 기반 변동성(σ) 계산
 - EWMA(λ=0.94) 가중치 적용
 - LOC 목표가: `전일종가 × (1 - σ × 승수)`
-- 매수 조건: 당일 저가 ≤ LOC 목표가 (최대 20차 — 적립 전용, 매도 없음)
+- 매수 조건: 당일 저가 ≤ LOC 목표가 (최대 5차 — 적립 전용, 매도 없음)
 
-### LOC 20분할 전략 (`LOC_DCA_strategy.py`)
+### LOC 5분할 전략 (`LOC_DCA_strategy.py`)
 
 실전 엔진 + 백테스트/신호를 통합한 **완결판 단일 파일**입니다. 티커별 기본 설정:
 
 | 티커 | 기본 설정 | 10년 결과 | 용도 |
 |------|-----------|-----------|------|
-| TQQQ | LOC 20분할 ($2,500×20, 승수 1.1) | +1,271.3% / MDD **-81.7%** (2026-08-16 재측정) | 순수 적립 — 매도 규칙 없음 |
+| TQQQ | LOC 5분할 ($10,000×5, 승수 1.1) | +1,422.3% / MDD **-81.7%** (2026-08-17 재측정) | 순수 적립 — 매도 규칙 없음 |
 
 ```bash
 # 백테스트
-python3 LOC_DCA_strategy.py --backtest                # TQQQ (LOC 20분할)
+python3 LOC_DCA_strategy.py --backtest                # TQQQ (LOC 5분할)
 python3 LOC_DCA_strategy.py --backtest --fee 0.001    # 수수료 0.1% 반영
 
 # 실시간 신호 (장 마감 후) — --discord로 Discord 발송 (GitHub Actions 자동화)
@@ -456,13 +458,44 @@ python3 LOC_DCA_strategy.py --signal --discord       # TQQQ 신호를 Discord로
 python3 LOC_DCA_strategy.py --signal --discord --all  # 전 종목 단일 메시지 (수동 확인용 — 워크플로우는 브리핑 1건만 발송)
 ```
 
-### 실전 반영 — 순수 LOC 20분할 (2026-08-16)
+### 매수 조건 비교 — LOC_DCA vs 스윙 (`loc_vs_swing_backtest.py`)
+
+스윙 알리미의 세븐 스플릿 매수 조건(ATH 대비 -15%~-33% 3% 단위 7구간)이 장기 적립 방식으로
+LOC_DCA(시그마)보다 우월한지 비교합니다 (2026-08-17). **스윙의 매도 목표(+40%)는 제외하고
+무매도 축적**으로 동일 예산($50,000)을 굴린 결과를 봅니다.
+
+```bash
+python3 loc_vs_swing_backtest.py                        # 기본: TQQQ, 최근 5년, $50,000, 수수료 0.1%
+python3 loc_vs_swing_backtest.py --since 2016-08-02     # 10년 기간 비교
+python3 loc_vs_swing_backtest.py --swing-per-cycle 3500  # 사이클마다 $3,500 신규 투입 (다중 사이클 축적)
+python3 loc_vs_swing_backtest.py --rolling               # 롤링 5년 강건성 검증 (시작 시점 6개월 간격)
+python3 loc_vs_swing_backtest.py --swing-zones 20        # 스윙 구간 20차(-15%~-72%)로 확장 비교
+python3 loc_vs_swing_backtest.py --sweep-zones            # 구간 수 스윕 — 몇 차까지 나눠야 자금이 안 노는지
+python3 loc_vs_swing_backtest.py --sweep-splits           # LOC 분할 수 스윕 — 1년 매수+홀딩 구조에서 몇 차가 최적인지
+```
+
+- 모델: 두 전략 모두 매도 없음 · 총 예산 동일($50,000) · 스윙 구간은 사이클(ATH +1% 리셋)마다 재무장
+- ⚠️ 결과는 윈도우 시작 시점에 민감 — 5년(2021-08~, 고점 부근)은 스윙 우위, 10년(2016-08~, 저점 부근)은 LOC 우위
+  (LOC의 시그마 트리거는 어떤 변동성에서든 발동해 저점에서 즉시 매수, 스윙은 ATH 하락 구간 도달까지 대기)
+- ⚠️ `--rolling` 강건성 검증 (2026-08-17): 14개 고정 5년 윈도우에서 스윙 9승/LOC 5승이지만
+  **평균 수익률 동률**(스윙 +397% vs LOC +405%, B&H +438%)·MDD 동일(-75.6/-75.7%) —
+  인접 윈도우(2개월 차이)에서도 승자가 뒤집혀 **5년 우위는 윈도우 운이지 전략 우월이 아님**
+- ⚠️ `--swing-zones 20`/`--sweep-zones` (2026-08-17): 구간을 20차(-72%)까지 깊게 나누면
+  **평균현금비율이 3.3%→8.9%로 상승(자금 유휴)하고 평균 수익률도 +397%→+315%로 하락** —
+  평균 수익률 최적은 **7구간(-15%~-33%, 현재 스윙 설정 그대로)**, 10구간(-42%)까지가 실용 한계
+- ⚠️ `--sweep-splits` (2026-08-17): '1년 매수 + 4년 홀딩'에서 분할 수가 적을수록 평균 수익률이
+  높다 — 1분할(≈일시 매수≈B&H) +438% > **현행 5분할 +423%** > 10분할 +414% > 20분할 +405% >
+  52분할 +345% (1년차 트리거 부족으로 유휴). MDD는 전 분할 수 동일(-75.7%) — 분할 수는 MDD와
+  무관하고 '강세장에서 늦은 투입'이 수익률 차이의 원인. 최근 5년(크래시 윈도우)만 보면 반대로
+  52분할이 최고(+115%) — 또 한 번 윈도우 의존성. → **2026-08-17 실전 20→5분할 채택**
+
+### 실전 반영 — 순수 LOC 5분할 (2026-08-16 단일 논리 · 2026-08-17 20→5분할 전환)
 
 MA/RSI/ATH_DCA 등 로직을 섞던 방식을 버리고 **하나의 논리**로 재구성했습니다
 (알림 신호 방식 — 실제 주문 자동 실행은 없음):
 
 - **LOC 매수가** = 전일 종가 × (1 − σ × 승수) — 당일 저가 ≤ LOC → **1차 체결**
-- $2,500 × **최대 20차** — 20차 소진 시 매수 중단 (적립 전용)
+- $10,000 × **최대 5차** — 5차 소진 시 매수 중단 (적립 전용, 2026-08-17 전환)
 - **체결 추적 없음 (2026-08-16)** — 정규장 지정가 주문 후 체결 여부는 증권앱 확인 + 엑셀 기록 (봇 미추적)
 - 일일 브리핑은 `• 🎯 [Action] LOC Buy:` 라인 하나로 **LOC 매수가만** 안내 (분할 예산/회차 표시 없음)
 - **매도 규칙 없음** — 순수 적립 (매도 신호 자체가 발생하지 않음)
@@ -728,7 +761,7 @@ python3 setup_cronjob_org.py   # CRONJOB_ORG_API_KEY/GITHUB_PAT/GITHUB_OWNER/GIT
 
 | 문서 | 설명 |
 |------|------|
-| [STRATEGY_RULES.md](STRATEGY_RULES.md) | 전략 규칙 (순수 LOC 20분할 DCA) |
+| [STRATEGY_RULES.md](STRATEGY_RULES.md) | 전략 규칙 (순수 LOC 5분할 DCA) |
 | [LOC_DCA_strategy_flowchart.py](LOC_DCA_strategy_flowchart.py) | 시스템 전체 플로우차트 |
 | [NAMYU_SWING_SETUP.md](NAMYU_SWING_SETUP.md) | 나무증권 시세포착주문 감시 등록 가이드 (스윙 알리미) |
 
