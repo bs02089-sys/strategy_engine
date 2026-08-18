@@ -146,13 +146,13 @@ def _normalize_lots(pp: dict) -> list[dict]:
             sh = lot.get("SHARES")
             if bp is None and sh is None:
                 continue  # 미입력 계좌 — 건너뜀
-        bd = lot.get("BUY_DATE")
-        out.append({
-            "account": int(lot.get("ACCOUNT") or i),
-            "buy_price": float(bp) if bp is not None else None,
-            "shares": float(sh) if sh is not None else 0.0,
-            "buy_date": str(bd).strip() if bd is not None else None,
-        })
+            bd = lot.get("BUY_DATE")
+            out.append({
+                "account": int(lot.get("ACCOUNT") or i),
+                "buy_price": float(bp) if bp is not None else None,
+                "shares": float(sh) if sh is not None else 0.0,
+                "buy_date": str(bd).strip() if bd is not None else None,
+            })
         return out
     if pp.get("BUY_PRICE") is not None:
         # 구형 단일 키 → 1번 계좌 로트로 승격 (하위 호환)
