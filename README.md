@@ -356,10 +356,12 @@ python3 LOC_DCA_strategy_flowchart.py
 |--------|------------|------|
 | 예약 실행 | 매일 00:00 UTC = 09:00 KST (월~금) | 달러 일일 브리핑 + 대시보드 갱신 (은행 영업 시작 전) |
 | repository_dispatch | 장중 N분 (cron-job.org, `dollar-monitor`) | `--monitor` 실시간 신호 (매수/익절/임박 — 나무증권 달러 환전 시간 09:00~익일 02:00 KST 폴링) |
+| 예약 실행 (백업) | 장중 10분 간격 (월~금, 00:00~17:00) | `--monitor` 자체 백업 — cron-job.org 503 등 디스패치 실패 시에도 신호 누락 방지 (2026-08-18, `github.event.schedule` 로 브리핑 cron 과 구분) |
 | 수동 실행 | 사용자 요청 시 | workflow_dispatch 수동 실행 |
 
 > cron-job.org 잡 생성: `GITHUB_EVENT_TYPE=dollar-monitor JOB_TITLE="Dollar alerter realtime monitor" UTC_HOURS_START=0 UTC_HOURS_END=17 POLL_MINUTES=10 python setup_cronjob_org.py`
 > (나무증권 환전 시간 09:00~익일 02:00 KST = UTC 00:00~17:00 — 점검 23:50~24:30 KST(14:50~15:30 UTC)는 코드 `_bank_hours_open` 게이트가 제외하므로 UTC_HOURS 는 넓게 잡는다, 2026-08-17 외환시장 연장 조사 반영)
+> ⚠️ cron-job.org 는 잡 자체 재시도(retry) 기능이 없어(2026-08-18 API 문서 확인), GitHub Actions `schedule`(`*/10 0-17 * * 1-5`)을 자체 백업 트리거로 병행한다 — cron-job.org 디스패치가 실패해도 이 스케줄이 워크플로우를 실행해 신호를 놓치지 않는다. `concurrency` 그룹 직렬화 + `dollar_state.json` 발송 플래그가 중복 실행을 안전하게 처리한다.
 
 ### 달러 알리미 운영 루틴
 

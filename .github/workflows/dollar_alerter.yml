@@ -4,6 +4,11 @@ on:
   schedule:
     # 월~금 00:00 UTC = 09:00 KST — 한국 아침 9시 고정 일일 브리핑 (은행 영업 시작 전)
     - cron: "0 0 * * 1-5"
+    # ⚠️ cron-job.org 장애(예: GitHub API 503) 대비 자체 백업 — 장중 10분 간격 실시간 모니터
+    # (나무증권 환전 시간 09:00~익일 02:00 KST = UTC 00:00~17:00 폴링, 2026-08-18 추가 —
+    #  cron-job.org 디스패치가 실패해도 이 스케줄이 워크플로우를 실행해 신호 누락을 방지한다.
+    #  00:00 UTC 는 브리핑 cron 과 겹치므로 두 실행 모두 발생 — concurrency 직렬화 + 상태 플래그로 안전)
+    - cron: "*/10 0-17 * * 1-5"
   repository_dispatch:
     types: [dollar-monitor]   # cron-job.org 장중 실시간 알림 발사 (나무증권 환전 시간 09:00~익일 02:00 KST 폴링 — 2026-08-17 야간 확장)
   workflow_dispatch:          # 수동 실행 지원
@@ -40,18 +45,22 @@ jobs:
           python -m pip install --upgrade pip -q
           pip install -q -r requirements.txt
 
-      - name: Run Realtime Dollar Monitor (from cron-job.org dispatch)
-        if: github.event_name == 'repository_dispatch'
-        # 장중 실시간 모니터 — 신규 매수/익절/임박 신호만 푸시 + Discord 발송.
+      - name: Run Realtime Dollar Monitor (dispatch + schedule backup)
+        # 주 트리거 = cron-job.org 디스패치. 백업 = GitHub Actions 자체 스케줄
+        # (매 10분 — cron-job.org 503 등으로 디스패치가 실패해도 신호 누락 방지,
+        #  브리핑 cron '0 0 * * 1-5' 과는 github.event.schedule 로 구분).
         # --monitor 가 실시간 가격을 반영한 대시보드 HTML 도 저장한다
         # → Sync 단계가 /tmp 로 보존해 Deploy 단계가 gh-pages 에 재배포.
+        if: >-
+          github.event_name == 'repository_dispatch' ||
+          (github.event_name == 'schedule' && github.event.schedule != '0 0 * * 1-5')
         run: |
           set -o pipefail
           python dollar_alerter.py --monitor 2>&1 | tee dollar_log.txt
 
       - name: Run Daily Dollar Briefing
-        if: github.event_name != 'repository_dispatch'
-        # 일일 브리핑 + 대시보드 HTML 갱신 (모바일 확인용)
+        # 일일 브리핑(00:00 UTC schedule) 또는 수동 실행 — 대시보드 HTML 갱신 (모바일 확인용)
+        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && github.event.schedule == '0 0 * * 1-5')
         run: |
           set -o pipefail
           python dollar_alerter.py --discord 2>&1 | tee dollar_log.txt

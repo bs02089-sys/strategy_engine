@@ -135,6 +135,12 @@ Not lazy about: input validation at trust boundaries, error handling that preven
   로 배포 (swing 의 index.html 과 충돌 방지). cron-job.org 잡은 `GITHUB_EVENT_TYPE=dollar-monitor` +
   `UTC_HOURS_START=0 UTC_HOURS_END=17`(환전 시간 09:00~익일 02:00 KST = UTC 00~17시, 점검 구간은
   코드 게이트가 제외)로 생성 (setup_cronjob_org.py 는 env 기반이라 수정 불필요).
+  ⚠️ **디스패치 실패 백업 (2026-08-18)**: cron-job.org 는 잡 자체 재시도(retry) 기능이 없어
+  (API 문서 확인), `dollar_alerter.yml` 에 `schedule: */10 0-17 * * 1-5` 자체 백업을 추가 —
+  cron-job.org 503 등 디스패치 실패 시에도 GitHub Actions 가 직접 워크플로우를 실행해 신호를
+  놓치지 않는다. 브리핑 cron(`0 0 * * 1-5`)과는 `github.event.schedule` 로 구분, `concurrency`
+  그룹 직렬화 + `dollar_state.json` 발송 플래그가 중복 실행을 안전하게 처리 (재시도 기능이 있는
+  서비스로 이전할 때까지 유지).
 - **현재 전략 규칙 (2026-08-16 단일 논리 재구성 · 2026-08-17 20→5분할 전환)**: **순수 LOC 지정가 5분할 DCA**
   하나만 사용한다 — LOC 매수가 = 전일 종가 × (1 − σ × ENTRY_MULTIPLIER), 사용자가 정규장에서 이 가격으로
   LOC 지정가 주문 (마감가 체결 — 장 마감가 ≤ 지정가일 때만 체결, 판정은 종가 기준,
