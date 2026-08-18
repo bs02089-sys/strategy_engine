@@ -121,9 +121,9 @@ Not lazy about: input validation at trust boundaries, error handling that preven
   매수 신호 푸시에도 '보유 60영업일 초과 시 ⏰ 탈출' 안내 포함.
   회당 +0.5%는 책의 '평균 0.5%' 주장과 일치했으나 그리드에서 +0.3% 익절이 총수익 동일로 더
   우세 — '1년 97%'는 어떤 해석으로도 재현 불가. ⚠️ **'1년 97% 수익률'은 어떤 해석으로도 재현 불가** (최고 연도 +12.8%) — 수수료 0% 가정의
-  회당 +0.5%가 복리로 과대표시된 것으로 판단. 실전 체결은 **나무증권 달러 환전 시간(평일 09:00~익일
-  02:00 KST — 주간 09~16시 + 야간 16~02시, 일일 점검 23:50~24:30 제외, 2024-07 외환시장 마감 연장
-  반영)에만** 가능하므로 신호 판정도 그 시간대의 실시간 가격 기준 (swing 의 종가 기준 원칙과 다름,
+  회당 +0.5%가 복리로 과대표시된 것으로 판단. 실전 체결은 **나무증권 달러 환전 시간(평일 09:00~16:00
+  KST — 야간 16:00~02:00 환전 불가(2026-08-18 확정), 점검 23:50~00:10 제외)에만** 가능하므로
+  신호 판정도 그 시간대의 실시간 가격 기준 (swing 의 종가 기준 원칙과 다름,
   2026-08-17 조사). 설정
   `dollar_config.json`(공용)/상태 `dollar_state.json`(봇 전용 — 매수 신호는 당일 한정 자동 리셋, 익절은
   계좌별 사이클당 1회)/개인 포지션 `dollar_personal.json`(사용자 소유, 봇 읽기만) 3파일 분리.
@@ -133,10 +133,10 @@ Not lazy about: input validation at trust boundaries, error handling that preven
   거짓 익절/임박 푸시가 울릴 수 있음. 대시보드는
   JS 없이 meta refresh(300초) — `dollar_dashboard.html`은 main 에 커밋하지 않고 gh-pages 의 **dollar.html**
   로 배포 (swing 의 index.html 과 충돌 방지). cron-job.org 잡은 `GITHUB_EVENT_TYPE=dollar-monitor` +
-  `UTC_HOURS_START=0 UTC_HOURS_END=17`(환전 시간 09:00~익일 02:00 KST = UTC 00~17시, 점검 구간은
-  코드 게이트가 제외)로 생성 (setup_cronjob_org.py 는 env 기반이라 수정 불필요).
+  `UTC_HOURS_START=0 UTC_HOURS_END=7`(환전 시간 09:00~16:00 KST = UTC 00~07시, 야간 환전 불가로
+  범위 축소, 2026-08-18)로 생성 (setup_cronjob_org.py 는 env 기반이라 수정 불필요).
   ⚠️ **디스패치 실패 백업 (2026-08-18)**: cron-job.org 는 잡 자체 재시도(retry) 기능이 없어
-  (API 문서 확인), `dollar_alerter.yml` 에 `schedule: */10 0-17 * * 1-5` 자체 백업을 추가 —
+  (API 문서 확인), `dollar_alerter.yml` 에 `schedule: */10 0-7 * * 1-5` 자체 백업을 추가 —
   cron-job.org 503 등 디스패치 실패 시에도 GitHub Actions 가 직접 워크플로우를 실행해 신호를
   놓치지 않는다. 브리핑 cron(`0 0 * * 1-5`)과는 `github.event.schedule` 로 구분, `concurrency`
   그룹 직렬화 + `dollar_state.json` 발송 플래그가 중복 실행을 안전하게 처리 (재시도 기능이 있는
