@@ -14,7 +14,7 @@ swing_split_backtest.py — 세븐 스플릿 하락 구간(스텝)/매도 목표
                    스텝 5% → 기존 -15/-20/-25/-30/-35/-40/-45 (-45% 종료)
 
 모델 규칙 (실전 엔진 swing_alerter.py 판정 규칙과 일치):
-  - ATH = 배당 조정 종가(Adj Close) 기준 롤링 역대 최고가 (엔진 get_ath 와 동일 기준)
+  - ATH = 원시 고가(High, 미조정) 기준 롤링 역대 최고가 (엔진 get_ath 와 동일 기준 — Google Finance high52와 동일)
   - 하락률 DD = 종가/ATH - 1, 구간 도달 판정은 **확정 종가** 기준 (엔진 동일 — 실시간 값 미사용)
   - 구간 도달(종가 ≤ 구간가) 시 해당 계좌가 $amount 매수 — 같은 날 여러 구간 동시 도달 가능
   - 매도: 종가 ≥ 매수가 × (1 + target%) → 전량 매도 (회수 현금으로 같은 날 신규 구간 매수 가능)
@@ -49,7 +49,9 @@ DEFAULT_SINCE = (date.today() - timedelta(days=3650)).isoformat()   # 최근 10�
 
 
 def fetch_closes(ticker: str) -> tuple[np.ndarray, pd.DatetimeIndex]:
-    """배당 조정 종가 시계열 — ATH/DD 판정 기준 (엔진 get_ath 와 동일 기준)."""
+    """배당 조정 종가 시계열 — 백테스트 전용 ATH/DD 판정 기준.
+    엔진(swing_alerter.py)은 원시 고가(High) 기준이지만, 백테스트는 종가(Close) 기준으로
+    일관된 내부 비교를 유지한다 (ARCHARLES 거래는 종가 기준)."""
     raw = yf.download(ticker, period="max", auto_adjust=True, progress=False)
     if isinstance(raw.columns, pd.MultiIndex):
         raw.columns = raw.columns.get_level_values(0)

@@ -14,7 +14,7 @@
   - 계산기: 매수가 × 보유수량 → 목표 매도 시 예상 수익금/수익률 자동 계산.
 
 기능:
-  - MDD 래더 상태 계산 (매수/대기) — yfinance 배당 조정 종가(Adj Close) 기준
+  - MDD 래더 상태 계산 (매수/대기) — yfinance 원시 고가(High, 미조정) 기준 (Google Finance high52와 동일)
   - 매수 구간 도달 / 임박 / 매도 알림을 Discord로 발송 (--monitor)
   - 일일 종합 브리핑 Discord 발송 (--discord)
   - 모바일 대시보드 HTML 생성 + 로컬 HTTP 서버 (--serve) — 스마트폰 확인용
@@ -501,14 +501,12 @@ def send_zone_pushes(zone_msgs: dict[str, list[str]], cfg: dict) -> None:
 # ═══════════════════════════════════════════════════════════
 
 def get_ath(ticker: str, max_retries: int = 3) -> tuple[float | None, str | None]:
-    """역대 최고 종가(ATH) 조회 — 배당 조정 종가(Adj Close) 기준.
+    """역대 최고가(ATH) 조회 — 원시 고가(High, 미조정) 기준.
 
-    yfinance Adj Close 는 액면분할과 현금 분배(배당)를 모두 반영한 연속 가격이라
-    분할 전후가 한 기준으로 비교된다. 사용자 참고 차트(TradingView 등 기본값)가
-    조정가 기준이므로 매수 구간(MDD)을 차트 전고가와 맞추려면 조정 종가를 써야
-    한다 (예: TQQQ 2026-06-02 — 원시 종가 $87.22 ↔ 조정 종가 $87.02).
-    조정 계수는 최신 행에서 1.0 으로 고정되므로 현재가/일간 등락률은 원시 종가
-    그대로 표시하는 게 맞다 (기준 비대칭은 의도적 — '실거래 표시 + 차트 기준 전고가').
+    Google Finance '=GOOGLEFINANCE(TICKER, "high52")'와 동일한 원시 장중 고가를 사용한다.
+    미조정이라 실제 거래에서 도달한 가격과 일치하므로 MDD 래더가 실거래 전고가를 기준으로
+    움직인다 (예: TQQQ 2026-06-03 — Raw High $88.09).
+    종가(Close) 대비 고가(High) 사용은 의도적 — '실거래 전고가 기준 MDD'.
     """
     last_err: Exception | None = None
     for attempt in range(max_retries):
@@ -517,14 +515,14 @@ def get_ath(ticker: str, max_retries: int = 3) -> tuple[float | None, str | None
             hist = stock.history(period="max", interval="1d", auto_adjust=False)
             if hist.empty:
                 raise ValueError("Data empty.")
-            closes = hist["Adj Close"].dropna()
-            if closes.empty:
-                # 폴백: 조정 데이터가 전무한 데이터 피드 대비 — 원시 종가로 계산 (비정상 케이스)
-                closes = hist["Close"].dropna()
-                if closes.empty:
-                    raise ValueError("No close data.")
-            peak_idx = closes.idxmax()
-            ath = float(closes.loc[peak_idx])
+            highs = hist["High"].dropna()
+            if highs.empty:
+                # 폴백: High 데이터 전무 시 종가로 계산 (비정상 케이스)
+                highs = hist["Close"].dropna()
+                if highs.empty:
+                    raise ValueError("No high/close data.")
+            peak_idx = highs.idxmax()
+            ath = float(highs.loc[peak_idx])
             ath_date = peak_idx.date().strftime("%Y-%m-%d")
             return ath, ath_date
         except Exception as e:  # noqa: BLE001
