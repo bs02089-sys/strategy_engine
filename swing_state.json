@@ -5,9 +5,7 @@
             "SELL_IMMINENT_SENT": false,
             "ZONE_ALERTS": {
                 "hit": [],
-                "imminent": [
-                    21
-                ]
+                "imminent": []
             },
             "ATH_CYCLE_BASE": 88.09,
             "CYCLE_RESET_DONE": false
