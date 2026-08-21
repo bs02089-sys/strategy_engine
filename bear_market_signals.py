@@ -397,7 +397,8 @@ def assess_regime(results: list) -> dict:
     판정 규칙 (롤링 검증 기준):
       - 확인 0점 + 선행 ≥4 → '고점 + 강세장 지속' → LOC_DCA 유리 (2017-06 유형, 전환 모니터링)
       - 확인 0점 + 선행 <4 → '안정적 강세장'   → LOC_DCA 유리
-      - 확인 1점 이상 → '하락 전환/진행' → 스윙 유리 (2021-08 유형)
+      - 확인 1점 (관심·미세 조짐) → '고점 + 약세 조짐 관찰' → LOC_DCA/스윙 선택 (전환 아님)
+      - 확인 2점 이상 (하락 진행 조짐) → '하락 전환/진행' → 스윙 유리 (2021-08 유형)
     """
     leading = sum(r.score for r in results if r.group == "leading")
     confirm = sum(r.score for r in results if r.group == "confirm")
@@ -410,10 +411,16 @@ def assess_regime(results: list) -> dict:
             regime = "안정적 강세장"
             note = "고점 경고·하락 진행 모두 없음 — LOC 즉시 투입이 유리"
         favorite = "LOC_DCA"
-    elif confirm <= 2:
-        regime = "고점 + 하락 전환 초기"
+    elif confirm == 1:
+        # 확인 1점은 미세 조짐 — 전략 전환 근거로 불충분 (2026-08-21 개선)
+        regime = "고점 + 약세 조짐 관찰"
+        favorite = "선택"
+        note = ("확인 그룹에서 미세 약세 신호 1개 발동 — 전략 전환 근거로는 불충분, "
+                "추가 발동 시 스윙 전환 여부 결정")
+    elif confirm <= 4:
+        regime = "고점 + 하락 전환"
         favorite = "스윙"
-        note = ("하락 진행 신호 일부 발동 — LOC는 고점 부근에서 분할을 소진할 위험, "
+        note = ("하락 진행 신호 발동 — LOC는 고점 부근에서 분할을 소진할 위험, "
                 "스윙의 ATH 하락 구간 매수가 유리해짐")
     else:
         regime = "하락 진행"
@@ -435,7 +442,8 @@ def print_report(results: list):
 
     # ── 국면 판정 (loc_vs_swing_backtest.py 결론 연계, 2026-08-17) ──
     reg = assess_regime(results)
-    print(f"\n [국면 판정] {reg['regime']} → {reg['favorite']} 매수 조건 유리")
+    fav_text = f"{reg['favorite']} 매수 조건 유리" if reg['favorite'] != '선택' else f"{reg['favorite']} — 두 전략 모두 가능"
+    print(f"\n [국면 판정] {reg['regime']} → {fav_text}")
     print(f"  선행(고점 경고) {reg['leading']}/6 : Yield Curve · Fed Policy · Valuation(CAPE)")
     print(f"  확인(하락 진행) {reg['confirm']}/8 : Breadth · Credit Spread · Leading Ind. · Momentum")
     print(f"  → {reg['note']}")

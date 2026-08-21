@@ -757,7 +757,8 @@ def _build_briefing_lines(now_ny: datetime, cfg: dict) -> list[str]:
     # 국면 판정 — LOC_DCA vs 스윙 중 유리한 매수 조건 (bear_market_signals 규칙 재사용)
     regime = get_market_regime()
     if regime:
-        lines.append(f"🎯 **[국면 판정] {regime['regime']} → {regime['favorite']} 매수 조건 유리**")
+        fav_text = f"{regime['favorite']} 매수 조건 유리" if regime['favorite'] != '선택' else f"{regime['favorite']} — 두 전략 모두 가능"
+        lines.append(f"🎯 **[국면 판정] {regime['regime']} → {fav_text}**")
         lines.append(f"• 선행(고점 경고) {regime['leading']}/6 · 확인(하락 진행) {regime['confirm']}/8")
     lines.append("─" * 40)
 
