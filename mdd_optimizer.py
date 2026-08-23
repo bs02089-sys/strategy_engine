@@ -64,7 +64,7 @@ class MDDOptimizer:
             "ath": float(ath),
             "current_dd": float(current_dd),
             "volatility": float(volatility),
-            "trend_score": trend_score
+            "trend_score": int(trend_score)
         }
 
     def detect_regime(self, indicators: Dict) -> str:
@@ -82,24 +82,53 @@ class MDDOptimizer:
             return "extreme"
 
     def get_levels_for_ticker(self, ticker: str, regime: str) -> Tuple[float, float, float]:
-        """종목별 설정이 있으면 사용, 없으면 default 사용"""
         ticker_config = self.config.get("tickers", {}).get(ticker, {})
         levels = ticker_config.get(regime) or self.default_levels.get(regime)
-        return tuple(levels)
+        return tuple(float(x) for x in levels)
 
-    def adjust_levels(self, levels: Tuple[float, float, float], current_dd: float) -> Tuple[float, float, float]:
-        """현재 Drawdown을 반영해 미세 조정"""
+    def adjust_levels(self, ticker: str, levels: Tuple[float, float, float], current_dd: float) -> Tuple[float, float, float]:
+        """
+        현실성을 고려한 레벨 조정
+        - 과도하게 깊게 밀어버리지 않음
+        - 종목별 최대 허용 깊이 제한
+        - 현재 DD가 이미 깊으면 '추가 하락' 방식으로 전환
+        """
+        # 종목별 현실적인 최대 깊이 상한 (역사적 데이터 기반)
+        max_depth_limit = {
+            "TQQQ": -65.0,
+            "SOXL": -88.0,
+        }
+        hard_limit = max_depth_limit.get(ticker, -70.0)
+
         adjusted = list(levels)
-        for i in range(3):
-            if current_dd <= adjusted[i] + 4:
-                adjusted[i] = min(adjusted[i], current_dd - 3)
 
-        # 최소 간격 유지
+        # 1. 현재 DD가 이미 1차 레벨보다 상당히 깊을 경우 → 추가 하락 기준으로 재설정
+        if current_dd <= adjusted[0] - 5:
+            adjusted[0] = current_dd - 4
+            adjusted[1] = current_dd - 12
+            adjusted[2] = current_dd - 22
+
+        # 2. 일반적인 미세 조정 (너무 깊지 않게)
+        for i in range(3):
+            if current_dd <= adjusted[i] + 3:
+                new_level = min(adjusted[i], current_dd - 3)
+                # 원래 레벨보다 최대 5%까지만 더 깊게 허용
+                adjusted[i] = max(new_level, adjusted[i] - 5)
+
+        # 3. 하드 리밋 적용
+        adjusted = [max(level, hard_limit) for level in adjusted]
+
+        # 4. 레벨 간 간격 유지
         for i in range(1, 3):
             if adjusted[i] > adjusted[i-1] - 8:
                 adjusted[i] = adjusted[i-1] - 10
+            if adjusted[i] < adjusted[i-1] - 25:
+                adjusted[i] = adjusted[i-1] - 20
 
-        return tuple(round(x, 1) for x in adjusted)
+        # 최종 하드 리밋 + 반올림
+        adjusted = [max(round(level, 1), hard_limit) for level in adjusted]
+
+        return tuple(adjusted)
 
     def generate_signals(self, levels: Tuple, indicators: Dict) -> List[Dict]:
         current_dd = indicators["current_dd"]
@@ -126,7 +155,7 @@ class MDDOptimizer:
         indicators = self.calculate_indicators(df)
         regime = self.detect_regime(indicators)
         base_levels = self.get_levels_for_ticker(ticker, regime)
-        levels = self.adjust_levels(base_levels, indicators["current_dd"])
+        levels = self.adjust_levels(ticker, base_levels, indicators["current_dd"])
         signals = self.generate_signals(levels, indicators)
 
         return {
