@@ -93,7 +93,6 @@ class MDDOptimizer:
         - 종목별 최대 허용 깊이 제한
         - 현재 DD가 이미 깊으면 '추가 하락' 방식으로 전환
         """
-        # 종목별 현실적인 최대 깊이 상한 (역사적 데이터 기반)
         max_depth_limit = {
             "TQQQ": -65.0,
             "SOXL": -88.0,
@@ -112,7 +111,6 @@ class MDDOptimizer:
         for i in range(3):
             if current_dd <= adjusted[i] + 3:
                 new_level = min(adjusted[i], current_dd - 3)
-                # 원래 레벨보다 최대 5%까지만 더 깊게 허용
                 adjusted[i] = max(new_level, adjusted[i] - 5)
 
         # 3. 하드 리밋 적용
@@ -130,13 +128,20 @@ class MDDOptimizer:
 
         return tuple(adjusted)
 
-    def generate_signals(self, levels: Tuple, indicators: Dict) -> List[Dict]:
+    def generate_signals(self, levels: Tuple, indicators: Dict, tolerance: float = 4.0) -> List[Dict]:
+        """
+        매수 신호 생성
+        - 현재 DD가 레벨에 도달했거나 약간 지난 경우만 표시
+        - 너무 깊게 경과한 신호는 표시하지 않음
+        """
         current_dd = indicators["current_dd"]
         ath = indicators["ath"]
         signals = []
 
         for i, level in enumerate(levels):
-            if current_dd <= level:
+            # 레벨에 도달했거나 tolerance 범위 안에서만 신호로 인정
+            # 예: level = -25, tolerance=4 → -25 ~ -29 사이만 표시
+            if level >= current_dd >= (level - tolerance):
                 target_price = ath * (1 + level / 100)
                 signals.append({
                     "차수": i + 1,
@@ -145,6 +150,7 @@ class MDDOptimizer:
                     "현재_DD": round(current_dd, 2),
                     "비중": "33.3%"
                 })
+
         return signals
 
     def analyze(self, ticker: str) -> Dict:
