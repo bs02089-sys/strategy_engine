@@ -1,0 +1,22 @@
+{
+  "tickers": {
+    "TQQQ": {
+      "strong_bull": [-15, -25, -40],
+      "normal": [-20, -32, -48],
+      "deep_correction": [-25, -38, -55],
+      "extreme": [-30, -45, -60]
+    },
+    "SOXL": {
+      "strong_bull": [-18, -30, -50],
+      "normal": [-25, -40, -60],
+      "deep_correction": [-35, -50, -70],
+      "extreme": [-45, -60, -80]
+    }
+  },
+  "default_levels": {
+    "strong_bull": [-15, -25, -40],
+    "normal": [-20, -32, -48],
+    "deep_correction": [-25, -38, -55],
+    "extreme": [-30, -45, -60]
+  }
+}
