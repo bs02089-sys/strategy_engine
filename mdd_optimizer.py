@@ -89,13 +89,12 @@ class MDDOptimizer:
     def adjust_levels(self, ticker: str, levels: Tuple[float, float, float], current_dd: float) -> Tuple[float, float, float]:
         """
         현실성을 고려한 레벨 조정
-        - 과도하게 깊게 밀어버리지 않음
-        - 종목별 최대 허용 깊이 제한
-        - 현재 DD가 이미 깊으면 '추가 하락' 방식으로 전환
         """
         max_depth_limit = {
             "TQQQ": -65.0,
             "SOXL": -88.0,
+            "SPMO": -45.0,
+            "PLTR": -70.0,
         }
         hard_limit = max_depth_limit.get(ticker, -70.0)
 
@@ -107,7 +106,7 @@ class MDDOptimizer:
             adjusted[1] = current_dd - 12
             adjusted[2] = current_dd - 22
 
-        # 2. 일반적인 미세 조정 (너무 깊지 않게)
+        # 2. 일반적인 미세 조정
         for i in range(3):
             if current_dd <= adjusted[i] + 3:
                 new_level = min(adjusted[i], current_dd - 3)
@@ -123,9 +122,7 @@ class MDDOptimizer:
             if adjusted[i] < adjusted[i-1] - 25:
                 adjusted[i] = adjusted[i-1] - 20
 
-        # 최종 하드 리밋 + 반올림
         adjusted = [max(round(level, 1), hard_limit) for level in adjusted]
-
         return tuple(adjusted)
 
     def generate_signals(self, levels: Tuple, indicators: Dict, tolerance: float = 4.0) -> List[Dict]:
@@ -139,8 +136,6 @@ class MDDOptimizer:
         signals = []
 
         for i, level in enumerate(levels):
-            # 레벨에 도달했거나 tolerance 범위 안에서만 신호로 인정
-            # 예: level = -25, tolerance=4 → -25 ~ -29 사이만 표시
             if level >= current_dd >= (level - tolerance):
                 target_price = ath * (1 + level / 100)
                 signals.append({

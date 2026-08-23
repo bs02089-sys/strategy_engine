@@ -11,6 +11,18 @@
       "normal": [-25, -40, -60],
       "deep_correction": [-35, -50, -70],
       "extreme": [-45, -60, -80]
+    },
+    "SPMO": {
+      "strong_bull": [-8, -15, -25],
+      "normal": [-12, -20, -32],
+      "deep_correction": [-18, -28, -40],
+      "extreme": [-25, -35, -50]
+    },
+    "PLTR": {
+      "strong_bull": [-12, -22, -35],
+      "normal": [-18, -28, -42],
+      "deep_correction": [-25, -38, -55],
+      "extreme": [-35, -50, -65]
     }
   },
   "default_levels": {
