@@ -30,5 +30,12 @@
     "normal": [-20, -32, -48],
     "deep_correction": [-25, -38, -55],
     "extreme": [-30, -45, -60]
-  }
+  },
+  "hard_limits": {
+    "TQQQ": -65.0,
+    "SOXL": -88.0,
+    "SPMO": -45.0,
+    "PLTR": -70.0
+  },
+  "default_hard_limit": -70.0
 }
