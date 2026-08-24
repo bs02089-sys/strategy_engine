@@ -9,15 +9,14 @@
                     "SHARES": 6
                 },
                 {
-                    
                     "ACCOUNT": 2,
                     "BUY_PRICE": 71.106,
                     "SHARES": 5
                 },
                 {
                     "ACCOUNT": 3,
-                    "BUY_PRICE": null,
-                    "SHARES": null
+                    "BUY_PRICE": 69.59,
+                    "SHARES": 7
                 },
                 {
                     "ACCOUNT": 4,
