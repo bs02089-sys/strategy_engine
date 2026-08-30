@@ -25,7 +25,7 @@ def run_daily_swing_simulation():
     ticker = os.environ.get("TRADING_TICKER", "PLTR")
     window = int(os.environ.get("ZONE_WINDOW", 10))
     
-    # 1. 일봉 테스트 데이터 생성
+    # 1. 일봉 테스트 데이터 생성 (실제 운영 시 증권사 API 데이터로 대체)
     np.random.seed(42)
     dates = pd.date_range(start="2026-01-01", periods=60, freq="B")
     price_walk = 50 + np.cumsum(np.random.randn(60) * 1.2)
@@ -40,7 +40,7 @@ def run_daily_swing_simulation():
     df['Resistance_Zone'] = df['High'].shift(1).rolling(window=window).max()
     df['Support_Zone'] = df['Low'].shift(1).rolling(window=window).min()
     
-    # 3. 전체 행에 대한 Strategy_Plan 컬럼 기본값 'HOLD'로 초기화 (KeyError 원인 원천 차단)
+    # 3. Strategy_Plan 컬럼 기본값 'HOLD'로 초기화
     df['Strategy_Plan'] = "HOLD"
     
     # 4. 가장 마지막 날(오늘) 데이터 추출 및 조건 판별
@@ -58,7 +58,9 @@ def run_daily_swing_simulation():
         order_plan = f"[{ticker}] 일봉 지지 존 도달 -> 익일 롱 지정가 예약 주문 설정 (지지선: {sup_zone:.2f})"
         send_discord_alert(order_plan)
     else:
-        print(f"[{ticker}] 현재 조건에 부합하는 존이 없습니다. (HOLD)")
+        # [변경] 조건에 부합하는 존이 없을 때도 디스코드로 알림 발송
+        order_plan = f"[{ticker}] 현재 조건에 부합하는 존이 없습니다. (HOLD)"
+        send_discord_alert(order_plan)
 
     # 마지막 날의 계획을 데이터프레임에 반영
     df.loc[df.index[i], 'Strategy_Plan'] = order_plan
@@ -71,12 +73,4 @@ if __name__ == "__main__":
     print("=" * 50)
     
     result_df = run_daily_swing_simulation()
-    
-    # 안전하게 컬럼 존재 여부를 확인 후 필터링
-    if 'Strategy_Plan' in result_df.columns:
-        active_plans = result_df[result_df['Strategy_Plan'] != "HOLD"]
-        print(f"총 {len(active_plans)}개의 지정가 예약 주문 가이드가 처리되었습니다.")
-    else:
-        print("[경고] 'Strategy_Plan' 컬럼이 존재하지 않습니다.")
-        
     print("=" * 50)
