@@ -1,17 +1,17 @@
 {
-  "default_window": 10,
-  "default_buffer_pct": 0.01,
   "alert_on_hold": false,
-  "zones": [
-    {
-      "ticker": "PLTR",
-      "window": 10,
-      "buffer_pct": 0.01
-    },
-    {
-      "ticker": "TQQQ",
-      "window": 10,
-      "buffer_pct": 0.01
-    }
+  "defaults": {
+    "period": "180d",
+    "num_bins": 24,
+    "volume_percentile": 80,
+    "max_touches": 2,
+    "wick_ratio": 1.5,
+    "volume_multiplier": 1.2,
+    "rr_ratio": 1.5,
+    "vol_avg_window": 20
+  },
+  "tickers": [
+    { "ticker": "PLTR" },
+    { "ticker": "TQQQ" }
   ]
 }
