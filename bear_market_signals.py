@@ -6,22 +6,21 @@
 
 System Overview:
   1. Yield Curve Inversion     - Inversion & Re-steepening (Most dangerous)
-  2. Market Breadth            - A-D Line deviation & High/Low ratios
+  2. Market Breadth            - A-D Line deviation & RSP/SPY relative strength
   3. Credit Spread Widening    - HY + IG spreads (Bond market signals)
   4. Fed Policy Cycle          - First rate cut + 6~12 months = Highest risk zone
   5. Valuation Overheat        - Shiller CAPE levels & S&P500 EPS growth slowing
   6. Leading Indicators        - USSLIND levels & Sahm Rule (0.5%p threshold)
   7. Momentum Strategy Signal  - SPX 200-day return & Sector rotation
 
-Regime Assessment (2026-08-17, loc_vs_swing_backtest.py 결론 연계):
+Regime Assessment:
   Total Risk Score(0~14)를 시장 국면 판정에 사용해 'LOC_DCA / 스윙 중 유리한 매수 조건'을
   함께 출력한다. 7개 시그널을 두 그룹으로 나눈다:
     - 선행 그룹 (고점 경고, 0~6): Yield Curve · Fed Policy · Valuation(CAPE)
     - 확인 그룹 (하락 진행, 0~8): Breadth · Credit Spread · Leading Ind. · Momentum
-  판정 규칙 (백테스트 롤링 검증 기준):
-    - 확인 0점 + 선행 ≥4 → '고점 + 강세장 지속' → LOC_DCA 유리 (2017-06 유형, 전환 모니터링)
-    - 확인 0점 + 선행 <4 → '안정적 강세장'   → LOC_DCA 유리
-    - 확인 1점 이상 (하락 진행 조짐) → '하락 전환/진행' → 스윙 유리 (2021-08 유형)
+  판정 규칙의 상세 내용은 `assess_regime()`의 docstring을 참고 (단일 출처로 관리,
+  이 헤더에는 규칙을 중복 서술하지 않는다 — 과거 이중 관리로 인해 두 곳의 설명이
+  어긋난 적이 있었음).
 
 Dependencies:
     pip install yfinance pandas requests
@@ -29,7 +28,7 @@ Dependencies:
 Data Sources:
   - FRED    : Direct download via fredgraph.csv
   - yfinance: S&P500, Sector ETFs, NYSE A-D Line (^NYAD)
-  - multpl.com: Shiller CAPE (Direct regex parsing)
+  - multpl.com: Shiller CAPE (Direct regex parsing, with local cache fallback)
 """
 
 import json
@@ -56,6 +55,7 @@ warnings.filterwarnings("ignore")
 FRED_LOOKBACK_2Y = 365 * 2   # 2년 lookback
 FRED_LOOKBACK_8Y = 365 * 8   # 8년 lookback (Fed cycle)
 CAPE_CACHE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cape_cache.json")
+CAPE_CACHE_MAX_AGE_DAYS = 7   # 캐시가 이보다 오래되면 신선하지 않다고 경고
 
 try:
     import yfinance as yf
@@ -92,7 +92,7 @@ def get_error_message(e: Exception, source_name: str) -> str:
         return f"{source_name} server response delayed"
     if "connection" in err_str:
         return f"{source_name} network connection failed"
-    return f"{source_name} data sync error ({type(e).__name__})"
+    return f"{source_name} data sync error ({type(e).__name__}: {e})"
 
 
 def validate_yf_data(raw_data: Optional[pd.DataFrame], symbols: list) -> pd.DataFrame:
@@ -117,6 +117,23 @@ def validate_yf_data(raw_data: Optional[pd.DataFrame], symbols: list) -> pd.Data
     return data[list(symbols)]  # type: ignore[return-type]
 
 
+def atomic_write_json(path: str, data: dict) -> None:
+    """JSON을 임시 파일에 쓰고 원자적으로 교체(rename)한다.
+
+    임시 파일을 대상 파일과 '같은 디렉터리'에 만들어야 os.replace/shutil.move가
+    같은 파일시스템 내 rename으로 처리되어 진짜 원자적 교체가 보장된다
+    (시스템 기본 temp 디렉터리를 쓰면 파티션이 달라 copy+delete로 대체되며
+    중간에 크래시가 나면 손상 위험이 생긴다).
+    """
+    target_dir = os.path.dirname(os.path.abspath(path)) or "."
+    with tempfile.NamedTemporaryFile(
+        "w", delete=False, suffix=".json", encoding="utf-8", dir=target_dir
+    ) as tmp:
+        json.dump(data, tmp, ensure_ascii=False, indent=2)
+        tmp_path = tmp.name
+    shutil.move(tmp_path, path)
+
+
 @dataclass
 class SignalResult:
     name: str
@@ -137,7 +154,7 @@ def signal_yield_curve() -> SignalResult:
         s = fred_series("T10Y2Y", lookback_days=FRED_LOOKBACK_2Y)
         current, min_2y = s.iloc[-1], s.min()
         was_inverted = min_2y < 0
-        
+
         if was_inverted and current > 0:
             score_total = 2
             notes.append(f"Re-steepening in progress ({current:+.2f}%p) (+2)")
@@ -148,12 +165,20 @@ def signal_yield_curve() -> SignalResult:
             notes.append(f"Normal ({current:+.2f}%p) (+0)")
     except Exception as e:
         notes.append(get_error_message(e, "Yield Curve"))
-    
+
     return SignalResult("Yield Curve Inversion", score_total >= 1, score_total, " | ".join(notes), group="leading")
 
 
 def signal_market_breadth() -> SignalResult:
-    """Detects market breadth cracks."""
+    """Detects market breadth cracks.
+
+    Sub-signal 2 measures RSP(equal-weight S&P500) performance *relative to*
+    SPY(cap-weight S&P500) — a falling ratio means mega-cap names are
+    carrying the index while the average stock lags (concentration risk).
+    NOTE: an earlier version computed RSP's own 20-day return in isolation,
+    which mislabeled it as "RSP/SPY" without ever comparing to SPY. Fixed
+    here to actually divide the two series.
+    """
     score_total, notes = 0, []
     symbols = ["SPY", "^NYA", "RSP"]
     try:
@@ -168,12 +193,17 @@ def signal_market_breadth() -> SignalResult:
         else:
             notes.append("Market breadth stable (+0)")
 
-        ratio_growth = (rsp.iloc[-1] / rsp.iloc[-20] - 1) * 100
+        # RSP/SPY 상대 강도(ratio)의 20일 변화율 — RSP 단독 수익률이 아니라
+        # SPY 대비 상대적으로 얼마나 뒤처졌는지를 봐야 집중도 리스크를 잡는다.
+        rsp_ratio_now = rsp.iloc[-1] / spy.iloc[-1]
+        rsp_ratio_before = rsp.iloc[-20] / spy.iloc[-20]
+        ratio_growth = (rsp_ratio_now / rsp_ratio_before - 1) * 100
+
         if ratio_growth < -2.0:
             score_total += 1
-            notes.append(f"Concentration risk high (RSP/SPY {ratio_growth:.1f}%) (+1)")
+            notes.append(f"Concentration risk high (RSP/SPY ratio {ratio_growth:.1f}%) (+1)")
         else:
-            notes.append("Market balance maintained (+0)")
+            notes.append(f"Market balance maintained (RSP/SPY ratio {ratio_growth:+.1f}%) (+0)")
     except Exception as e:
         notes.append(get_error_message(e, "Market Breadth"))
 
@@ -181,6 +211,12 @@ def signal_market_breadth() -> SignalResult:
 
 
 def _spread_signal(series: pd.Series, warn: float, caution: float, widen_warn: float, label: str) -> tuple[int, str]:
+    """HY/IG 스프레드 평가.
+
+    NOTE: "warning"과 "caution" 두 조건 모두 점수는 동일하게 +1이다 (각 스프레드는
+    최대 1점만 기여하도록 설계됨 — HY 1점 + IG 1점 = signal_credit_spread 최대 2점).
+    메시지 문구의 심각도 차이는 점수에는 반영되지 않으며, 사람이 보는 상세 로그용이다.
+    """
     value = series.iloc[-1]
     widen = value - series.tail(min(63, len(series))).min()
     if value > warn or widen > widen_warn:
@@ -191,7 +227,7 @@ def _spread_signal(series: pd.Series, warn: float, caution: float, widen_warn: f
 
 
 def signal_credit_spread() -> SignalResult:
-    """Detects credit spread widening (HY & IG)."""
+    """Detects credit spread widening (HY & IG). Max 2점 (HY 1 + IG 1)."""
     score_total, notes = 0, []
     try:
         hy = fred_series("BAMLH0A0HYM2", lookback_days=FRED_LOOKBACK_2Y)
@@ -214,7 +250,7 @@ def signal_fed_cycle() -> SignalResult:
     """Analyzes Fed rate cycle.
 
     Uses the MOST RECENT rate cut (iterates backward through the series)
-    rather than the FIRST cut in the lookback window.  This correctly
+    rather than the FIRST cut in the lookback window. This correctly
     handles multiple easing cycles (cut → hike → cut again): instead
     of measuring from the first cut of 2024, it measures from the most
     recent cut, so the risk score reflects the CURRENT easing cycle.
@@ -243,7 +279,7 @@ def signal_fed_cycle() -> SignalResult:
             notes.append("Awaiting rate cut")
     except Exception as e:
         notes.append(get_error_message(e, "Fed Cycle"))
-    
+
     return SignalResult("Fed Policy Cycle", score_total >= 1, score_total, " | ".join(notes), group="leading")
 
 
@@ -251,24 +287,20 @@ def _save_cape_cache(cape: float) -> None:
     """성공적으로 조회된 CAPE 값을 캐시 파일에 원자적(atomic)으로 저장"""
     try:
         data = {"cape": cape, "date": datetime.datetime.now().strftime("%Y-%m-%d"), "source": "multpl.com"}
-        # Atomic write via tempfile + move — prevents corrupt cache on crash
-        with tempfile.NamedTemporaryFile(
-            "w", delete=False, suffix=".json", encoding="utf-8"
-        ) as tmp:
-            json.dump(data, tmp, ensure_ascii=False, indent=2)
-            tmp_path = tmp.name
-        shutil.move(tmp_path, CAPE_CACHE_PATH)
+        atomic_write_json(CAPE_CACHE_PATH, data)
     except Exception:
         pass  # 캐시 저장 실패는 치명적이지 않음
 
 
-def _load_cape_cache() -> Optional[float]:
-    """이전에 캐시된 CAPE 값 로드. 없으면 None 반환."""
+def _load_cape_cache() -> Optional[tuple[float, int]]:
+    """이전에 캐시된 (CAPE 값, 캐시 나이[일]) 로드. 없으면 None 반환."""
     try:
         if os.path.exists(CAPE_CACHE_PATH):
             with open(CAPE_CACHE_PATH, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            return float(data["cape"])
+            cached_date = datetime.datetime.strptime(data["date"], "%Y-%m-%d").date()
+            age_days = (datetime.date.today() - cached_date).days
+            return float(data["cape"]), age_days
     except Exception:
         pass
     return None
@@ -278,7 +310,7 @@ def signal_valuation() -> SignalResult:
     """Analyzes Shiller CAPE & EPS. (max 2점)"""
     score_total, notes = 0, []
     cape = None
-    from_cache = False
+    cache_age_days = None
 
     # 1차 시도: multpl.com 실시간 조회
     try:
@@ -299,14 +331,13 @@ def signal_valuation() -> SignalResult:
     if cape is None:
         cached = _load_cape_cache()
         if cached is not None:
-            cape = cached
-            from_cache = True
+            cape, cache_age_days = cached
         else:
             notes.append(get_error_message(Exception("No data from multpl.com or cache"), "Valuation"))
             return SignalResult("Valuation Overheat", False, 0, " | ".join(notes), group="leading")
 
     # CAPE 값 평가
-    source_tag = " (cached)" if from_cache else ""
+    source_tag = f" (cached, {cache_age_days}d old)" if cache_age_days is not None else ""
     if cape >= 35:
         score_total += 2
         notes.append(f"CAPE {cape} (Critical){source_tag} (+2)")
@@ -315,8 +346,15 @@ def signal_valuation() -> SignalResult:
         notes.append(f"CAPE {cape} (Warning){source_tag} (+1)")
     else:
         notes.append(f"CAPE {cape} (Normal){source_tag} (+0)")
-    if from_cache:
-        notes.append("⚠️ 실시간 조회 실패, 캐시 데이터 사용")
+
+    if cache_age_days is not None:
+        if cache_age_days > CAPE_CACHE_MAX_AGE_DAYS:
+            notes.append(
+                f"⚠️ 실시간 조회 실패, {cache_age_days}일 전 캐시 데이터 사용 "
+                f"(신선도 기준 {CAPE_CACHE_MAX_AGE_DAYS}일 초과 — 값이 낡았을 수 있음)"
+            )
+        else:
+            notes.append(f"⚠️ 실시간 조회 실패, {cache_age_days}일 전 캐시 데이터 사용")
 
     return SignalResult("Valuation Overheat", score_total >= 1, score_total, " | ".join(notes), group="leading")
 
@@ -341,7 +379,7 @@ def signal_leading_indicators() -> SignalResult:
         else:
             notes.append(f"Sahm Rule normal ({sahm.iloc[-1]:.2f}%p) (+0)")
     except Exception as e:
-        notes.append("LEI/Sahm data error")
+        notes.append(get_error_message(e, "LEI/Sahm"))
 
     return SignalResult("Leading Indicators", score_total >= 1, score_total, " | ".join(notes), group="confirm")
 
@@ -386,7 +424,7 @@ def signal_momentum_breakdown() -> SignalResult:
 # ─────────────────────────────────────────────
 
 def assess_regime(results: list) -> dict:
-    """시장 국면 판정 — 백테스트 결론(loc_vs_swing_backtest.py, 2026-08-17) 연계.
+    """시장 국면 판정 — 이 함수의 docstring이 판정 규칙의 단일 출처(source of truth)다.
 
     시그널을 두 그룹으로 나눈다:
       - 선행 그룹 (고점 경고, 0~6): Yield Curve / Fed Policy / Valuation(CAPE)
@@ -394,11 +432,12 @@ def assess_regime(results: list) -> dict:
       - 확인 그룹 (하락 진행, 0~8): Breadth / Credit Spread / Leading Ind. / Momentum
         → '하락이 실제 진행 중인지'를 확인한다
 
-    판정 규칙 (롤링 검증 기준):
+    판정 규칙:
       - 확인 0점 + 선행 ≥4 → '고점 + 강세장 지속' → LOC_DCA 유리 (2017-06 유형, 전환 모니터링)
       - 확인 0점 + 선행 <4 → '안정적 강세장'   → LOC_DCA 유리
       - 확인 1점 (관심·미세 조짐) → '고점 + 약세 조짐 관찰' → LOC_DCA/스윙 선택 (전환 아님)
-      - 확인 2점 이상 (하락 진행 조짐) → '하락 전환/진행' → 스윙 유리 (2021-08 유형)
+      - 확인 2~4점 (하락 진행 조짐) → '고점 + 하락 전환' → 스윙 유리
+      - 확인 5점 이상 (하락 진행 다수) → '하락 진행' → 스윙 유리 (2021-08 유형)
     """
     leading = sum(r.score for r in results if r.group == "leading")
     confirm = sum(r.score for r in results if r.group == "confirm")
@@ -412,7 +451,7 @@ def assess_regime(results: list) -> dict:
             note = "고점 경고·하락 진행 모두 없음 — LOC 즉시 투입이 유리"
         favorite = "LOC_DCA"
     elif confirm == 1:
-        # 확인 1점은 미세 조짐 — 전략 전환 근거로 불충분 (2026-08-21 개선)
+        # 확인 1점은 미세 조짐 — 전략 전환 근거로 불충분
         regime = "고점 + 약세 조짐 관찰"
         favorite = "선택"
         note = ("확인 그룹에서 미세 약세 신호 1개 발동 — 전략 전환 근거로는 불충분, "
@@ -440,7 +479,7 @@ def print_report(results: list):
     print(f"\nTotal Risk Score: {total} / 14")
     print("=" * 72)
 
-    # ── 국면 판정 (loc_vs_swing_backtest.py 결론 연계, 2026-08-17) ──
+    # ── 국면 판정 (판정 규칙은 assess_regime()의 docstring 참고) ──
     reg = assess_regime(results)
     fav_text = f"{reg['favorite']} 매수 조건 유리" if reg['favorite'] != '선택' else f"{reg['favorite']} — 두 전략 모두 가능"
     print(f"\n [국면 판정] {reg['regime']} → {fav_text}")
@@ -457,14 +496,8 @@ def save_report_to_json(results: list, filename="signal_report.json"):
         "signals": [{"name": r.name, "score": r.score, "detail": r.detail,
                       "group": r.group} for r in results]   # group: LOC 브리핑이 국면 판정 재현용
     }
-    # Atomic write — prevents corrupt signal_report.json on crash
-    report_path = os.path.join(os.path.dirname(__file__), filename)
-    with tempfile.NamedTemporaryFile(
-        "w", delete=False, suffix=".json", encoding="utf-8"
-    ) as tmp:
-        json.dump(data, tmp, ensure_ascii=False, indent=4)
-        tmp_path = tmp.name
-    shutil.move(tmp_path, report_path)
+    report_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), filename)
+    atomic_write_json(report_path, data)
 
 
 if __name__ == "__main__":
