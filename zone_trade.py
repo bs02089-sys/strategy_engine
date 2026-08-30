@@ -1,7 +1,7 @@
 import os
 import requests
 import pandas as pd
-import numpy as 
+import numpy as np
 
 
 def send_discord_alert(message):
