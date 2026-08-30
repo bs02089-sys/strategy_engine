@@ -2,8 +2,8 @@ name: Zone Trade Automation
 
 on:
   schedule:
-    # 매일 한국 시간 아침 7시 (UTC 기준 밤 10시) 자동 실행
-    - cron: '0 22 * * *'
+    # 한국 시간 평일 아침 7시 (UTC 기준 일~목 22시) 자동 실행
+    - cron: '0 22 * * 0-4'
   workflow_dispatch: # 레포지토리에서 수동 실행 버튼 제공
 
 jobs:
@@ -16,7 +16,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.14.6'
+          python-version: '3.12'
 
       - name: Install dependencies
         run: |
@@ -26,7 +26,6 @@ jobs:
       - name: Run Trading Script with Secrets
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-          TRADING_TICKER: "PLTR"
-          ZONE_WINDOW: "10"
+          ZONE_CONFIG_PATH: "zone_trade_config.json"
         run: |
           python zone_trade.py
