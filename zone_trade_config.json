@@ -3,6 +3,7 @@
   "defaults": {
     "period": "180d",
     "num_bins": 24,
+    "profile_lookback": 120,
     "volume_percentile": 80,
     "max_touches": 2,
     "wick_ratio": 1.5,

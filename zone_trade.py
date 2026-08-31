@@ -208,10 +208,15 @@ def compute_sl_tp(direction, zone, entry_price, rr_ratio):
 
 
 # ----------------------------------------------------------------------
-# 종목 하나에 대한 전체 분석 파이프라인
+# 하루치 신호 판단 (라이브 실행/파라미터 스윕에서 공통으로 재사용)
 # ----------------------------------------------------------------------
-def analyze_ticker(ticker, cfg):
-    period = cfg.get("period", "180d")
+def evaluate_at_index(ticker, df, i, cfg):
+    """
+    df: 전체 OHLCV 데이터 (이미 결측치 제거 완료 상태)
+    i: "오늘"로 취급할 행의 위치 (0 <= i < len(df))
+    cfg: num_bins, volume_percentile, max_touches, wick_ratio,
+         volume_multiplier, rr_ratio, vol_avg_window, profile_lookback 포함
+    """
     num_bins = int(cfg.get("num_bins", 24))
     volume_percentile = float(cfg.get("volume_percentile", 80))
     max_touches = int(cfg.get("max_touches", 2))
@@ -219,45 +224,15 @@ def analyze_ticker(ticker, cfg):
     volume_multiplier = float(cfg.get("volume_multiplier", 1.2))
     rr_ratio = float(cfg.get("rr_ratio", 1.5))
     vol_avg_window = int(cfg.get("vol_avg_window", 20))
+    profile_lookback = int(cfg.get("profile_lookback", 120))
 
-    df = yf.download(ticker, period=period, interval="1d", progress=False)
-    if df.empty:
-        return {"ticker": ticker, "signal": "ERROR",
-                "message": f"[{ticker}] 데이터를 불러오지 못했습니다. 종목 코드를 확인해주세요."}
-
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = df.columns.get_level_values(0)
-
-    required = {"Open", "High", "Low", "Close", "Volume"}
-    missing = required - set(df.columns)
-    if missing:
-        return {"ticker": ticker, "signal": "ERROR",
-                "message": f"[{ticker}] 필수 컬럼 누락({missing}) - 스킵합니다."}
-
-    # yfinance는 미국 장이 아직 열리지 않았거나 당일 데이터가 아직 반영 안 됐을 때
-    # 마지막 행에 NaN이 섞인 "미완결 봉"을 끼워 넣는 경우가 있다.
-    # 그 상태로 분석하면 오늘자 종가가 NaN이 되어버리므로, 완전히 마감된
-    # 마지막 거래일만 남도록 결측 행을 제거한다.
-    before_drop = len(df)
-    df = df.dropna(subset=list(required))
-    if len(df) < before_drop:
-        print(f"[{ticker}] 미완결/결측 봉 {before_drop - len(df)}개 제거 (당일 미마감 데이터 방어)")
-
-    if df.empty:
-        return {"ticker": ticker, "signal": "ERROR",
-                "message": f"[{ticker}] 유효한(완결된) 데이터가 없습니다."}
-
-    min_len = max(num_bins, vol_avg_window) + 5
-    if len(df) < min_len:
-        return {"ticker": ticker, "signal": "ERROR",
-                "message": f"[{ticker}] 데이터가 {len(df)}일뿐이라 분석에 부족합니다(최소 {min_len}일 필요)."}
-
-    i = len(df) - 1
-    df_hist = df.iloc[:i]              # 오늘을 제외한 과거 구간 (룩어헤드 방지)
+    df_hist_full = df.iloc[:i]  # 오늘을 제외한 과거 전체 (룩어헤드 방지)
+    # 거래량 프로파일은 무한정 과거까지 누적하지 않고, 최근 profile_lookback일만 본다.
+    # (차트에서 실제로 보이는 범위와 비슷하게, 그리고 계산량도 일정하게 유지하기 위함)
+    df_hist = df_hist_full.tail(profile_lookback)
     today_row = df.iloc[i]
     ref_price = df["Close"].iloc[i - 1]  # 어제 종가 기준으로 존을 저항/지지로 분류
 
-    # 1) 거래량 프로파일 → 존 추출, ref_price 기준 가까운 순서로 후보 정렬
     edges, bin_volume = build_volume_profile(df_hist, num_bins)
     zones = extract_zones(edges, bin_volume, volume_percentile)
     resistance_candidates, support_candidates = sorted_zone_candidates(zones, ref_price)
@@ -267,15 +242,12 @@ def analyze_ticker(ticker, cfg):
     avg_volume = df_hist["Volume"].tail(vol_avg_window).mean()
     entry_price = today_row["Close"]
 
-    # 2) 가까운 존부터 순서대로: 실제로 닿았는지 + 종가가 존 안/근처로 되돌아왔는지
-    #    (그냥 뚫고 지나간 것과 존에서 반등/반락한 것을 구분하기 위한 조건)
-    #    + 반전 확인 캔들까지 모두 만족해야 신호로 인정한다.
     signal = "HOLD"
     detail = None
 
     for zone in resistance_candidates:
         touched = today_row["High"] >= zone["low"]
-        reverted = entry_price <= zone["high"]  # 종가가 저항을 완전히 뚫고 위에 머물지 않았는지
+        reverted = entry_price <= zone["high"]
         touches_before = count_touches(df_hist, zone)
         if touched and reverted and touches_before < max_touches:
             if check_confirmation(today_row, avg_volume, "short", wick_ratio, volume_multiplier):
@@ -288,7 +260,7 @@ def analyze_ticker(ticker, cfg):
     if signal == "HOLD":
         for zone in support_candidates:
             touched = today_row["Low"] <= zone["high"]
-            reverted = entry_price >= zone["low"]  # 종가가 지지를 완전히 뚫고 아래에 머물지 않았는지
+            reverted = entry_price >= zone["low"]
             touches_before = count_touches(df_hist, zone)
             if touched and reverted and touches_before < max_touches:
                 if check_confirmation(today_row, avg_volume, "long", wick_ratio, volume_multiplier):
@@ -314,7 +286,54 @@ def analyze_ticker(ticker, cfg):
         message = (f"[{ticker}] HOLD - 종가: {entry_price:.2f}, "
                    f"저항존: {res_str}, 지지존: {sup_str}")
 
-    return {"ticker": ticker, "signal": signal, "message": message, "detail": detail}
+    return {"ticker": ticker, "date": df.index[i], "signal": signal, "message": message, "detail": detail}
+
+
+def fetch_clean_data(ticker, period):
+    """yfinance에서 데이터를 받아 컬럼 정리 + 미완결(NaN) 봉 제거까지 마친 df를 반환."""
+    df = yf.download(ticker, period=period, interval="1d", progress=False)
+    if df.empty:
+        return None, f"[{ticker}] 데이터를 불러오지 못했습니다. 종목 코드를 확인해주세요."
+
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+
+    required = {"Open", "High", "Low", "Close", "Volume"}
+    missing = required - set(df.columns)
+    if missing:
+        return None, f"[{ticker}] 필수 컬럼 누락({missing}) - 스킵합니다."
+
+    before_drop = len(df)
+    df = df.dropna(subset=list(required))
+    if len(df) < before_drop:
+        print(f"[{ticker}] 미완결/결측 봉 {before_drop - len(df)}개 제거 (당일 미마감 데이터 방어)")
+
+    if df.empty:
+        return None, f"[{ticker}] 유효한(완결된) 데이터가 없습니다."
+
+    return df, None
+
+
+# ----------------------------------------------------------------------
+# 종목 하나에 대한 라이브(오늘) 분석
+# ----------------------------------------------------------------------
+def analyze_ticker(ticker, cfg):
+    period = cfg.get("period", "180d")
+    num_bins = int(cfg.get("num_bins", 24))
+    vol_avg_window = int(cfg.get("vol_avg_window", 20))
+    profile_lookback = int(cfg.get("profile_lookback", 120))
+
+    df, err = fetch_clean_data(ticker, period)
+    if err:
+        return {"ticker": ticker, "signal": "ERROR", "message": err}
+
+    min_len = max(num_bins, vol_avg_window) + 5
+    if len(df) < min_len:
+        return {"ticker": ticker, "signal": "ERROR",
+                "message": f"[{ticker}] 데이터가 {len(df)}일뿐이라 분석에 부족합니다(최소 {min_len}일 필요)."}
+
+    i = len(df) - 1
+    return evaluate_at_index(ticker, df, i, cfg)
 
 
 def run_daily_swing_simulation(config_path=CONFIG_PATH):
