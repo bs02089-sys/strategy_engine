@@ -28,24 +28,23 @@ class MDDOptimizer:
         with open(self.config_path, "r", encoding="utf-8") as f:
             return json.load(f)
 
-    def get_data(self, ticker: str, period: str = "max") -> Optional[pd.DataFrame]:
-        """
-        (1) 기본 period를 'max'로 변경.
-        진짜 전고점(ATH) 계산을 위해서는 상장 이후 전체 데이터가 필요합니다.
-        변동성/이동평균/추세점수는 어차피 tail()/rolling()으로 최근 구간만
-        사용하므로, 전체 히스토리를 받아도 계산 결과는 동일합니다.
-        """
-        try:
-            df = yf.download(ticker, period=period, interval="1d", progress=False, auto_adjust=True)
-            if df is None or df.empty:
-                return None
-            if isinstance(df.columns, pd.MultiIndex):
-                df.columns = df.columns.get_level_values(0)
-            df.columns = [str(col).lower() for col in df.columns]
-            return df
-        except Exception as e:
-            print(f"❌ {ticker} 데이터 다운로드 실패: {e}")
-            return None
+    def get_data(self, ticker: str, period: str = "max", retries: int = 3, delay: float = 3.0) -> Optional[pd.DataFrame]:
+        import time
+        for attempt in range(1, retries + 1):
+            try:
+                df = yf.download(ticker, period=period, interval="1d", progress=False, auto_adjust=True)
+                if df is None or df.empty:
+                    raise ValueError("빈 데이터 반환됨 (rate limit 가능성)")
+                if isinstance(df.columns, pd.MultiIndex):
+                    df.columns = df.columns.get_level_values(0)
+                df.columns = [str(col).lower() for col in df.columns]
+                return df
+            except Exception as e:
+                print(f"⚠️ {ticker} 시도 {attempt}/{retries} 실패: {e}")
+                if attempt < retries:
+                    time.sleep(delay)
+        print(f"❌ {ticker} 데이터 다운로드 최종 실패")
+        return None
 
     def calculate_indicators(self, df: pd.DataFrame) -> Dict:
         close = df["close"]
