@@ -37,18 +37,8 @@ class MDDOptimizer:
                 if isinstance(df.columns, pd.MultiIndex):
                     df.columns = df.columns.get_level_values(0)
                 df.columns = [str(col).lower() for col in df.columns]
-<<<<<<< HEAD
-<<<<<<< HEAD
-                # 아직 장 마감 전인 오늘 날짜 등, close가 비어있는 트레일링 행 제거
-                df = df.dropna(subset=["close"])
-=======
                 # 아직 장 마감 전인 오늘 날짜 등, close/high가 비어있는 트레일링 행 제거
                 df = df.dropna(subset=["close", "high"])
->>>>>>> 41f4012 (수정)
-=======
-                # 아직 장 마감 전인 오늘 날짜 등, close/high가 비어있는 트레일링 행 제거
-                df = df.dropna(subset=["close", "high"])
->>>>>>> 47fdc7f (수정)
                 if df.empty:
                     raise ValueError("유효한 종가 데이터 없음")
                 return df
