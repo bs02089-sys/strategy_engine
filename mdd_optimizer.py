@@ -18,7 +18,6 @@ class MDDOptimizer:
             "deep_correction": [-25, -38, -55],
             "extreme": [-30, -45, -60]
         })
-        # (4) 하드리밋을 코드 하드코딩이 아닌 config에서 읽음 (없으면 기본값 사용)
         self.hard_limits = self.config.get("hard_limits", {})
         self.default_hard_limit = self.config.get("default_hard_limit", -70.0)
 
@@ -28,33 +27,32 @@ class MDDOptimizer:
         with open(self.config_path, "r", encoding="utf-8") as f:
             return json.load(f)
 
-    def get_data(self, ticker: str, period: str = "max", retries: int = 3, delay: float = 3.0) -> Optional[pd.DataFrame]:
-        import time
-        for attempt in range(1, retries + 1):
-            try:
-                df = yf.download(ticker, period=period, interval="1d", progress=False, auto_adjust=True)
-                if df is None or df.empty:
-                    raise ValueError("빈 데이터 반환됨 (rate limit 가능성)")
-                if isinstance(df.columns, pd.MultiIndex):
-                    df.columns = df.columns.get_level_values(0)
-                df.columns = [str(col).lower() for col in df.columns]
-                return df
-            except Exception as e:
-                print(f"⚠️ {ticker} 시도 {attempt}/{retries} 실패: {e}")
-                if attempt < retries:
-                    time.sleep(delay)
-        print(f"❌ {ticker} 데이터 다운로드 최종 실패")
-        return None
+    def get_data(self, ticker: str, period: str = "max") -> Optional[pd.DataFrame]:
+        """
+        (1) 기본 period를 'max'로 변경.
+        진짜 전고점(ATH) 계산을 위해서는 상장 이후 전체 데이터가 필요합니다.
+        변동성/이동평균/추세점수는 어차피 tail()/rolling()으로 최근 구간만
+        사용하므로, 전체 히스토리를 받아도 계산 결과는 동일합니다.
+        """
+        try:
+            df = yf.download(ticker, period=period, interval="1d", progress=False, auto_adjust=True)
+            if df is None or df.empty:
+                return None
+            if isinstance(df.columns, pd.MultiIndex):
+                df.columns = df.columns.get_level_values(0)
+            df.columns = [str(col).lower() for col in df.columns]
+            return df
+        except Exception as e:
+            print(f"❌ {ticker} 데이터 다운로드 실패: {e}")
+            return None
 
     def calculate_indicators(self, df: pd.DataFrame) -> Dict:
         close = df["close"]
 
-        # (1) ATH는 전체 히스토리 기준 — 최근 1년만 보지 않음
         ath = close.cummax().iloc[-1]
         current_price = close.iloc[-1]
         current_dd = (current_price / ath - 1) * 100
 
-        # 변동성/추세는 최근 구간만 사용 (전체 히스토리를 다 볼 필요 없음)
         returns = close.pct_change().dropna()
         volatility = returns.tail(20).std() * np.sqrt(252)
 
@@ -98,32 +96,24 @@ class MDDOptimizer:
         return tuple(float(x) for x in levels)
 
     def get_hard_limit(self, ticker: str) -> float:
-        """(4) config의 hard_limits에서 티커별 값을 읽고, 없으면 default_hard_limit 사용."""
         return float(self.hard_limits.get(ticker, self.default_hard_limit))
 
     def adjust_levels(self, ticker: str, levels: Tuple[float, float, float], current_dd: float) -> Tuple[float, float, float]:
-        """
-        현실성을 고려한 레벨 조정
-        """
         hard_limit = self.get_hard_limit(ticker)
         adjusted = list(levels)
 
-        # 1. 현재 DD가 이미 1차 레벨보다 상당히 깊을 경우 → 추가 하락 기준으로 재설정
         if current_dd <= adjusted[0] - 5:
             adjusted[0] = current_dd - 4
             adjusted[1] = current_dd - 12
             adjusted[2] = current_dd - 22
 
-        # 2. 일반적인 미세 조정
         for i in range(3):
             if current_dd <= adjusted[i] + 3:
                 new_level = min(adjusted[i], current_dd - 3)
                 adjusted[i] = max(new_level, adjusted[i] - 5)
 
-        # 3. 하드 리밋 적용
         adjusted = [max(level, hard_limit) for level in adjusted]
 
-        # 4. 레벨 간 간격 유지
         for i in range(1, 3):
             if adjusted[i] > adjusted[i-1] - 8:
                 adjusted[i] = adjusted[i-1] - 10
@@ -132,9 +122,6 @@ class MDDOptimizer:
 
         adjusted = [max(level, hard_limit) for level in adjusted]
 
-        # (2) 하드리밋 근처에서 레벨끼리 겹치는 것 방지.
-        # 단, 앞 레벨이 이미 hard_limit 바닥에 닿아있으면 더 이상 깊게 갈 곳이
-        # 없으므로 그 경우에만 동일값(겹침)을 허용한다.
         for i in range(1, 3):
             if adjusted[i-1] > hard_limit and adjusted[i] >= adjusted[i-1]:
                 adjusted[i] = max(adjusted[i-1] - 1, hard_limit)
@@ -143,11 +130,6 @@ class MDDOptimizer:
         return tuple(adjusted)
 
     def generate_signals(self, levels: Tuple, indicators: Dict, tolerance: float = 4.0) -> List[Dict]:
-        """
-        매수 신호 생성
-        - 현재 DD가 레벨에 도달했거나 약간 지난 경우만 표시
-        - 너무 깊게 경과한 신호는 표시하지 않음
-        """
         current_dd = indicators["current_dd"]
         ath = indicators["ath"]
         signals = []
@@ -170,8 +152,6 @@ class MDDOptimizer:
         if df is None or len(df) < 60:
             return {"error": f"{ticker} 데이터 부족"}
 
-        # (3) 데이터 다운로드 이후 단계도 예외처리로 감싸서
-        # 한 종목의 계산 오류가 전체 run() 루프를 중단시키지 않도록 함
         try:
             indicators = self.calculate_indicators(df)
             regime = self.detect_regime(indicators)
