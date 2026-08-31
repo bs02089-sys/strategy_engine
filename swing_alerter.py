@@ -1559,10 +1559,6 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
   </div>
   <div class="price mono">${st["price"]:,.2f}</div>
   <div class="meta">{meta_src}{day_span}</div>
-  <div class="row" style="margin-top:10px;justify-content:flex-end">
-    <span class="chip {'green' if passed_cnt else 'gray'}">
-      {'🟢 매수 구간 ' + str(passed_cnt) + '개 경과' if passed_cnt else '매수 구간 대기'}</span>
-  </div>
   <div class="info">📊 전고가 ${st["ath"]:,.2f} ({st["ath_date"]}) 대비 <span class="dd {dd_cls}">{dd_sign}{abs(dd_pct_disp):.1f}%</span></div>
   <div class="plan">
     <div class="plan-head">
