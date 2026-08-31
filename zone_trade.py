@@ -234,6 +234,19 @@ def analyze_ticker(ticker, cfg):
         return {"ticker": ticker, "signal": "ERROR",
                 "message": f"[{ticker}] 필수 컬럼 누락({missing}) - 스킵합니다."}
 
+    # yfinance는 미국 장이 아직 열리지 않았거나 당일 데이터가 아직 반영 안 됐을 때
+    # 마지막 행에 NaN이 섞인 "미완결 봉"을 끼워 넣는 경우가 있다.
+    # 그 상태로 분석하면 오늘자 종가가 NaN이 되어버리므로, 완전히 마감된
+    # 마지막 거래일만 남도록 결측 행을 제거한다.
+    before_drop = len(df)
+    df = df.dropna(subset=list(required))
+    if len(df) < before_drop:
+        print(f"[{ticker}] 미완결/결측 봉 {before_drop - len(df)}개 제거 (당일 미마감 데이터 방어)")
+
+    if df.empty:
+        return {"ticker": ticker, "signal": "ERROR",
+                "message": f"[{ticker}] 유효한(완결된) 데이터가 없습니다."}
+
     min_len = max(num_bins, vol_avg_window) + 5
     if len(df) < min_len:
         return {"ticker": ticker, "signal": "ERROR",
