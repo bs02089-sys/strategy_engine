@@ -1416,9 +1416,9 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
     # 사용자별 localStorage 기준으로 JS(_PLAN_JS)가 항상 재판정하므로 서버 값은 필요 없다.
     sell_cnt = sum(1 for s in statuses
                    if s.get("sell_ready") and not s.get("error") and not s.get("personal"))
-    # 매수 경과 — 이미 매수한 구간(개인 LOTS)도 포함 (2026-08-13)
-    buy_cnt = sum(1 for s in statuses
-                  if not s.get("error") and any(l.get("passed") for l in s.get("ladder") or []))
+    # 매수 경과 — 실제 매수한 계좌 수 (swing_personal.json LOTS 기준)
+    buy_cnt = sum(1 for s in statuses for l in (s.get("lots") or [])
+                  if not s.get("error") and l.get("buy_price"))
     any_live = any(s.get("live") for s in statuses if not s.get("error"))
     pages_url = (cfg.get("PAGES_URL") or "").strip()
     live_link = (
