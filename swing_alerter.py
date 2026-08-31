@@ -1573,8 +1573,7 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
     <div class="plan-row">
       <label>📈 예상 수익률</label>
       <div class="plan-pcts">
-        <!-- 예상 수익률 — 사용자 채택값 40% 단일 옵션 (2026-08-15) -->
-        <button type="button" class="pct" data-pct="40">40%</button>
+        <button type="button" class="pct" data-pct="{float(cfg.get("SWING_TARGET_PCT", 10)):g}">{float(cfg.get("SWING_TARGET_PCT", 10)):g}%</button>
       </div>
     </div>
   </div>
