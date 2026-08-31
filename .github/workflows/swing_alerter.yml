@@ -1,6 +1,12 @@
 name: Swing Alerter
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'swing_config.json'
+      - 'swing_personal.json'
+      - 'swing_alerter.py'
   schedule:
     # 월~금 00:00 UTC = 09:00 KST — 한국 아침 9시 고정 일일 브리핑 (2026-08-13)
     - cron: "0 0 * * 1-5"
