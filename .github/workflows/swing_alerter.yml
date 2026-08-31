@@ -13,6 +13,12 @@ on:
   repository_dispatch:
     types: [swing-monitor]   # cron-job.org 실시간 알림 발사 (매수 구간 도달/임박/매도)
   workflow_dispatch:          # 수동 실행 지원
+    inputs:
+      test_push:
+        description: 'OneSignal 테스트 푸시 발송'
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: swing-alerter        # 일일 브리핑 ↔ 실시간 폴링 직렬화
@@ -53,6 +59,11 @@ jobs:
           npm ci --silent
           npm run typecheck
 
+      - name: Run OneSignal Test Push
+        if: github.event_name == 'workflow_dispatch' && inputs.test_push == true
+        run: |
+          python swing_alerter.py --test-push
+
       - name: Run Realtime Swing Monitor (from cron-job.org dispatch)
         if: github.event_name == 'repository_dispatch'
         # 실시간 모니터 — 변경분(매수 구간 도달/임박/매도)만 Discord 발송.
@@ -63,7 +74,7 @@ jobs:
           python swing_alerter.py --monitor 2>&1 | tee swing_log.txt
 
       - name: Run Daily Swing Briefing
-        if: github.event_name != 'repository_dispatch'
+        if: github.event_name != 'repository_dispatch' && !(github.event_name == 'workflow_dispatch' && inputs.test_push == true)
         # 일일 브리핑 + 대시보드 HTML 갱신 (모바일 확인용)
         run: |
           set -o pipefail
