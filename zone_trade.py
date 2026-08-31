@@ -166,19 +166,30 @@ def count_touches(df_hist, zone):
 # ----------------------------------------------------------------------
 # [영상 요소 2] 반전 확인 캔들 — 압력이 소화된 뒤 반대 압력이 나타났는가
 # ----------------------------------------------------------------------
-def check_confirmation(today_row, avg_volume, direction, wick_ratio, volume_multiplier):
+def check_confirmation(today_row, avg_volume, direction, wick_ratio, volume_multiplier,
+                        close_position_threshold=0.66):
     """
     direction: 'long' (지지에서 반등 확인) 또는 'short' (저항에서 반락 확인)
     - 몸통(body) 대비 반대쪽 꼬리가 wick_ratio배 이상 길고
-    - 방향에 맞는 양봉/음봉이며
+    - 종가가 당일 변동폭(고가~저가)의 위쪽/아래쪽 close_position_threshold 이상 지점에서 마감하고
     - 거래량이 최근 평균의 volume_multiplier배 이상이어야 '압력 소화 후 반전'으로 인정
+
+    [수정 이력] 원래는 "종가 > 시가(양봉)"를 반등 조건으로 썼는데, 실제 데이터에서
+    예를 들어 저가에서 크게 반등했지만 시가보다 살짝 낮게 마감한 경우
+    (전형적인 지지선 반등 캔들인데 시가 대비로만 보면 음봉)가 전부 걸러지는 문제가 있었다.
+    표준적인 반전 캔들(해머/역해머 등) 판단은 "시가 대비 색깔"이 아니라
+    "당일 저가/고가 대비 어디서 마감했는가"이므로 이 기준으로 교체했다.
     """
     o, h, l, c, v = (today_row["Open"], today_row["High"],
                      today_row["Low"], today_row["Close"], today_row["Volume"])
 
+    day_range = h - l
+    if day_range <= 0:
+        return False
+
     body = abs(c - o)
     if body == 0:
-        body = (h - l) * 0.01 or 1e-9  # 도지 캔들 방어용 최소 몸통
+        body = day_range * 0.01 or 1e-9  # 도지 캔들 방어용 최소 몸통
 
     lower_wick = min(o, c) - l
     upper_wick = h - max(o, c)
@@ -186,9 +197,11 @@ def check_confirmation(today_row, avg_volume, direction, wick_ratio, volume_mult
     volume_ok = avg_volume > 0 and v >= avg_volume * volume_multiplier
 
     if direction == "long":
-        return (c > o) and (lower_wick >= body * wick_ratio) and volume_ok
+        close_position = (c - l) / day_range  # 1에 가까울수록 고가 근처에서 마감(저가 반등 확인)
+        return (lower_wick >= body * wick_ratio) and (close_position >= close_position_threshold) and volume_ok
     elif direction == "short":
-        return (c < o) and (upper_wick >= body * wick_ratio) and volume_ok
+        close_position = (h - c) / day_range  # 1에 가까울수록 저가 근처에서 마감(고가 반락 확인)
+        return (upper_wick >= body * wick_ratio) and (close_position >= close_position_threshold) and volume_ok
     return False
 
 
@@ -225,6 +238,7 @@ def evaluate_at_index(ticker, df, i, cfg):
     rr_ratio = float(cfg.get("rr_ratio", 1.5))
     vol_avg_window = int(cfg.get("vol_avg_window", 20))
     profile_lookback = int(cfg.get("profile_lookback", 120))
+    close_position_threshold = float(cfg.get("close_position_threshold", 0.66))
 
     df_hist_full = df.iloc[:i]  # 오늘을 제외한 과거 전체 (룩어헤드 방지)
     # 거래량 프로파일은 무한정 과거까지 누적하지 않고, 최근 profile_lookback일만 본다.
@@ -250,7 +264,8 @@ def evaluate_at_index(ticker, df, i, cfg):
         reverted = entry_price <= zone["high"]
         touches_before = count_touches(df_hist, zone)
         if touched and reverted and touches_before < max_touches:
-            if check_confirmation(today_row, avg_volume, "short", wick_ratio, volume_multiplier):
+            if check_confirmation(today_row, avg_volume, "short", wick_ratio, volume_multiplier,
+                                   close_position_threshold):
                 sl, tp = compute_sl_tp("short", zone, entry_price, rr_ratio)
                 signal = "SHORT"
                 detail = {"zone": zone, "touches": touches_before,
@@ -263,7 +278,8 @@ def evaluate_at_index(ticker, df, i, cfg):
             reverted = entry_price >= zone["low"]
             touches_before = count_touches(df_hist, zone)
             if touched and reverted and touches_before < max_touches:
-                if check_confirmation(today_row, avg_volume, "long", wick_ratio, volume_multiplier):
+                if check_confirmation(today_row, avg_volume, "long", wick_ratio, volume_multiplier,
+                                       close_position_threshold):
                     sl, tp = compute_sl_tp("long", zone, entry_price, rr_ratio)
                     signal = "LONG"
                     detail = {"zone": zone, "touches": touches_before,

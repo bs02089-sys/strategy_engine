@@ -33,6 +33,7 @@ FIXED_DEFAULTS = {
     "profile_lookback": 120,
     "rr_ratio": 1.5,
     "vol_avg_window": 20,
+    "close_position_threshold": 0.66,
 }
 
 
