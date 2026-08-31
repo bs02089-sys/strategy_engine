@@ -3,8 +3,8 @@
     "SOXL": {
       "strong_bull": [-18, -30, -50],
       "normal": [-25, -40, -60],
-      "deep_correction": [-50, -60, -70],
-      "extreme": [-70, -80, -90]
+      "deep_correction": [-32, -38, -44],
+      "extreme": [-48, -62, -80]
     },
     "PLTR": {
       "strong_bull": [-12, -22, -35],
