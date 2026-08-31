@@ -37,8 +37,13 @@ class MDDOptimizer:
                 if isinstance(df.columns, pd.MultiIndex):
                     df.columns = df.columns.get_level_values(0)
                 df.columns = [str(col).lower() for col in df.columns]
+<<<<<<< HEAD
                 # 아직 장 마감 전인 오늘 날짜 등, close가 비어있는 트레일링 행 제거
                 df = df.dropna(subset=["close"])
+=======
+                # 아직 장 마감 전인 오늘 날짜 등, close/high가 비어있는 트레일링 행 제거
+                df = df.dropna(subset=["close", "high"])
+>>>>>>> 41f4012 (수정)
                 if df.empty:
                     raise ValueError("유효한 종가 데이터 없음")
                 return df
@@ -51,8 +56,10 @@ class MDDOptimizer:
 
     def calculate_indicators(self, df: pd.DataFrame) -> Dict:
         close = df["close"]
+        high = df["high"]
 
-        ath = close.cummax().iloc[-1]
+        # ATH는 종가가 아니라 일중 고가(High) 기준 — 52주 최고가/실제 ATH와 일치시킴
+        ath = high.cummax().iloc[-1]
         current_price = close.iloc[-1]
         current_dd = (current_price / ath - 1) * 100
 
@@ -150,6 +157,20 @@ class MDDOptimizer:
 
         return signals
 
+    def get_live_price(self, ticker: str) -> Optional[float]:
+        """
+        일봉 종가는 마지막 완결된 거래일 기준이라 장중에는 실제 시세와
+        괴리가 생길 수 있음. 가능하면 실시간(지연) 시세로 덮어씀.
+        실패하면 None을 반환해 일봉 종가를 그대로 사용하게 함.
+        """
+        try:
+            fast_info = yf.Ticker(ticker).fast_info
+            price = fast_info.get("lastPrice") or fast_info.get("last_price")
+            return float(price) if price else None
+        except Exception as e:
+            print(f"⚠️ {ticker} 실시간 시세 조회 실패, 일봉 종가로 대체: {e}")
+            return None
+
     def analyze(self, ticker: str) -> Dict:
         df = self.get_data(ticker)
         if df is None or len(df) < 60:
@@ -157,6 +178,13 @@ class MDDOptimizer:
 
         try:
             indicators = self.calculate_indicators(df)
+
+            # 가능하면 현재가를 실시간 시세로 교체하고 DD도 재계산
+            live_price = self.get_live_price(ticker)
+            if live_price is not None:
+                indicators["current_price"] = live_price
+                indicators["current_dd"] = (live_price / indicators["ath"] - 1) * 100
+
             regime = self.detect_regime(indicators)
             base_levels = self.get_levels_for_ticker(ticker, regime)
             levels = self.adjust_levels(ticker, base_levels, indicators["current_dd"])
