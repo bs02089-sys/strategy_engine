@@ -1,11 +1,11 @@
 {
-  "timestamp": "2026-09-04T00:49:25.978445",
+  "timestamp": "2026-09-05T00:38:28.133249",
   "total_score": 6,
   "signals": [
     {
       "name": "Yield Curve Inversion",
       "score": 2,
-      "detail": "Re-steepening in progress (+0.43%p) (+2)",
+      "detail": "Re-steepening in progress (+0.41%p) (+2)",
       "group": "leading"
     },
     {
@@ -17,7 +17,7 @@
     {
       "name": "Credit Spread",
       "score": 0,
-      "detail": "HY stable (2.66%) | IG stable (0.81%)",
+      "detail": "HY stable (2.65%) | IG stable (0.81%)",
       "group": "confirm"
     },
     {
@@ -29,19 +29,19 @@
     {
       "name": "Valuation Overheat",
       "score": 2,
-      "detail": "CAPE 42.38 (Critical) (+2)",
+      "detail": "CAPE 41.41 (Critical) (+2)",
       "group": "leading"
     },
     {
       "name": "Leading Indicators",
       "score": 0,
-      "detail": "LEI stable (+0) | Sahm Rule normal (-0.03%p) (+0)",
+      "detail": "LEI stable (+0) | Sahm Rule normal (-0.07%p) (+0)",
       "group": "confirm"
     },
     {
       "name": "Momentum Strategy",
       "score": 0,
-      "detail": "SPX momentum healthy (14.8%) (+0) | Growth sectors lead (+nan% gap) (+0)",
+      "detail": "SPX momentum healthy (16.0%) (+0) | Growth sectors lead (+nan% gap) (+0)",
       "group": "confirm"
     }
   ]
