@@ -1,17 +1,17 @@
 {
-  "timestamp": "2026-09-05T00:38:28.133249",
-  "total_score": 6,
+  "timestamp": "2026-09-08T00:56:19.130977",
+  "total_score": 5,
   "signals": [
     {
       "name": "Yield Curve Inversion",
-      "score": 2,
-      "detail": "Re-steepening in progress (+0.41%p) (+2)",
+      "score": 0,
+      "detail": "Normal (+0.41%p) (+0)",
       "group": "leading"
     },
     {
       "name": "Market Breadth",
       "score": 0,
-      "detail": "Market breadth stable (+0) | Market balance maintained (RSP/SPY ratio +nan%) (+0)",
+      "detail": "Market breadth stable (+0) | Market balance maintained (RSP/SPY ratio -0.2%) (+0)",
       "group": "confirm"
     },
     {
@@ -40,8 +40,8 @@
     },
     {
       "name": "Momentum Strategy",
-      "score": 0,
-      "detail": "SPX momentum healthy (16.0%) (+0) | Growth sectors lead (+nan% gap) (+0)",
+      "score": 1,
+      "detail": "SPX momentum healthy (16.7%) (+0) | Defensive sectors outperform growth (+1.8% gap) (+1)",
       "group": "confirm"
     }
   ]
