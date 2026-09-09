@@ -1,6 +1,6 @@
 {
-  "timestamp": "2026-09-08T00:56:19.130977",
-  "total_score": 5,
+  "timestamp": "2026-09-09T01:04:14.363233",
+  "total_score": 4,
   "signals": [
     {
       "name": "Yield Curve Inversion",
@@ -11,13 +11,13 @@
     {
       "name": "Market Breadth",
       "score": 0,
-      "detail": "Market breadth stable (+0) | Market balance maintained (RSP/SPY ratio -0.2%) (+0)",
+      "detail": "Market breadth stable (+0) | Market balance maintained (RSP/SPY ratio +nan%) (+0)",
       "group": "confirm"
     },
     {
       "name": "Credit Spread",
       "score": 0,
-      "detail": "HY stable (2.65%) | IG stable (0.81%)",
+      "detail": "HY stable (2.68%) | IG stable (0.81%)",
       "group": "confirm"
     },
     {
@@ -29,7 +29,7 @@
     {
       "name": "Valuation Overheat",
       "score": 2,
-      "detail": "CAPE 41.41 (Critical) (+2)",
+      "detail": "CAPE 41.18 (Critical) (+2)",
       "group": "leading"
     },
     {
@@ -40,8 +40,8 @@
     },
     {
       "name": "Momentum Strategy",
-      "score": 1,
-      "detail": "SPX momentum healthy (16.7%) (+0) | Defensive sectors outperform growth (+1.8% gap) (+1)",
+      "score": 0,
+      "detail": "SPX momentum healthy (16.7%) (+0) | Growth sectors lead (+nan% gap) (+0)",
       "group": "confirm"
     }
   ]
