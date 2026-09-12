@@ -372,7 +372,7 @@ def send_sell_imminent_pushes(statuses: list[dict], cfg: dict) -> bool:
     """매도 목표 임박(🚀) 푸시 — 개인 포지션(_PERSONAL) 전용, 전체 구독자(= 내 기기) 대상 (2026-08-15).
 
     배경: _PERSONAL 포지션의 매도 임박은 공용 알림(Discord)에서 제외되어 대시보드 칩으로만
-    표시됐다. 나무증권 매도감시를 '목표 임박 시점'에 등록하는 루틴(NAMYU_SWING_SETUP.md ②)의
+    표시됐다. 나무증권 매도감시를 '목표 임박 시점'에 등록하는 루틴(NAMU_SWING_SETUP.md ②)의
     신호가 되도록, 임박(목표까지 IMMINENT_GAP_PCT 이내) 상태를 푸시로 발송한다.
 
     매도 신호 푸시(send_user_sell_pushes)와 동일한 패턴:
