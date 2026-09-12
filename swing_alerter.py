@@ -933,10 +933,8 @@ def build_briefing_text(statuses: list[dict], cfg: dict) -> str:
         ]
         if buy_txt:
             block.append(f"- {buy_txt}")
-        block += [
-            f"- 전고가: ${st['ath']:,.2f} ({st['ath_date']})",
-            "",
-        ]
+        # 전고가는 위 ATH 줄에 이미 표시된다 — 중복 줄을 만들지 않는다 (2026-09-12).
+        block.append("")
         lines.extend(block)
     return "\n".join(lines).strip()
 
