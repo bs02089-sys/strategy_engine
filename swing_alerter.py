@@ -1013,7 +1013,6 @@ footer{color:#4b5563;font-size:12px;text-align:center;margin-top:8px;line-height
 .plan-row label{font-size:22px;color:var(--muted);width:168px;flex-shrink:0}
 .plan-head{display:flex;align-items:baseline;gap:6px;flex-wrap:wrap;margin-bottom:8px}
 .plan-head .pt{font-size:22px;font-weight:700;color:var(--text)}
-.plan-head .ps{font-size:12px;color:#5b6572}
 .plan-acc{display:flex;align-items:center;gap:8px;margin-bottom:6px}
 .plan-hd{display:flex;align-items:center;gap:8px;margin-bottom:4px;font-size:11px;color:#5b6572}
 .plan-hd .hd-no{width:26px;flex-shrink:0;text-align:center}
@@ -1381,11 +1380,12 @@ def _lvl_row(lvl: dict, next_fill: float | None = None) -> str:
 def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny: str) -> str:
     """스마트폰용 자체 완결 HTML 대시보드 생성 (외부 리소스 없음)."""
     cards = []
-    # 개인 포지션은 공용 대시보드의 서버 렌더 매도 칩/카운트에서 제외 — 앱의 매도 상태는
-    # 사용자별 localStorage 기준으로 JS(_PLAN_JS)가 항상 재판정하므로 서버 값은 필요 없다.
-    sell_cnt = sum(1 for s in statuses
-                   if s.get("sell_ready") and not s.get("error") and not s.get("personal"))
-    # 매수 경과 — 실제 매수한 계좌 수 (swing_personal.json LOTS 기준)
+    # 매도 도달 티커 수 — 개인 포지션도 포함한다 (2026-09-12). 대시보드는 사용자 전용이라 감출
+    # 이유가 없고, 카드에는 이미 계좌별 매도 예정가가 그려진다. 로드 후 JS(_PLAN_JS)가 입력값
+    # 기준으로 다시 세지만, 서버 값도 실제 상태와 맞아야 화면이 깜빡이지 않는다.
+    sell_cnt = sum(1 for s in statuses if s.get("sell_ready") and not s.get("error"))
+    # 매수 완료 — 실제 매수한 계좌 수 (swing_personal.json LOTS 기준). 래더의 '경과'(가격이 지나간
+    # 구간)와 다른 뜻이라 화면 문구도 '매수 완료'로 구분한다 (2026-09-12).
     buy_cnt = sum(1 for s in statuses for l in (s.get("lots") or [])
                   if not s.get("error") and l.get("buy_price"))
     any_live = any(s.get("live") for s in statuses if not s.get("error"))
@@ -1462,9 +1462,11 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
                     and st["sell_gap_pct"] <= float(cfg.get("IMMINENT_GAP_PCT", 5)))
         # 기본(대기) 상태는 칩을 숨긴다 — 매도 예정가는 하단 계획 섹션에 항상 표시되므로
         # 화면의 고정 노이즈(⏳ 대기)를 제거하고 🚨 매도 / 🚀 임박 상태만 보여준다.
+        # 개인 포지션 전용 '매도 미설정' 칩을 두지 않는다 — 카드 안에 계좌별 매도 예정가가 그대로
+        # 보이는데 칩만 '매도 미설정'이라 서로 모순이었다 (2026-09-12). JS가 입력값 기준으로
+        # 재판정하므로 서버는 자리만 만들어 둔다 (대기 = 숨김).
         sell_chip = (
-            '<span class="chip gray" data-sell-chip>매도 미설정</span>' if st.get("personal")
-            else '<span class="chip red" data-sell-chip>🚨 매도</span>' if st["sell_ready"]
+            '<span class="chip red" data-sell-chip>🚨 매도</span>' if st["sell_ready"]
             else '<span class="chip amber" data-sell-chip>🚀 임박</span>' if imminent
             else '<span class="chip gray" data-sell-chip>매도 미설정</span>' if st["sell_target"] is None
             else '<span class="chip gray" data-sell-chip style="display:none">⏳ 대기</span>'
@@ -1532,7 +1534,6 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
   <div class="plan">
     <div class="plan-head">
       <span class="pt">💰 계좌별 매수 예정가</span>
-      <span class="ps">세븐 스플릿 — 7개 계좌</span>
     </div>
 {acc_rows}
     <div class="plan-row">
@@ -1542,7 +1543,7 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
       </div>
     </div>
   </div>
-  <div class="ladder-title">📉 매수 구간 (전고가 대비 MDD)</div>
+  <div class="ladder-title">📉 매수 구간</div>
   <div class="ladder">{rows}</div>
 </div>""")
 
@@ -1576,7 +1577,7 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
   <div class="chips">
     {push_btn}
     <span class="chip {'red' if sell_cnt else 'gray'}" id="sell-alarm-cnt">🚨 매도 알람 {sell_cnt}</span>
-    <span class="chip {'green' if buy_cnt else 'gray'}">🟢 매수 경과 {buy_cnt}</span>
+    <span class="chip {'green' if buy_cnt else 'gray'}">🟢 매수 완료 {buy_cnt}</span>
   </div>
   {sync_row}
 </header>
