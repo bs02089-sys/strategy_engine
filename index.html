@@ -161,6 +161,13 @@ footer{color:#4b5563;font-size:12px;text-align:center;margin-top:8px;line-height
   color:var(--text);font-size:22px;font-weight:700;padding:7px 10px;font-family:ui-monospace,Menlo,Consolas,monospace}
 .acc-sell{font-size:13px;font-weight:700;color:var(--text);font-family:ui-monospace,Menlo,Consolas,monospace;
   width:94px;text-align:right;flex-shrink:0}
+/* 🛡 매도감시 점검 — 계좌별 '등록 필요 시점' 상태 (서버 렌더링, 2026-09-12) */
+.watch{margin-top:10px;background:#0d121c;border:1px dashed var(--border);border-radius:10px;padding:8px 10px}
+.watch-hd{font-size:12px;color:var(--muted);margin-bottom:5px}
+.watch-item{font-size:12px;font-family:ui-monospace,Menlo,Consolas,monospace;margin-top:3px;line-height:1.5}
+.watch-item.wait{color:#7d8797}
+.watch-item.now{color:var(--amber);font-weight:700}
+.watch-item.sell{color:#ff6b6b;font-weight:700}
 .plan-unit{font-size:22px;color:var(--muted)}
 .plan-pcts{display:flex;gap:6px;flex-wrap:wrap}
 .pct{font-size:22px;font-weight:700;padding:7px 13px;border-radius:999px;
@@ -185,7 +192,7 @@ footer{color:#4b5563;font-size:12px;text-align:center;margin-top:8px;line-height
 <body>
 <header>
   <h1>📈 스윙 투자 알리미</h1>
-  <div class="sub">업데이트 2026-09-12 04:07 · 종가 기준 2026-09-12 00:07 (미국)<span class="pages">· <a href="https://bs02089-sys.github.io/strategy_engine/" target="_blank" rel="noopener">🌐 라이브 열기</a></span></div>
+  <div class="sub">업데이트 2026-09-12 04:16 · 종가 기준 2026-09-12 00:16 (미국)<span class="pages">· <a href="https://bs02089-sys.github.io/strategy_engine/" target="_blank" rel="noopener">🌐 라이브 열기</a></span></div>
   <div class="chips">
     <button id="push-btn" class="push-btn" disabled>🔔 알림 받기</button>
     <span class="chip gray" id="sell-alarm-cnt">🚨 매도 알람 0</span>
@@ -252,6 +259,12 @@ footer{color:#4b5563;font-size:12px;text-align:center;margin-top:8px;line-height
       <div class="plan-pcts">
         <button type="button" class="pct" data-pct="25">25%</button>
       </div>
+    </div>
+    <div class="watch">
+      <div class="watch-hd">🛡 매도감시 점검 — 지금 등록 0 · 등록 보류 3 (나무증권 · 30일 · 정규장만)</div>
+      <div class="watch-item wait">⏳ 1번 — 등록 보류 (목표 $91.86 · $87.27 도달 시 등록)</div>
+      <div class="watch-item wait">⏳ 2번 — 등록 보류 (목표 $88.88 · $84.44 도달 시 등록)</div>
+      <div class="watch-item wait">⏳ 3번 — 등록 보류 (목표 $86.99 · $82.64 도달 시 등록)</div>
     </div>
   </div>
   <div class="ladder-title">📉 매수 구간 (전고가 대비 MDD)</div>
