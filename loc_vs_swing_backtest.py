@@ -8,7 +8,8 @@ loc_vs_swing_backtest.py — 장기 축적형 매수 조건 비교: LOC_DCA(시�
       LOC_DCA(전일 종가 × (1−σ×승수))보다 장기 적립 방식으로 우월한가?"
 
 모델 (2026-08-17 사용자 결정):
-  - ⚠️ 스윙의 매도 목표(+40%, SWING_TARGET_PCT)는 **제외** — 두 전략 모두 무매도 순수 적립
+  - ⚠️ 스윙의 매도 목표(SWING_TARGET_PCT)는 **제외** — 두 전략 모두 무매도 순수 적립
+    (수치는 목표율과 무관 — 특정 값을 적지 않아 설정 전환 때 문서가 어깗나지 않는다)
   - 총 예산 동일화: --budget (기본 $50,000 — LOC 실전 예산과 동일)
   - 기간: 최근 5년 (기본 2021-08-02 ~ 2026-08-02, LOC TEST_END 기준 고정 — 재현성)
   - 스윙 재투입: 새 ATH 사이클(+1% 리셋, swing_alerter.py _handle_ath_cycle_reset 와 동일 규칙)
@@ -480,7 +481,7 @@ def run_rolling(df: pd.DataFrame, args, loc_cfg: dict, zones: list[int]) -> None
 
     print(f"\n{'═' * 96}")
     print(f"  롤링 {window_years:.0f}년 윈도우 강건성 검증 — 시작 시점 {step_months}개월 간격 스윕")
-    print(f"  {args.ticker} · 예산 ${args.budget:,.0f} · 수수료 {args.fee*100:.2f}% · 40% 매도 제외 무매도 축적")
+    print(f"  {args.ticker} · 예산 ${args.budget:,.0f} · 수수료 {args.fee*100:.2f}% · 매도 제외 무매도 축적")
     print(f"  dd = 윈도우 시작 시점의 ATH 대비 하락률 (0 부근 = 고점 시작, -20% = 저점 시작)")
     print(f"{'═' * 96}")
     print(f"  {'시작일':>12} {'종료일':>12} {'시작dd':>7} {'LOC':>9} {'스윙':>9} {'B&H':>9} {'승자':>6} {'LOC MDD':>8} {'스윙 MDD':>8}")
@@ -507,7 +508,7 @@ def run_rolling(df: pd.DataFrame, args, loc_cfg: dict, zones: list[int]) -> None
 
 def main() -> None:
     ap = argparse.ArgumentParser(
-        description="장기 축적형 매수 조건 비교: LOC_DCA(시그마) vs 스윙(ATH 하락 구간) — 40% 매도 제외")
+        description="장기 축적형 매수 조건 비교: LOC_DCA(시그마) vs 스윙(ATH 하락 구간) — 매도 제외(무매도 축적)")
     ap.add_argument("--ticker", default=DEFAULT_TICKER)
     ap.add_argument("--since", default=None,
                     help=f"시뮬레이션 시작일 (기본: 최근 5년 = {TEST_END - pd.Timedelta(days=1826)} ~ {TEST_END})")
@@ -590,7 +591,7 @@ def main() -> None:
     print(f"  매수 조건 비교 — {args.ticker} · {wstart} ~ {wend} ({years:.1f}년) · 예산 ${args.budget:,.0f} · 수수료 {args.fee*100:.2f}%")
     reinvest_desc = (f" + 사이클당 ${args.swing_per_cycle:,.0f} 신규 투입" if args.swing_per_cycle > 0
                      else " (총 예산 내 재투입 — 예산 소진 시 중단)")
-    print(f"  모델: 40% 매도 제외 무매도 축적 | 스윙 = ATH -{zones[0]}~-{zones[-1]}% {len(zones)}구간 "
+    print(f"  모델: 매도 제외 무매도 축적 | 스윙 = ATH -{zones[0]}~-{zones[-1]}% {len(zones)}구간 "
           f"(3% 래더) 사이클(+1% ATH 리셋) 재투입{reinvest_desc}")
     print(f"{'═' * 88}")
     print(f"  {'전략':<28} {'총수익률':>9} {'MDD':>8} {'Sharpe':>7} {'Calmar':>7} {'매수':>5} "

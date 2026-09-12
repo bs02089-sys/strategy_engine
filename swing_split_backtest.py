@@ -6,7 +6,8 @@ swing_split_backtest.py — 세븐 스플릿 하락 구간(스텝)/매도 목표
 
 현재 실전 설정 (swing_config.json):
   - 매수 구간: ATH 대비 -15% ~ -33%, 3% 스텝 7구간 (15/18/21/24/27/30/33)
-  - 계좌 1~7 각 $500 (세븐 스플릿), 매도 목표: 매수가 대비 +40% (SWING_TARGET_PCT, 2026-08-15 전환)
+  - 계좌 1~7 각 $500 (세븐 스플릿), 매도 목표: 매수가 대비 +25% (SWING_TARGET_PCT — 2026-08-31 전환)
+    ⚠️ 목표는 하드코딩하지 않고 --target 기본값이 swing_config.json 에서 읽어온다 (값이 바뀌면 자동 반영)
 
 이 백테스트의 질문:
   "첫 구간 -15%, 7분할 고정"에서 하락 스텝을 얼마로 잡아야 기회 비용(미투자 캐시)이
@@ -38,16 +39,30 @@ swing_split_backtest.py — 세븐 스플릿 하락 구간(스텝)/매도 목표
   python3 swing_split_backtest.py --no-index          # 나스닥 비교 생략 (다운로드 절약)
 """
 import argparse
+import json
 from datetime import date, timedelta
 
 import numpy as np
 import pandas as pd
 import yfinance as yf
 
+SWING_CONFIG_PATH = "swing_config.json"   # 매도 목표 단일 소스 (SWING_TARGET_PCT — 읽기 전용)
 DEFAULT_TICKER = "TQQQ"
 INDEX_TICKER = "^IXIC"     # 나스닥 종합 — 유튜브 영상 주장(-30% 드묾) 검증용
 AMOUNT = 500.0             # 계좌당 예산 (swing_config 기준)
 DEFAULT_SINCE = (date.today() - timedelta(days=3650)).isoformat()   # 최근 10년
+
+
+def load_swing_target() -> float:
+    """swing_config.json 의 SWING_TARGET_PCT — 백테스트 기본 매도 목표 (설정이 단일 소스).
+
+    하드코딩하면 설정 전환(예: 2026-08-31 +40%→+25%) 때 백테스트와 실전이 어긋난다.
+    """
+    try:
+        with open(SWING_CONFIG_PATH, "r", encoding="utf-8") as f:
+            return float(json.load(f).get("SWING_TARGET_PCT", 25))
+    except Exception:
+        return 25.0
 
 
 def fetch_ohlc(ticker: str) -> tuple[np.ndarray, np.ndarray, pd.DatetimeIndex]:
@@ -294,7 +309,7 @@ def run_grid_sweep(closes: np.ndarray, highs: np.ndarray, dates: pd.DatetimeInde
     """2차원 그리드 — 하락 스텝 × 매도 목표 수익률 동시 스윕 (--grid).
 
     스텝/목표를 따로 최적화하면 상호작용(예: 좁은 스텝 + 높은 목표)을 놓친다.
-    행 = 스텝, 열 = 목표, 셀 = 총수익률%/MDD% — 행 최고에 ★, 현재 실전 설정(3%×+40%)에 ◀.
+    행 = 스텝, 열 = 목표, 셀 = 총수익률%/MDD% — 행 최고에 ★, 현재 실전 설정(스텝 × config 목표)에 ◀.
     """
     print(f"\n{'═' * 76}")
     print(f"  2차원 그리드 — 하락 스텝 × 매도 목표 수익률 — {args.ticker} · {args.since} 이후")
@@ -379,7 +394,8 @@ def main() -> None:
     ap.add_argument("--since", default=DEFAULT_SINCE, help=f"백테스트 시작일 (기본: 최근 10년 = {DEFAULT_SINCE})")
     ap.add_argument("--start", type=float, default=15.0, help="첫 구간 하락률 %% (기본 15 = -15%%)")
     ap.add_argument("--splits", type=int, default=7, help="분할 수 (기본 7 = 세븐 스플릿)")
-    ap.add_argument("--target", type=float, default=40.0, help="매도 목표 수익률 %% (기본 40 = 현재 실전 설정)")
+    ap.add_argument("--target", type=float, default=load_swing_target(),
+                    help="매도 목표 수익률 %% (기본 = swing_config.json SWING_TARGET_PCT — 실전 설정 단일 소스)")
     ap.add_argument("--step", type=float, default=3.0, help="--targets 스윕 시 고정 하락 스텝 %% (기본 3 = 현재 실전 설정)")
     ap.add_argument("--amount", type=float, default=AMOUNT, help="계좌당 매수 금액 $ (기본 500)")
     ap.add_argument("--fee", type=float, default=0.001, help="왕복 수수료 (기본 0.001 = 0.1%%)")
