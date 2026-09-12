@@ -1028,6 +1028,13 @@ footer{color:#4b5563;font-size:12px;text-align:center;margin-top:8px;line-height
   color:var(--text);font-size:22px;font-weight:700;padding:7px 10px;font-family:ui-monospace,Menlo,Consolas,monospace}
 .acc-sell{font-size:13px;font-weight:700;color:var(--text);font-family:ui-monospace,Menlo,Consolas,monospace;
   width:94px;text-align:right;flex-shrink:0}
+/* 🛡 매도감시 점검 — 계좌별 '등록 필요 시점' 상태 (서버 렌더링, 2026-09-12) */
+.watch{margin-top:10px;background:#0d121c;border:1px dashed var(--border);border-radius:10px;padding:8px 10px}
+.watch-hd{font-size:12px;color:var(--muted);margin-bottom:5px}
+.watch-item{font-size:12px;font-family:ui-monospace,Menlo,Consolas,monospace;margin-top:3px;line-height:1.5}
+.watch-item.wait{color:#7d8797}
+.watch-item.now{color:var(--amber);font-weight:700}
+.watch-item.sell{color:#ff6b6b;font-weight:700}
 .plan-unit{font-size:22px;color:var(--muted)}
 .plan-pcts{display:flex;gap:6px;flex-wrap:wrap}
 .pct{font-size:22px;font-weight:700;padding:7px 13px;border-radius:999px;
@@ -1522,6 +1529,45 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
             for n, (b, v, s) in ((n, _plan_cell(n)) for n in range(1, 8))
         )
 
+        # 🛡 매도감시 점검 — 계좌별 '등록 필요 시점' 상태 (서버 렌더링, 2026-09-12)
+        #   규칙: 목표 임박(🚀, 목표까지 IMMINENT_GAP_PCT 이내) 시 나무증권 매도감시 등록,
+        #   목표 도달(🚨) 시 매도 신호 푸시 → 수동 매도. 매수 직후 등록은 30일 만료가 먼저 와
+        #   헛등록이 되므로 '지금 등록'은 임박부터다.
+        #   값은 서버 단일 소스(swing_personal.json LOTS × SWING_TARGET_PCT) 기준 — 화면의
+        #   세션용 수익률 버튼(localStorage)과 무관하게 항상 같은 상태를 보여준다.
+        gap_limit = float(cfg.get("IMMINENT_GAP_PCT", 5))
+        watch_items: list[str] = []
+        n_now = n_sell = n_wait = 0
+        for n in range(1, 8):
+            lot = lot_map.get(n) or {}
+            tgt = lot.get("sell_target")
+            if not tgt:
+                continue
+            gap = lot.get("sell_gap_pct")
+            if lot.get("sell_ready"):
+                cls = "sell"
+                txt = f"🚨 {n}번 — 매도 신호 (목표 ${tgt:,.2f} 도달) → 수동 매도"
+                n_sell += 1
+            elif gap is not None and gap <= gap_limit:
+                cls = "now"
+                txt = f"🚀 {n}번 — 지금 등록 (목표 ${tgt:,.2f} · 남은 {gap:.1f}%p)"
+                n_now += 1
+            else:
+                cls = "wait"
+                # 등록 시작 가격 = 목표에서 임박 기준만큼 아래 (그 가격에 닿으면 🚀 로 바뀐다)
+                trig = f"${tgt * (1 - gap_limit / 100.0):,.2f} 도달 시 등록" if gap is not None else "등록 시점 대기"
+                txt = f"⏳ {n}번 — 등록 보류 (목표 ${tgt:,.2f} · {trig})"
+                n_wait += 1
+            watch_items.append(f'      <div class="watch-item {cls}">{txt}</div>')
+        watch_block = ""
+        if watch_items:
+            head = (f"🛡 매도감시 점검 — 지금 등록 {n_now}"
+                    + (f" · 매도 신호 {n_sell}" if n_sell else "")
+                    + f" · 등록 보류 {n_wait} (나무증권 · 30일 · 정규장만)")
+            watch_block = ('    <div class="watch">\n'
+                           f'      <div class="watch-hd">{head}</div>\n'
+                           + "\n".join(watch_items) + "\n    </div>\n")
+
         cards.append(f"""
 <div class="card" data-ticker="{st["ticker"]}" data-ath="{st["ath"]:.2f}" data-close="{st["price"]:.2f}" data-gap="{float(cfg.get("IMMINENT_GAP_PCT", 5)):g}" data-sell-default="{float(cfg.get("SWING_TARGET_PCT", 10)):g}">
   <div class="row">
@@ -1543,7 +1589,7 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
         <button type="button" class="pct" data-pct="{float(cfg.get("SWING_TARGET_PCT", 10)):g}">{float(cfg.get("SWING_TARGET_PCT", 10)):g}%</button>
       </div>
     </div>
-  </div>
+{watch_block}  </div>
   <div class="ladder-title">📉 매수 구간 (전고가 대비 MDD)</div>
   <div class="ladder">{rows}</div>
 </div>""")
