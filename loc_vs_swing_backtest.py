@@ -17,12 +17,15 @@ loc_vs_swing_backtest.py — 장기 축적형 매수 조건 비교: LOC_DCA(시�
     중단. --swing-per-cycle $N 을 주면 사이클마다 $N 신규 자금을 추가 투입 (실전 스윙의
     사이클당 $3,500 규모로 다중 사이클 축적 확인 가능)
 
-전략 규칙 (실전 엔진과 동일):
+전략 규칙 (실전 엔진과 동일 — 2026-09-12 가격 기준 통일):
+  - 가격: **원시 종가(Close)/고가(High), 미조정** — 두 전략이 같은 계열을 쓴다 (배당 미반영,
+         양쪽 동일 조건). 실전 판정이 확정 종가·원시 고가 기준이라 그대로 맞춘다.
+         (참고: LOC_DCA_strategy.py --backtest 는 배당 조정 종가를 쓰므로 절대 수치가 다름)
   - LOC: 매일 loc = 전일 종가 × (1−σ×승수), σ = EWMA(λ=0.94, 252일 로그수익률).
          당일 종가 ≤ loc → 매수 (LOC 지정가 — 마감가 체결: 장 마감가 ≤ 지정가일 때만
          체결, 체결가 = 종가), $budget/splits × 최대 splits 회
-  - 스윙: ATH = 배당 조정 종가 롤링 역대 최고가. 종가 ≤ ATH × (1−구간%) 도달 시 매수
-         (확정 종가 기준 — 실시간 값 미사용, 엔진 동일), 구간당 $budget/7.
+  - 스윙: ATH = 원시 고가(High) 롤링 역대 최고가 (엔진 공용 LOC_DCA_strategy.get_all_time_high 와 동일).
+         종가 ≤ ATH × (1−구간%) 도달 시 매수 (확정 종가 기준 — 실시간 값 미사용, 엔진 동일), 구간당 $budget/7.
          구간은 사이클당 1회 매수, ATH +1% 갱신 시 새 사이클 → 전 구간 재무장·재매수.
   - 수수료: --fee (기본 0.1%, 매수 시 적용 — 두 전략 동일)
   - 기준선: 전액 일시 매수 후 보유 (Buy & Hold) 참고
@@ -56,14 +59,20 @@ DATA_START = "2013-12-01"   # LOC 엔진 DATA_START 와 동일 — 워밍업(σ 
 
 
 def load_ohlc(ticker: str, end: date) -> pd.DataFrame:
-    """OHLC 다운로드 — LOC 엔진 load_data 와 동일 규칙(TEST_START 필터만 제거해
-    윈도우 이전 워밍업 데이터를 확보). Close 로 시뮬레이션한다 (LOC — 마감가 체결, Low 불필요)."""
+    """원시 Close/High 다운로드 — 실전 엔진과 동일 기준으로 두 전략을 비교한다.
+
+    - Close(미조정): LOC 판정(마감가 체결)·스윙 구간 도달 판정 공통 (실전은 확정 종가로 판정)
+    - High(미조정): 스윙 ATH = 누적 최고 (엔진 공용 get_all_time_high 와 동일)
+    - 배당 미반영 — 양쪽 전략 공통이라 비교는 공평하지만, 배당 조정 종가를 쓰는
+      LOC_DCA_strategy.py --backtest 의 절대 수치와는 다르다 (2026-09-12 정렬)
+    TEST_START 필터만 제거해 윈도우 이전 워밍업 데이터를 확보한다.
+    """
     raw = yf.download(ticker, start=DATA_START,
                       end=(end + timedelta(days=1)).isoformat(),
-                      auto_adjust=True, progress=False)
+                      auto_adjust=False, progress=False)
     if isinstance(raw.columns, pd.MultiIndex):
         raw.columns = raw.columns.get_level_values(0)
-    df = raw[["Close"]].dropna().copy()
+    df = raw[["Close", "High"]].dropna().copy()
     if df.index.tz is not None:
         df.index = df.index.tz_localize(None)
     df = df[~df.index.duplicated(keep="last")].sort_index()
@@ -149,7 +158,8 @@ def simulate_swing(df: pd.DataFrame, w0: int, budget: float, zones: list[int],
                    wend: int | None = None) -> dict:
     """세븐 스플릿 매수 조건 무매도 축적 — ATH 하락 구간 + 사이클(+1% 리셋) 재투입.
 
-    - ATH = 배당 조정 종가 롤링 역대 최고가 (윈도우 진입 시점 ATH = 이전 데이터 최고가)
+    - ATH = 원시 고가(High) 롤링 역대 최고가 — 엔진 공용 get_all_time_high 와 동일 기준
+      (윈도우 진입 시점 ATH = 이전 데이터의 High 최고가)
     - 구간 도달 판정: 종가 ≤ ATH × (1−구간%) — 확정 종가 기준 (엔진 동일)
     - 사이클: ATH 가 사이클 기준 대비 +1% 초과 갱신 시 새 사이클 → 전 구간 재무장 (재매수 가능)
     - 매수: 구간당 사이클 1회, $budget/len(zones) — 잔여 예산 소진 시 중단
@@ -157,11 +167,12 @@ def simulate_swing(df: pd.DataFrame, w0: int, budget: float, zones: list[int],
     - wend: 윈도우 종료 인덱스 (기본 = 데이터 끝) — 롤링 검증용
     """
     closes = df["Close"].to_numpy(dtype=float)
+    highs = df["High"].to_numpy(dtype=float)
     dates = df.index
     n = wend if wend is not None else len(df)
     per_zone = budget / len(zones)
 
-    ath = float(closes[:w0].max()) if w0 > 0 else float(closes[0])   # 윈도우 진입 ATH
+    ath = float(highs[:w0].max()) if w0 > 0 else float(highs[0])   # 윈도우 진입 ATH (High 기준)
     cycle_base = ath
     cycle = 1
     last_bought_cycle = {z: 0 for z in zones}   # 구간별 마지막 매수 사이클 (사이클당 1회)
@@ -178,8 +189,9 @@ def simulate_swing(df: pd.DataFrame, w0: int, budget: float, zones: list[int],
 
     for i in range(w0, n):
         c = float(closes[i])
-        if c > ath:
-            ath = c
+        h = float(highs[i])
+        if h > ath:
+            ath = h                       # ATH = 일중 고가 누적 최고 (엔진과 동일)
         # 사이클 리셋 — ATH_CYCLE_BASE 대비 +1% 초과 시 (엔진 _handle_ath_cycle_reset 동일 규칙)
         if ath > cycle_base * 1.01:
             cycle += 1
@@ -454,7 +466,7 @@ def run_rolling(df: pd.DataFrame, args, loc_cfg: dict, zones: list[int]) -> None
     rows = []
     for w0, we in starts:
         start_close = float(df["Close"].iloc[w0])
-        ath_before = float(df["Close"].iloc[:w0].max())
+        ath_before = float(df["High"].iloc[:w0].max())
         start_dd = (start_close / ath_before - 1) * 100   # 시작 시점 ATH 대비 하락률 (음수 = 저점 부근)
         loc = simulate_loc(df, w0, args.budget, loc_cfg["splits"],
                            loc_cfg["entry_multiplier"], args.fee, wend=we)
@@ -615,7 +627,9 @@ def main() -> None:
               f"최후 {loc_log[-1]['date'].date()} @ ${loc_log[-1]['price']:,.2f} · "
               f"평균 ${avg_loc:,.2f}{dep} — 최종 종가 ${loc['last_close']:,.2f}")
     print(f"\n  ⚠️ 참고: 스윙·LOC 모두 종가(확정 종가/마감가) 기준 — 각 실전 엔진의 판정 규칙을 "
-          f"그대로 사용했습니다. LOC 지정가는 장 마감가 ≤ 지정가일 때만 체결됩니다 (2026-08-17 수정).\n")
+          f"그대로 사용했습니다. LOC 지정가는 장 마감가 ≤ 지정가일 때만 체결됩니다 (2026-08-17 수정)."
+          f"\n     가격 계열은 원시 종가/고가(미조정·배당 미반영)로 양쪽 동일 — 스윙 ATH 는 엔진 공용"
+          f"\n     get_all_time_high(High 기준)와 일치합니다 (2026-09-12 정렬).\n")
 
 
 if __name__ == "__main__":

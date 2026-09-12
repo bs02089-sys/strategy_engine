@@ -22,7 +22,7 @@
     (봇이 상태 파일만 커밋 → git 충돌로 알림 상태가 유실되지 않음)
 
 기존 인프라 재사용:
-  - LOC_DCA_strategy.py 의 get_prev_close / _send_discord / resolve_discord_config
+  - LOC_DCA_strategy.py 의 get_prev_close / get_all_time_high(전고점) / _send_discord / resolve_discord_config
   - GitHub Actions + cron-job.org (repository_dispatch) 실시간 폴링 패턴
 
 사용법:
@@ -47,7 +47,7 @@ from zoneinfo import ZoneInfo
 import yfinance as yf
 
 
-from LOC_DCA_strategy import _send_discord, get_prev_close, resolve_discord_config
+from LOC_DCA_strategy import _send_discord, get_all_time_high, get_prev_close, resolve_discord_config
 
 CONFIG_PATH = "swing_config.json"
 STATE_PATH = "swing_state.json"        # 봇 전용 상태 파일 (ZONE_ALERTS/매도 플래그) — 설정과 분리
@@ -500,37 +500,8 @@ def send_zone_pushes(zone_msgs: dict[str, list[str]], cfg: dict) -> None:
 # 데이터 조회
 # ═══════════════════════════════════════════════════════════
 
-def get_ath(ticker: str, max_retries: int = 3) -> tuple[float | None, str | None]:
-    """역대 최고가(ATH) 조회 — 원시 고가(High, 미조정) 기준.
-
-    Google Finance '=GOOGLEFINANCE(TICKER, "high52")'와 동일한 원시 장중 고가를 사용한다.
-    미조정이라 실제 거래에서 도달한 가격과 일치하므로 MDD 래더가 실거래 전고가를 기준으로
-    움직인다 (예: TQQQ 2026-06-03 — Raw High $88.09).
-    종가(Close) 대비 고가(High) 사용은 의도적 — '실거래 전고가 기준 MDD'.
-    """
-    last_err: Exception | None = None
-    for attempt in range(max_retries):
-        try:
-            stock = yf.Ticker(ticker)
-            hist = stock.history(period="max", interval="1d", auto_adjust=False)
-            if hist.empty:
-                raise ValueError("Data empty.")
-            highs = hist["High"].dropna()
-            if highs.empty:
-                # 폴백: High 데이터 전무 시 종가로 계산 (비정상 케이스)
-                highs = hist["Close"].dropna()
-                if highs.empty:
-                    raise ValueError("No high/close data.")
-            peak_idx = highs.idxmax()
-            ath = float(highs.loc[peak_idx])
-            ath_date = peak_idx.date().strftime("%Y-%m-%d")
-            return ath, ath_date
-        except Exception as e:  # noqa: BLE001
-            last_err = e
-            if attempt < max_retries - 1:
-                time.sleep(2.0)
-    print(f"   ⚠️ {ticker} ATH 조회 실패 (3회 재시도): {last_err}")
-    return None, None
+# 전고점(ATH) 조회는 LOC_DCA_strategy.get_all_time_high 공용 함수를 쓴다 —
+# 같은 계산을 양쪽에 복제하지 말 것 (LOC 브리핑 전고점 / 스윙 MDD 래더 기준가 공용, 2026-09-12).
 
 
 def get_prior_close(ticker: str, as_of: str, max_retries: int = 3) -> tuple[float | None, str | None]:
@@ -640,7 +611,7 @@ def compute_ticker(ticker: str, pos: dict, cfg: dict, live: bool = False) -> dic
         return st
     st["close_price"] = price
 
-    ath, ath_date = get_ath(ticker)
+    ath, ath_date = get_all_time_high(ticker)
     if ath is None or ath <= 0:
         st["error"] = f"{ticker} ATH 조회 실패"
         return st

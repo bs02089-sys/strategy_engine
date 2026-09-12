@@ -401,40 +401,37 @@ def get_prev_close(ticker: str) -> tuple[float | None, str]:
     return None, "N/A"
 
 
-def get_period_ath(ticker: str, lookback_days: int = 252, max_retries: int = 3) -> tuple[float | None, str | None]:
+def get_all_time_high(ticker: str, max_retries: int = 3) -> tuple[float | None, str | None]:
     """
-    Fetches the trading-period high (전고점) over the lookback window.
+    역대 최고가(전고점/ATH) 조회 — 원시 고가(High, 미조정)·전체 이력 기준 (공용).
 
-    Uses the same standard methodology financial analysts use:
-      - Close prices (종가 기준)
-      - auto_adjust=True (주식분할/배당 조정 → 과거 데이터와 연속성 유지)
-
-    Same calendar-day buffering approach as _fetch_closes_for_lookback() so
-    yfinance's calendar-day `period` still yields enough trading days.
+    LOC 브리핑의 '전고점 대비 하락률'과 스윙 알리미의 MDD 래더 기준가가 이 함수 하나를
+    함께 쓴다 (Google Finance '=GOOGLEFINANCE(TICKER, "high52")' 와 일치). 실제 거래에서
+    도달한 장중 고가를 쓰므로 종가·배당 조정값을 쓰면 차트의 전고점보다 낮게 나온다
+    (예: TQQQ 2026-06-03 장중 고가 $88.09 vs. 종가 최고 $87.22/06-02, 배당 조정 종가
+    최고 $87.02 — 2026-09-12 통합).
     """
-    buffer_days = max(30, int(lookback_days * 0.6) + 30)
-    period_days = lookback_days + buffer_days
-
-    last_err = None
+    last_err: Exception | None = None
     for attempt in range(1, max_retries + 1):
         try:
-            stock = yf.Ticker(ticker)
-            hist = stock.history(period=f"{period_days}d", interval="1d", auto_adjust=True)
+            hist = yf.Ticker(ticker).history(period="max", interval="1d", auto_adjust=False)
             if hist.empty:
                 raise ValueError("Data empty.")
-            closes = hist['Close'].dropna()
-            if closes.empty:
-                raise ValueError("No close price data.")
-            recent_closes: pd.Series = closes[-lookback_days:] if len(closes) >= lookback_days else closes  # type: ignore[no-redef]
-            peak_idx = recent_closes.idxmax()
-            peak_price = float(recent_closes.loc[peak_idx])
+            highs: pd.Series = hist["High"].dropna()
+            if highs.empty:
+                # 폴백: High 데이터 전무 시 종가로 계산 (비정상 케이스)
+                highs = hist["Close"].dropna()
+                if highs.empty:
+                    raise ValueError("No high/close data.")
+            peak_idx = highs.idxmax()
+            peak_price = float(highs.loc[peak_idx])
             peak_date_str = peak_idx.date().strftime("%Y-%m-%d") if isinstance(peak_idx, pd.Timestamp) else str(peak_idx)
             return peak_price, peak_date_str
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             last_err = e
             if attempt < max_retries:
                 time.sleep(2.0)
-    print(f"   ⚠️ {ticker} previous-high fetch failed after {max_retries} attempts: {last_err}")
+    print(f"   ⚠️ {ticker} 전고점(ATH) 조회 실패 ({max_retries}회 재시도): {last_err}")
     return None, None
 
 
@@ -452,13 +449,13 @@ def calculate_drawdown_and_recovery(prev_close: float, peak_price: float) -> tup
     return drawdown_pct, recovery_needed_pct
 
 
-def format_drawdown_line(ticker: str, prev_close: float, lookback_days: int) -> str | None:
+def format_drawdown_line(ticker: str, prev_close: float) -> str | None:
     """
     Builds the Discord line showing decline-from-high and required-rise-to-
     high, both to 2 decimal places. Returns None if the previous high could
     not be fetched (briefing continues without this line for that ticker).
     """
-    peak_price, peak_date_str = get_period_ath(ticker, lookback_days)
+    peak_price, peak_date_str = get_all_time_high(ticker)
     if peak_price is None:
         return None
 
@@ -773,8 +770,7 @@ def _build_briefing_lines(now_ny: datetime, cfg: dict) -> list[str]:
         position_meta = format_position_meta(pos_cfg, today_ny)
         lines.append(f"\n🔹 **{ticker}** (Close: ${prev_close:.2f} | {last_date_str}{position_meta})")
 
-        lookback_days = int(pos_cfg.get("LOOKBACK_DAYS", 252))
-        drawdown_line = format_drawdown_line(ticker, prev_close, lookback_days)
+        drawdown_line = format_drawdown_line(ticker, prev_close)
         if drawdown_line:
             lines.append(drawdown_line)
 

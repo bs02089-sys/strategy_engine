@@ -110,8 +110,8 @@
 │  │  │  └─ 실패 시 → yfinance info API fallback                       │ │ │
 │  │  ├──────────────────────────────────────────────────────────────────┤ │ │
 │  │  │  [5-b] 전고점 대비 하락률 (참고 표시)                          │ │ │
-│  │  │  format_drawdown_line(ticker, prev_close, lookback_days)       │ │ │
-│  │  │  ├─ get_period_ath() → N일 최고가 (Close 기준)                 │ │ │
+│  │  │  format_drawdown_line(ticker, prev_close)                     │ │ │
+│  │  │  ├─ get_all_time_high() → 전고점 (High 기준, 전체 이력)          │ │ │
 │  │  │  └─ calculate_drawdown_and_recovery()                          │ │ │
 │  │  │     → "전고점 $XX 기준 하락률 -XX% / 회복필요 XX%"             │ │ │
 │  │  ├──────────────────────────────────────────────────────────────────┤ │ │
@@ -188,7 +188,7 @@ LOC_DCA_strategy.py (직접 실행)
 │   ├── format_position_meta()
 │   │   └── business_days_elapsed()
 │   ├── format_drawdown_line()                 전고점 하락률 (참고)
-│   │   ├── get_period_ath()                   ← yfinance API
+│   │   ├── get_all_time_high()               ← yfinance API
 │   │   └── calculate_drawdown_and_recovery()
 │   ├── _loc_action_line()
 │   │   └── calculate_loc_price()
@@ -242,7 +242,8 @@ LOC_DCA_strategy.py (직접 실행)
 
  yfinance API (외부 데이터)
  ├── 1mo 데이터 → get_prev_close() (최종 종가)
- ├── 252d+ 데이터 → get_period_ath() / get_realtime_sigma() / recompute_sigma_for_ticker()
+ ├── 전체 이력(max) → get_all_time_high() (전고점 — High 기준)
+ ├── 252d+ 데이터 → get_realtime_sigma() / recompute_sigma_for_ticker()
  └── 백테스트/신호 → load_data() (Close — LOC 마감가 체결)
 
  Discord Webhook (외부 출력)
@@ -356,7 +357,7 @@ jobs:
   ────────────────────────────────────────
 
   🔹 TQQQ (Close: $76.79 | 08-14 | LONG_YEAR / D+15)
-  • 📈 전고점: $87.02 (2026-06-02) 기준 하락률 -11.76% / 회복 필요 13.32%
+  • 📈 전고점: $88.09 (2026-06-03) 기준 하락률 -12.83% / 회복 필요 14.72%
   • 🎯 [Action] LOC Buy: **$73.16**
 """
 

@@ -13,9 +13,11 @@ swing_split_backtest.py — 세븐 스플릿 하락 구간(스텝)/매도 목표
   적게 나는가?  — 예: 스텝 3% → -15/-18/-21/-24/-27/-30/-33 (-33% 종료),
                    스텝 5% → 기존 -15/-20/-25/-30/-35/-40/-45 (-45% 종료)
 
-모델 규칙 (실전 엔진 swing_alerter.py 판정 규칙과 일치):
-  - ATH = 원시 고가(High, 미조정) 기준 롤링 역대 최고가 (엔진 get_ath 와 동일 기준 — Google Finance high52와 동일)
-  - 하락률 DD = 종가/ATH - 1, 구간 도달 판정은 **확정 종가** 기준 (엔진 동일 — 실시간 값 미사용)
+모델 규칙 (실전 엔진 swing_alerter.py 판정 규칙과 일치 — 2026-09-12 가격 기준 정렬):
+  - ATH = 원시 고가(High, 미조정) 기준 롤링 역대 최고가 (엔진 공용 LOC_DCA_strategy.get_all_time_high 와 동일 — Google Finance high52와 동일)
+  - 하락률 DD = 원시 종가/ATH - 1, 구간 도달 판정은 **확정 종가** 기준 (엔진 동일 — 실시간 값 미사용)
+  - 배당은 미반영 (원시 가격 = 실제 체결가). 배당 현금만큼 수익률이 보수적으로 잡힌다 —
+    이전에는 배당 조정 종가(auto_adjust=True)를 써서 ATH·구간가가 실전보다 약 1.2% 낮게 계산됐다 (2026-09-12 수정)
   - 구간 도달(종가 ≤ 구간가) 시 해당 계좌가 $amount 매수 — 같은 날 여러 구간 동시 도달 가능
   - 매도: 종가 ≥ 매수가 × (1 + target%) → 전량 매도 (회수 현금으로 같은 날 신규 구간 매수 가능)
   - 계좌는 매도 후에만 같은 구간 재매수 가능 (엔진 bought 플래그와 동일 — 미매도 구간 중복 매수 없음)
@@ -48,34 +50,37 @@ AMOUNT = 500.0             # 계좌당 예산 (swing_config 기준)
 DEFAULT_SINCE = (date.today() - timedelta(days=3650)).isoformat()   # 최근 10년
 
 
-def fetch_closes(ticker: str) -> tuple[np.ndarray, pd.DatetimeIndex]:
-    """배당 조정 종가 시계열 — 백테스트 전용 ATH/DD 판정 기준.
-    엔진(swing_alerter.py)은 원시 고가(High) 기준이지만, 백테스트는 종가(Close) 기준으로
-    일관된 내부 비교를 유지한다 (ARCHARLES 거래는 종가 기준)."""
-    raw = yf.download(ticker, period="max", auto_adjust=True, progress=False)
+def fetch_ohlc(ticker: str) -> tuple[np.ndarray, np.ndarray, pd.DatetimeIndex]:
+    """원시 종가(Close)/장중 고가(High) 시계열 — 실전 엔진(swing_alerter.py)과 동일 기준.
+
+    ATH = High 누적 최고, 구간 도달 판정·체결가 = 확정 종가. 미조정(auto_adjust=False)이라
+    실제 체결 가격 그대로이고 배당 조정으로 래더가 아래로 밀리지 않는다 (2026-09-12 정렬).
+    """
+    raw = yf.download(ticker, period="max", auto_adjust=False, progress=False)
     if isinstance(raw.columns, pd.MultiIndex):
         raw.columns = raw.columns.get_level_values(0)
-    s = raw["Close"].dropna()
-    if s.index.tz is not None:
-        s.index = s.index.tz_localize(None)
-    s = s[~s.index.duplicated(keep="last")].sort_index()
-    return s.to_numpy(dtype=float), s.index
+    df = raw[["Close", "High"]].dropna()
+    if df.index.tz is not None:
+        df.index = df.index.tz_localize(None)
+    df = df[~df.index.duplicated(keep="last")].sort_index()
+    return df["Close"].to_numpy(dtype=float), df["High"].to_numpy(dtype=float), df.index
 
 
-def window_slice(closes: np.ndarray, dates: pd.DatetimeIndex, since: str) -> tuple[int, np.ndarray, pd.DatetimeIndex, float]:
-    """백테스트 윈도우 시작 인덱스/슬라이스 + 윈도우 진입 시점 ATH."""
+def window_slice(closes: np.ndarray, highs: np.ndarray, dates: pd.DatetimeIndex,
+                 since: str) -> tuple[int, np.ndarray, np.ndarray, pd.DatetimeIndex, float]:
+    """백테스트 윈도우 시작 인덱스/슬라이스 + 윈도우 진입 시점 ATH(High 기준)."""
     ts0 = pd.Timestamp(since)
     idx0 = int(np.argmax(dates >= ts0)) if (dates >= ts0).any() else 0
-    ath0 = float(closes[:idx0].max()) if idx0 > 0 else float(closes[0])
-    return idx0, closes[idx0:], dates[idx0:], ath0
+    ath0 = float(highs[:idx0].max()) if idx0 > 0 else float(highs[0])
+    return idx0, closes[idx0:], highs[idx0:], dates[idx0:], ath0
 
 
-def simulate(closes: np.ndarray, dates: pd.DatetimeIndex, since: str,
+def simulate(closes: np.ndarray, highs: np.ndarray, dates: pd.DatetimeIndex, since: str,
              start_pct: float, step_pct: float, splits: int,
              target_pct: float, amount: float, fee_rate: float) -> dict:
     """하락 구간 래더 백테스트 1케이스. 지표 dict 반환."""
     zones = [start_pct + i * step_pct for i in range(splits)]
-    idx0, cw, dw, ath = window_slice(closes, dates, since)
+    idx0, cw, hw, dw, ath = window_slice(closes, highs, dates, since)
     n = len(cw)
     cash = amount * splits
     lots: list[dict] = []
@@ -88,8 +93,8 @@ def simulate(closes: np.ndarray, dates: pd.DatetimeIndex, since: str,
     zone_hold: dict[float, list[int]] = {z: [] for z in zones}
     for i in range(n):
         c = float(cw[i])
-        if c > ath:
-            ath = c
+        if float(hw[i]) > ath:
+            ath = float(hw[i])   # ATH = 일중 고가 누적 최고 (엔진 get_all_time_high 와 동일)
         # 1) 매도 먼저 — 회수 현금으로 같은 날 신규 구간 매수 가능 (자본 회전)
         keep = []
         for l in lots:
@@ -142,11 +147,11 @@ def simulate(closes: np.ndarray, dates: pd.DatetimeIndex, since: str,
     }
 
 
-def depth_frequency(closes: np.ndarray, dates: pd.DatetimeIndex, since: str,
+def depth_frequency(closes: np.ndarray, highs: np.ndarray, dates: pd.DatetimeIndex, since: str,
                     depths: list[float]) -> tuple[list[dict], float]:
-    """윈도우 내 하락률 깊이별 도달 일수/에피소드 + 최대 하락률."""
-    idx0, cw, dw, ath0 = window_slice(closes, dates, since)
-    aths = np.maximum.accumulate(np.concatenate(([ath0], cw)))[1:]
+    """윈도우 내 하락률 깊이별 도달 일수/에피소드 + 최대 하락률 (ATH = High 기준)."""
+    idx0, cw, hw, dw, ath0 = window_slice(closes, highs, dates, since)
+    aths = np.maximum.accumulate(np.concatenate(([ath0], hw)))[1:]
     dd = cw / aths - 1
     rows = []
     for d in depths:
@@ -189,7 +194,7 @@ def print_detail_report(r: dict, args, header: str) -> None:
             print(f"  {d.date()}  SELL -{z:.0f}%  @ ${px:,.2f}  (매수 ${bp:,.2f} → 회수 ${pr:,.2f})")
 
 
-def run_step_sweep(closes: np.ndarray, dates: pd.DatetimeIndex, args,
+def run_step_sweep(closes: np.ndarray, highs: np.ndarray, dates: pd.DatetimeIndex, args,
                    steps: list[float], bh_final: float, bh_ret: float, bh_mdd: float) -> None:
     """하락 스텝 스윕 (기존) — 매도 목표는 --target 고정."""
     print(f"\n{'═' * 76}")
@@ -197,7 +202,7 @@ def run_step_sweep(closes: np.ndarray, dates: pd.DatetimeIndex, args,
     print(f"  첫 구간 -{args.start:.0f}% · {args.splits}분할 · 계좌당 ${args.amount:.0f} · 매도 목표 +{args.target:.0f}% · 수수료 {args.fee*100:.1f}%")
     print(f"{'═' * 76}")
 
-    results = [simulate(closes, dates, args.since, args.start, s, args.splits,
+    results = [simulate(closes, highs, dates, args.since, args.start, s, args.splits,
                         args.target, args.amount, args.fee) for s in steps]
 
     hdr = (f"  {'스텝':>5} {'마지막구간':>10} {'최종가치':>10} {'총수익률':>9} {'MDD':>7} "
@@ -229,7 +234,7 @@ def run_step_sweep(closes: np.ndarray, dates: pd.DatetimeIndex, args,
         print_detail_report(r, args, header)
 
 
-def run_target_sweep(closes: np.ndarray, dates: pd.DatetimeIndex, args,
+def run_target_sweep(closes: np.ndarray, highs: np.ndarray, dates: pd.DatetimeIndex, args,
                      targets: list[float], bh_final: float, bh_ret: float, bh_mdd: float) -> None:
     """매도 목표 수익률 스윕 — 하락 스텝(--step) 고정, 목표 수익률만 변화."""
     step = args.step
@@ -238,7 +243,7 @@ def run_target_sweep(closes: np.ndarray, dates: pd.DatetimeIndex, args,
     print(f"  첫 구간 -{args.start:.0f}% · {args.splits}분할 · 계좌당 ${args.amount:.0f} · 수수료 {args.fee*100:.1f}%")
     print(f"{'═' * 76}")
 
-    results = [simulate(closes, dates, args.since, args.start, step, args.splits,
+    results = [simulate(closes, highs, dates, args.since, args.start, step, args.splits,
                         t, args.amount, args.fee) for t in targets]
 
     hdr = (f"  {'목표':>5} {'최종가치':>10} {'총수익률':>9} {'MDD':>7} {'Sharpe':>7} "
@@ -283,7 +288,7 @@ def run_target_sweep(closes: np.ndarray, dates: pd.DatetimeIndex, args,
         print_detail_report(r, args, header)
 
 
-def run_grid_sweep(closes: np.ndarray, dates: pd.DatetimeIndex, args,
+def run_grid_sweep(closes: np.ndarray, highs: np.ndarray, dates: pd.DatetimeIndex, args,
                    steps: list[float], targets: list[float],
                    bh_final: float, bh_ret: float, bh_mdd: float) -> None:
     """2차원 그리드 — 하락 스텝 × 매도 목표 수익률 동시 스윕 (--grid).
@@ -300,7 +305,7 @@ def run_grid_sweep(closes: np.ndarray, dates: pd.DatetimeIndex, args,
     grid: dict[tuple[float, float], dict] = {}
     for s in steps:
         for t in targets:
-            grid[(s, t)] = simulate(closes, dates, args.since, args.start, s, args.splits,
+            grid[(s, t)] = simulate(closes, highs, dates, args.since, args.start, s, args.splits,
                                     t, args.amount, args.fee)
 
     def _print_matrix(title: str, pick, fmt: str) -> None:
@@ -399,12 +404,12 @@ def main() -> None:
         print("❌ --steps 가 비어 있습니다.")
         return
 
-    print(f"📥 {args.ticker} 데이터 다운로드 (배당 조정 종가, 최대 기간)...")
-    closes, dates = fetch_closes(args.ticker)
+    print(f"📥 {args.ticker} 데이터 다운로드 (원시 종가/고가, 최대 기간)...")
+    closes, highs, dates = fetch_ohlc(args.ticker)
     print(f"   데이터 범위: {dates[0].date()} ~ {dates[-1].date()} ({len(dates)} 거래일)")
 
     # 기준선: 전액 매수 후 보유 (참고용 — 스윕 차원과 무관)
-    idx0, cw, dw, _ = window_slice(closes, dates, args.since)
+    idx0, cw, _, dw, _ = window_slice(closes, highs, dates, args.since)
     bh_shares = args.amount * args.splits * (1 - args.fee) / float(cw[0])
     bh_peak = np.maximum.accumulate(cw)
     bh_mdd = float(((cw - bh_peak) / bh_peak).min() * 100)
@@ -414,27 +419,27 @@ def main() -> None:
     if args.grid:
         grid_targets = ([float(t) for t in args.targets.split(",") if t.strip()]
                         if args.targets is not None else [10.0, 15.0, 20.0, 25.0, 30.0, 40.0, 50.0])
-        run_grid_sweep(closes, dates, args, steps, grid_targets, bh_final, bh_ret, bh_mdd)
+        run_grid_sweep(closes, highs, dates, args, steps, grid_targets, bh_final, bh_ret, bh_mdd)
     elif args.targets is not None:
         targets = [float(t) for t in args.targets.split(",") if t.strip()]
         if not targets:
             print("❌ --targets 가 비어 있습니다.")
             return
-        run_target_sweep(closes, dates, args, targets, bh_final, bh_ret, bh_mdd)
+        run_target_sweep(closes, highs, dates, args, targets, bh_final, bh_ret, bh_mdd)
     else:
-        run_step_sweep(closes, dates, args, steps, bh_final, bh_ret, bh_mdd)
+        run_step_sweep(closes, highs, dates, args, steps, bh_final, bh_ret, bh_mdd)
 
     # 깊이 빈도표 — TQQQ
     t_depths = [15, 18, 20, 21, 24, 27, 30, 33, 35, 40, 45, 50, 60, 70, 80]
-    rows, max_dd = depth_frequency(closes, dates, args.since, t_depths)
+    rows, max_dd = depth_frequency(closes, highs, dates, args.since, t_depths)
     print_depth_table(f"{args.ticker} (3배 레버리지)", rows, max_dd)
 
     # 깊이 빈도표 — 나스닥 (영상 주장 검증)
     if not args.no_index:
         try:
-            icloses, idates = fetch_closes(INDEX_TICKER)
+            icloses, ihighs, idates = fetch_ohlc(INDEX_TICKER)
             i_depths = [10, 15, 20, 25, 30, 35, 40, 45]
-            irows, imax_dd = depth_frequency(icloses, idates, args.since, i_depths)
+            irows, imax_dd = depth_frequency(icloses, ihighs, idates, args.since, i_depths)
             print_depth_table(f"{INDEX_TICKER} (나스닥 종합)", irows, imax_dd)
             print("\n  ⚠️  참고: TQQQ 는 나스닥 3배 레버리지 — TQQQ -30% 는 나스닥 약 -11% 내외 하락과"
                   "\n       대응한다. '나스닥 -30% 는 드물다'는 주장을 TQQQ 구간 깊이에 그대로 적용하면"
