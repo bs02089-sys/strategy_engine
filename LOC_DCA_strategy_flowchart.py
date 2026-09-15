@@ -4,7 +4,7 @@
   DCA LOC Strategy — 전체 시스템 플로우차트
 ══════════════════════════════════════════════════════════════════════
   파일: LOC_DCA_strategy.py
-  최종 업데이트: 2026-08-17
+  최종 업데이트: 2026-09-15
   전략: 순수 LOC 지정가 5분할 DCA (단일 논리 — 2026-08-17 20→5분할 전환)
     - MA 레짐 필터 / RSI+볼륨 / ATH_DCA 비상 모드 / STAGE5 / 회복 재진입
       / 실시간 모니터(--ath-monitor) 전부 삭제 (2026-08-16)
@@ -27,8 +27,11 @@
 """
 📌 DCA LOC Strategy는 매일 정해진 시간에 GitHub Actions에서 실행되어,
    portfolio_config.json에 설정된 포지션(TQQQ)의 LOC 매수 목표가를 계산하고,
-   **당일 종가(마감가) ≤ LOC → 5분할 중 1차 체결**을 감지해 디스코드로 종합 브리핑을
-   전송합니다. (LOC 지정가 = 장 마감가 ≤ 지정가일 때만 체결 — 판정은 종가 기준, 2026-08-17 수정) 로직을 섞지 않고 **하나의 논리**(LOC 지정가 5분할 적립)만 사용합니다.
+   **▶ 실행 액션(LOC 매수가)**을 담은 종합 브리핑을 디스코드로 전송합니다.
+   (LOC 지정가 = 장 마감가 ≤ 지정가일 때만 체결 — 판정은 종가 기준, 2026-08-17 수정)
+   ⚠️ 체결 추적은 봇이 하지 않습니다 (2026-08-16) — 주문/체결은 사용자가 증권앱에서 확인하고
+   엑셀에 기록하며, 분할 예산/회차도 엑셀이 단일 소스입니다.
+   로직을 섞지 않고 **하나의 논리**(LOC 지정가 5분할 적립)만 사용합니다.
 
 🔗 연동 시스템:
   - bear_market_signals.py → signal_report.json (시장 리스크 점수 — 참고용)
@@ -326,7 +329,7 @@ jobs:
 📄 .github/workflows/bear_market_signals.yml (Bear Market Signals Engine)
   - cron '0 23 * * 1-5' (23:00 UTC) — signal_report.json 갱신
 
-📄 .github/workflows/tracker.yml (Market Stage Tracker)
+📄 .github/workflows/market_stage_tracker.yml (Market Stage Tracker)
   - cron '14 23 * * 1-5' (23:14 UTC) — market_state.json 갱신 (DCA 미사용)
 
 📄 .github/workflows/swing_alerter.yml (스윙 알리미)
@@ -336,7 +339,7 @@ jobs:
 
 📌 워크플로우 실행 순서 (23:00~23:30 UTC, 월~금):
   1. 23:00 UTC — bear_market_signals.yml   (시장 리스크 평가)
-  2. 23:14 UTC — tracker.yml               (시장 단계 추적 — DCA와 독립)
+  2. 23:14 UTC — market_stage_tracker.yml   (시장 단계 추적 — DCA와 독립)
   3. 23:30 UTC — loc_dca_strategy.yml       (통합 브리핑 1건 — LOC 5분할 신호 포함)
 
 
@@ -387,7 +390,7 @@ jobs:
 └── 📁 .github/workflows/
     ├── loc_dca_strategy.yml           ★ 브리핑 + LOC 5분할 신호 (23:30 UTC)
     ├── bear_market_signals.yml         신호 분석 자동 실행 (23:00 UTC)
-    ├── tracker.yml                     시장 단계 추적 자동 실행 (23:14 UTC)
+    ├── market_stage_tracker.yml         시장 단계 추적 자동 실행 (23:14 UTC)
     └── swing_alerter.yml               스윙 알리미 (00:00 UTC + 실시간 dispatch)
 
 (2026-08-16 삭제: DUAL_MODE_SUMMARY.md · TRIGGER_OPTIMIZATION_SUMMARY.md ·

@@ -309,7 +309,7 @@ python3 LOC_DCA_strategy_flowchart.py
 |--------|------------|------|
 | 예약 실행 | 매일 23:00 (월~금) | 시장 리스크 평가 |
 
-### `tracker.yml` — 시장 단계 추적
+### `market_stage_tracker.yml` — 시장 단계 추적
 
 | 트리거 | 시간 (UTC) | 설명 |
 |--------|------------|------|
@@ -373,7 +373,7 @@ python3 LOC_DCA_strategy_flowchart.py
 
 ### TypeScript strict 검사 게이트 (모든 워크플로우 공통)
 
-모든 봇 워크플로우(`swing_alerter.yml`/`loc_dca_strategy.yml`/`bear_market_signals.yml`/`tracker.yml`)는
+모든 봇 워크플로우(`swing_alerter.yml`/`loc_dca_strategy.yml`/`bear_market_signals.yml`/`market_stage_tracker.yml`)는
 봇 실행 전에 **JS 수정 검사 게이트**를 통과해야 합니다 (2026-08-14):
 
 ```bash
