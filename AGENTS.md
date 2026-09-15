@@ -133,44 +133,6 @@ Not lazy about: input validation at trust boundaries, error handling that preven
   10년 Sharpe·보유일(위 항목)에서 +25%가 우세 — **회전율과 수익률의 맞교환**(2026-08-31 결정 유지).
   ⚠️ 모델 차이: `loc_vs_swing_backtest --sweep-zones`(무매도 축적)에서 깊은 래더가 좋아 보이는 것은
   실전 모델(매도 후 재매수)이 아님 — 래더 형상 판단은 `swing_split_backtest.py` 기준으로 할 것.
-- **달러 알리미 (dollar_alerter.py, 2026-08-17 신규)**: 박성현 『매직 스플릿』의 달러 매매 아이디어를
-  swing_alerter.py 와 같은 알림 앱 구조로 재구현 — 데이터는 yfinance `USDKRW=X` (주식 아님에도 환율 티커
-  `=X` 접미사로 일봉/실시간 지원, 2003년부터 존재). 전략은 **dollar_split_backtest.py 백테스트 검증값**:
-  매수 신호 = 전일 종가 대비 -0.3%~-0.5% 하락 (`BUY_DROP_PCT`/`BUY_BAND_PCT`), 익절 신호 = 매수가 대비
-  +0.3% (`SELL_TARGET_PCT` — 2026-08-17 `--grid` 최적화로 0.5→0.3 전환) — 백테스트
-  (2004~2026, 스프레드 왕복 0% = 나무 멤버스 100% 환전 우대, 사용자 앱 확인) 결과:
-  '상승 매수/하락 매도' 해석은 CAGR 음수(패배), **'하락 매수/익절 매도' 해석만** CAGR +5.2% vs
-  바이앤홀드 +0.8%로 우위. 그리드 검증: 0.3%×0.3% 조합이 두 기간(22.6년/10년) 모두 안정 최적
-  (MDD -14.2%·Sharpe 0.65·평균 보유 6일 — 구 0.5% 대비 보유 16→6일·MDD -17.2→-14.2%·Sharpe
-  0.56→0.65, 수익 동일). 3분할 진입(--split)은 자본 2/3 유휴로 CAGR 절반(미채택).
-  ⏰ **타임스톱 (2026-08-17 채택)**: 보유 MAX_HOLD_DAYS(기본 60) 영업일 초과 시 탈출 신호 — 백테스트
-  (2026-08-17)에서 타임스톱 30~90일이 CAGR/MDD/Sharpe 전부 개선 (무기한 대비 22.6년 CAGR
-  +5.2→+6.0%·MDD -14.2→-10.5%·Sharpe 0.65→0.93 — 갇힘 809일 꼬리 제거로 자금 회전 개선, 30일은
-  회전이 더 빠르나 2009~2014 약세장 churn 으로 장기 MDD 열위 → 60일 선정). 개인 파일 LOTS 의
-  BUY_DATE(YYYY-MM-DD) 기준 영업일 계산, 계좌별 매수 사이클당 1회 (ESCAPE_SIGNAL_DATE 상태),
-  매수 신호 푸시에도 '보유 60영업일 초과 시 ⏰ 탈출' 안내 포함.
-  회당 +0.5%는 책의 '평균 0.5%' 주장과 일치했으나 그리드에서 +0.3% 익절이 총수익 동일로 더
-  우세 — '1년 97%'는 어떤 해석으로도 재현 불가. ⚠️ **'1년 97% 수익률'은 어떤 해석으로도 재현 불가** (최고 연도 +12.8%) — 수수료 0% 가정의
-  회당 +0.5%가 복리로 과대표시된 것으로 판단. 실전 체결은 **나무증권 달러 환전 시간(평일 09:00~16:00
-  KST — 야간 16:00~02:00 환전 불가(2026-08-18 확정), 점검 23:50~00:10 제외)에만** 가능하므로
-  신호 판정도 그 시간대의 실시간 가격 기준 (swing 의 종가 기준 원칙과 다름,
-  2026-08-17 조사). 설정
-  `dollar_config.json`(공용)/상태 `dollar_state.json`(봇 전용 — 매수 신호는 당일 한정 자동 리셋, 익절은
-  계좌별 사이클당 1회)/개인 포지션 `dollar_personal.json`(사용자 소유, 봇 읽기만) 3파일 분리.
-  📋 **운영 루틴 (README.md '달러 알리미 운영 루틴' 참고)**: 매수 체결 시 LOTS에 BUY_PRICE/SHARES/
-  BUY_DATE 3개를 채우고, 매도(익절/탈출) 완료 시 3개를 비운다(null) — 봇 신호 상태 리셋은 자동
-  (auto_cycle_reset, 새 BUY_DATE 기록 시 탈출 신호 자동 재무장), 슬롯을 안 비우면 매도된 포지션에
-  거짓 익절/임박 푸시가 울릴 수 있음. 대시보드는
-  JS 없이 meta refresh(300초) — `dollar_dashboard.html`은 main 에 커밋하지 않고 gh-pages 의 **dollar.html**
-  로 배포 (swing 의 index.html 과 충돌 방지). cron-job.org 잡은 `GITHUB_EVENT_TYPE=dollar-monitor` +
-  `UTC_HOURS_START=0 UTC_HOURS_END=7`(환전 시간 09:00~16:00 KST = UTC 00~07시, 야간 환전 불가로
-  범위 축소, 2026-08-18)로 생성 (setup_cronjob_org.py 는 env 기반이라 수정 불필요).
-  ⚠️ **디스패치 실패 백업 (2026-08-18)**: cron-job.org 는 잡 자체 재시도(retry) 기능이 없어
-  (API 문서 확인), `dollar_alerter.yml` 에 `schedule: */10 0-7 * * 1-5` 자체 백업을 추가 —
-  cron-job.org 503 등 디스패치 실패 시에도 GitHub Actions 가 직접 워크플로우를 실행해 신호를
-  놓치지 않는다. 브리핑 cron(`0 0 * * 1-5`)과는 `github.event.schedule` 로 구분, `concurrency`
-  그룹 직렬화 + `dollar_state.json` 발송 플래그가 중복 실행을 안전하게 처리 (재시도 기능이 있는
-  서비스로 이전할 때까지 유지).
 - **현재 전략 규칙 (2026-08-16 단일 논리 재구성 · 2026-08-17 20→5분할 전환)**: **순수 LOC 지정가 5분할 DCA**
   하나만 사용한다 — LOC 매수가 = 전일 종가 × (1 − σ × ENTRY_MULTIPLIER), 사용자가 정규장에서 이 가격으로
   LOC 지정가 주문 (마감가 체결 — 장 마감가 ≤ 지정가일 때만 체결, 판정은 종가 기준,
@@ -190,8 +152,7 @@ Not lazy about: input validation at trust boundaries, error handling that preven
   **매도 규칙 없음** — 순수 적립 전용.
   🔻 **주문 채널 = LS증권 (2026-09-12 기록)**: LOC 주문은 **LS증권**에서 TQQQ **LOC(장마감 지정가)**로
   접수한다 — 마감가 ≤ 지정가일 때 종가 체결이라 엔진 판정과 같은 규칙이고, 일반 지정가로 걸면 장중
-  터치로 체결돼 판정(종가 기준)과 어긋난다. 스윙(나무증권 7계좌 × $500)·달러 알리미(나무증권 환전)와
-  **별개 장치·별개 자금**. 봇은 주문을 넣지 않는다 — 알림·가격만 제공. 운영 루틴은 README
+  터치로 체결돼 판정(종가 기준)과 어긋난다. 스윙(나무증권 7계좌 × $500)과 **별개 장치·별개 자금**. 봇은 주문을 넣지 않는다 — 알림·가격만 제공. 운영 루틴은 README
   'LOC 5분할 운영 루틴 (LS증권)' 참고.
   MA 레짐 필터·RSI+볼륨·ATH_DCA 비상 모드·STAGE5·회복 재진입·실시간 모니터(`--ath-monitor`)는 전부 삭제(아래 제거 목록).
 - **신호 시스템**: 브리핑의 ▶ 실행 액션 라인은 신호이며 실제 체결은 사용자 수동 매매 — 엔진은 주문을 자동 실행하지 않는다.
@@ -236,7 +197,7 @@ Not lazy about: input validation at trust boundaries, error handling that preven
   않으므로 콘솔에서 수동 삭제 필요 (setup_cronjob_org.py는 잡 삭제 기능 없음).
   다시 추가하거나 문서에 언급하지 말 것.
 - **시그마 LOC 백테스트 모드 + 52주 중앙값 밴드 (2026-08-17 실험 후 제거)**:
-  `dollar_split_backtest.py --sigma` 실험 — 전일종가×(1−배수×σ) LOC 매수(1개월 롤링 σ) ×
+  `dollar_split_backtest.py --sigma` 실험(당시 달러 알리미 백테스트 — 파일은 2026-08-31 함께 삭제) — 전일종가×(1−배수×σ) LOC 매수(1개월 롤링 σ) ×
   +3% 익절, 52주 고/저 중앙값 밴드(중앙값 미만에서만 매수, 상향 돌파 시 매수 중지). 결과:
   ① σ×1.1 은 트리거 도달 **연 83~90회** — '252일 중 20회' 가정과 4배 차이 (장중 저가 기준 —
   당시 엔진 판정. 2026-08-17 LOC 판정을 마감가(종가) 기준으로 수정하며 해당 수치는 무효:
@@ -248,6 +209,14 @@ Not lazy about: input validation at trust boundaries, error handling that preven
   백테스트 도구에서도 코드 제거. 다시 추가하거나 문서에 언급하지 말 것.
   (참고: 같은 날 발견한 yfinance 데이터 글리치 보정 — 2008-03-17 High=21,353 → max(Open,Close)
   — 은 fetch_ohlc 에 유지, 기존 실전 결과 영향 없음 확인.)
+- **달러 알리미 (dollar)**: 2026-08-31 제거. 박성현 『매직 스플릿』의 달러 매매(USD/KRW)를
+  swing_alerter.py 와 같은 알림 앱 구조로 재구현했던 기능 — `dollar_alerter.py`,
+  `dollar_config.json`/`dollar_state.json`/`dollar_personal.json`, 대시보드 `dollar_dashboard.html`,
+  백테스트 `dollar_split_backtest.py`, GHA 워크플로우 `dollar_alerter.yml`, cron-job.org `dollar-monitor`
+  잡, gh-pages `dollar.html` 배포를 모두 삭제하고 문서(README/AGENTS/.gitignore) 잔재도 정리함.
+  ⚠️ cron-job.org 콘솔의 원격 잡("Dollar alerter realtime monitor")은 코드 삭제만으로 사라지지 않으므로
+  수동 삭제 필요 (FVG/ATH DCA 잡과 동일 케이스, setup_cronjob_org.py 는 잡 삭제 기능 없음).
+  다시 추가하거나 문서에 언급하지 말 것.
 
 ### 문서 규율
 - `STRATEGY_RULES.md`는 **순수 규칙만** — 백테스트 근거·성과 수치·미사용 기능 노트를 넣지 않는다.

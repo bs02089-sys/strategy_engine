@@ -116,12 +116,6 @@
 | **swing_state.json** | 스윙 알리미 봇 상태 (ZONE_ALERTS/매도 플래그 — 봇 전용, 자동 관리) |
 | **swing_dashboard.html** | 스윙 알리미 모바일 대시보드 (자동 생성) |
 | **loc_vs_swing_backtest.py** | 🆕 장기 적립형 매수 조건 비교 백테스트 — LOC_DCA(시그마) vs 스윙(ATH 하락 구간, 매도 제외 무매도 축적, 사이클 재투입) |
-| **dollar_split_backtest.py** | 🆕 달러(USD/KRW) 매직 스플릿 전략 백테스트 — '97% 수익률' 주장 검증 (검증 결과: 세븐 스플릿 정통 해석만 바이앤홀드 우위) |
-| **dollar_alerter.py** | 🆕 **달러 매직 스플릿 알리미** — 전일 종가 대비 -0.3% 하락 매수 신호 / 매수가 대비 +0.3% 익절 신호 / 보유 60영업일 초과 ⏰ 탈출 신호 + 모바일 대시보드 |
-| **dollar_config.json** | 달러 알리미 공용 설정 (사용자 소유 — 매수/익절/탈출 파라미터/푸시) |
-| **dollar_personal.json** | 🔒 달러 알리미 **개인 포지션** (LOTS — 계좌별 BUY_PRICE/SHARES/BUY_DATE, 사용자 소유) |
-| **dollar_state.json** | 달러 알리미 봇 상태 (매수/익절 신호 플래그 — 봇 전용, 자동 관리) |
-| **dollar_dashboard.html** | 달러 알리미 모바일 대시보드 (자동 생성) |
 | **sw.js** | PWA 서비스 워커 — 통과형 fetch (설치형 앱용, strict 검사 대상) |
 | **OneSignalSDKWorker.js** | OneSignal 웹 푸시 + PWA 통합 서비스 워커 (strict 검사 대상) |
 | **tsconfig.json** | TypeScript strict 검사 설정 — `sw.js`/`OneSignalSDKWorker.js` (서비스 워커) |
@@ -135,6 +129,7 @@
 | ~~TRIGGER_OPTIMIZATION_SUMMARY.md~~ | (제거됨 — ATH_DCA 전략 삭제, 2026-08-16) |
 | ~~DUAL_MODE_SUMMARY.md~~ | (제거됨 — 듀얼 모드 삭제, 2026-08-16) |
 | ~~REALTIME_ALERT_SETUP.md~~ | (제거됨 — 실시간 ATH DCA 모니터 삭제, 2026-08-16) |
+| ~~dollar_alerter.py · dollar_config.json · dollar_personal.json · dollar_state.json · dollar_dashboard.html · dollar_split_backtest.py~~ | (제거됨 — 달러 알리미 삭제, 2026-08-31 · cron-job.org `dollar-monitor` 잡은 콘솔에서 수동 삭제) |
 | ~~MarketStage_config.json~~ | (제거됨 — portfolio_config.json으로 통합) |
 | **sigma_history.csv** | Sigma 갱신 이력 (런타임 자동 생성 — 추적 제외) |
 | **market_state.json** | 시장 단계 상태 정보 (자동 생성) |
@@ -290,7 +285,7 @@ python3 LOC_DCA_strategy_flowchart.py
 
 ### LOC 5분할 운영 루틴 (LS증권 — 2026-09-12)
 
-> 스윙 알리미(나무증권 7계좌 × $500)·달러 알리미(나무증권 환전)와 **별개 장치·별개 자금**입니다.
+> 스윙 알리미(나무증권 7계좌 × $500)와 **별개 장치·별개 자금**입니다.
 > LS증권은 알림을 보내지 않습니다 — **알림·가격 = LOC 브리핑(Discord 09:00 KST), 체결 = LS증권 앱 수동**.
 
 1. **09:00 KST — 브리핑 확인**: Discord LOC 브리핑의 `🎯 [Action] LOC Buy: $X`
@@ -375,61 +370,6 @@ python3 LOC_DCA_strategy_flowchart.py
 - 매수 구간: **ATH 대비 -15%~-33%, 3% 단위 7구간** (계좌 1~7번, 각 $500) — 신고가 갱신 시 감시 가격도 대시보드 값으로 재등록
 - 🔒 개인 포지션(`swing_personal.json` LOTS)의 매도 정보는 **Discord 브리핑에서 숨김**('매도 미설정' 표시) —
   대시보드는 사용자 전용이므로 계좌별 매수/매도 예정가·감시 점검 줄을 서버가 직접 그려 넣습니다 (값 관리 단일 소스)
-
-### `dollar_alerter.yml` — 달러 매직 스플릿 알리미
-
-| 트리거 | 시간 (UTC) | 설명 |
-|--------|------------|------|
-| 예약 실행 | 매일 00:00 UTC = 09:00 KST (월~금) | 달러 일일 브리핑 + 대시보드 갱신 (은행 영업 시작 전) |
-| repository_dispatch | 장중 N분 (cron-job.org, `dollar-monitor`) | `--monitor` 실시간 신호 (매수/익절/임박 — 나무증권 달러 환전 시간 09:00~16:00 KST 폴링) |
-| 예약 실행 (백업) | 장중 10분 간격 (월~금, 00:00~07:00) | `--monitor` 자체 백업 — cron-job.org 503 등 디스패치 실패 시에도 신호 누락 방지 (2026-08-18, `github.event.schedule` 로 브리핑 cron 과 구분) |
-| 수동 실행 | 사용자 요청 시 | workflow_dispatch 수동 실행 |
-
-> cron-job.org 잡 생성: `GITHUB_EVENT_TYPE=dollar-monitor JOB_TITLE="Dollar alerter realtime monitor" UTC_HOURS_START=0 UTC_HOURS_END=7 POLL_MINUTES=10 python setup_cronjob_org.py`
-> (나무증권 환전 시간 09:00~16:00 KST = UTC 00:00~07:00 — 야간 16:00~02:00 환전 불가(2026-08-18 확정), 점검 23:50~00:10 제외)
-> ⚠️ cron-job.org 는 잡 자체 재시도(retry) 기능이 없어(2026-08-18 API 문서 확인), GitHub Actions `schedule`(`*/10 0-7 * * 1-5`)을 자체 백업 트리거로 병행한다 — cron-job.org 디스패치가 실패해도 이 스케줄이 워크플로우를 실행해 신호를 놓치지 않는다. `concurrency` 그룹 직렬화 + `dollar_state.json` 발송 플래그가 중복 실행을 안전하게 처리한다.
-
-### 달러 알리미 운영 루틴
-
-> 알림은 신호일 뿐 — **실제 체결(환전)은 나무증권 앱에서 수동**으로 합니다.
-> 개인 포지션 기록은 `dollar_personal.json` 한 곳뿐 (봇은 읽기만 — 절대 쓰지 않음).
-
-**① 매수 체결 시 — 3개 값 채우기** (`POSITIONS → USDKRW=X → LOTS → ACCOUNT 1`)
-
-| 필드 | 내용 | 예시 |
-|------|------|------|
-| `BUY_PRICE` | 매수 환율 (원/USD) | `1416.48` |
-| `SHARES` | 보유 달러 수량 | `100` |
-| `BUY_DATE` | 매수일 | `"2026-08-17"` |
-
-**② 매도 완료 시 — 3개 값 비우기** (`null` 또는 키 삭제)
-
-| 필드 | 값 |
-|------|-----|
-| `BUY_PRICE` | `null` |
-| `SHARES` | `null` |
-| `BUY_DATE` | `null` |
-
-- ⚠️ 정리하지 않으면 봇이 **매도한 포지션을 계속 보유로 표시**하고, 가격이 목표 아래로
-  빠지면 재무장해 거짓 익절/임박 푸시가 울릴 수 있습니다.
-- 봇 신호 상태(익절/탈출 플래그)는 **자동 리셋** — 기록할 것 없음 (전 계좌 익절 시
-  `auto_cycle_reset`, 새 `BUY_DATE` 기록 시 탈출 신호 자동 재무장).
-- 상태가 꼬이면 수동 초기화: `python3 dollar_alerter.py --reset USDKRW=X`
-
-**③ 신호 종류 (푸시 = 전체 구독자 = 내 기기)**
-
-| 신호 | 의미 | 대응 |
-|------|------|------|
-| 📡 매수 임박 | 트리거까지 0.2%p 이내 | RP 해지하고 현금 대기 |
-| 🔻 매수 신호 | 전일 종가 대비 -0.3%~-0.5% 하락 | 환전 (목표: 매수가 대비 +0.3% 익절, 60영업일 초과 시 ⏰ 탈출) |
-| 🚀 익절 임박 | 익절 목표까지 0.2%p 이내 | 매도 준비 |
-| 🚨 익절 신호 | 매수가 대비 +0.3% 도달 | 매도 후 LOTS 3개 비우기 |
-| ⏰ 탈출 신호 | 보유 60영업일 초과 — 갇힘 | 시장가로 정리 후 LOTS 3개 비우기 |
-| 🔄 사이클 완료 | 전 계좌 익절 → 자동 리셋 | 기록 불필요 (다음 매수부터 새 사이클) |
-
-**④ 참고**
-- 실시간 신호 판정은 **나무증권 달러 환전 시간(평일 09:00~16:00 KST)** 동안만 (야간 16:00 이후 환전 불가, 2026-08-18 확정 — 그 외엔 확정 종가 기준).
-- 대시보드: `python3 dollar_alerter.py --serve` 또는 GitHub Pages `dollar.html` (장중 자동 갱신).
 
 ### TypeScript strict 검사 게이트 (모든 워크플로우 공통)
 
