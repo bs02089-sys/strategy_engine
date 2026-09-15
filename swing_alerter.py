@@ -1047,12 +1047,28 @@ footer{color:#4b5563;font-size:12px;text-align:center;margin-top:8px;line-height
 """
 
 # PWA 서비스 워커 등록 — Chrome '앱 설치' 기준 충족 (통과형 fetch, 캐시 없음)
-# 5분 자동 새로고침 — meta refresh(<meta http-equiv="refresh">)는 설치형(standalone) 앱에서
+# 자동 새로고침(2분) — meta refresh(<meta http-equiv="refresh">)는 설치형(standalone) 앱에서
 # 창이 닫히고 Chrome 브라우저로 빠져나가는 안드로이드 문제가 있어 JS 방식으로 대체한다.
 # (화면에 보일 때만 새로고침해 백그라운드에서 불필요한 갱신 방지)
+# 주기 결정: gh-pages 의 index.html 은 cron-job.org 폴링(POLL_MINUTES, 기본 10분)마다
+# 재배포되므로 실제 신선도는 그 주기가 결정한다 — 페이지 쪽은 발행보다 촘촘히 확인해
+# 배포 직후 몇 분 안에 반영되게 2분으로 둔다 (2026-09-15, 5분 → 2분).
 _AUTO_RELOAD_JS = """
 <script>
-setTimeout(function () { if (!document.hidden) { location.reload(); } }, 300000);
+(function () {
+  var REFRESH_MS = 120000;   // 2분 주기 갱신 (화면에 보일 때만)
+  var MIN_GAP_MS = 60000;    // 복귀 직후 중복 새로고침 방지 — 1분 이상 지난 경우만
+  var loadedAt = Date.now();
+  function reload() {
+    if (!document.hidden && Date.now() - loadedAt >= MIN_GAP_MS) { location.reload(); }
+  }
+  setInterval(reload, REFRESH_MS);
+  // 백그라운드 → 복귀 시 즉시 갱신 — 타이머는 숨김 시 건너뛰므로 오래 닫아둔 앱이
+  // 옛 스냅샷에 멈춘다 (수동 새로고침 전까지 안 바뀜).
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) { reload(); }
+  });
+})();
 </script>
 """
 

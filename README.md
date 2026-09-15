@@ -743,8 +743,9 @@ python3 setup_cronjob_org.py   # CRONJOB_ORG_API_KEY/GITHUB_PAT/GITHUB_OWNER/GIT
 
 ### 모바일 대시보드 GitHub Pages 배포 (스마트폰 어디서나 접속)
 
-`swing_alerter.yml` 이 일일 실행 시 대시보드를 **`gh-pages` 브랜치에 `index.html` 로
-자동 배포**합니다 (장중 실시간 폴링 dispatch 에서는 배포하지 않아 배포 횟수를 아낌).
+`swing_alerter.yml` 이 **매 실행마다**(일일 브리핑 · 장중 `swing-monitor` 디스패치 · 수동)
+대시보드를 **`gh-pages` 브랜치에 `index.html` 로 자동 배포**합니다 — 장중에도 스마트폰 앱이
+실시간 가격을 따라가려면 디스패치마다 재배포가 필요합니다 (2026-08-11).
 
 **1회성 설정 (약 1분):**
 
@@ -756,9 +757,11 @@ python3 setup_cronjob_org.py   # CRONJOB_ORG_API_KEY/GITHUB_PAT/GITHUB_OWNER/GIT
 3. 배포 후 주소: **`https://bs02089-sys.github.io/strategy_engine/`**
    (`swing_config.json` 의 `PAGES_URL` 에 반영 — 대시보드 상단에 🌐 라이브 링크 표시)
 
-> 참고: Pages 대시보드는 **매일 갱신되는 스냅샷**입니다 (장 마감 후 데이터). 장중
-> 실시간 알림(매수 구간 도달/임박/매도)은 Discord 푸시가 담당하므로, Pages 는
-> 스마트폰에서 상태 확인용으로 사용하세요.
+> 참고: Pages 대시보드의 갱신 주기는 **서버(gh-pages 재배포)가 결정**합니다 — 장중에는
+> cron-job.org 폴링 주기(`POLL_MINUTES`, 기본 10분)마다, 그 외에는 매일 09:00 KST 브리핑 때
+> 갱신됩니다. 앱은 화면에 보이는 동안 2분마다 자동 새로고침(백그라운드 복귀 시 즉시 갱신)하므로
+> 새 배포가 몇 분 안에 반영됩니다. 표시 가격은 장중 yfinance 실시간(약 15분 지연) 값이고
+> 알림 판정(구간 도달/임박/매도)은 항상 확정 종가 기준입니다 — 장중 알림은 Discord 푸시가 담당합니다.
 
 ### 스마트폰 홈 화면 추가 (앱처럼 사용)
 
