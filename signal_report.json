@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-09-17T01:06:22.921606",
+  "timestamp": "2026-09-18T01:04:20.228663",
   "total_score": 4,
   "signals": [
     {
@@ -17,7 +17,7 @@
     {
       "name": "Credit Spread",
       "score": 0,
-      "detail": "HY stable (2.76%) | IG stable (0.80%)",
+      "detail": "HY stable (2.70%) | IG stable (0.78%)",
       "group": "confirm"
     },
     {
@@ -29,7 +29,7 @@
     {
       "name": "Valuation Overheat",
       "score": 2,
-      "detail": "CAPE 40.52 (Critical) (+2)",
+      "detail": "CAPE 40.99 (Critical) (+2)",
       "group": "leading"
     },
     {
@@ -41,7 +41,7 @@
     {
       "name": "Momentum Strategy",
       "score": 0,
-      "detail": "SPX momentum healthy (13.1%) (+0) | Growth sectors lead (+nan% gap) (+0)",
+      "detail": "SPX momentum healthy (11.9%) (+0) | Growth sectors lead (+nan% gap) (+0)",
       "group": "confirm"
     }
   ]
