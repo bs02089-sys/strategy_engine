@@ -181,15 +181,18 @@ Not lazy about: input validation at trust boundaries, error handling that preven
   '정상(+0)' 으로 위장됐다 — Market Breadth(RSP/SPY)·Momentum(섹터 슬라이스)이 `+nan%` 로 +0 보고,
   최근 16회 리포트 중 14회 발생(국면이 confirm 0 → '고점 + 강세장 지속(LOC 유리)' 쪽으로 기울어 있었다).
   🧩 **결측 = 판정 불가 분리 (2026-09-20 전수 점검 후 추가)**: 점수 0 은 '정상'과 '판정 불가'가
-  같은 값이라, `SignalResult.data_ok` 플래그로 둘을 구분한다 — `except` 분기와 `_require_finite()`
-  가드(결측이면 예외)가 `data_ok=False` 를 세우고, `assess_regime()` 이 note 에 결측 신호 개수와
+  같은 값이라, `SignalResult.data_ok` 플래그로 둘을 구분한다 — `except` 분기와 결측 가드
+  (`_require_finite()` = 결측이면 예외 / 인라인 `math.isfinite` 검사 = '판정 불가' 문구)가
+  `data_ok=False` 를 세우고, `assess_regime()` 이 note 에 결측 신호 개수와
   「점수 과소집계 가능」 경고를 덧붙인다(점수 0 이 낙관 쪽이라 결측은 LOC 유리 방향으로 편향된다).
   리포트는 콘솔·`signal_report.json`(`data_ok`·`degraded_signals`)·LOC 브리핑(`get_market_regime`)까지
   같은 값을 전달한다 — 구버전 리포트는 `data_ok` 기본 True 로 호환.
-  ⚠️ **검증된 범위 (2026-09-20)**: FRED(`fred_series`)·yfinance(`validate_yf_data`) 경로는 결측이
-  걸러지는 것을 실제 확인했고 (`_require_finite` 는 7곳: 금리/브레드스/스프레드/LEI/Sahm/모멘텀/CAPE),
-  신용 스프레드·선행지표·모멘텀은 결측 주입으로 `data_ok=False` 를 확인했다. 새 신호를 추가하면
-  **같은 가드를 먼저 달고** 결측 주입으로 `data_ok=False` 를 확인할 것 (상류 dropna 에만 의존 금지).
+  ⚠️ **검증된 범위 (2026-09-20)**: 결측 가드 총 **9곳** — `_require_finite()` 6곳(금리 커브 ·
+  Breadth DD · 스프레드 · LEI · Sahm · 모멘텀 200D) + 인라인 유한성 검사 3곳(CAPE · Breadth 비율 ·
+  모멘텀 섹터). FRED(`fred_series`)·yfinance(`validate_yf_data`) 상류에서 결측이 걸러지는 것을 실제
+  확인했고, 결측 주입으로 금리 커브·신용 스프레드·LEI/Sahm·Breadth·모멘텀의 `data_ok=False` 를 확인했다.
+  새 신호를 추가하면 **같은 가드를 먼저 달고** 결측 주입으로 `data_ok=False` 를 확인할 것
+  (상류 dropna 에만 의존 금지 — 그 보호가 빠지면 같은 버그가 그대로 재발한다).
 - **신호 시스템**: 브리핑의 ▶ 실행 액션 라인은 신호이며 실제 체결은 사용자 수동 매매 — 엔진은 주문을 자동 실행하지 않는다.
 
 ### 제거된 기능 — 재도입 금지
