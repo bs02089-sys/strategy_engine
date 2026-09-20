@@ -32,6 +32,7 @@ Data Sources:
 """
 
 import json
+import math
 import os
 import re
 import sys
@@ -96,7 +97,14 @@ def get_error_message(e: Exception, source_name: str) -> str:
 
 
 def validate_yf_data(raw_data: Optional[pd.DataFrame], symbols: list) -> pd.DataFrame:
-    """Validate yfinance input and extract 'Close' series."""
+    """Validate yfinance input and extract 'Close' series.
+
+    ⚠️ 심볼 공통 '완성' 행만 반환한다 (2026-09-20): yfinance 는 런타임에 심볼별로 당일 행이
+    미확정(NaN)인 채 내려올 수 있다. 그대로 두면 호출부의 .iloc[-1] 이 NaN 을 집고, NaN 은
+    예외를 던지지 않으면서 모든 비교(<, >)를 False 로 만들어 '정상(+0)' 으로 위장된다
+    (실제 발생: Market Breadth RSP/SPY · Momentum 섹터 슬라이스가 +nan% 로 +0 보고 —
+    최근 16회 리포트 중 14회). 마지막 완성 행까지만 남겨 .iloc[-1] 을 신뢰할 수 있게 한다.
+    """
     if raw_data is None or raw_data.empty:
         raise ValueError("yfinance returned no data")
 
@@ -114,7 +122,11 @@ def validate_yf_data(raw_data: Optional[pd.DataFrame], symbols: list) -> pd.Data
     if missing:
         raise KeyError(f"Missing symbols: {missing}")
 
-    return data[list(symbols)]  # type: ignore[return-type]
+    # 심볼 공통 완성 행만 — 미완성 마지막 행(NaN)을 .iloc[-1] 이 집지 않도록 (2026-09-20)
+    cleaned = data[list(symbols)].dropna()
+    if cleaned.empty:
+        raise ValueError("yfinance returned only incomplete rows (all NaN)")
+    return cleaned  # type: ignore[return-type]
 
 
 def atomic_write_json(path: str, data: dict) -> None:
@@ -199,7 +211,10 @@ def signal_market_breadth() -> SignalResult:
         rsp_ratio_before = rsp.iloc[-20] / spy.iloc[-20]
         ratio_growth = (rsp_ratio_now / rsp_ratio_before - 1) * 100
 
-        if ratio_growth < -2.0:
+        if not math.isfinite(ratio_growth):
+            # NaN 비교는 항상 False → '정상'으로 위장되므로 결측을 명시적으로 알린다 (2026-09-20)
+            notes.append("RSP/SPY 데이터 결측 — 이 하위신호 판정 불가 (+0)")
+        elif ratio_growth < -2.0:
             score_total += 1
             notes.append(f"Concentration risk high (RSP/SPY ratio {ratio_growth:.1f}%) (+1)")
         else:
@@ -408,7 +423,10 @@ def signal_momentum_breakdown() -> SignalResult:
         def_ret = (data[defensive].iloc[-1] / data[defensive].iloc[-22] - 1).mean() * 100
         grw_ret = (data[growth].iloc[-1] / data[growth].iloc[-22] - 1).mean() * 100
 
-        if def_ret > grw_ret:
+        if not (math.isfinite(def_ret) and math.isfinite(grw_ret)):
+            # 결측을 '성장주 주도(+0)' 로 위장하지 않는다 (2026-09-20)
+            notes.append("섹터 수익률 데이터 결측 — 이 하위신호 판정 불가 (+0)")
+        elif def_ret > grw_ret:
             score_total += 1
             notes.append(f"Defensive sectors outperform growth ({def_ret - grw_ret:+.1f}% gap) (+1)")
         else:

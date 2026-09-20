@@ -154,7 +154,32 @@ Not lazy about: input validation at trust boundaries, error handling that preven
   접수한다 — 마감가 ≤ 지정가일 때 종가 체결이라 엔진 판정과 같은 규칙이고, 일반 지정가로 걸면 장중
   터치로 체결돼 판정(종가 기준)과 어긋난다. 스윙(나무증권 7계좌 × $500)과 **별개 장치·별개 자금**. 봇은 주문을 넣지 않는다 — 알림·가격만 제공. 운영 루틴은 README
   'LOC 5분할 운영 루틴 (LS증권)' 참고.
-  MA 레짐 필터·RSI+볼륨·ATH_DCA 비상 모드·STAGE5·회복 재진입·실시간 모니터(`--ath-monitor`)는 전부 삭제(아래 제거 목록).
+  ⚠️ 위 삭제는 **`LOC_DCA_strategy.py` 내부 로직 한정**이다 — MA 레짐 필터·RSI+볼륨·ATH_DCA 비상 모드·
+  STAGE5·회복 재진입·실시간 모니터(`--ath-monitor`)는 전부 삭제(아래 제거 목록). 단 `MarketStageSystem.py`
+  의 5단계 트래커(STAGE5 포함)는 **별개 기능으로 운영 중**이므로 이 문장을 근거로 지우지 말 것 (2026-09-20).
+- **시장 단계 트래커**: `MarketStageSystem.py` (상태 `market_state.json` · WF `market_stage_tracker.yml`,
+  평일 23:14 UTC) — `portfolio_config.json` 의 `POSITIONS` 티커마다 **하단/상단 5단계**를 판정해
+  Discord 로 보고하고 상태 파일만 커밋한다(2026-09-20 아키텍처에 추가 — 이전 누락으로 삭제 오해 위험이 있었다).
+  하단 = 매도세 소진(5봉 하락·횡보 + 변동폭 임계 이하) → 재테스트(저점 근접 + 거래량 감소) →
+  트랩(전일 저점 이탈 후 회복) → 추세 전환(20일 고점 돌파 + 거래량 1.4배) → 5단계(🔥 최종 매수: 거래량 1.75배 + MA 정배열),
+  상단 = 과열(RSI 60 상회 후 하회) → 다이버전스(신고가 + MACD 데드크로스) → 밴드 트랩(볼린저 상단 이탈 후 복귀) →
+  분산(거래량 1.4배 + 상승 정체) → 5단계(🔻 최종 매도: 하락 + 거래량 1.75배 + MA 하락 정렬).
+  지표 = RSI(14)·MACD(12/26/9)·볼린저(20, 2σ)·거래량 MA20(전일 기준)·MA5/20/60 정렬, 데이터 = yfinance 일봉 6개월.
+  ⚠️ 고갈(exhaustion) 임계는 **TQQQ 0.16 / 그 외 0.10** — 티커별 분기라 config 가 아니라 코드에 있다.
+  ⚠️ 단계는 **증가만** 하고 5단계 진입 후 `STAGE5_RESET_DAYS`(30일)이 지나면 0으로 자동 리셋된다 —
+  리셋이 없으면 5단계가 영구 고정되므로 이 리셋을 지우지 말 것. 상태는 원자적 쓰기(temp → move)로 저장한다.
+- **약세 조기경보**: `bear_market_signals.py` (리포트 `signal_report.json` · CAPE 캐시 `cape_cache.json` ·
+  WF `bear_market_signals.yml`, 평일 23:00 UTC) — 7개 지표를 **선행 그룹(고점 경고, 0~6점)** 과
+  **확인 그룹(하락 진행, 0~8점)** 으로 나눠 점수화하고, 두 합으로 시장 국면을 판정해 **LOC_DCA / 스윙 중
+  유리한 쪽**을 Discord 로 알린다. 선행 = 금리 커브 · Fed 정책 사이클 · 밸류에이션(CAPE),
+  확인 = Breadth · 신용 스프레드 · 선행지표(FRED) · 모멘텀. 데이터 = FRED CSV · yfinance · multpl.com(CAPE).
+  📌 **국면 판정 규칙의 단일 출처는 `assess_regime()` 의 docstring** — 헤더나 다른 문서에 중복 서술하지 말 것
+  (과거 이중 관리로 두 곳 설명이 어긋난 적 있음).
+  🔁 **NaN 조용한 위장 금지 (2026-09-20 수정)**: `validate_yf_data` 는 심볼 공통 **완성 행만** 반환한다
+  (미완성 마지막 행 = NaN 제거). 수정 전에는 `.iloc[-1]` 이 NaN 을 집어 모든 비교(<, >)가 False 가 되고
+  '정상(+0)' 으로 위장됐다 — Market Breadth(RSP/SPY)·Momentum(섹터 슬라이스)이 `+nan%` 로 +0 보고,
+  최근 16회 리포트 중 14회 발생(국면이 confirm 0 → '고점 + 강세장 지속(LOC 유리)' 쪽으로 기울어 있었다).
+  하위신호를 추가/수정할 때도 **결측이면 점수를 주지 말고 '판정 불가' 문구를 남긴다** (NaN 을 정상으로 폴백 금지).
 - **신호 시스템**: 브리핑의 ▶ 실행 액션 라인은 신호이며 실제 체결은 사용자 수동 매매 — 엔진은 주문을 자동 실행하지 않는다.
 
 ### 제거된 기능 — 재도입 금지
@@ -187,6 +212,8 @@ Not lazy about: input validation at trust boundaries, error handling that preven
   ⚠️ **cron-job.org 원격 ATH DCA 잡("ATH DCA realtime monitor")은 콘솔에서 수동 삭제 필요** —
   `--ath-monitor` 분기 삭제로 코드만으로는 사라지지 않는다 (FVG 원격 잡과 동일 케이스).
   다시 추가하거나 문서에 언급하지 말 것.
+  ⚠️ 이 삭제는 **LOC 엔진(`LOC_DCA_strategy.py`) 내부 한정** — `MarketStageSystem.py` 의 하단/상단 5단계
+  트래커(STAGE5 포함)는 별개 기능으로 실운영 중이다 (2026-09-20 범위 명시 — 혼동 금지).
 - **FVG 봇 (fvg)**: 2026-08-08 제거. 유튜브 FVG/CHoCH 데이 트레이딩 전략 이식 봇(`fvg_signal_bot.py`)과
   백테스트(`fvg_bot_backtest.py`)·실전 평가(`fvg_bot_eval.py`)·로컬 크론(`setup_fvg_cron.py`/`fvg_local_cron.sh`),
   GHA 워크플로우(`fvg_signal.yml`/`fvg_eval.yml`), 나무증권 가이드(`FVG_NAMYU_SETUP.md`),
@@ -217,6 +244,21 @@ Not lazy about: input validation at trust boundaries, error handling that preven
   ⚠️ cron-job.org 콘솔의 원격 잡("Dollar alerter realtime monitor")은 코드 삭제만으로 사라지지 않으므로
   수동 삭제 필요 (FVG/ATH DCA 잡과 동일 케이스, setup_cronjob_org.py 는 잡 삭제 기능 없음).
   다시 추가하거나 문서에 언급하지 말 것.
+
+- **후지모토 시게루 '1:2:6 매매법' 기계적 검증 (2026-09-20 실험 후 제거)**: 유튜브 영상 전략
+  검증용 임시 도구 `fujimoto_126_backtest.py` (커밋 없이 삭제 — git 이력에 없음).
+  원전은 포지션 **사이징** 규칙(1000:2000:6000 = 11%:22%:67%, 매도도 같은 분할)이고 트리거가
+  재량("좋아 보인다")이라 그대로는 검증 불가 — 기계적 트리거로 대체해 검증함
+  (비중1 = RSI30 회복 / 비중2 = MACD 골든크로스 / 비중3 = 일목 구름대 돌파 후 재돌파·상승 전환,
+  매도 없음, 예산 $10,000 × 1:2:6). 29종목 × 롤링 5년 6개월 간격 = 290윈도우 결과:
+  B&H 대비 승률 31~41%(순차 37%·독립 31%) · 평균 초과 -24~-57%p · 종목별 평균 우위 2~4/29 ·
+  평균 MDD -44.9% vs B&H -46.3% → **분할의 하락 방어 효과 없음** (3트랜치가 전 종목 발동 =
+  투입률 100%라 그 뒤로는 B&H 와 같은 커브 — 위험은 그대로, 노출 기간만 짧음).
+  원인: 세 지표가 모두 후행 '하락 후 반등' 신호(RSI 회복 → MACD → 구름대 재돌파 순)라 한 바닥에
+  몰려 체결(SOXL 실측 3.5개월 내 $6.8~8.0 구간) = 사실상 'B&H 를 늦게 시작'. 1:2:6 비중 배분
+  자체는 다 발동되면 성과에 영향이 없다(방향이 아니라 크기 규칙). 단일 시작일로만 보면 17~19/29
+  로 이겨 보이는 **시작일 편향**도 재확인 → 판정은 반드시 롤링 기준으로 할 것.
+  **실전 미채택** — 파일 삭제. 다시 만들거나 문서에 언급하지 말 것.
 
 ### 문서 규율
 - `STRATEGY_RULES.md`는 **순수 규칙만** — 백테스트 근거·성과 수치·미사용 기능 노트를 넣지 않는다.
