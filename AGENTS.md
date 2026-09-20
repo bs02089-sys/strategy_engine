@@ -269,6 +269,20 @@ Not lazy about: input validation at trust boundaries, error handling that preven
   자체는 다 발동되면 성과에 영향이 없다(방향이 아니라 크기 규칙). 단일 시작일로만 보면 17~19/29
   로 이겨 보이는 **시작일 편향**도 재확인 → 판정은 반드시 롤링 기준으로 할 것.
   **실전 미채택** — 파일 삭제. 다시 만들거나 문서에 언급하지 말 것.
+- **장세 기반 MDD 3차 분할 최적화 (mdd_optimizer)**: 2026-09-20 제거. `mdd_optimizer.py` +
+  `mdd_config.json` — ATH 대비 MDD·변동성(20일 연율)·추세점수(MA5/20/60)로 장세를 판정해
+  (strong_bull / normal / deep_correction / extreme) 종목별 **3차 매수 레벨(-MDD)** 과 목표가를
+  콘솔에 출력하는 단발 도구. **백테스트 없이 설정 파일에 손으로 튜닝한 레벨**이고 3분할 균등
+  (33.3%) 모델이라 현재 실전(순수 LOC 5분할 σ / 스윙 7계좌 3% 스텝)과 설계가 어긋난다.
+  대상도 SOXL·PLTR 로 현재 전략(둘 다 TQQQ 전용) 밖이고, 코드·워크플로우·문서 어디에서도
+  참조되지 않던 고아 파일이었다(마지막 변경 2026-08-31 — README 파일 표에 없던 유일한 .py).
+  💡 리서치 결론만 남긴다 — **hard limit = 실측 최대낙폭 + 버퍼**: SOXL -93.0%(실측 -90.5%,
+  2022-10) · PLTR -88.0%(실측 -84.6%, 2020 상장 이후) · 기본 -75.0%.
+  레벨 예: SOXL strong_bull [-18,-30,-50] / extreme [-48,-62,-80],
+  PLTR strong_bull [-12,-22,-35] / extreme [-35,-50,-65].
+  복원: `git log --diff-filter=D -- mdd_optimizer.py` 로 삭제 커밋을 찾고
+  `git checkout <삭제 커밋>^ -- mdd_optimizer.py mdd_config.json`.
+  다시 추가하거나 문서에 언급하지 말 것.
 
 ### 문서 규율
 - `STRATEGY_RULES.md`는 **순수 규칙만** — 백테스트 근거·성과 수치·미사용 기능 노트를 넣지 않는다.
