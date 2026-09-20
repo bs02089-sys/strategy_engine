@@ -169,7 +169,8 @@ Not lazy about: input validation at trust boundaries, error handling that preven
   ⚠️ 단계는 **증가만** 하고 5단계 진입 후 `STAGE5_RESET_DAYS`(30일)이 지나면 0으로 자동 리셋된다 —
   리셋이 없으면 5단계가 영구 고정되므로 이 리셋을 지우지 말 것. 상태는 원자적 쓰기(temp → move)로 저장한다.
 - **약세 조기경보**: `bear_market_signals.py` (리포트 `signal_report.json` · CAPE 캐시 `cape_cache.json` ·
-  WF `bear_market_signals.yml`, 평일 23:00 UTC) — 7개 지표를 **선행 그룹(고점 경고, 0~6점)** 과
+  WF `bear_market_signals.yml`(리포트와 함께 `cape_cache.json` 도 커밋 — 러너가 일회성이라 커밋해야
+  폴백 캐시가 낡지 않는다), 평일 23:00 UTC) — 7개 지표를 **선행 그룹(고점 경고, 0~6점)** 과
   **확인 그룹(하락 진행, 0~8점)** 으로 나눠 점수화하고, 두 합으로 시장 국면을 판정해 **LOC_DCA / 스윙 중
   유리한 쪽**을 Discord 로 알린다. 선행 = 금리 커브 · Fed 정책 사이클 · 밸류에이션(CAPE),
   확인 = Breadth · 신용 스프레드 · 선행지표(FRED) · 모멘텀. 데이터 = FRED CSV · yfinance · multpl.com(CAPE).
@@ -179,7 +180,16 @@ Not lazy about: input validation at trust boundaries, error handling that preven
   (미완성 마지막 행 = NaN 제거). 수정 전에는 `.iloc[-1]` 이 NaN 을 집어 모든 비교(<, >)가 False 가 되고
   '정상(+0)' 으로 위장됐다 — Market Breadth(RSP/SPY)·Momentum(섹터 슬라이스)이 `+nan%` 로 +0 보고,
   최근 16회 리포트 중 14회 발생(국면이 confirm 0 → '고점 + 강세장 지속(LOC 유리)' 쪽으로 기울어 있었다).
-  하위신호를 추가/수정할 때도 **결측이면 점수를 주지 말고 '판정 불가' 문구를 남긴다** (NaN 을 정상으로 폴백 금지).
+  🧩 **결측 = 판정 불가 분리 (2026-09-20 전수 점검 후 추가)**: 점수 0 은 '정상'과 '판정 불가'가
+  같은 값이라, `SignalResult.data_ok` 플래그로 둘을 구분한다 — `except` 분기와 `_require_finite()`
+  가드(결측이면 예외)가 `data_ok=False` 를 세우고, `assess_regime()` 이 note 에 결측 신호 개수와
+  「점수 과소집계 가능」 경고를 덧붙인다(점수 0 이 낙관 쪽이라 결측은 LOC 유리 방향으로 편향된다).
+  리포트는 콘솔·`signal_report.json`(`data_ok`·`degraded_signals`)·LOC 브리핑(`get_market_regime`)까지
+  같은 값을 전달한다 — 구버전 리포트는 `data_ok` 기본 True 로 호환.
+  ⚠️ **검증된 범위 (2026-09-20)**: FRED(`fred_series`)·yfinance(`validate_yf_data`) 경로는 결측이
+  걸러지는 것을 실제 확인했고 (`_require_finite` 는 7곳: 금리/브레드스/스프레드/LEI/Sahm/모멘텀/CAPE),
+  신용 스프레드·선행지표·모멘텀은 결측 주입으로 `data_ok=False` 를 확인했다. 새 신호를 추가하면
+  **같은 가드를 먼저 달고** 결측 주입으로 `data_ok=False` 를 확인할 것 (상류 dropna 에만 의존 금지).
 - **신호 시스템**: 브리핑의 ▶ 실행 액션 라인은 신호이며 실제 체결은 사용자 수동 매매 — 엔진은 주문을 자동 실행하지 않는다.
 
 ### 제거된 기능 — 재도입 금지

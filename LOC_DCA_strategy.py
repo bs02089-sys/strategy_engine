@@ -537,7 +537,8 @@ def get_market_regime(filepath="signal_report.json") -> dict | None:
             data = json.load(f)
         results = [
             SignalResult(s["name"], int(s["score"]) > 0, int(s["score"]), s.get("detail", ""),
-                         s.get("group") or _signal_group(s["name"]))
+                         s.get("group") or _signal_group(s["name"]),
+                         data_ok=bool(s.get("data_ok", True)))   # 구버전 리포트는 True 로 간주 (2026-09-20)
             for s in data.get("signals", [])
         ]
         if not results:

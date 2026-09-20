@@ -93,7 +93,21 @@ def get_error_message(e: Exception, source_name: str) -> str:
         return f"{source_name} server response delayed"
     if "connection" in err_str:
         return f"{source_name} network connection failed"
+    if "결측" in err_str:
+        # _require_finite 가드 — 동기화 실패가 아니라 값이 불완전한 경우 (2026-09-20)
+        return f"{source_name} 데이터 결측으로 판정 불가 (점수 미부여)"
     return f"{source_name} data sync error ({type(e).__name__}: {e})"
+
+
+def _require_finite(*values: float) -> None:
+    """결측(NaN)이면 예외 — 조용히 '정상(+0)' 으로 위장되는 것을 막는다 (2026-09-20).
+
+    비교(<, >)만으로는 NaN 을 걸러낼 수 없다 — NaN 을 던지지 않고 오히려 모든 비교를
+    False 로 만들어 else 가지('정상')로 떨어뜨린다. 이 헬퍼를 가드로 두면 NaN 이 들어온
+    경우 그 신호는 except 로 빠져 data_ok=False (판정 불가) 가 된다.
+    """
+    if not all(math.isfinite(v) for v in values):
+        raise ValueError("데이터 결측(NaN)으로 판정 불가")
 
 
 def validate_yf_data(raw_data: Optional[pd.DataFrame], symbols: list) -> pd.DataFrame:
@@ -153,6 +167,7 @@ class SignalResult:
     score: int          # 0=Normal, 1=Caution, 2=Warning
     detail: str
     group: str = "confirm"   # "leading"=고점 경고 / "confirm"=하락 진행 (백테스트 연계용)
+    data_ok: bool = True     # False = 데이터 결측/실패로 '판정 불가' — 점수 0 인 '정상'과 구분한다 (2026-09-20)
 
 
 # ─────────────────────────────────────────────
@@ -161,10 +176,11 @@ class SignalResult:
 
 def signal_yield_curve() -> SignalResult:
     """Detects yield curve inversion (T10Y2Y)."""
-    score_total, notes = 0, []
+    score_total, notes, data_ok = 0, [], True
     try:
         s = fred_series("T10Y2Y", lookback_days=FRED_LOOKBACK_2Y)
         current, min_2y = s.iloc[-1], s.min()
+        _require_finite(current, min_2y)      # 결측이면 'Normal(+0)' 로 위장되므로 가드 (2026-09-20)
         was_inverted = min_2y < 0
 
         if was_inverted and current > 0:
@@ -176,9 +192,11 @@ def signal_yield_curve() -> SignalResult:
         else:
             notes.append(f"Normal ({current:+.2f}%p) (+0)")
     except Exception as e:
+        data_ok = False
         notes.append(get_error_message(e, "Yield Curve"))
 
-    return SignalResult("Yield Curve Inversion", score_total >= 1, score_total, " | ".join(notes), group="leading")
+    return SignalResult("Yield Curve Inversion", score_total >= 1, score_total, " | ".join(notes),
+                        group="leading", data_ok=data_ok)
 
 
 def signal_market_breadth() -> SignalResult:
@@ -191,13 +209,14 @@ def signal_market_breadth() -> SignalResult:
     which mislabeled it as "RSP/SPY" without ever comparing to SPY. Fixed
     here to actually divide the two series.
     """
-    score_total, notes = 0, []
+    score_total, notes, data_ok = 0, [], True
     symbols = ["SPY", "^NYA", "RSP"]
     try:
         data = validate_yf_data(yf.download(symbols, period="1y", progress=False), symbols)
         spy, nya, rsp = data["SPY"], data["^NYA"], data["RSP"]
         spy_dd = spy.iloc[-1] / spy.max() - 1
         nya_dd = nya.iloc[-1] / nya.max() - 1
+        _require_finite(spy_dd, nya_dd)      # 'Market breadth stable(+0)' 로 위장 금지 (2026-09-20)
 
         if spy_dd > -0.05 and nya_dd < -0.10:
             score_total += 1
@@ -213,6 +232,7 @@ def signal_market_breadth() -> SignalResult:
 
         if not math.isfinite(ratio_growth):
             # NaN 비교는 항상 False → '정상'으로 위장되므로 결측을 명시적으로 알린다 (2026-09-20)
+            data_ok = False
             notes.append("RSP/SPY 데이터 결측 — 이 하위신호 판정 불가 (+0)")
         elif ratio_growth < -2.0:
             score_total += 1
@@ -220,9 +240,11 @@ def signal_market_breadth() -> SignalResult:
         else:
             notes.append(f"Market balance maintained (RSP/SPY ratio {ratio_growth:+.1f}%) (+0)")
     except Exception as e:
+        data_ok = False
         notes.append(get_error_message(e, "Market Breadth"))
 
-    return SignalResult("Market Breadth", score_total >= 1, score_total, " | ".join(notes), group="confirm")
+    return SignalResult("Market Breadth", score_total >= 1, score_total, " | ".join(notes),
+                        group="confirm", data_ok=data_ok)
 
 
 def _spread_signal(series: pd.Series, warn: float, caution: float, widen_warn: float, label: str) -> tuple[int, str]:
@@ -234,6 +256,7 @@ def _spread_signal(series: pd.Series, warn: float, caution: float, widen_warn: f
     """
     value = series.iloc[-1]
     widen = value - series.tail(min(63, len(series))).min()
+    _require_finite(value, widen)      # NaN 이면 '{label} stable(0)' 로 위장되므로 가드 (2026-09-20)
     if value > warn or widen > widen_warn:
         return 1, f"{label} spread warning ({value:.2f}%)"
     if value > caution:
@@ -243,7 +266,7 @@ def _spread_signal(series: pd.Series, warn: float, caution: float, widen_warn: f
 
 def signal_credit_spread() -> SignalResult:
     """Detects credit spread widening (HY & IG). Max 2점 (HY 1 + IG 1)."""
-    score_total, notes = 0, []
+    score_total, notes, data_ok = 0, [], True
     try:
         hy = fred_series("BAMLH0A0HYM2", lookback_days=FRED_LOOKBACK_2Y)
         score, note = _spread_signal(hy, 6.0, 4.5, 1.5, "HY")
@@ -256,9 +279,11 @@ def signal_credit_spread() -> SignalResult:
         score_total += score
         notes.append(note)
     except Exception as e:
+        data_ok = False
         notes.append(get_error_message(e, "Credit Spread"))
 
-    return SignalResult("Credit Spread", score_total >= 1, score_total, " | ".join(notes), group="confirm")
+    return SignalResult("Credit Spread", score_total >= 1, score_total, " | ".join(notes),
+                        group="confirm", data_ok=data_ok)
 
 
 def signal_fed_cycle() -> SignalResult:
@@ -270,7 +295,7 @@ def signal_fed_cycle() -> SignalResult:
     of measuring from the first cut of 2024, it measures from the most
     recent cut, so the risk score reflects the CURRENT easing cycle.
     """
-    score_total, notes = 0, []
+    score_total, notes, data_ok = 0, [], True
     try:
         s = fred_series("FEDFUNDS", lookback_days=FRED_LOOKBACK_8Y).resample("ME").last().dropna()
         # Iterate BACKWARD to find the MOST RECENT rate cut (start of the
@@ -293,9 +318,11 @@ def signal_fed_cycle() -> SignalResult:
         else:
             notes.append("Awaiting rate cut")
     except Exception as e:
+        data_ok = False
         notes.append(get_error_message(e, "Fed Cycle"))
 
-    return SignalResult("Fed Policy Cycle", score_total >= 1, score_total, " | ".join(notes), group="leading")
+    return SignalResult("Fed Policy Cycle", score_total >= 1, score_total, " | ".join(notes),
+                        group="leading", data_ok=data_ok)
 
 
 def _save_cape_cache(cape: float) -> None:
@@ -323,7 +350,7 @@ def _load_cape_cache() -> Optional[tuple[float, int]]:
 
 def signal_valuation() -> SignalResult:
     """Analyzes Shiller CAPE & EPS. (max 2점)"""
-    score_total, notes = 0, []
+    score_total, notes, data_ok = 0, [], True
     cape = None
     cache_age_days = None
 
@@ -349,9 +376,15 @@ def signal_valuation() -> SignalResult:
             cape, cache_age_days = cached
         else:
             notes.append(get_error_message(Exception("No data from multpl.com or cache"), "Valuation"))
-            return SignalResult("Valuation Overheat", False, 0, " | ".join(notes), group="leading")
+            return SignalResult("Valuation Overheat", False, 0, " | ".join(notes),
+                                group="leading", data_ok=False)
 
-    # CAPE 값 평가
+    # CAPE 값 평가 — 결측이면 'Normal(+0)' 로 위장하지 않는다 (캐시 파일은 외부 입력, 2026-09-20)
+    if not math.isfinite(cape):
+        notes.append("CAPE 값 결측 — 판정 불가")
+        return SignalResult("Valuation Overheat", False, 0, " | ".join(notes),
+                            group="leading", data_ok=False)
+
     source_tag = f" (cached, {cache_age_days}d old)" if cache_age_days is not None else ""
     if cape >= 35:
         score_total += 2
@@ -364,6 +397,7 @@ def signal_valuation() -> SignalResult:
 
     if cache_age_days is not None:
         if cache_age_days > CAPE_CACHE_MAX_AGE_DAYS:
+            data_ok = False      # 신선도 기준 초과 = 값이 낡아 판정 근거로 쓸 수 없음 (2026-09-20)
             notes.append(
                 f"⚠️ 실시간 조회 실패, {cache_age_days}일 전 캐시 데이터 사용 "
                 f"(신선도 기준 {CAPE_CACHE_MAX_AGE_DAYS}일 초과 — 값이 낡았을 수 있음)"
@@ -371,14 +405,16 @@ def signal_valuation() -> SignalResult:
         else:
             notes.append(f"⚠️ 실시간 조회 실패, {cache_age_days}일 전 캐시 데이터 사용")
 
-    return SignalResult("Valuation Overheat", score_total >= 1, score_total, " | ".join(notes), group="leading")
+    return SignalResult("Valuation Overheat", score_total >= 1, score_total, " | ".join(notes),
+                        group="leading", data_ok=data_ok)
 
 
 def signal_leading_indicators() -> SignalResult:
     """LEI & Sahm Rule. (max 2점)"""
-    score_total, notes = 0, []
+    score_total, notes, data_ok = 0, [], True
     try:
         lei = fred_series("USSLIND", lookback_days=FRED_LOOKBACK_2Y)
+        _require_finite(lei.iloc[-1])      # 'LEI stable(+0)' 로 위장 금지 (2026-09-20)
         if lei.iloc[-1] < 0:
             score_total += 1
             notes.append("LEI contraction (+1)")
@@ -386,6 +422,7 @@ def signal_leading_indicators() -> SignalResult:
             notes.append("LEI stable (+0)")
 
         sahm = fred_series("SAHMREALTIME", lookback_days=FRED_LOOKBACK_2Y)
+        _require_finite(sahm.iloc[-1])      # NaN 은 두 비교 모두 False → 'Sahm normal(+0)' 위장 (2026-09-20)
         if sahm.iloc[-1] >= 0.5:
             score_total += 1
             notes.append(f"Sahm Rule triggered ({sahm.iloc[-1]:.2f}%p) (+1)")
@@ -394,14 +431,16 @@ def signal_leading_indicators() -> SignalResult:
         else:
             notes.append(f"Sahm Rule normal ({sahm.iloc[-1]:.2f}%p) (+0)")
     except Exception as e:
+        data_ok = False
         notes.append(get_error_message(e, "LEI/Sahm"))
 
-    return SignalResult("Leading Indicators", score_total >= 1, score_total, " | ".join(notes), group="confirm")
+    return SignalResult("Leading Indicators", score_total >= 1, score_total, " | ".join(notes),
+                        group="confirm", data_ok=data_ok)
 
 
 def signal_momentum_breakdown() -> SignalResult:
     """Momentum & Sector Rotation. (max 2점)"""
-    score_total, notes = 0, []
+    score_total, notes, data_ok = 0, [], True
     try:
         tickers = ["SPY", "XLU", "XLP", "XLV", "XLK", "XLY", "XLI"]
         data = validate_yf_data(yf.download(tickers, period="2y", progress=False), tickers)
@@ -410,6 +449,7 @@ def signal_momentum_breakdown() -> SignalResult:
             raise ValueError("Insufficient SPY history")
 
         ret_200d = (spy.iloc[-1] / spy.iloc[-201] - 1) * 100
+        _require_finite(ret_200d)      # 'SPX momentum healthy(+0)' 로 위장 금지 (2026-09-20)
         if ret_200d < 0:
             score_total += 1
             notes.append(f"SPX 200D momentum negative ({ret_200d:.1f}%) (+1)")
@@ -425,6 +465,7 @@ def signal_momentum_breakdown() -> SignalResult:
 
         if not (math.isfinite(def_ret) and math.isfinite(grw_ret)):
             # 결측을 '성장주 주도(+0)' 로 위장하지 않는다 (2026-09-20)
+            data_ok = False
             notes.append("섹터 수익률 데이터 결측 — 이 하위신호 판정 불가 (+0)")
         elif def_ret > grw_ret:
             score_total += 1
@@ -432,9 +473,11 @@ def signal_momentum_breakdown() -> SignalResult:
         else:
             notes.append(f"Growth sectors lead ({grw_ret - def_ret:+.1f}% gap) (+0)")
     except Exception as e:
+        data_ok = False
         notes.append(get_error_message(e, "Momentum"))
 
-    return SignalResult("Momentum Strategy", score_total >= 1, score_total, " | ".join(notes), group="confirm")
+    return SignalResult("Momentum Strategy", score_total >= 1, score_total, " | ".join(notes),
+                        group="confirm", data_ok=data_ok)
 
 
 # ─────────────────────────────────────────────
@@ -456,9 +499,13 @@ def assess_regime(results: list) -> dict:
       - 확인 1점 (관심·미세 조짐) → '고점 + 약세 조짐 관찰' → LOC_DCA/스윙 선택 (전환 아님)
       - 확인 2~4점 (하락 진행 조짐) → '고점 + 하락 전환' → 스윙 유리
       - 확인 5점 이상 (하락 진행 다수) → '하락 진행' → 스윙 유리 (2021-08 유형)
+
+    ⭐ data_ok=False (데이터 결측/실패) 신호도 점수는 0 이라 '정상'과 구분되지 않는다 — 그래서
+       판정 note 에 결측 신호 개수를 덧붙여 '낙관 쪽으로 기울었을 수 있음'을 함께 알린다 (2026-09-20).
     """
     leading = sum(r.score for r in results if r.group == "leading")
     confirm = sum(r.score for r in results if r.group == "confirm")
+    degraded = [r.name for r in results if not r.data_ok]
     if confirm == 0:
         if leading >= 4:
             regime = "고점 + 강세장 지속"
@@ -483,18 +530,26 @@ def assess_regime(results: list) -> dict:
         regime = "하락 진행"
         favorite = "스윙"
         note = "하락 진행 신호 다수 — 스윙의 ATH 하락 구간 매수가 유리 (2021-08 유형)"
+    if degraded:
+        # 점수 0 은 '정상'과 '판정 불가'가 같은 값 — 결측이 있으면 국면이 낙관 쪽으로 기울므로 함께 알린다
+        note += (f" ⚠️ 데이터 결측/실패로 판정 불가인 신호 {len(degraded)}개"
+                 f"({', '.join(degraded)}) — 점수가 과소집계됐을 수 있다.")
     return {"leading": leading, "confirm": confirm, "regime": regime,
-            "favorite": favorite, "note": note}
+            "favorite": favorite, "note": note, "degraded": degraded}
 
 
 def print_report(results: list):
     print(f"\n{'='*72}\n Summary Report: Bear Market Early Warning System\n Generated: {datetime.datetime.now():%Y-%m-%d %H:%M:%S}\n{'='*72}")
     for r in results:
-        status = 'Triggered' if r.triggered else 'Stable'
+        status = 'Data Error' if not r.data_ok else ('Triggered' if r.triggered else 'Stable')
         print(f"{r.name:<30} | {r.score}/2 | {status}")
 
     total = sum(r.score for r in results)
     print(f"\nTotal Risk Score: {total} / 14")
+    degraded = [r.name for r in results if not r.data_ok]
+    if degraded:
+        print(f"⚠️ Data Error {len(degraded)}개: {', '.join(degraded)}"
+              f" — 점수 0(=정상)으로 잡히므로 실제보다 낮게 평가됐을 수 있음")
     print("=" * 72)
 
     # ── 국면 판정 (판정 규칙은 assess_regime()의 docstring 참고) ──
@@ -511,8 +566,9 @@ def save_report_to_json(results: list, filename="signal_report.json"):
     data = {
         "timestamp": datetime.datetime.now().isoformat(),
         "total_score": sum(r.score for r in results),
+        "degraded_signals": [r.name for r in results if not r.data_ok],   # 판정 불가 신호 (2026-09-20)
         "signals": [{"name": r.name, "score": r.score, "detail": r.detail,
-                      "group": r.group} for r in results]   # group: LOC 브리핑이 국면 판정 재현용
+                      "group": r.group, "data_ok": r.data_ok} for r in results]   # group·data_ok: LOC 브리핑이 국면 판정 재현용
     }
     report_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), filename)
     atomic_write_json(report_path, data)

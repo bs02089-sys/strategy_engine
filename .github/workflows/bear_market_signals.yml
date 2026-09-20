@@ -41,7 +41,10 @@ jobs:
           git config --global user.name "Signals Bot"
           git config --global user.email "bot@example.com"
           # 상태 파일만 커밋 (로그는 저장하지 않음)
+          # cape_cache.json 도 함께 커밋 — 러너는 일회성이라 커밋하지 않으면 캐시가 갱신되지 않고
+          # 저장소 사본만 낡는다 (2026-09-20: 33일 동결돼 CAPE 폴백이 낡은 값을 쓸 위험이 있었다)
           [ -f "signal_report.json" ] && git add signal_report.json
+          [ -f "cape_cache.json" ] && git add cape_cache.json
           git commit -m "update: signals $(date +'%Y-%m-%d')" || echo "No changes to commit"
           # -X theirs: 충돌 시 원격 버전 유지 — 봇 상태는 다음 실행에서 재생성.
           # || true: 일시적 실패 시에도 push는 계속 시도 (기존에는 pull 자체가 없었음)
