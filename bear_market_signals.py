@@ -10,7 +10,9 @@ System Overview:
   3. Credit Spread Widening    - HY + IG spreads (Bond market signals)
   4. Fed Policy Cycle          - First rate cut + 6~12 months = Highest risk zone
   5. Valuation Overheat        - Shiller CAPE levels & S&P500 EPS growth slowing
-  6. Leading Indicators        - USSLIND levels & Sahm Rule (0.5%p threshold)
+  6. Leading Indicators        - USPHCI YoY (coincident activity) & Sahm Rule (0.5%p threshold)
+     ⚠️ 원래 USSLIND(Philly Fed 선행지수)를 썼으나 그 시리즈가 2020-02 에 중단돼 6년간
+        값이 동결(1.72) → 'LEI contraction' 이 구조적으로 발동 불가였다 (2026-09-20 교체)
   7. Momentum Strategy Signal  - SPX 200-day return & Sector rotation
 
 Regime Assessment:
@@ -57,6 +59,7 @@ FRED_LOOKBACK_2Y = 365 * 2   # 2년 lookback
 FRED_LOOKBACK_8Y = 365 * 8   # 8년 lookback (Fed cycle)
 CAPE_CACHE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cape_cache.json")
 CAPE_CACHE_MAX_AGE_DAYS = 7   # 캐시가 이보다 오래되면 신선하지 않다고 경고
+ACTIVITY_MAX_AGE_DAYS = 120   # 동행지수(USPHCI) 허용 지연 — 월간 + 발표지연 ~2개월 (2026-09-20)
 
 try:
     import yfinance as yf
@@ -410,16 +413,31 @@ def signal_valuation() -> SignalResult:
 
 
 def signal_leading_indicators() -> SignalResult:
-    """LEI & Sahm Rule. (max 2점)"""
+    """경제활동(동행지수 YoY) & Sahm Rule. (max 2점)
+
+    ⚠️ USSLIND(Philly Fed 선행지수)는 2020-02 에 중단된 시리즈라 `fredgraph.csv` 가 그 이후
+    데이터를 주지 않아, 값이 1.72 로 6년 넘게 동결된 채 'LEI stable (+0)' 만 반복했다
+    (2026-09-20 발견). 같은 발행처의 살아있는 동행지수(USPHCI)로 교체하고, 절대값(< 0) 대신
+    전년 대비 감소(YoY < 0)를 위축으로 판정한다 — 실측 검증: 1990-91·2001·2008·2020 침체 구간
+    포착, 플래그 발생률 8.2%, 최근 31개월 오경보 0회 (동행지수라 침체 '진행 중'에 반응 =
+    확인 그룹의 목적과 부합).
+    """
     score_total, notes, data_ok = 0, [], True
     try:
-        lei = fred_series("USSLIND", lookback_days=FRED_LOOKBACK_2Y)
-        _require_finite(lei.iloc[-1])      # 'LEI stable(+0)' 로 위장 금지 (2026-09-20)
-        if lei.iloc[-1] < 0:
+        phci = fred_series("USPHCI", lookback_days=FRED_LOOKBACK_2Y)
+        if len(phci) < 13:
+            raise ValueError("동행지수 이력 부족 (13개월 미만)")
+        yoy = (phci.iloc[-1] / phci.iloc[-13] - 1) * 100          # 12개월 전 대비
+        _require_finite(phci.iloc[-1], yoy)      # 'expanding(+0)' 로 위장 금지 (2026-09-20)
+        age_days = (datetime.date.today() - phci.index[-1].date()).days
+        if age_days > ACTIVITY_MAX_AGE_DAYS:
+            # 중단·동결된 시리즈를 조용히 쓰지 않는다 (USSLIND 동결이 이 가드 없이 6년간 unnoticed)
+            raise ValueError(f"동행지수 최신 관측이 {age_days}일 전 — 시리즈 중단/지연 의심")
+        if yoy < 0:
             score_total += 1
-            notes.append("LEI contraction (+1)")
+            notes.append(f"경제활동 위축 (동행지수 YoY {yoy:+.1f}%) (+1)")
         else:
-            notes.append("LEI stable (+0)")
+            notes.append(f"경제활동 확장 (동행지수 YoY {yoy:+.1f}%) (+0)")
 
         sahm = fred_series("SAHMREALTIME", lookback_days=FRED_LOOKBACK_2Y)
         _require_finite(sahm.iloc[-1])      # NaN 은 두 비교 모두 False → 'Sahm normal(+0)' 위장 (2026-09-20)
@@ -432,7 +450,7 @@ def signal_leading_indicators() -> SignalResult:
             notes.append(f"Sahm Rule normal ({sahm.iloc[-1]:.2f}%p) (+0)")
     except Exception as e:
         data_ok = False
-        notes.append(get_error_message(e, "LEI/Sahm"))
+        notes.append(get_error_message(e, "Activity/Sahm"))
 
     return SignalResult("Leading Indicators", score_total >= 1, score_total, " | ".join(notes),
                         group="confirm", data_ok=data_ok)
@@ -510,7 +528,7 @@ def assess_regime(results: list) -> dict:
         if leading >= 4:
             regime = "고점 + 강세장 지속"
             note = ("고점 경고(선행)가 최고치에 가깝고 하락 진행은 아직 없음 — LOC 즉시 투입이 유리하나, "
-                    "2017-06 → 2021-08 전환 직전일 수 있어 확인 그룹(모멘텀·breadth·스프레드·LEI) 매일 모니터링 필요")
+                    "2017-06 → 2021-08 전환 직전일 수 있어 확인 그룹(모멘텀·breadth·스프레드·경제활동) 매일 모니터링 필요")
         else:
             regime = "안정적 강세장"
             note = "고점 경고·하락 진행 모두 없음 — LOC 즉시 투입이 유리"

@@ -173,7 +173,18 @@ Not lazy about: input validation at trust boundaries, error handling that preven
   폴백 캐시가 낡지 않는다), 평일 23:00 UTC) — 7개 지표를 **선행 그룹(고점 경고, 0~6점)** 과
   **확인 그룹(하락 진행, 0~8점)** 으로 나눠 점수화하고, 두 합으로 시장 국면을 판정해 **LOC_DCA / 스윙 중
   유리한 쪽**을 Discord 로 알린다. 선행 = 금리 커브 · Fed 정책 사이클 · 밸류에이션(CAPE),
-  확인 = Breadth · 신용 스프레드 · 선행지표(FRED) · 모멘텀. 데이터 = FRED CSV · yfinance · multpl.com(CAPE).
+  확인 = Breadth · 신용 스프레드 · 경제활동(USPHCI YoY)·Sahm · 모멘텀. 데이터 = FRED CSV · yfinance ·
+  multpl.com(CAPE).
+  🔻 **LEI 동결 발견·교체 (2026-09-20)**: 이 신호는 원래 `USSLIND`(Philly Fed 선행지수)를 썼는데,
+  그 시리즈가 **2020-02 에 중단**돼 값이 1.72 로 6년 넘게 동결된 채 `LEI contraction (+1)` 이
+  **구조적으로 발동 불가**였다 (옆 관측: `fredgraph.csv` 는 요청 시작일을 무시하고 과거 이력만
+  돌려주므로 중단된 시리즈도 '정상 데이터'처럼 보인다). 확인 그룹 8점 중 1점이 영구 0에 고정돼
+  낙관 쪽으로 편향됐다 — ⚠️ **`data_ok` 로는 안 잡힌다** (NaN 이 아니라 '유효하지만 낡은' 값).
+  살아있는 동행지수 `USPHCI` 의 **YoY < 0** 으로 교체. 실측 검증: 1990-91·2001·2008·2020 침체
+  구간 포착 · 플래그 발생률 8.2% · 최근 31개월 오경보 0회 (동행지수라 침체 '진행 중'에 반응 =
+  확인 그룹 목적과 부합). **신선도 가드**(`ACTIVITY_MAX_AGE_DAYS=120`, 월간+발표지연 고려)를 넣어
+  같은 동결이 재발하면 점수 대신 '판정 불가'로 뜨다. FRED 시리즈를 새로 쓸 때는 **중단 여부를
+  먼저 확인**할 것.
   📌 **국면 판정 규칙의 단일 출처는 `assess_regime()` 의 docstring** — 헤더나 다른 문서에 중복 서술하지 말 것
   (과거 이중 관리로 두 곳 설명이 어긋난 적 있음).
   🔁 **NaN 조용한 위장 금지 (2026-09-20 수정)**: `validate_yf_data` 는 심볼 공통 **완성 행만** 반환한다
@@ -188,9 +199,10 @@ Not lazy about: input validation at trust boundaries, error handling that preven
   리포트는 콘솔·`signal_report.json`(`data_ok`·`degraded_signals`)·LOC 브리핑(`get_market_regime`)까지
   같은 값을 전달한다 — 구버전 리포트는 `data_ok` 기본 True 로 호환.
   ⚠️ **검증된 범위 (2026-09-20)**: 결측 가드 총 **9곳** — `_require_finite()` 6곳(금리 커브 ·
-  Breadth DD · 스프레드 · LEI · Sahm · 모멘텀 200D) + 인라인 유한성 검사 3곳(CAPE · Breadth 비율 ·
-  모멘텀 섹터). FRED(`fred_series`)·yfinance(`validate_yf_data`) 상류에서 결측이 걸러지는 것을 실제
-  확인했고, 결측 주입으로 금리 커브·신용 스프레드·LEI/Sahm·Breadth·모멘텀의 `data_ok=False` 를 확인했다.
+  Breadth DD · 스프레드 · 경제활동(USPHCI) · Sahm · 모멘텀 200D) + 인라인 유한성 검사 3곳(CAPE ·
+  Breadth 비율 · 모멘텀 섹터). FRED(`fred_series`)·yfinance(`validate_yf_data`) 상류에서 결측이
+  걸러지는 것을 실제 확인했고, 결측 주입·동결 시리즈·이력 부족 주입으로 금리 커브·신용 스프레드·
+  경제활동/Sahm·Breadth·모멘텀의 `data_ok=False` 를 확인했다.
   새 신호를 추가하면 **같은 가드를 먼저 달고** 결측 주입으로 `data_ok=False` 를 확인할 것
   (상류 dropna 에만 의존 금지 — 그 보호가 빠지면 같은 버그가 그대로 재발한다).
 - **신호 시스템**: 브리핑의 ▶ 실행 액션 라인은 신호이며 실제 체결은 사용자 수동 매매 — 엔진은 주문을 자동 실행하지 않는다.
