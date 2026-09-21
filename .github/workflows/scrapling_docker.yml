@@ -115,8 +115,9 @@ jobs:
             python main.py -m stealthy 2>&1 | tee stealthy.log
 
       - name: 결과 검증
-        # main.py 는 각 모드 실패 시에도 exit 0 으로 끝나고 ok=false / 0건을 남긴다.
+        # adaptive·stealthy 는 실패해도 exit 0 으로 끝나고 ok=false 와 원인(failure_kind)을 남긴다.
         # 따라서 종료코드가 아니라 결과 JSON 을 검사해야 실제 검증이 된다.
+        # (static 은 내장 HTML 만 쓰므로 실패하면 코드 버그다 — 예외를 잡아 숨기지 않는다)
         working-directory: scrapling-project
         run: |
           python3 - <<'PY'
@@ -146,14 +147,21 @@ jobs:
           # 2) adaptive: 저장 -> selector 파손 -> 재탐색 복구
           adaptive = load("ci-output-adaptive/results.json")["adaptive"]
           print("adaptive:", {k: v for k, v in adaptive.items() if k != "quotes"})
-          if adaptive["saved_count"] <= 0:
-              failures.append("저장 단계가 요소를 저장하지 못했습니다")
-          if adaptive["broken_selector_matches"] != 0:
-              failures.append("깨진 selector 가 매칭되었습니다 — 검증 전제가 무너짐")
-          if adaptive["recovered_count"] <= 0:
-              failures.append("adaptive 재탐색이 요소를 복구하지 못했습니다")
-          if not adaptive["first_item_preserved"]:
-              failures.append("복구된 요소가 저장 시점과 다릅니다")
+          if not adaptive.get("ok", True):
+              # 네트워크 실패·HTTP 4xx/5xx 는 main.py 가 원인을 분류해 남긴다.
+              # 이 경우 아래 개수 검사는 의미가 없어(0건으로 나옴) 원인만 보고한다.
+              failures.append(
+                  f"adaptive 모드 실패({adaptive.get('failure_kind')}): {adaptive.get('error') or ''}"
+              )
+          else:
+              if adaptive["saved_count"] <= 0:
+                  failures.append("저장 단계가 요소를 저장하지 못했습니다")
+              if adaptive["broken_selector_matches"] != 0:
+                  failures.append("깨진 selector 가 매칭되었습니다 — 검증 전제가 무너짐")
+              if adaptive["recovered_count"] <= 0:
+                  failures.append("adaptive 재탐색이 요소를 복구하지 못했습니다")
+              if not adaptive["first_item_preserved"]:
+                  failures.append("복구된 요소가 저장 시점과 다릅니다")
 
           # 3) stealthy: Cloudflare 우회
           stealthy = load("ci-output-stealthy/results.json")["stealthy"]

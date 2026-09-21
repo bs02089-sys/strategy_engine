@@ -405,9 +405,12 @@ def run_static() -> dict[str, Any]:
     print(f"[static] xpath data-id -> {ids}")
 
     hit = page.find_by_text("USB-C Hub", first_match=True)
-    matched_name = (hit.css("::text").get() or "").strip() if hit is not None else ""
+    # ⚠️ 2026-09-21 실측: 못 찾았을 때 None 이 아니라 빈 결과(Selectors)가 온다.
+    #    `is not None` 으로 검사하면 '못 찾음'을 절대 잡지 못한다 — bool() 로 본다.
+    found = bool(hit)
+    matched_name = (hit.css("::text").get() or "").strip() if found else ""
     # 못 찾았을 때 '' 만 찍으면 "찾았는데 비어 있음" 처럼 보인다.
-    not_found = "" if hit is not None else " (찾지 못함)"
+    not_found = "" if found else " (찾지 못함)"
     print(f"[static] find_by_text('USB-C Hub') -> {matched_name!r}{not_found}")
 
     # 적응형: 정상 selector 로 저장한 뒤, 깨진 selector 로도 다시 찾아낸다.
