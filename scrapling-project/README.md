@@ -12,6 +12,7 @@ Cloudflare Turnstile/Interstitial 같은 안티봇 보호를 우회할 수 있�
 | --- | --- |
 | Python | 3.10 이상 (검증 환경: 3.14.6) |
 | Scrapling | 0.4.15 |
+| OS | Linux / macOS / WSL (브라우저 모드는 Linux 계열에서 검증) |
 
 > Scrapling 은 Python 3.10 미만을 지원하지 않습니다.
 
@@ -24,22 +25,42 @@ source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### 브라우저 fetcher 사용 시 (선택)
+### 브라우저 fetcher 사용 시 (stealthy 모드)
 
-`StealthyFetcher` / `DynamicFetcher` 는 실제 브라우저를 띄우므로 브라우저 바이너리를 한 번 내려받아야 합니다.
+`static`, `adaptive` 모드는 브라우저 없이 바로 동작합니다.
+`stealthy` 모드는 실제 Chromium 을 띄우므로 아래 두 단계가 추가로 필요합니다.
+
+**1단계 — 브라우저 바이너리 내려받기**
 
 ```bash
 scrapling install
 ```
 
-`scrapling install` 은 브라우저 바이너리와 함께 시스템 라이브러리(`playwright install-deps`)까지 설치하려 하므로
-**root 권한이 필요할 수 있습니다.** 권한이 없다면 아래 명령으로 브라우저만 먼저 받을 수 있습니다.
+`scrapling install` 은 브라우저 바이너리뿐 아니라 시스템 라이브러리(`playwright install-deps`)까지
+설치하려 하므로 **root 권한이 필요**합니다. 권한이 없다면 브라우저 바이너리만 따로 받으세요.
 
 ```bash
 python -m patchright install chromium
 ```
 
-> `static`, `adaptive` 모드는 브라우저 없이 동작합니다. 브라우저가 필요한 것은 `stealthy` 모드뿐입니다.
+**2단계 — 브라우저용 시스템 라이브러리**
+
+Chromium 은 `libnspr4`, `libnss3`, `libasound2` 같은 시스템 라이브러리를 요구합니다.
+root 권한이 있다면 표준 명령으로 끝납니다.
+
+```bash
+sudo playwright install-deps chromium
+```
+
+컨테이너나 WSL 처럼 **root 권한이 없는 환경**이라면 이 프로젝트의 헬퍼 스크립트를 사용하세요.
+`.deb` 패키지를 프로젝트 안(`.browser-libs/`)에 내려받아 풀어 두며, **시스템은 건드리지 않습니다.**
+
+```bash
+bash scripts/setup_browser_libs.sh
+```
+
+`main.py` 는 `.browser-libs/` 가 있으면 실행 시 자동으로 `LD_LIBRARY_PATH` 에 추가합니다.
+폴더가 없으면 아무것도 하지 않으므로, 라이브러리가 이미 갖춰진 환경에서는 동작에 영향이 없습니다.
 
 ## 실행 방법
 
@@ -57,10 +78,13 @@ python main.py -m adaptive -u <URL>  # 대상 URL 지정
 
 ```
 .
-├── main.py            # 예시 스크립트 (adaptive / stealthy / static 모드)
-├── requirements.txt   # 의존성 (scrapling[fetchers] 포함)
+├── main.py                      # 예시 스크립트 (adaptive / stealthy / static 모드)
+├── requirements.txt             # 의존성 (scrapling[fetchers] 포함)
 ├── README.md
-└── output/            # 실행 산출물 (git 추적 제외)
+├── scripts/
+│   └── setup_browser_libs.sh    # [root 불필요] 브라우저용 시스템 라이브러리 로컬 설치
+├── .browser-libs/               # 위 스크립트가 내려받는 라이브러리 (git 추적 제외)
+└── output/                      # 실행 산출물 (git 추적 제외)
     ├── results.json
     └── adaptive_storage.db
 ```
@@ -126,8 +150,17 @@ page = StealthyFetcher.fetch(
 | `hide_canvas` | 캔버스 지문 채집 방지 |
 | `timeout` | 밀리초 단위. 기본 30,000 |
 
-> 브라우저가 설치되어 있지 않으면 스크립트는 예외를 잡아 `scrapling install` 안내를 출력하고
-> 나머지 모드는 계속 진행합니다.
+실행 확인된 출력 (실제 Cloudflare Turnstile 챌린지를 우회함):
+
+```
+INFO: The turnstile version discovered is "interactive"
+INFO: Cloudflare captcha is solved
+INFO: Fetched (200) <GET https://nopecha.com/demo>
+[stealthy] status=200 title='NopeCHA - CAPTCHA Demo' 링크 19개
+```
+
+브라우저가 준비되지 않았거나 라이브러리가 없으면 스크립트는 예외를 잡아 원인과 해결 방법을
+안내하고, 나머지 모드는 계속 진행합니다.
 
 ### 3. `static` — 오프라인 확인
 
@@ -167,14 +200,20 @@ Scrapling 은 요소의 **태그명·텍스트·속성·형제 요소·경로**,
 **`Executable doesn't exist at .../chrome`**
 브라우저 바이너리가 없습니다. `scrapling install` 또는 `python -m patchright install chromium` 을 실행하세요.
 
-**`error while loading shared libraries: libnspr4.so`**
-브라우저 실행에 필요한 시스템 라이브러리가 없는 경우입니다. Debian/Ubuntu 계열에서는 아래가 필요합니다.
+**`error while loading shared libraries: libnspr4.so` (또는 libnss3, libasound)**
+브라우저 실행에 필요한 시스템 라이브러리가 없는 경우입니다.
 
 ```bash
-sudo playwright install-deps chromium
+sudo playwright install-deps chromium          # root 권한이 있는 경우
+bash scripts/setup_browser_libs.sh             # root 권한이 없는 경우 (시스템 미변경)
 ```
 
-Docker 를 쓴다면 `mcr.microsoft.com/playwright` 이미지를 사용하면 이 문제를 피할 수 있습니다.
+`scrapling install` 이 `playwright install-deps` 단계에서 실패하는 것도 같은 원인입니다.
+브라우저 바이너리는 이미 받아졌을 수 있으니, 위 2단계만 따로 처리하면 됩니다.
+Docker 라면 `mcr.microsoft.com/playwright` 이미지를 쓰면 이 문제를 피할 수 있습니다.
+
+**Cloudflare 챌린지가 계속 반복되는 경우**
+`timeout` 을 60초 이상으로 두세요. 챌린지 종류에 따라 한 번 더 시도하는 로그가 정상적으로 출력됩니다.
 
 **적응형 재탐색이 아무것도 찾지 못하는 경우**
 먼저 `auto_save=True` 로 저장이 되었는지 확인하세요.

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -96,6 +97,36 @@ def adaptive_storage_args() -> dict[str, str]:
     return {"storage_file": str(ADAPTIVE_DB)}
 
 
+def local_browser_libs_dir() -> Path | None:
+    """`scripts/setup_browser_libs.sh` 가 내려받아 둔 라이브러리 폴더를 찾는다.
+
+    root 권한 없이 브라우저를 띄우기 위한 장치로, 없으면 None 을 돌려준다.
+    """
+    base = BASE_DIR / ".browser-libs" / "usr" / "lib"
+    if not base.is_dir():
+        return None
+    for candidate in sorted(base.glob("*-linux-gnu")):
+        if candidate.is_dir():
+            return candidate
+    return base if any(base.glob("*.so*")) else None
+
+
+def enable_local_browser_libs() -> Path | None:
+    """로컬 라이브러리 폴더가 있으면 LD_LIBRARY_PATH 앞에 붙인다.
+
+    브라우저는 자식 프로세스로 뜨기 때문에 여기서 환경변수를 설정하면 그대로 상속된다.
+    폴더가 없으면 아무것도 하지 않으므로, 시스템 라이브러리가 갖춰진 환경에서는
+    동작에 영향이 없다.
+    """
+    libs = local_browser_libs_dir()
+    if libs is None:
+        return None
+    current = os.environ.get("LD_LIBRARY_PATH", "")
+    parts = [str(libs), *(p for p in current.split(os.pathsep) if p)]
+    os.environ["LD_LIBRARY_PATH"] = os.pathsep.join(dict.fromkeys(parts))
+    return libs
+
+
 # --------------------------------------------------------------------------- #
 # 1) 적응형 스크래핑
 # --------------------------------------------------------------------------- #
@@ -151,6 +182,9 @@ def run_stealthy(url: str = CLOUDFLARE_DEMO_URL) -> dict[str, Any]:
     """StealthyFetcher 로 Cloudflare 챌린지를 우회해 페이지를 가져온다."""
     from scrapling.fetchers import StealthyFetcher  # 브라우저 스택이 필요하므로 지연 임포트
 
+    libs = enable_local_browser_libs()
+    if libs is not None:
+        print(f"[stealthy] 로컬 브라우저 라이브러리 사용: {libs}")
     print(f"[stealthy] StealthyFetcher.fetch({url}) — 브라우저 기동")
 
     try:
@@ -163,10 +197,19 @@ def run_stealthy(url: str = CLOUDFLARE_DEMO_URL) -> dict[str, Any]:
             hide_canvas=True,       # 캔버스 지문 채집 방지
             timeout=90_000,         # Cloudflare 해결에는 60초 이상 권장 (밀리초 단위)
         )
-    except Exception as exc:  # 브라우저 미설치 등
-        print(f"[stealthy] 실패: {exc}")
-        print("[stealthy] 브라우저가 없다면 먼저 `scrapling install` 을 실행하세요.")
-        return {"url": url, "ok": False, "error": str(exc)}
+    except Exception as exc:  # 브라우저 미설치 / 시스템 라이브러리 부족 등
+        detail = str(exc)
+        reason = detail.splitlines()[0]
+        print(f"[stealthy] 실패: {reason}")
+
+        # 브라우저 로그가 수십 줄이라 원인 파악이 어렵다. 흔한 실패는 짚어 준다.
+        if "shared libraries" in detail or "libnspr4" in detail:
+            print("[stealthy] 브라우저 실행에 필요한 시스템 라이브러리가 없습니다.")
+            print("[stealthy]   root 권한이 있다면 : sudo playwright install-deps chromium")
+            print("[stealthy]   root 권한이 없다면: bash scripts/setup_browser_libs.sh")
+        else:
+            print("[stealthy] 브라우저가 없다면 먼저 `scrapling install` 을 실행하세요.")
+        return {"url": url, "ok": False, "error": reason}
 
     title = page.css("title::text").get()
     links = page.css("#padded_content a::attr(href)").getall()
