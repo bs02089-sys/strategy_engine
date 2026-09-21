@@ -102,7 +102,7 @@ python main.py -m adaptive -u <URL>  # 대상 URL 지정
 .
 ├── main.py                      # 예시 스크립트 (adaptive / stealthy / static 모드)
 ├── requirements.txt             # 의존성 (scrapling[fetchers] 포함)
-├── Dockerfile                   # Playwright 공식 이미지 기반 실행 환경
+├── Dockerfile                   # python:3.14-slim + chromium (1.49GB) 실행 환경
 ├── .dockerignore
 ├── README.md
 ├── scripts/
@@ -253,11 +253,11 @@ if page.retrieve("quotes") is None:
 
 | 항목 | 상태 |
 | --- | --- |
-| `static` 모드 | ✅ 실행 확인 |
+| `static` 모드 | ✅ 실행 확인 (로컬 + Docker CI) |
 | `adaptive` 모드 | ✅ 실행 확인 (10개 저장 → selector 파손 → 10개 복구) |
 | `stealthy` 모드 (브라우저) | ✅ 실행 확인 — 실제 Cloudflare Turnstile 챌린지 우회 성공 (HTTP 200) |
 | `scripts/setup_browser_libs.sh` | ✅ 새로 실행하여 확인 (root 권한 불필요) |
-| `Dockerfile` (slim, 1.49GB) | ✅ **Docker 실기 검증 완료** — 컨테이너 안에서 adaptive 재탐색과 stealthy Cloudflare 우회 모두 성공 |
+| `Dockerfile` (slim, 1.49GB) | ✅ **Docker 실기 검증 완료** — 컨테이너 안에서 static 파서·adaptive 재탐색·stealthy Cloudflare 우회 모두 성공 |
 
 ### Dockerfile 검증 방식
 
@@ -269,8 +269,13 @@ GitHub Actions 러너에서 실제로 빌드·실행해 검증합니다
 
 1. 이미지가 빌드되는가 — `scrapling-demo:latest 1.49GB`
 2. 로컬 우회책이 이미지에 없는가 — `OK: /app/.browser-libs 없음`
-3. adaptive 모드가 깨진 selector 를 재탐색으로 복구하는가 — 10개 저장 → 0개 매칭 → 10개 복구
-4. stealthy 모드가 실제로 Cloudflare 를 통과하는가 — `status=200`
+3. static 모드가 그대로 동작하는가 — 상품 3개 · xpath `['p1','p2','p3']` · `find_by_text` 일치 · 재탐색 1개 복구
+4. adaptive 모드가 깨진 selector 를 재탐색으로 복구하는가 — 10개 저장 → 0개 매칭 → 10개 복구
+5. stealthy 모드가 실제로 Cloudflare 를 통과하는가 — `status=200`
+
+종료코드는 신뢰하지 않습니다. `main.py` 는 모드가 실패해도 exit 0 으로 끝나고
+`ok=false` / 0건을 남기므로, 워크플로우는 모드별 `results.json` 을 읽어 값을 검사합니다.
+(`static` 은 브라우저 없이 돌아가는 파서 경로라 네트워크 없이도 확인할 수 있습니다.)
 
 ### 빌드 캐시를 쓴 이유
 
@@ -281,6 +286,9 @@ GitHub Actions 러너에서 실제로 빌드·실행해 검증합니다
 | 기본 빌드 | 52초 |
 | 캐시 적중 | 29초 (+ buildx 준비 3초) |
 | 캐시 미적중 | 135초 |
+
+실제 런에서도 재확인했습니다 — 현재 워크플로우의 로그는 빌드 레이어가 `#8~#11 CACHED`,
+빌드 스텝 29초, 이미지 `1.49GB` 입니다.
 
 이미지가 작아지면서 `load: true` 로 로컬 데몬에 옮기는 비용이 줄어 캐시가 **이득으로 뒤집혔습니다.**
 2.74GB 시절에는 그 비용이 55초라 캐시가 오히려 손해여서 도입했다가 되돌렸습니다.

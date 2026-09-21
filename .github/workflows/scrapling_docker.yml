@@ -4,11 +4,12 @@ name: Scrapling Docker Build
 # 실제로 빌드·실행해 검증한다. 로컬 개발 환경(WSL)에는 컨테이너 런타임이 없어
 # 빌드를 돌릴 수 없으므로 검증은 이 워크플로우가 담당한다.
 #
-# 검증 포인트는 네 가지다.
+# 검증 포인트는 다섯 가지다.
 #   1. 이미지가 빌드되는가
 #   2. 로컬 우회책(.browser-libs) 없이 동작하는가
-#   3. adaptive 모드가 실패하는 selector 를 재탐색으로 복구하는가
-#   4. stealthy 모드가 실제로 Cloudflare 를 통과해 200 을 받는가
+#   3. static 모드가 파서와 적응형 기능을 그대로 수행하는가
+#   4. adaptive 모드가 실패하는 selector 를 재탐색으로 복구하는가
+#   5. stealthy 모드가 실제로 Cloudflare 를 통과해 200 을 받는가
 #
 # 실행 시간은 측정에 근거해 잡았다.
 #   디스크 정리 스텝 제거 : 46초 -> 0초 (러너에 105G 여유가 있었다)
@@ -23,6 +24,7 @@ on:
   pull_request:
     paths:
       - 'scrapling-project/**'
+      - '.github/workflows/scrapling_docker.yml'
   workflow_dispatch:
 
 # 같은 브랜치에서 중복 실행되면 이전 실행을 취소한다 (이미지 빌드가 무겁다)
@@ -79,7 +81,7 @@ jobs:
           docker run --rm --entrypoint sh scrapling-demo -c \
             'test ! -e /app/.browser-libs && echo "OK: /app/.browser-libs 없음"'
 
-      - name: static 모드 (오프라인 스모크 테스트)
+      - name: static 모드 실행 (오프라인 파서 + 적응형 재탐색)
         working-directory: scrapling-project
         run: |
           mkdir -p ci-output-static
@@ -119,7 +121,19 @@ jobs:
                   sys.exit(1)
               return json.loads(file.read_text())
 
-          # 1) adaptive: 저장 -> selector 파손 -> 재탐색 복구
+          # 1) static: 내장 HTML 파서 + 적응형 재탐색 (네트워크/브라우저 불필요)
+          static = load("ci-output-static/results.json")["static"]
+          print("static:", {k: v for k, v in static.items() if k != "products"})
+          if static["product_count"] != 3:
+              failures.append(f"static 모드가 상품 3개를 찾지 못했습니다 (실제 {static['product_count']}개)")
+          if static["product_ids"] != ["p1", "p2", "p3"]:
+              failures.append("static 모드 xpath 결과가 예상과 다릅니다")
+          if static["text_search_match"] != "USB-C Hub":
+              failures.append("static 모드 find_by_text 결과가 예상과 다릅니다")
+          if static["adaptive_recovered"] <= 0:
+              failures.append("static 모드 적응형 재탐색이 요소를 복구하지 못했습니다")
+
+          # 2) adaptive: 저장 -> selector 파손 -> 재탐색 복구
           adaptive = load("ci-output-adaptive/results.json")["adaptive"]
           print("adaptive:", {k: v for k, v in adaptive.items() if k != "quotes"})
           if adaptive["saved_count"] <= 0:
@@ -131,7 +145,7 @@ jobs:
           if not adaptive["first_item_preserved"]:
               failures.append("복구된 요소가 저장 시점과 다릅니다")
 
-          # 2) stealthy: Cloudflare 우회
+          # 3) stealthy: Cloudflare 우회
           stealthy = load("ci-output-stealthy/results.json")["stealthy"]
           print("stealthy:", {k: v for k, v in stealthy.items() if k != "sample_links"})
           if not stealthy.get("ok") or stealthy.get("status") != 200:
@@ -142,7 +156,7 @@ jobs:
           if failures:
               sys.exit(1)
 
-          print("검증 통과: adaptive 재탐색 + stealthy Cloudflare 우회")
+          print("검증 통과: static 파서 + adaptive 재탐색 + stealthy Cloudflare 우회")
           PY
 
       - name: 실패 시 로그 업로드
