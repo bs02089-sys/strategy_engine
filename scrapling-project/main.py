@@ -128,8 +128,114 @@ def enable_local_browser_libs() -> Path | None:
 
 
 # --------------------------------------------------------------------------- #
+# 실패 원인 분류 — 두 fetcher 가 서로 다른 예외를 던진다
+# --------------------------------------------------------------------------- #
+# 예외 메시지의 **첫 줄만 보여주면 안 된다.** 2026-09-21 로컬 재현에서 확인한 두 가지:
+#   · stealthy(브라우저) 시스템 라이브러리 부재 → 첫 줄은 "Target page, context or
+#     browser has been closed" 라서 원인이 드러나지 않고, 원인은 브라우저 로그 줄에만 있다.
+#   · adaptive(HTTP) 네트워크 실패 → curl_cffi 예외가 그대로 튀어올라(안 잡으면 트레이스백)
+#     사용자가 볼 안내가 없다.
+# 그래서 식별자가 들어 있는 줄을 찾아 이유로 쓰고, 원인 종류에 맞는 안내를 함께 돌려준다.
+# 표기한 문자열은 모두 그 재현에서 확인한 것이다.
+STEALTHY_FAILURE_SIGNATURES = (
+    #   브라우저 바이너리 없음 : "Executable doesn't exist at <경로>"
+    #   시스템 라이브러리 없음 : "[pid=..][err] <chrome>: error while loading shared libraries: libnspr4.so ..."
+    #   네트워크/대상 문제    : "net::ERR_*" (예: ERR_NAME_NOT_RESOLVED) — 브라우저와 무관하다
+    #   응답 지연/차단        : "Timeout <n>ms exceeded"
+    (
+        ("Executable doesn't exist",),
+        "브라우저 바이너리 없음",
+        (
+            "브라우저 바이너리가 없습니다.",
+            "  root 권한이 있으면 : scrapling install",
+            "  root 권한이 없으면: python -m patchright install chromium",
+        ),
+    ),
+    (
+        ("shared libraries", "libnspr4"),
+        "시스템 라이브러리 없음",
+        (
+            "브라우저 실행에 필요한 시스템 라이브러리가 없습니다.",
+            "  root 권한이 있다면 : sudo playwright install-deps chromium",
+            "  root 권한이 없다면: bash scripts/setup_browser_libs.sh",
+        ),
+    ),
+    (
+        ("net::ERR_",),
+        "네트워크/대상 문제",
+        (
+            "브라우저는 정상 동작했고 네트워크 또는 대상 주소 문제입니다 (브라우저 설치와 무관).",
+            "  대상 URL 과 네트워크 연결을 확인하세요.",
+        ),
+    ),
+    (
+        ("ms exceeded",),
+        "응답 지연/차단",
+        (
+            "응답이 timeout 안에 오지 않았습니다. 차단 챌린지가 풀리지 않았을 수 있습니다.",
+            "  timeout 을 60초 이상으로 두고 다시 시도해 보세요 (Cloudflare 권장).",
+        ),
+    ),
+)
+
+REQUEST_FAILURE_SIGNATURES = (
+    # curl_cffi(HTTP fetcher) 실패는 curl 오류코드가 메시지에 들어온다.
+    #   "Failed to perform, curl: (6) Could not resolve host: ..." (DNS)
+    #   "curl: (7) Failed to connect" · "curl: (28) timed out" 등
+    (
+        ("curl: (", "Could not resolve host", "Failed to connect", "timed out"),
+        "네트워크/대상 문제",
+        (
+            "대상 주소에 닿지 못했습니다 (브라우저를 쓰지 않는 HTTP 모드입니다).",
+            "  대상 URL 과 네트워크 연결을 확인하세요.",
+        ),
+    ),
+)
+
+
+def classify_failure(detail: str, signatures: tuple) -> tuple[str, str, list[str]]:
+    """예외 문자열을 (보여줄 이유, 원인 종류, 안내문) 으로 정리한다."""
+    lines = [line.strip() for line in detail.splitlines() if line.strip()]
+    for markers, kind, hints in signatures:
+        reason = next((line for line in lines if any(m in line for m in markers)), None)
+        if reason is None:
+            continue
+        # 브라우저 로그 접두사([pid=..][err])를 떼어 사람이 읽는 부분만 남긴다.
+        return reason.split("][err] ", 1)[-1].strip(), kind, list(hints)
+    return (
+        (lines[0] if lines else detail.strip()),
+        "원인 미분류",
+        ["원인을 분류하지 못했습니다. 로그 전체를 확인하세요."],
+    )
+
+
+def classify_stealthy_failure(detail: str) -> tuple[str, str, list[str]]:
+    """StealthyFetcher(브라우저) 실패를 분류한다."""
+    return classify_failure(detail, STEALTHY_FAILURE_SIGNATURES)
+
+
+def classify_request_failure(detail: str) -> tuple[str, str, list[str]]:
+    """Fetcher(HTTP, curl_cffi) 실패를 분류한다."""
+    return classify_failure(detail, REQUEST_FAILURE_SIGNATURES)
+
+
+# --------------------------------------------------------------------------- #
 # 1) 적응형 스크래핑
 # --------------------------------------------------------------------------- #
+def adaptive_failure(url: str, kind: str, error: str, **extra: Any) -> dict[str, Any]:
+    """실패해도 CI 와 사용자가 읽을 수 있게 성공과 같은 키를 채운다 (0건 · ok=false)."""
+    return {
+        "url": url,
+        "ok": False,
+        "failure_kind": kind,
+        "error": error,
+        "saved_count": 0,
+        "broken_selector_matches": 0,
+        "recovered_count": 0,
+        "fingerprint_stored": False,
+        "first_item_preserved": False,
+        **extra,
+    }
 def run_adaptive(url: str = QUOTES_URL) -> dict[str, Any]:
     """fingerprint 저장 → selector 파손 → adaptive 재탐색 흐름을 보여준다."""
     from scrapling.fetchers import Fetcher  # curl_cffi 가 필요하므로 지연 임포트
@@ -137,8 +243,23 @@ def run_adaptive(url: str = QUOTES_URL) -> dict[str, Any]:
     # 이 Fetcher 로 만든 페이지에서 adaptive 기능을 전역으로 켠다.
     Fetcher.configure(adaptive=True, storage_args=adaptive_storage_args())
 
-    page = Fetcher.get(url, stealthy_headers=True)
+    try:
+        page = Fetcher.get(url, stealthy_headers=True)
+    except Exception as exc:  # 예외를 안 잡으면 트레이스백만 남고 결과 JSON 도 안 쓰인다
+        reason, kind, hints = classify_request_failure(f"{type(exc).__name__}: {exc}")
+        print(f"[adaptive] 실패({kind}): {reason}")
+        for hint in hints:
+            print(f"[adaptive] {hint}")
+        return adaptive_failure(url, kind, reason)
+
     print(f"[adaptive] GET {url} -> HTTP {page.status}")
+
+    # 페이지를 못 받은 상태(4xx/5xx)로 진행하면 '0개 저장'만 보고되어 selector 가 깨진 것처럼
+    # 보인다. 원인은 상태코드이므로 그대로 알리고, selector 판정은 하지 않는다.
+    if not 200 <= page.status < 300:
+        reason = f"HTTP {page.status} — 대상 페이지를 받지 못했습니다 (selector 문제가 아님)"
+        print(f"[adaptive] {reason}")
+        return adaptive_failure(url, f"HTTP {page.status}", reason, status=page.status)
 
     # --- 1) Save 단계 -------------------------------------------------------
     # 정상 selector 로 요소를 찾으면서, 그 요소의 고유 속성을 저장소에 기록한다.
@@ -163,9 +284,13 @@ def run_adaptive(url: str = QUOTES_URL) -> dict[str, Any]:
     preserved = bool(quotes) and quotes[0]["text"] == (recovered[0]["text"] if recovered else None)
     if preserved:
         print("[adaptive] 복구된 첫 항목이 저장 시점과 동일함을 확인")
+    else:
+        # 아무 말도 안 하면 로그만 보고는 성공처럼 보인다 (CI 는 JSON 을 검사한다).
+        print("[adaptive] 복구된 첫 항목이 저장 시점과 다릅니다")
 
     return {
         "url": url,
+        "ok": True,
         "saved_count": len(quotes),
         "broken_selector_matches": len(broken),
         "recovered_count": len(recovered),
@@ -207,68 +332,6 @@ def detect_block(status: int, html: str) -> str | None:
         if marker in html:
             return f"Cloudflare 챌린지 페이지 (본문에 {marker!r})"
     return None
-
-
-# 실패 원인 분류. **첫 줄만 보여주면 안 된다** — 2026-09-21 로컬 재현 결과 시스템
-# 라이브러리 부재는 첫 줄이 "Target page, context or browser has been closed" 라서
-# 원인이 드러나지 않고, 진짜 원인은 브라우저 로그 줄에만 들어 있다. 그래서 식별자가
-# 들어 있는 줄을 찾아 그 줄을 보여준다. 표기한 문자열은 모두 그 재현에서 확인한 것이다.
-#   브라우저 바이너리 없음 : "Executable doesn't exist at <경로>"
-#   네트워크/대상 문제    : "net::ERR_*" (예: ERR_NAME_NOT_RESOLVED) — 브라우저와 무관하다
-#   응답 지연/차단        : "Timeout <n>ms exceeded"
-#   시스템 라이브러리 없음 : "[pid=..][err] <chrome>: error while loading shared libraries: libnspr4.so ..."
-FAILURE_SIGNATURES: tuple[tuple[tuple[str, ...], str, tuple[str, ...]], ...] = (
-    (
-        ("Executable doesn't exist",),
-        "브라우저 바이너리 없음",
-        (
-            "브라우저 바이너리가 없습니다.",
-            "  root 권한이 있으면 : scrapling install",
-            "  root 권한이 없으면: python -m patchright install chromium",
-        ),
-    ),
-    (
-        ("shared libraries", "libnspr4"),
-        "시스템 라이브러리 없음",
-        (
-            "브라우저 실행에 필요한 시스템 라이브러리가 없습니다.",
-            "  root 권한이 있다면 : sudo playwright install-deps chromium",
-            "  root 권한이 없다면: bash scripts/setup_browser_libs.sh",
-        ),
-    ),
-    (
-        ("net::ERR_",),
-        "네트워크/대상 문제",
-        (
-            "브라우저는 정상 동작했고 네트워크 또는 대상 주소 문제입니다 (브라우저 설치와 무관).",
-            "  대상 URL 과 네트워크 연결을 확인하세요.",
-        ),
-    ),
-    (
-        ("ms exceeded",),
-        "응답 지연/차단",
-        (
-            "응답이 timeout 안에 오지 않았습니다. 차단 챌린지가 풀리지 않았을 수 있습니다.",
-            "  timeout 을 60초 이상으로 두고 다시 시도해 보세요 (Cloudflare 권장).",
-        ),
-    ),
-)
-
-
-def classify_stealthy_failure(detail: str) -> tuple[str, str, list[str]]:
-    """실패한 fetch 의 예외 문자열을 (보여줄 이유, 원인 종류, 안내문) 으로 정리한다."""
-    lines = [line.strip() for line in detail.splitlines() if line.strip()]
-    for markers, kind, hints in FAILURE_SIGNATURES:
-        reason = next((line for line in lines if any(m in line for m in markers)), None)
-        if reason is None:
-            continue
-        # 브라우저 로그 접두사([pid=..][err])를 떼어 사람이 읽는 부분만 남긴다.
-        return reason.split("][err] ", 1)[-1].strip(), kind, list(hints)
-    return (
-        (lines[0] if lines else detail.strip()),
-        "원인 미분류",
-        ["원인을 분류하지 못했습니다. 로그 전체를 확인하세요."],
-    )
 
 
 def run_stealthy(url: str = CLOUDFLARE_DEMO_URL) -> dict[str, Any]:
@@ -343,7 +406,9 @@ def run_static() -> dict[str, Any]:
 
     hit = page.find_by_text("USB-C Hub", first_match=True)
     matched_name = (hit.css("::text").get() or "").strip() if hit is not None else ""
-    print(f"[static] find_by_text('USB-C Hub') -> {matched_name!r}")
+    # 못 찾았을 때 '' 만 찍으면 "찾았는데 비어 있음" 처럼 보인다.
+    not_found = "" if hit is not None else " (찾지 못함)"
+    print(f"[static] find_by_text('USB-C Hub') -> {matched_name!r}{not_found}")
 
     # 적응형: 정상 selector 로 저장한 뒤, 깨진 selector 로도 다시 찾아낸다.
     page.css(".product", auto_save=True, identifier="products")
