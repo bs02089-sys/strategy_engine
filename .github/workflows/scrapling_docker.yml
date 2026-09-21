@@ -9,6 +9,10 @@ name: Scrapling Docker Build
 #   2. 로컬 우회책(.browser-libs) 없이 동작하는가
 #   3. adaptive 모드가 실패하는 selector 를 재탐색으로 복구하는가
 #   4. stealthy 모드가 실제로 Cloudflare 를 통과해 200 을 받는가
+#
+# 실행 시간은 측정에 근거해 잡았다 (자세한 수치는 아래 스텝 주석 참고).
+#   디스크 정리 스텝 제거 : 46초 -> 0초 (러너에 105G 여유가 있었다)
+#   빌드 캐시(type=gha)   : 도입했다가 되돌림. 캐시 적중 58초 vs 순수 빌드 34초
 
 on:
   push:
@@ -37,25 +41,21 @@ jobs:
         uses: actions/checkout@v4
 
       - name: 러너 디스크 확인
-        # 예전에는 여기서 디스크를 비웠지만, 실측 결과 ubuntu-24.04 러너는
-        # 145G 중 105G 가 비어 있어 불필요했다 (스텝 하나가 46초를 잡아먹었다).
-        # 이미지가 2.74GB 수준이므로 정리 없이 그대로 진행한다.
+        # 실측 결과 ubuntu-24.04 러너는 145G 중 105G 가 비어 있었다.
+        # 예전에 여기서 디스크를 비웠는데, 그 스텝 하나가 46초를 잡아먹었을 뿐
+        # 이미지(2.74GB)에는 전혀 필요 없었으므로 진단 출력만 남긴다.
         run: df -h /
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: 이미지 빌드 (레이어 캐시 사용)
-        # pip 설치 레이어와 베이스 이미지 레이어를 GitHub Actions 캐시에 담아
-        # 다음 실행에서 재사용한다. requirements.txt 는 버전이 고정되어 있어
-        # 대부분의 실행에서 캐시가 적중한다.
-        uses: docker/build-push-action@v6
-        with:
-          context: scrapling-project
-          tags: scrapling-demo:latest
-          load: true
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+      - name: 이미지 빌드
+        # 기본 docker build 를 쓴다. buildx + type=gha 캐시도 시험해 봤으나
+        # 베이스 이미지 레이어가 buildkit 컨테이너 안에만 존재해서,
+        # load:true 로 로컬 데몬에 옮기는 데만 약 55초가 걸렸다.
+        # MCR 에서 직접 받는 시간(약 23초)보다 비싸므로 캐시가 역효과였다.
+        #   - 캐시 미적중: 146초
+        #   - 캐시 적중  :  58초
+        #   - 기본 빌드  :  34초 (베이스 pull 23초 + pip 설치 6초)
+        working-directory: scrapling-project
+        run: docker build -t scrapling-demo .
 
       - name: 이미지 크기 확인
         run: docker images scrapling-demo --format '{{.Repository}}:{{.Tag}}  {{.Size}}'
