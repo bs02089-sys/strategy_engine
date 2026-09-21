@@ -94,6 +94,9 @@ python main.py -m all              # 전체 실행
 python main.py -m adaptive -u <URL>  # 대상 URL 지정
 ```
 
+`-u` 는 `adaptive`·`stealthy` 에만 적용됩니다 — `static` 은 내장 HTML 만 쓰므로 URL 을 받지 않습니다
+(`-m all -u <URL>` 로 실행하면 static 만 기본 HTML 로 돕니다).
+
 모든 실행 결과는 `output/results.json` 에 저장됩니다.
 
 ## 프로젝트 구조
@@ -104,6 +107,7 @@ python main.py -m adaptive -u <URL>  # 대상 URL 지정
 ├── requirements.txt             # 의존성 (scrapling[fetchers] 포함)
 ├── Dockerfile                   # python:3.14-slim + chromium (1.49GB) 실행 환경
 ├── .dockerignore
+├── .gitignore
 ├── README.md
 ├── scripts/
 │   ├── setup_browser_libs.sh    # [root 불필요] 브라우저용 시스템 라이브러리 로컬 설치
@@ -251,9 +255,9 @@ python main.py -m static
 
 ## 적응형 스크래핑 동작 원리
 
-Scrapling 은 요소의 **태그명·텍스트·속성·형제 요소·경로**, 그리고 부모의 태그명·속성·텍스트를
-고유 속성으로 저장합니다. 사이트가 개편되면 현재 페이지의 모든 요소와 저장된 속성을 비교해
-유사도가 가장 높은 요소를 반환합니다.
+Scrapling 은 요소의 **태그명·텍스트·속성·경로·자식 요소**, 부모의 **태그명·속성·텍스트**,
+그리고 **형제 요소** 목록을 고유 속성으로 저장합니다 (Scrapling `element_to_dict`).
+사이트가 개편되면 현재 페이지의 모든 요소와 저장된 속성을 비교해 유사도가 가장 높은 요소를 반환합니다.
 
 - 저장소는 기본적으로 SQLite 를 사용합니다.
 - Scrapling 기본 저장 경로는 `site-packages/scrapling/elements_storage.db` 입니다.
@@ -266,7 +270,7 @@ Scrapling 은 요소의 **태그명·텍스트·속성·형제 요소·경로**,
 
 ## 문제 해결
 
-`stealthy` 모드가 실패하면 스크립트가 예외 문자열을 보고 원인을 분류해 안내합니다.
+두 fetcher 모드(`adaptive`·`stealthy`)가 실패하면 스크립트가 예외 문자열을 보고 원인을 분류해 안내합니다.
 결과 JSON 에는 `ok=false` · `failure_kind` · `error` 가 남습니다. 분류 기준은 아래 실측값입니다.
 
 | 예외 메시지의 식별자 | 해당 모드 | `failure_kind` | 안내 |
@@ -297,7 +301,9 @@ bash scripts/setup_browser_libs.sh             # root 권한이 없는 경우 (�
 
 `scrapling install` 이 `playwright install-deps` 단계에서 실패하는 것도 같은 원인입니다.
 브라우저 바이너리는 이미 받아졌을 수 있으니, 위 2단계만 따로 처리하면 됩니다.
-Docker 라면 `mcr.microsoft.com/playwright` 이미지를 쓰면 이 문제를 피할 수 있습니다.
+공식 Playwright 이미지(`mcr.microsoft.com/playwright`)를 쓰면 이 문제를 피할 수 있지만, 이 프로젝트는
+firefox·webkit 까지 들어 2.74GB 였므로 slim 베이스 + `patchright install --with-deps` 로 바꿨습니다
+(위 'Docker 로 실행' 참고).
 
 **Cloudflare 챌린지가 계속 반복되는 경우**
 `timeout` 을 60초 이상으로 두세요. 챌린지 종류에 따라 한 번 더 시도하는 로그가 정상적으로 출력됩니다.
@@ -324,7 +330,7 @@ if page.retrieve("quotes") is None:
 | `static` 모드 | ✅ 실행 확인 (로컬 + Docker CI) |
 | `adaptive` 모드 | ✅ 실행 확인 (10개 저장 → selector 파손 → 10개 복구) |
 | `stealthy` 모드 (브라우저) | ✅ 실행 확인 — 실제 Cloudflare Turnstile 챌린지 우회 성공 (HTTP 200, `blocked=false`) |
-| `scripts/setup_browser_libs.sh` | ✅ 새로 실행하여 확인 (root 권한 불필요) |
+| `scripts/setup_browser_libs.sh` | ✅ 실행 확인 (root 권한 불필요) — 산출물 `.browser-libs/` 가 로컬 stealthy 실행에 그대로 쓰임 |
 | `scripts/check_block_detection.py` | ✅ fixture 6건 (차단 4 · 정상 2) — 200 챌린지 페이지를 성공으로 오인하지 않음 |
 | `Dockerfile` (slim, 1.49GB) | ✅ **Docker 실기 검증 완료** — 컨테이너 안에서 static 파서·adaptive 재탐색·stealthy Cloudflare 우회 모두 성공 |
 
@@ -336,7 +342,7 @@ GitHub Actions 러너에서 실제로 빌드·실행해 검증합니다
 
 워크플로우가 확인하는 것:
 
-1. 이미지가 빌드되는가 — `scrapling-demo:latest 1.49GB`
+1. 이미지가 빌드되는가 — 빌드 성공 + 로그에 `scrapling-demo:latest 1.49GB` 출력 (크기 자체는 단언하지 않음)
 2. 로컬 우회책이 이미지에 없는가 — `OK: /app/.browser-libs 없음`
 3. 차단 감지가 200 챌린지 페이지를 성공으로 오인하지 않는가 — fixture 6건(차단 4 · 정상 2)
 4. static 모드가 그대로 동작하는가 — 상품 3개 · xpath `['p1','p2','p3']` · `find_by_text` 일치 · 재탐색 1개 복구
@@ -351,16 +357,15 @@ GitHub Actions 러너에서 실제로 빌드·실행해 검증합니다
 
 ### 빌드 캐시를 쓴 이유
 
-구성마다 **다른 러너**에서 재어 왜곡을 없앤 측정값입니다.
-
 | 구성 | 빌드 스텝 소요 |
 | --- | --- |
-| 기본 빌드 | 52초 |
-| 캐시 적중 | 29초 (+ buildx 준비 3초) |
-| 캐시 미적중 | 135초 |
+| 캐시 미적중 (Dockerfile·requirements 변경 시) | 135초 |
+| 캐시 적중 | **23~48초** (실측 4회: 48·32·42·23초, buildx 준비 3~10초 별도) |
+| 캐시 없이 매번 빌드 (초기 구성) | 52초 |
 
-실제 런에서도 재확인했습니다 — 현재 워크플로우의 로그는 빌드 레이어가 `#8~#11 CACHED`,
-빌드 스텝 29초, 이미지 `1.49GB` 입니다.
+⚠️ 캐시 적중 시에도 **러너 편차가 큽니다**(최근 4회 기준 23~48초, 평균 약 36초). 그래서 한 값으로
+단정하지 않습니다 — 숫자는 GitHub Actions 러너 step 소요시간 실측값입니다.
+빌드 레이어는 `#8~#11 CACHED`, 이미지 크기는 `1.49GB` 로 매번 동일합니다.
 
 이미지가 작아지면서 `load: true` 로 로컬 데몬에 옮기는 비용이 줄어 캐시가 **이득으로 뒤집혔습니다.**
 2.74GB 시절에는 그 비용이 55초라 캐시가 오히려 손해여서 도입했다가 되돌렸습니다.

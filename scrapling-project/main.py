@@ -459,7 +459,7 @@ def build_parser() -> argparse.ArgumentParser:
         "-u",
         "--url",
         default=None,
-        help="대상 URL. 생략하면 모드별 예시 사이트를 사용한다.",
+        help="대상 URL. 생략하면 모드별 예시 사이트를 사용한다. static 모드는 내장 HTML 을 쓰므로 무시된다.",
     )
     return parser
 
