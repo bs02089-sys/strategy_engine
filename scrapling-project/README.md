@@ -184,8 +184,9 @@ INFO: Fetched (200) <GET https://nopecha.com/demo>
 [stealthy] status=200 title='NopeCHA - CAPTCHA Demo' 링크 19개
 ```
 
-브라우저가 준비되지 않았거나 라이브러리가 없으면 스크립트는 예외를 잡아 **원인을 분류해** 안내하고,
-나머지 모드는 계속 진행합니다 (판정 기준과 실측 메시지는 아래 '문제 해결' 참고).
+두 fetcher 모드(`adaptive`·`stealthy`)는 실패해도 예외를 잡아 **원인을 분류해** 안내하고,
+나머지 모드는 계속 진행합니다 — 한 모드가 죽어도 결과 JSON 은 남으므로 `-m all` 도 중단되지 않습니다.
+(분류 기준과 실측 메시지는 아래 '문제 해결' 참고.)
 
 #### 차단 감지 — 200 이라고 우회 성공이 아니다
 
@@ -244,6 +245,10 @@ python main.py -m static
 [static] 깨진 selector 로 adaptive 재탐색 -> 1개 복구
 ```
 
+⚠️ `find_by_text` 는 **못 찾았을 때 `None` 이 아니라 빈 결과를 돌려줍니다.** 2026-09-21 실측으로
+확인했으며(`Selector` → 찾음 / 빈 `Selectors` → 못 찾음), `is not None` 으로 검사하면 못 찾음을
+절대 잡지 못합니다. 그래서 `bool()` 로 판정하고 로그에는 `(찾지 못함)` 을 덧붙입니다.
+
 ## 적응형 스크래핑 동작 원리
 
 Scrapling 은 요소의 **태그명·텍스트·속성·형제 요소·경로**, 그리고 부모의 태그명·속성·텍스트를
@@ -264,12 +269,14 @@ Scrapling 은 요소의 **태그명·텍스트·속성·형제 요소·경로**,
 `stealthy` 모드가 실패하면 스크립트가 예외 문자열을 보고 원인을 분류해 안내합니다.
 결과 JSON 에는 `ok=false` · `failure_kind` · `error` 가 남습니다. 분류 기준은 아래 실측값입니다.
 
-| 예외 메시지의 식별자 | `failure_kind` | 안내 |
-| --- | --- | --- |
-| `Executable doesn't exist at <경로>` | 브라우저 바이너리 없음 | `scrapling install` 또는 `python -m patchright install chromium` |
-| `error while loading shared libraries: libnspr4.so` | 시스템 라이브러리 없음 | `sudo playwright install-deps chromium` 또는 `bash scripts/setup_browser_libs.sh` |
-| `net::ERR_*` (예: `net::ERR_NAME_NOT_RESOLVED`) | 네트워크/대상 문제 | **브라우저 설치와 무관** — 대상 URL 과 네트워크 확인 |
-| `Timeout <n>ms exceeded` | 응답 지연/차단 | `timeout` 을 60초 이상으로 |
+| 예외 메시지의 식별자 | 해당 모드 | `failure_kind` | 안내 |
+| --- | --- | --- | --- |
+| `Executable doesn't exist at <경로>` | stealthy | 브라우저 바이너리 없음 | `scrapling install` 또는 `python -m patchright install chromium` |
+| `error while loading shared libraries: libnspr4.so` | stealthy | 시스템 라이브러리 없음 | `sudo playwright install-deps chromium` 또는 `bash scripts/setup_browser_libs.sh` |
+| `net::ERR_*` (예: `net::ERR_NAME_NOT_RESOLVED`) | stealthy | 네트워크/대상 문제 | **브라우저 설치와 무관** — 대상 URL 과 네트워크 확인 |
+| `Timeout <n>ms exceeded` | stealthy | 응답 지연/차단 | `timeout` 을 60초 이상으로 |
+| `DNSError: ... curl: (6) Could not resolve host` (`curl: (N)` 계열) | adaptive | 네트워크/대상 문제 | **브라우저를 쓰지 않는 모드** — 대상 URL 과 네트워크 확인 |
+| `HTTP 404` · `HTTP 403` 등 4xx/5xx 응답 | adaptive | `HTTP <코드>` | 받은 페이지가 대상이 아님 — **selector 문제가 아니므로** URL 확인 |
 
 ⚠️ **시스템 라이브러리 부재는 Playwright 예외의 첫 줄에 원인이 안 드러납니다.** 2026-09-21 실측에서
 첫 줄은 `BrowserType.launch_persistent_context: Target page, context or browser has been closed` 였고,
@@ -338,7 +345,8 @@ GitHub Actions 러너에서 실제로 빌드·실행해 검증합니다
 
 종료코드는 신뢰하지 않습니다. `main.py` 는 모드가 실패해도 exit 0 으로 끝나고
 `ok=false` / 0건을 남기므로, 워크플로우는 모드별 `results.json` 을 읽어 값을 검사합니다.
-차단으로 판정되면 `::error::차단 감지: <이유> — 우회 실패` 로 원인이 바로 드러납니다.
+실패 원인도 즉시 드러납니다 — 차단은 `::error::차단 감지: <이유> — 우회 실패`,
+`adaptive`·`stealthy` 실패는 `::error::<모드> 모드 실패(<원인 종류>): <이유>` 로 보고됩니다.
 (`static` · 차단 감지 fixture 는 네트워크 없이 돌아갑니다.)
 
 ### 빌드 캐시를 쓴 이유
