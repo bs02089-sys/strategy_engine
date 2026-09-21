@@ -1,0 +1,16 @@
+# ============================================================
+# Python 의존성
+# ============================================================
+# 설치:
+#   pip install -r requirements.txt
+#
+# 브라우저 기반 fetcher(StealthyFetcher / DynamicFetcher)를 쓰려면
+# 패키지 설치 후 브라우저 바이너리를 한 번 내려받아야 합니다.
+#   scrapling install
+#
+# 참고: static 모드는 위 브라우저 설치 없이도 동작합니다.
+# ============================================================
+
+# 적응형 스크래핑 + StealthyFetcher(안티봇 우회)를 모두 쓰기 위해 fetchers extra 포함.
+# fetchers extra 가 함께 설치하는 것: curl_cffi, playwright, patchright, browserforge 등
+scrapling[fetchers]==0.4.15
