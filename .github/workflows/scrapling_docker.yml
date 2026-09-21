@@ -1,18 +1,19 @@
 name: Scrapling Docker Build
 
-# Dockerfile 이 정말로 브라우저 시스템 라이브러리 문제를 해결하는지
-# GitHub 러너(Docker 포함)에서 실제로 빌드·실행해 검증한다.
+# Dockerfile 이 정말로 브라우저를 띄울 수 있는지 GitHub 러너(Docker 포함)에서
+# 실제로 빌드·실행해 검증한다. 로컬 개발 환경(WSL)에는 컨테이너 런타임이 없어
+# 빌드를 돌릴 수 없으므로 검증은 이 워크플로우가 담당한다.
 #
-# 로컬 개발 환경(WSL)에는 컨테이너 런타임이 없어 빌드를 돌릴 수 없으므로
-# 검증은 이 워크플로우가 담당한다. 검증 포인트는 네 가지다.
+# 검증 포인트는 네 가지다.
 #   1. 이미지가 빌드되는가
 #   2. 로컬 우회책(.browser-libs) 없이 동작하는가
 #   3. adaptive 모드가 실패하는 selector 를 재탐색으로 복구하는가
 #   4. stealthy 모드가 실제로 Cloudflare 를 통과해 200 을 받는가
 #
-# 실행 시간은 측정에 근거해 잡았다 (자세한 수치는 아래 스텝 주석 참고).
+# 실행 시간은 측정에 근거해 잡았다.
 #   디스크 정리 스텝 제거 : 46초 -> 0초 (러너에 105G 여유가 있었다)
-#   빌드 캐시(type=gha)   : 도입했다가 되돌림. 캐시 적중 58초 vs 순수 빌드 34초
+#   슬림 베이스 전환      : 이미지 2.74GB -> 1.49GB
+#   빌드 캐시            : 슬림 이미지에서 적중 32초 / 기본 52초로 이득
 
 on:
   push:
@@ -43,19 +44,30 @@ jobs:
       - name: 러너 디스크 확인
         # 실측 결과 ubuntu-24.04 러너는 145G 중 105G 가 비어 있었다.
         # 예전에 여기서 디스크를 비웠는데, 그 스텝 하나가 46초를 잡아먹었을 뿐
-        # 이미지(2.74GB)에는 전혀 필요 없었으므로 진단 출력만 남긴다.
+        # 이미지(1.49GB)에는 전혀 필요 없었으므로 진단 출력만 남긴다.
         run: df -h /
 
-      - name: 이미지 빌드
-        # 기본 docker build 를 쓴다. buildx + type=gha 캐시도 시험해 봤으나
-        # 베이스 이미지 레이어가 buildkit 컨테이너 안에만 존재해서,
-        # load:true 로 로컬 데몬에 옮기는 데만 약 55초가 걸렸다.
-        # MCR 에서 직접 받는 시간(약 23초)보다 비싸므로 캐시가 역효과였다.
-        #   - 캐시 미적중: 146초
-        #   - 캐시 적중  :  58초
-        #   - 기본 빌드  :  34초 (베이스 pull 23초 + pip 설치 6초)
-        working-directory: scrapling-project
-        run: docker build -t scrapling-demo .
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 이미지 빌드 (레이어 캐시 사용)
+        # 측정값 (구성마다 다른 러너에서 측정):
+        #   - 기본 빌드   : 52초
+        #   - 캐시 적중   : 29초 + buildx 준비 3초 = 32초
+        #   - 캐시 미적중 : 135초  (Dockerfile/requirements.txt 변경 시에만)
+        # Dockerfile 마지막이 COPY main.py 라서 코드·문서만 바뀌면 무거운 레이어
+        # (pip 설치, chromium 설치)는 그대로 캐시된다.
+        #
+        # 참고: 이전 2.74GB Playwright 이미지에서는 반대였다. 베이스 레이어를
+        # load:true 로 로컬 데몬에 옮기는 비용이 55초라 캐시 이득을 넘어섰다.
+        # 이미지가 작아지면서 캐시가 이득으로 뒤집혔다.
+        uses: docker/build-push-action@v6
+        with:
+          context: scrapling-project
+          tags: scrapling-demo:latest
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: 이미지 크기 확인
         run: docker images scrapling-demo --format '{{.Repository}}:{{.Tag}}  {{.Size}}'

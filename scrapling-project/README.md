@@ -64,9 +64,9 @@ bash scripts/setup_browser_libs.sh
 
 ### Docker 로 실행 (브라우저 의존성 문제 회피)
 
-브라우저 시스템 라이브러리를 직접 다루는 게 번거롭다면 공식 Playwright 이미지가 가장 깔끔합니다.
-`mcr.microsoft.com/playwright/python:v1.63.0-noble` 에는 필요한 시스템 라이브러리와 브라우저
-바이너리가 모두 들어 있습니다.
+`Dockerfile` 은 `python:3.14-slim-bookworm` 을 베이스로 씁니다. 브라우저 바이너리와
+시스템 라이브러리는 `patchright install --with-deps chromium` 한 줄이 처리하므로
+베이스 이미지가 브라우저 의존성을 제공하지 않아도 됩니다.
 
 ```bash
 docker build -t scrapling-demo .
@@ -76,12 +76,13 @@ docker run --rm scrapling-demo python main.py -m static    # 오프라인 모드
 docker run --rm scrapling-demo python main.py -m all       # 전체 실행
 ```
 
-이 이미지에는 `scripts/setup_browser_libs.sh` 우회책이 **들어가지 않습니다.** 시스템 라이브러리가
-이미 제공되므로 `main.py` 의 `.browser-libs` 자동 감지도 아무것도 찾지 못하고 그냥 넘어갑니다.
+이미지 크기는 약 **1.49GB** 입니다. 처음에는 공식 Playwright 이미지
+(`mcr.microsoft.com/playwright/python:v1.63.0-noble`)를 썼는데, firefox 와 webkit 및 그들의
+의존성까지 포함해 2.74GB 였습니다. 이 프로젝트는 chromium 하나만 필요하므로 slim 베이스에
+필요한 것만 설치하도록 바꿔 **45% 줄였습니다.**
 
-이미지 태그와 브라우저 버전이 맞는 이유는, **playwright 와 patchright 가 같은 chromium
-revision(1243)을 사용**하기 때문입니다. v1.63.0 이미지의 번들 브라우저를 재다운로드 없이 그대로
-재사용합니다.
+이 이미지에는 `scripts/setup_browser_libs.sh` 우회책이 **들어가지 않습니다.**
+`main.py` 의 `.browser-libs` 자동 감지도 아무것도 찾지 못하고 그냥 넘어갑니다.
 
 ## 실행 방법
 
@@ -256,7 +257,7 @@ if page.retrieve("quotes") is None:
 | `adaptive` 모드 | ✅ 실행 확인 (10개 저장 → selector 파손 → 10개 복구) |
 | `stealthy` 모드 (브라우저) | ✅ 실행 확인 — 실제 Cloudflare Turnstile 챌린지 우회 성공 (HTTP 200) |
 | `scripts/setup_browser_libs.sh` | ✅ 새로 실행하여 확인 (root 권한 불필요) |
-| `Dockerfile` | ✅ **Docker 실기 검증 완료** — 2.74GB 이미지 빌드 후 컨테이너 안에서 stealthy 모드가 Cloudflare 우회 성공 |
+| `Dockerfile` (slim, 1.49GB) | ✅ **Docker 실기 검증 완료** — 컨테이너 안에서 adaptive 재탐색과 stealthy Cloudflare 우회 모두 성공 |
 
 ### Dockerfile 검증 방식
 
@@ -266,14 +267,25 @@ GitHub Actions 러너에서 실제로 빌드·실행해 검증합니다
 
 워크플로우가 확인하는 것:
 
-1. 이미지가 빌드되는가 — `scrapling-demo:latest 2.74GB`
+1. 이미지가 빌드되는가 — `scrapling-demo:latest 1.49GB`
 2. 로컬 우회책이 이미지에 없는가 — `OK: /app/.browser-libs 없음`
-3. `static` 모드가 컨테이너 안에서 도는가
+3. adaptive 모드가 깨진 selector 를 재탐색으로 복구하는가 — 10개 저장 → 0개 매칭 → 10개 복구
 4. stealthy 모드가 실제로 Cloudflare 를 통과하는가 — `status=200`
-5. `RUN python -m patchright install chromium` 이 no-op 인가 — 0.5초 (이미지 번들 브라우저 재사용)
 
-이미지 태그와 브라우저 버전이 맞는 근거는 playwright 1.63.0 과 patchright 1.63.0 이
-**같은 chromium revision(1243)을 기대**한다는 점이며, 위 5번이 이를 실측으로 확인합니다.
+### 빌드 캐시를 쓴 이유
+
+구성마다 **다른 러너**에서 재어 왜곡을 없앤 측정값입니다.
+
+| 구성 | 빌드 스텝 소요 |
+| --- | --- |
+| 기본 빌드 | 52초 |
+| 캐시 적중 | 29초 (+ buildx 준비 3초) |
+| 캐시 미적중 | 135초 |
+
+이미지가 작아지면서 `load: true` 로 로컬 데몬에 옮기는 비용이 줄어 캐시가 **이득으로 뒤집혔습니다.**
+2.74GB 시절에는 그 비용이 55초라 캐시가 오히려 손해여서 도입했다가 되돌렸습니다.
+`Dockerfile` 의 마지막이 `COPY main.py` 라서 코드·문서만 바꾸면 무거운 레이어(pip 설치,
+chromium 설치)는 그대로 캐시되므로 대부분의 실행이 캐시 적중입니다.
 
 ## 참고 링크
 
