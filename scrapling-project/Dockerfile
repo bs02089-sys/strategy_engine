@@ -1,24 +1,26 @@
 # ============================================================
-# Playwright 공식 이미지 기반 실행 환경
+# 슬림 베이스 이미지 (python:3.14-slim-bookworm)
 # ============================================================
-# 목적: 로컬(WSL 등)에서 libnspr4 / libnss3 / libasound 부재로 실패하던
-#       stealthy 모드가, 브라우저 시스템 라이브러리가 갖춰진 환경에서는
-#       추가 작업 없이 동작함을 보인다.
+# 이전에는 mcr.microsoft.com/playwright/python 이미지를 썼다. 브라우저 시스템
+# 라이브러리가 다 들어 있어 편했지만 2.74GB 로 컸다. 그 이미지는 firefox 와
+# webkit, 그리고 그들의 의존성까지 포함하는데 이 프로젝트는 chromium 하나만 쓴다.
 #
-# 그래서 이 이미지에는 scripts/setup_browser_libs.sh 우회책을 넣지 않는다.
-# (main.py 의 .browser-libs 자동 감지도 아무것도 찾지 못하고 그냥 넘어간다)
+# 그래서 slim 베이스에 필요한 것만 설치한다. 브라우저 바이너리와 시스템
+# 라이브러리는 `patchright install --with-deps chromium` 한 줄이 처리한다.
+#
+# 참고: 이 이미지에는 이 프로젝트의 로컬 우회책(.browser-libs)이 들어가지 않는다.
 #
 # 빌드:
 #   docker build -t scrapling-demo .
 # 실행:
-#   docker run --rm scrapling-demo                          # stealthy (기본)
-#   docker run --rm scrapling-demo python main.py -m static  # 오프라인 모드
+#   docker run --rm scrapling-demo                            # stealthy (기본)
+#   docker run --rm scrapling-demo python main.py -m static    # 오프라인 모드
 #   docker run --rm scrapling-demo python main.py -m all
 # ============================================================
 
-# playwright 와 patchright 는 같은 chromium revision(1243)을 사용한다.
-# v1.63.0 이미지에는 해당 브라우저와 모든 시스템 라이브러리가 이미 포함되어 있다.
-FROM mcr.microsoft.com/playwright/python:v1.63.0-noble
+# bookworm(Debian 12)을 쓰는 이유: Playwright/patchright 의 --with-deps 가
+# 지원하는 배포판 목록에 들어 있다. (trixie 등 최신 배포판은 목록에 없을 수 있다)
+FROM python:3.14-slim-bookworm
 
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
@@ -29,10 +31,11 @@ WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 브라우저 바이너리 보장.
-# 공식 이미지의 /ms-playwright 를 그대로 재사용하므로 보통은 재다운로드 없이 통과한다.
-# (requirements 로 이미지보다 새로운 playwright 가 설치된 경우에만 내려받는다)
-RUN python -m patchright install chromium
+# chromium 바이너리 + 실행에 필요한 시스템 라이브러리를 함께 설치한다.
+# --with-deps 가 apt 설치까지 처리하므로 slim 베이스에서도 동작한다.
+# 같은 레이어에서 apt 캐시를 지워 이미지 크기를 줄인다.
+RUN python -m patchright install --with-deps --no-progress chromium \
+ && rm -rf /var/lib/apt/lists/*
 
 COPY main.py ./
 

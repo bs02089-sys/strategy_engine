@@ -1,0 +1,86 @@
+name: Scrapling Cache Experiment
+
+# 일회성 측정용 워크플로우 (측정이 끝나면 삭제한다).
+#
+# 슬림 이미지에서 빌드 캐시(buildx + type=gha)가 실제로 이득인지 재본다.
+# 공정한 비교를 위해 구성마다 **다른 러너**에서 돌린다. 같은 러너에서 연속으로
+# 빌드하면 로컬 도커 레이어 캐시가 남아 측정이 왜곡되기 때문이다.
+#
+#   plain          : 기본 docker build          (빈 러너)
+#   cache-populate : buildx + 캐시 채우기        (빈 러너)
+#   cache-hit      : buildx + 캐시 적중          (빈 러너, populate 이후)
+#
+# 소요 시간은 각 스텝 duration 으로 비교한다.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scrapling-cache-experiment
+  cancel-in-progress: false
+
+jobs:
+  plain:
+    name: plain (기본 docker build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 기본 빌드
+        working-directory: scrapling-project
+        run: docker build -t scrapling-plain .
+
+      - name: 결과 기록
+        run: |
+          size=$(docker images scrapling-plain --format '{{.Size}}')
+          echo "plain 이미지 크기: $size"
+          echo "- plain 이미지 크기: \`$size\`" >> "$GITHUB_STEP_SUMMARY"
+
+  cache-populate:
+    name: cache-populate (캐시 채우기)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 캐시를 채우며 빌드
+        uses: docker/build-push-action@v6
+        with:
+          context: scrapling-project
+          tags: scrapling-cached:populate
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  cache-hit:
+    name: cache-hit (캐시 적중)
+    needs: cache-populate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 캐시 적중으로 빌드
+        uses: docker/build-push-action@v6
+        with:
+          context: scrapling-project
+          tags: scrapling-cached:hit
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: 결과 기록
+        run: |
+          size=$(docker images scrapling-cached:hit --format '{{.Size}}')
+          echo "cache-hit 이미지 크기: $size"
+          echo "- cache-hit 이미지 크기: \`$size\`" >> "$GITHUB_STEP_SUMMARY"
