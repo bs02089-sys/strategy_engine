@@ -1,0 +1,20 @@
+# 빌드 컨텍스트에서 제외한다.
+# .venv 를 빼지 않으면 수백 MB 가 그대로 컨텍스트에 실려 빌드가 느려진다.
+.venv/
+venv/
+env/
+
+# 로컬 전용 우회책 — 이미지에는 불필요하다 (이미지가 시스템 라이브러리를 제공)
+.browser-libs/
+
+# 실행 산출물 / 캐시
+output/
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# 개발 도구
+.git/
+.gitignore
+.vscode/
+.idea/

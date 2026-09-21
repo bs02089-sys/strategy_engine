@@ -62,6 +62,27 @@ bash scripts/setup_browser_libs.sh
 `main.py` 는 `.browser-libs/` 가 있으면 실행 시 자동으로 `LD_LIBRARY_PATH` 에 추가합니다.
 폴더가 없으면 아무것도 하지 않으므로, 라이브러리가 이미 갖춰진 환경에서는 동작에 영향이 없습니다.
 
+### Docker 로 실행 (브라우저 의존성 문제 회피)
+
+브라우저 시스템 라이브러리를 직접 다루는 게 번거롭다면 공식 Playwright 이미지가 가장 깔끔합니다.
+`mcr.microsoft.com/playwright/python:v1.63.0-noble` 에는 필요한 시스템 라이브러리와 브라우저
+바이너리가 모두 들어 있습니다.
+
+```bash
+docker build -t scrapling-demo .
+
+docker run --rm scrapling-demo                             # stealthy (기본)
+docker run --rm scrapling-demo python main.py -m static    # 오프라인 모드
+docker run --rm scrapling-demo python main.py -m all       # 전체 실행
+```
+
+이 이미지에는 `scripts/setup_browser_libs.sh` 우회책이 **들어가지 않습니다.** 시스템 라이브러리가
+이미 제공되므로 `main.py` 의 `.browser-libs` 자동 감지도 아무것도 찾지 못하고 그냥 넘어갑니다.
+
+이미지 태그와 브라우저 버전이 맞는 이유는, **playwright 와 patchright 가 같은 chromium
+revision(1243)을 사용**하기 때문입니다. v1.63.0 이미지의 번들 브라우저를 재다운로드 없이 그대로
+재사용합니다.
+
 ## 실행 방법
 
 ```bash
@@ -80,6 +101,8 @@ python main.py -m adaptive -u <URL>  # 대상 URL 지정
 .
 ├── main.py                      # 예시 스크립트 (adaptive / stealthy / static 모드)
 ├── requirements.txt             # 의존성 (scrapling[fetchers] 포함)
+├── Dockerfile                   # Playwright 공식 이미지 기반 실행 환경
+├── .dockerignore
 ├── README.md
 ├── scripts/
 │   └── setup_browser_libs.sh    # [root 불필요] 브라우저용 시스템 라이브러리 로컬 설치
@@ -224,6 +247,24 @@ if page.retrieve("quotes") is None:
 ```
 
 도메인이 바뀌었다면 `identifier` 와 `adaptive_domain` 을 함께 맞춰 주세요.
+
+## 검증 상태
+
+| 항목 | 상태 |
+| --- | --- |
+| `static` 모드 | ✅ 실행 확인 |
+| `adaptive` 모드 | ✅ 실행 확인 (10개 저장 → selector 파손 → 10개 복구) |
+| `stealthy` 모드 (브라우저) | ✅ 실행 확인 — 실제 Cloudflare Turnstile 챌린지 우회 성공 (HTTP 200) |
+| `scripts/setup_browser_libs.sh` | ✅ 새로 실행하여 확인 (root 권한 불필요) |
+| `Dockerfile` | ⚠️ 작성 및 사실관계 검증 완료 — 단, 개발 환경에 컨테이너 런타임이 없어 `docker build`/`docker run` 자체는 미실행 |
+
+`Dockerfile` 관련하여 정적으로 확인한 사항:
+
+- `mcr.microsoft.com/playwright/python:v1.63.0-noble` 태그가 실제로 존재함 (MCR 태그 목록 조회)
+- playwright 1.63.0 과 patchright 1.63.0 이 기대하는 chromium revision 이 동일함(1243)
+- `python -m patchright install chromium` 이 브라우저가 이미 있을 때 no-op 으로 끝남(0.4초)
+- `.browser-libs/` 가 없는 상태(= 이미지 내부 조건)에서도 시스템 라이브러리만 있으면
+  stealthy 모드가 추가 작업 없이 동작함
 
 ## 참고 링크
 
