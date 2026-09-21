@@ -162,7 +162,9 @@ jobs:
           if stealthy.get("blocked"):
               failures.append(f"차단 감지: {stealthy.get('block_reason')} — 우회 실패")
           elif not stealthy.get("ok") or stealthy.get("status") != 200:
-              failures.append("stealthy 모드가 200 을 받지 못했습니다")
+              # 실패 원인은 main.py 가 분류해 failure_kind/error 에 남긴다 (참고: README '문제 해결')
+              kind = stealthy.get("failure_kind") or f"HTTP {stealthy.get('status')}"
+              failures.append(f"stealthy 모드 실패({kind}): {stealthy.get('error') or ''}")
 
           for message in failures:
               print(f"::error::{message}")

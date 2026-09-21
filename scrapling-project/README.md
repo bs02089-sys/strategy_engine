@@ -184,8 +184,8 @@ INFO: Fetched (200) <GET https://nopecha.com/demo>
 [stealthy] status=200 title='NopeCHA - CAPTCHA Demo' 링크 19개
 ```
 
-브라우저가 준비되지 않았거나 라이브러리가 없으면 스크립트는 예외를 잡아 원인과 해결 방법을
-안내하고, 나머지 모드는 계속 진행합니다.
+브라우저가 준비되지 않았거나 라이브러리가 없으면 스크립트는 예외를 잡아 **원인을 분류해** 안내하고,
+나머지 모드는 계속 진행합니다 (판정 기준과 실측 메시지는 아래 '문제 해결' 참고).
 
 #### 차단 감지 — 200 이라고 우회 성공이 아니다
 
@@ -261,6 +261,22 @@ Scrapling 은 요소의 **태그명·텍스트·속성·형제 요소·경로**,
 
 ## 문제 해결
 
+`stealthy` 모드가 실패하면 스크립트가 예외 문자열을 보고 원인을 분류해 안내합니다.
+결과 JSON 에는 `ok=false` · `failure_kind` · `error` 가 남습니다. 분류 기준은 아래 실측값입니다.
+
+| 예외 메시지의 식별자 | `failure_kind` | 안내 |
+| --- | --- | --- |
+| `Executable doesn't exist at <경로>` | 브라우저 바이너리 없음 | `scrapling install` 또는 `python -m patchright install chromium` |
+| `error while loading shared libraries: libnspr4.so` | 시스템 라이브러리 없음 | `sudo playwright install-deps chromium` 또는 `bash scripts/setup_browser_libs.sh` |
+| `net::ERR_*` (예: `net::ERR_NAME_NOT_RESOLVED`) | 네트워크/대상 문제 | **브라우저 설치와 무관** — 대상 URL 과 네트워크 확인 |
+| `Timeout <n>ms exceeded` | 응답 지연/차단 | `timeout` 을 60초 이상으로 |
+
+⚠️ **시스템 라이브러리 부재는 Playwright 예외의 첫 줄에 원인이 안 드러납니다.** 2026-09-21 실측에서
+첫 줄은 `BrowserType.launch_persistent_context: Target page, context or browser has been closed` 였고,
+`libnspr4.so` 오류는 브라우저 로그 줄에만 있었습니다. 그래서 첫 줄이 아니라 **식별자가 들어 있는 줄**을
+찾아 보여주며(`(pid=..)[err]` 접두사는 떼어냅니다), 어느 식별자에도 안 걸리면 원인을 단정하지 않고
+`원인 미분류` 로 표시합니다.
+
 **`Executable doesn't exist at .../chrome`**
 브라우저 바이너리가 없습니다. `scrapling install` 또는 `python -m patchright install chromium` 을 실행하세요.
 
@@ -278,6 +294,11 @@ Docker 라면 `mcr.microsoft.com/playwright` 이미지를 쓰면 이 문제를 �
 
 **Cloudflare 챌린지가 계속 반복되는 경우**
 `timeout` 을 60초 이상으로 두세요. 챌린지 종류에 따라 한 번 더 시도하는 로그가 정상적으로 출력됩니다.
+`Timeout <n>ms exceeded` 가 이 경우이고, 챌린지 페이지가 200 으로 돌아오면 `차단 감지` 로 판정됩니다.
+
+**`net::ERR_...` (네트워크 오류)**
+브라우저는 정상적으로 떴고 대상 주소에 닿지 못한 경우입니다. 브라우저 설치 문제가 아니므로
+`scrapling install` 을 다시 돌릴 필요가 없습니다 — URL 과 네트워크 연결을 확인하세요.
 
 **적응형 재탐색이 아무것도 찾지 못하는 경우**
 먼저 `auto_save=True` 로 저장이 되었는지 확인하세요.

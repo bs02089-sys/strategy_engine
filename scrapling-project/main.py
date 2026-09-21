@@ -209,6 +209,68 @@ def detect_block(status: int, html: str) -> str | None:
     return None
 
 
+# 실패 원인 분류. **첫 줄만 보여주면 안 된다** — 2026-09-21 로컬 재현 결과 시스템
+# 라이브러리 부재는 첫 줄이 "Target page, context or browser has been closed" 라서
+# 원인이 드러나지 않고, 진짜 원인은 브라우저 로그 줄에만 들어 있다. 그래서 식별자가
+# 들어 있는 줄을 찾아 그 줄을 보여준다. 표기한 문자열은 모두 그 재현에서 확인한 것이다.
+#   브라우저 바이너리 없음 : "Executable doesn't exist at <경로>"
+#   네트워크/대상 문제    : "net::ERR_*" (예: ERR_NAME_NOT_RESOLVED) — 브라우저와 무관하다
+#   응답 지연/차단        : "Timeout <n>ms exceeded"
+#   시스템 라이브러리 없음 : "[pid=..][err] <chrome>: error while loading shared libraries: libnspr4.so ..."
+FAILURE_SIGNATURES: tuple[tuple[tuple[str, ...], str, tuple[str, ...]], ...] = (
+    (
+        ("Executable doesn't exist",),
+        "브라우저 바이너리 없음",
+        (
+            "브라우저 바이너리가 없습니다.",
+            "  root 권한이 있으면 : scrapling install",
+            "  root 권한이 없으면: python -m patchright install chromium",
+        ),
+    ),
+    (
+        ("shared libraries", "libnspr4"),
+        "시스템 라이브러리 없음",
+        (
+            "브라우저 실행에 필요한 시스템 라이브러리가 없습니다.",
+            "  root 권한이 있다면 : sudo playwright install-deps chromium",
+            "  root 권한이 없다면: bash scripts/setup_browser_libs.sh",
+        ),
+    ),
+    (
+        ("net::ERR_",),
+        "네트워크/대상 문제",
+        (
+            "브라우저는 정상 동작했고 네트워크 또는 대상 주소 문제입니다 (브라우저 설치와 무관).",
+            "  대상 URL 과 네트워크 연결을 확인하세요.",
+        ),
+    ),
+    (
+        ("ms exceeded",),
+        "응답 지연/차단",
+        (
+            "응답이 timeout 안에 오지 않았습니다. 차단 챌린지가 풀리지 않았을 수 있습니다.",
+            "  timeout 을 60초 이상으로 두고 다시 시도해 보세요 (Cloudflare 권장).",
+        ),
+    ),
+)
+
+
+def classify_stealthy_failure(detail: str) -> tuple[str, str, list[str]]:
+    """실패한 fetch 의 예외 문자열을 (보여줄 이유, 원인 종류, 안내문) 으로 정리한다."""
+    lines = [line.strip() for line in detail.splitlines() if line.strip()]
+    for markers, kind, hints in FAILURE_SIGNATURES:
+        reason = next((line for line in lines if any(m in line for m in markers)), None)
+        if reason is None:
+            continue
+        # 브라우저 로그 접두사([pid=..][err])를 떼어 사람이 읽는 부분만 남긴다.
+        return reason.split("][err] ", 1)[-1].strip(), kind, list(hints)
+    return (
+        (lines[0] if lines else detail.strip()),
+        "원인 미분류",
+        ["원인을 분류하지 못했습니다. 로그 전체를 확인하세요."],
+    )
+
+
 def run_stealthy(url: str = CLOUDFLARE_DEMO_URL) -> dict[str, Any]:
     """StealthyFetcher 로 Cloudflare 챌린지를 우회해 페이지를 가져온다."""
     from scrapling.fetchers import StealthyFetcher  # 브라우저 스택이 필요하므로 지연 임포트
@@ -228,19 +290,12 @@ def run_stealthy(url: str = CLOUDFLARE_DEMO_URL) -> dict[str, Any]:
             hide_canvas=True,       # 캔버스 지문 채집 방지
             timeout=90_000,         # Cloudflare 해결에는 60초 이상 권장 (밀리초 단위)
         )
-    except Exception as exc:  # 브라우저 미설치 / 시스템 라이브러리 부족 등
-        detail = str(exc)
-        reason = detail.splitlines()[0]
-        print(f"[stealthy] 실패: {reason}")
-
-        # 브라우저 로그가 수십 줄이라 원인 파악이 어렵다. 흔한 실패는 짚어 준다.
-        if "shared libraries" in detail or "libnspr4" in detail:
-            print("[stealthy] 브라우저 실행에 필요한 시스템 라이브러리가 없습니다.")
-            print("[stealthy]   root 권한이 있다면 : sudo playwright install-deps chromium")
-            print("[stealthy]   root 권한이 없다면: bash scripts/setup_browser_libs.sh")
-        else:
-            print("[stealthy] 브라우저가 없다면 먼저 `scrapling install` 을 실행하세요.")
-        return {"url": url, "ok": False, "error": reason}
+    except Exception as exc:  # 브라우저 미설치 / 라이브러리 부족 / 네트워크 오류 등
+        reason, kind, hints = classify_stealthy_failure(str(exc))
+        print(f"[stealthy] 실패({kind}): {reason}")
+        for hint in hints:
+            print(f"[stealthy] {hint}")
+        return {"url": url, "ok": False, "failure_kind": kind, "error": reason}
 
     title = page.css("title::text").get()
     links = page.css("#padded_content a::attr(href)").getall()
