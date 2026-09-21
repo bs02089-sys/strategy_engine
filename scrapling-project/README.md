@@ -256,15 +256,24 @@ if page.retrieve("quotes") is None:
 | `adaptive` 모드 | ✅ 실행 확인 (10개 저장 → selector 파손 → 10개 복구) |
 | `stealthy` 모드 (브라우저) | ✅ 실행 확인 — 실제 Cloudflare Turnstile 챌린지 우회 성공 (HTTP 200) |
 | `scripts/setup_browser_libs.sh` | ✅ 새로 실행하여 확인 (root 권한 불필요) |
-| `Dockerfile` | ⚠️ 작성 및 사실관계 검증 완료 — 단, 개발 환경에 컨테이너 런타임이 없어 `docker build`/`docker run` 자체는 미실행 |
+| `Dockerfile` | ✅ **Docker 실기 검증 완료** — 2.74GB 이미지 빌드 후 컨테이너 안에서 stealthy 모드가 Cloudflare 우회 성공 |
 
-`Dockerfile` 관련하여 정적으로 확인한 사항:
+### Dockerfile 검증 방식
 
-- `mcr.microsoft.com/playwright/python:v1.63.0-noble` 태그가 실제로 존재함 (MCR 태그 목록 조회)
-- playwright 1.63.0 과 patchright 1.63.0 이 기대하는 chromium revision 이 동일함(1243)
-- `python -m patchright install chromium` 이 브라우저가 이미 있을 때 no-op 으로 끝남(0.4초)
-- `.browser-libs/` 가 없는 상태(= 이미지 내부 조건)에서도 시스템 라이브러리만 있으면
-  stealthy 모드가 추가 작업 없이 동작함
+개발 환경에 컨테이너 런타임이 없어 로컬에서는 빌드할 수 없으므로,
+GitHub Actions 러너에서 실제로 빌드·실행해 검증합니다
+(`.github/workflows/scrapling_docker.yml`, `scrapling-project/**` 변경 시 자동 실행).
+
+워크플로우가 확인하는 것:
+
+1. 이미지가 빌드되는가 — `scrapling-demo:latest 2.74GB`
+2. 로컬 우회책이 이미지에 없는가 — `OK: /app/.browser-libs 없음`
+3. `static` 모드가 컨테이너 안에서 도는가
+4. stealthy 모드가 실제로 Cloudflare 를 통과하는가 — `status=200`
+5. `RUN python -m patchright install chromium` 이 no-op 인가 — 0.5초 (이미지 번들 브라우저 재사용)
+
+이미지 태그와 브라우저 버전이 맞는 근거는 playwright 1.63.0 과 patchright 1.63.0 이
+**같은 chromium revision(1243)을 기대**한다는 점이며, 위 5번이 이를 실측으로 확인합니다.
 
 ## 참고 링크
 
