@@ -106,7 +106,8 @@ python main.py -m adaptive -u <URL>  # 대상 URL 지정
 ├── .dockerignore
 ├── README.md
 ├── scripts/
-│   └── setup_browser_libs.sh    # [root 불필요] 브라우저용 시스템 라이브러리 로컬 설치
+│   ├── setup_browser_libs.sh    # [root 불필요] 브라우저용 시스템 라이브러리 로컬 설치
+│   └── check_block_detection.py # 차단 감지 로직 fixture 검증 (차단 4 · 정상 2)
 ├── .browser-libs/               # 위 스크립트가 내려받는 라이브러리 (git 추적 제외)
 └── output/                      # 실행 산출물 (git 추적 제외)
     ├── results.json
@@ -186,6 +187,45 @@ INFO: Fetched (200) <GET https://nopecha.com/demo>
 브라우저가 준비되지 않았거나 라이브러리가 없으면 스크립트는 예외를 잡아 원인과 해결 방법을
 안내하고, 나머지 모드는 계속 진행합니다.
 
+#### 차단 감지 — 200 이라고 우회 성공이 아니다
+
+Scrapling 은 Cloudflare 해결에 **실패해도 예외를 던지지 않습니다.** 로그만
+`Failed to solve the Cloudflare challenge ... returning the page as is` 로 남기고
+**챌린지 페이지를 그대로 돌려줍니다.** 그래서 상태코드만 보면 실패를 성공으로 읽게 됩니다.
+`main.py` 는 상태코드와 본문을 함께 보고 판정합니다 (`detect_block`).
+
+| 신호 | 판정 |
+| --- | --- |
+| `401/403/407/429/444/500/502/503/504` | `HTTP <코드>` |
+| 본문에 `cType: '` — Scrapling 내부 검출기와 같은 신호 | 챌린지 페이지 |
+| 본문에 `challenges.cloudflare.com/turnstile` | 임베드 위젯 |
+| 본문/제목에 `Just a moment` | 인터스티셜 |
+
+차단으로 판정되면 결과 JSON 에 `ok=false` · `blocked=true` · `block_reason` 이 남습니다.
+
+⚠️ **`__cf_chl` 을 마커로 쓰면 안 됩니다.** 2026-09-21 실측에서 **성공한 nopecha 페이지
+(200, 실제 콘텐츠)** 본문에도 그 문자열이 들어 있었습니다(스크립트 URL).
+`scripts/check_block_detection.py` 가 이 판단을 fixture 로 고정합니다 — 차단 4건과 함께
+**정상 페이지 2건(오탐 함정 포함)** 을 검사해 오탐도 막습니다.
+
+```bash
+python scripts/check_block_detection.py
+```
+
+```
+[fixture] 인터스티셜 200                                        status=200 -> 차단 (Cloudflare 챌린지 페이지 (본문에 "cType: '"))
+[fixture] 임베드 Turnstile 200                                status=200 -> 차단 (Cloudflare 챌린지 페이지 (본문에 'challenges.cloudflare.com/turnstile'))
+[fixture] HTTP 403                                         status=403 -> 차단 (HTTP 403)
+[fixture] HTTP 429                                         status=429 -> 차단 (HTTP 429)
+[fixture] 정상 페이지 200                                       status=200 -> 정상
+[fixture] 오탐 함정(__cf_chl·turnstile 포함 성공 페이지)              status=200 -> 정상
+PASS: 차단 감지 fixture 6건 (차단 4 · 정상 2)
+```
+
+참고: **인터스티셜은 보통 403 이라 상태코드로도 잡히지만, 200 으로 오는 챌린지 페이지는
+상태코드로 구분되지 않습니다.** 또 임베드 Turnstile 데모는 해결 여부가 같은 200 페이지
+안에서 결정되어 본문만으로는 구분되지 않으므로, 상태코드 검사도 함께 유지합니다.
+
 ### 3. `static` — 오프라인 확인
 
 네트워크나 브라우저 없이 내장 HTML 로 파서와 적응형 기능을 확인합니다.
@@ -255,8 +295,9 @@ if page.retrieve("quotes") is None:
 | --- | --- |
 | `static` 모드 | ✅ 실행 확인 (로컬 + Docker CI) |
 | `adaptive` 모드 | ✅ 실행 확인 (10개 저장 → selector 파손 → 10개 복구) |
-| `stealthy` 모드 (브라우저) | ✅ 실행 확인 — 실제 Cloudflare Turnstile 챌린지 우회 성공 (HTTP 200) |
+| `stealthy` 모드 (브라우저) | ✅ 실행 확인 — 실제 Cloudflare Turnstile 챌린지 우회 성공 (HTTP 200, `blocked=false`) |
 | `scripts/setup_browser_libs.sh` | ✅ 새로 실행하여 확인 (root 권한 불필요) |
+| `scripts/check_block_detection.py` | ✅ fixture 6건 (차단 4 · 정상 2) — 200 챌린지 페이지를 성공으로 오인하지 않음 |
 | `Dockerfile` (slim, 1.49GB) | ✅ **Docker 실기 검증 완료** — 컨테이너 안에서 static 파서·adaptive 재탐색·stealthy Cloudflare 우회 모두 성공 |
 
 ### Dockerfile 검증 방식
@@ -269,13 +310,15 @@ GitHub Actions 러너에서 실제로 빌드·실행해 검증합니다
 
 1. 이미지가 빌드되는가 — `scrapling-demo:latest 1.49GB`
 2. 로컬 우회책이 이미지에 없는가 — `OK: /app/.browser-libs 없음`
-3. static 모드가 그대로 동작하는가 — 상품 3개 · xpath `['p1','p2','p3']` · `find_by_text` 일치 · 재탐색 1개 복구
-4. adaptive 모드가 깨진 selector 를 재탐색으로 복구하는가 — 10개 저장 → 0개 매칭 → 10개 복구
-5. stealthy 모드가 실제로 Cloudflare 를 통과하는가 — `status=200`
+3. 차단 감지가 200 챌린지 페이지를 성공으로 오인하지 않는가 — fixture 6건(차단 4 · 정상 2)
+4. static 모드가 그대로 동작하는가 — 상품 3개 · xpath `['p1','p2','p3']` · `find_by_text` 일치 · 재탐색 1개 복구
+5. adaptive 모드가 깨진 selector 를 재탐색으로 복구하는가 — 10개 저장 → 0개 매칭 → 10개 복구
+6. stealthy 모드가 실제로 Cloudflare 를 통과하는가 — `status=200` (`blocked` 필드도 함께 검사)
 
 종료코드는 신뢰하지 않습니다. `main.py` 는 모드가 실패해도 exit 0 으로 끝나고
 `ok=false` / 0건을 남기므로, 워크플로우는 모드별 `results.json` 을 읽어 값을 검사합니다.
-(`static` 은 브라우저 없이 돌아가는 파서 경로라 네트워크 없이도 확인할 수 있습니다.)
+차단으로 판정되면 `::error::차단 감지: <이유> — 우회 실패` 로 원인이 바로 드러납니다.
+(`static` · 차단 감지 fixture 는 네트워크 없이 돌아갑니다.)
 
 ### 빌드 캐시를 쓴 이유
 

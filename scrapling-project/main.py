@@ -176,8 +176,39 @@ def run_adaptive(url: str = QUOTES_URL) -> dict[str, Any]:
 
 
 # --------------------------------------------------------------------------- #
-# 2) StealthyFetcher (안티봇 우회)
+# 2) StealthyFetcher (안티봇 우회) + 차단 감지
 # --------------------------------------------------------------------------- #
+# 200 이라고 우회 성공이 아니다. Scrapling 은 Cloudflare 해결에 실패하면 예외를 던지지 않고
+# "Failed to solve the Cloudflare challenge ... returning the page as is" 로그만 남기고
+# 챌린지 페이지를 그대로 돌려준다. 그래서 상태코드만 보면 실패를 성공으로 오인한다.
+BLOCKED_STATUS_CODES = frozenset({401, 403, 407, 429, 444, 500, 502, 503, 504})
+
+# 챌린지 페이지를 알아보는 본문 마커. Scrapling 내부 검출기(_browsers/_base.py 의
+# _detect_cloudflare)가 쓰는 신호와 같은 것을 쓴다 (그 함수는 private 이라 필요한 만큼만 직접 본다).
+#
+# ⚠️ 2026-09-21 실측: 성공한 nopecha 페이지(200, 실제 콘텐츠)에도 '__cf_chl' 이 들어 있었다
+# (스크립트 URL). 그래서 그 문자열은 마커로 쓰면 정상 응답을 차단으로 오판한다.
+CHALLENGE_MARKERS = (
+    "cType: '",  # Turnstile/Interstitial 챌린지 스크립트
+    "challenges.cloudflare.com/turnstile",  # 본문에 직접 박힌 Turnstile 위젯
+    "Just a moment",  # 인터스티셜 제목
+)
+
+
+def detect_block(status: int, html: str) -> str | None:
+    """차단/챌린지 페이지로 보이면 이유를, 아니면 None 을 돌려준다.
+
+    네트워크·브라우저 없이 확인할 수 있도록 순수 함수로 둔다
+    (fixture 검증은 scripts/check_block_detection.py).
+    """
+    if status in BLOCKED_STATUS_CODES:
+        return f"HTTP {status}"
+    for marker in CHALLENGE_MARKERS:
+        if marker in html:
+            return f"Cloudflare 챌린지 페이지 (본문에 {marker!r})"
+    return None
+
+
 def run_stealthy(url: str = CLOUDFLARE_DEMO_URL) -> dict[str, Any]:
     """StealthyFetcher 로 Cloudflare 챌린지를 우회해 페이지를 가져온다."""
     from scrapling.fetchers import StealthyFetcher  # 브라우저 스택이 필요하므로 지연 임포트
@@ -215,9 +246,22 @@ def run_stealthy(url: str = CLOUDFLARE_DEMO_URL) -> dict[str, Any]:
     links = page.css("#padded_content a::attr(href)").getall()
     print(f"[stealthy] status={page.status} title={title!r} 링크 {len(links)}개")
 
+    blocked = detect_block(page.status, page.html_content)
+    if blocked:
+        print(f"[stealthy] 차단 감지: {blocked} — 우회 실패로 판정")
+        return {
+            "url": url,
+            "ok": False,
+            "blocked": True,
+            "block_reason": blocked,
+            "status": page.status,
+            "title": title,
+        }
+
     return {
         "url": url,
         "ok": True,
+        "blocked": False,
         "status": page.status,
         "title": title,
         "sample_links": links[:10],

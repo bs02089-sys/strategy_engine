@@ -4,12 +4,13 @@ name: Scrapling Docker Build
 # 실제로 빌드·실행해 검증한다. 로컬 개발 환경(WSL)에는 컨테이너 런타임이 없어
 # 빌드를 돌릴 수 없으므로 검증은 이 워크플로우가 담당한다.
 #
-# 검증 포인트는 다섯 가지다.
+# 검증 포인트는 여섯 가지다.
 #   1. 이미지가 빌드되는가
 #   2. 로컬 우회책(.browser-libs) 없이 동작하는가
-#   3. static 모드가 파서와 적응형 기능을 그대로 수행하는가
-#   4. adaptive 모드가 실패하는 selector 를 재탐색으로 복구하는가
-#   5. stealthy 모드가 실제로 Cloudflare 를 통과해 200 을 받는가
+#   3. 차단 감지가 200 챌린지 페이지를 성공으로 오인하지 않는가 (fixture)
+#   4. static 모드가 파서와 적응형 기능을 그대로 수행하는가
+#   5. adaptive 모드가 실패하는 selector 를 재탐색으로 복구하는가
+#   6. stealthy 모드가 실제로 Cloudflare 를 통과해 200 을 받는가
 #
 # 실행 시간은 측정에 근거해 잡았다.
 #   디스크 정리 스텝 제거 : 46초 -> 0초 (러너에 105G 여유가 있었다)
@@ -81,6 +82,15 @@ jobs:
           docker run --rm --entrypoint sh scrapling-demo -c \
             'test ! -e /app/.browser-libs && echo "OK: /app/.browser-libs 없음"'
 
+      - name: 차단 감지 로직 검증 (fixture)
+        # 실제 차단은 상대 서버가 결정하므로 재현할 수 없다. 차단 페이지 fixture 로
+        # detect_block 이 잡아내는지 + 정상 페이지를 오판하지 않는지 확인한다.
+        # (스크립트만 마운트한다 — main.py 는 이미 이미지 안에 있다)
+        working-directory: scrapling-project
+        run: |
+          docker run --rm -v "$PWD/scripts:/app/scripts" scrapling-demo \
+            python scripts/check_block_detection.py
+
       - name: static 모드 실행 (오프라인 파서 + 적응형 재탐색)
         working-directory: scrapling-project
         run: |
@@ -148,7 +158,10 @@ jobs:
           # 3) stealthy: Cloudflare 우회
           stealthy = load("ci-output-stealthy/results.json")["stealthy"]
           print("stealthy:", {k: v for k, v in stealthy.items() if k != "sample_links"})
-          if not stealthy.get("ok") or stealthy.get("status") != 200:
+          # 차단은 ok=False 로 내려오지만, 메시지를 구분해 두면 실패 원인이 바로 보인다.
+          if stealthy.get("blocked"):
+              failures.append(f"차단 감지: {stealthy.get('block_reason')} — 우회 실패")
+          elif not stealthy.get("ok") or stealthy.get("status") != 200:
               failures.append("stealthy 모드가 200 을 받지 못했습니다")
 
           for message in failures:
@@ -156,7 +169,7 @@ jobs:
           if failures:
               sys.exit(1)
 
-          print("검증 통과: static 파서 + adaptive 재탐색 + stealthy Cloudflare 우회")
+          print("검증 통과: 차단 감지 fixture + static 파서 + adaptive 재탐색 + stealthy Cloudflare 우회")
           PY
 
       - name: 실패 시 로그 업로드
