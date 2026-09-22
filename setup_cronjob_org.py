@@ -36,6 +36,9 @@ cron-job.org 콘솔에서 수동 삭제 필요.
 
 스윙 알리미 잡 (기본값):
   python setup_cronjob_org.py               # swing-monitor 디스패치 잡 생성
+
+생성되는 잡은 실패/자동 비활성화 알림(onFailure~1회 / onDisable)이 기본으로 켜진다 —
+이게 꺼져 있으면 PAT 만료 등으로 401이 쌓여 잡이 조용히 멈춰도 알 수 없다 (2026-09-22).
 """
 import base64
 import copy
@@ -57,6 +60,17 @@ except ImportError:
 CRONJOB_API_BASE = "https://api.cron-job.org"
 GITHUB_API_BASE = "https://api.github.com"
 WORKFLOW_PATH = ".github/workflows/swing_alerter.yml"
+
+# 실패/자동 비활성화 알림 — 생성 시 기본으로 켠다.
+# 꺼져 있으면 잡이 조용히 멈춰도 알 수 없다: 2026-09-22, 크론잡에 저장된 PAT가 낡아 401이
+# 쌓여 cron-job.org가 잡을 내렸는데 onFailure/onDisable 이 모두 false 라 메일 한 통 없이
+# 하루 넘게 폴링이 죽어 있었다 (대시보드가 어제 스냅샷에 멈춘 원인). onFailureCount=1 은
+# 기본값 — 1회 실패부터 통보하고, onDisable 은 자동 비활성화 통보.
+DEFAULT_NOTIFICATION: dict[str, Any] = {
+    "onFailure": True,
+    "onFailureCount": 1,
+    "onDisable": True,
+}
 
 # cron-job.org jobDetails에 포함된 응답 전용(읽기 전용) 필드 — PATCH 시 제거해야 400을 피한다
 READONLY_JOB_FIELDS = (
@@ -152,6 +166,7 @@ def _build_job_payload(cfg: dict) -> dict:
                 "body": json.dumps({"event_type": cfg["event_type"]}),
             },
             "schedule": cfg["schedule"],
+            "notification": copy.deepcopy(DEFAULT_NOTIFICATION),
         }
     }
 
