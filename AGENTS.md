@@ -347,7 +347,7 @@ Not lazy about: input validation at trust boundaries, error handling that preven
   실제 버그가 재발하면 그 함수만 `unittest` 로 고정(회귀 테스트), 또는 계산 규칙 변경 시 변경 함수부터
   테스트 작성 후 수정.
 - **가격 기준 회귀 테스트 (2026-09-22)**: 2026-09-22 에 난 가격 기준 버그(일봉 미확정 분봉 폴백 ·
-  `get_prior_close` dropna 함정 · `--signal` 낙은 세션 · 라이브 표시 기준 · 헤더 종가 날짜 ·
+  `get_prior_close` dropna 함정 · `--signal` 낡은 세션 · 라이브 표시 기준 · 헤더 종가 날짜 ·
   알림 판정 종가 기준)는 `test_price_basis.py` 에 고정해 두었다 —
   `python3 -m unittest -q test_price_basis` (네트워크 0회, yfinance 는 mock, 0.01초).
   가격 조회(`get_prev_close`/`get_prior_close`/`load_data`)나 표시 기준(`_display_dd`/`_close_date`),
