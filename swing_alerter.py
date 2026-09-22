@@ -509,10 +509,12 @@ def get_prior_close(ticker: str, as_of: str, max_retries: int = 3) -> tuple[floa
 
     전일 종가 대비 등락률 + 대시보드 '전일 종가' 줄 표시용 — get_prev_close()가 반환한
     최종 세션의 바로 앞 세션 종가/날짜를 같은 yfinance 1개월 데이터에서 찾는다.
-    as_of에 해당하는 행이 없으면(데이터 변경 등) 마지막에서 두 번째 행을 사용한다.
+    as_of에 해당하는 행이 없으면(데이터 변경 등) 마지막 행을 as_of 로 간주한다.
 
-    ⚠️ 폴백은 반드시 '한 세션 앞' 행(iloc[-2])으로 해야 한다 — 마지막 행(iloc[-1])은
-    현재 표시 중인 종가와 같은 값이라 '전일 종가 = 현재가'로 잘못 표시된다. (2026-08-12)
+    ⚠️ as_of 행 **앞**의 행만 쓴다 — as_of 행은 현재 표시 중인 종가와 같은 값이라
+    '전일 종가 = 현재가'로 잘못 표시된다. (2026-08-12)
+    ⚠️ as_of 행의 Close 가 NaN(미확정)일 수 있으므로 날짜 검색은 dropna 전 이력으로 하고,
+    '직전 종가'는 그 앞쪽의 유효한 종가 중 마지막을 쓴다. (2026-09-22)
     """
     try:
         as_month, as_day = int(as_of[:2]), int(as_of[3:5])
@@ -522,20 +524,30 @@ def get_prior_close(ticker: str, as_of: str, max_retries: int = 3) -> tuple[floa
     for attempt in range(max_retries):
         try:
             hist = yf.Ticker(ticker).history(period="1mo", interval="1d", auto_adjust=False)
-            closes = hist["Close"].dropna()
-            if len(closes) < 2:
-                raise ValueError("Need at least 2 sessions.")
+            # ⚠️ dropna 로 행을 지우지 않는다 — 미확정 마지막 봉(Close=NaN)도 '세션'으로는
+            # 존재하므로, 지우면 as_of 행을 못 찾아 직전 종가가 한 세션 더 뒤로 밀린다
+            # (2026-09-22: 09-21 종가를 기준으로 09-17 $71.38 을 '전일 종가'로 표시)
+            closes = hist["Close"]
+            if closes.dropna().empty:
+                raise ValueError("No close data.")
+            as_pos = None
             for i in range(len(closes) - 1, -1, -1):
                 d = closes.index[i].date() if hasattr(closes.index[i], "date") else None
                 if d is not None and d.month == as_month and d.day == as_day:
-                    if i == 0:
-                        return None, None   # as_of 가 데이터 첫 행 — 이전 세션 없음
-                    pd = closes.index[i - 1].date() if hasattr(closes.index[i - 1], "date") else None
-                    return float(closes.iloc[i - 1]), (pd.strftime("%m-%d") if pd is not None else None)
-            # as_of 미발견(새 fetch가 한 세션 뒤처진 데이터 지연 등) → 마지막에서 두 번째 행을
-            # 직전 종가로 사용 (마지막 행 = 현재 표시 종가이므로 절대 쓰지 않는다)
-            pd = closes.index[-2].date() if hasattr(closes.index[-2], "date") else None
-            return float(closes.iloc[-2]), (pd.strftime("%m-%d") if pd is not None else None)
+                    as_pos = i
+                    break
+            # as_of 미발견(새 fetch가 한 세션 뒤처진 데이터 지연 등) → 마지막 행을 as_of 로 간주
+            if as_pos is None:
+                as_pos = len(closes) - 1
+            if as_pos == 0:
+                return None, None   # as_of 가 데이터 첫 행 — 이전 세션 없음
+            # as_of 행 '앞'의 유효한 종가 중 마지막 — as_of 행 자체는 현재 종가라 쓰지 않는다
+            prev = closes.iloc[:as_pos].dropna()
+            if prev.empty:
+                return None, None
+            pd_idx = prev.index[-1]
+            pd = pd_idx.date() if hasattr(pd_idx, "date") else None
+            return float(prev.iloc[-1]), (pd.strftime("%m-%d") if pd is not None else None)
         except Exception as e:  # noqa: BLE001
             last_err = e
             if attempt < max_retries - 1:
@@ -724,17 +736,23 @@ def compute_ticker(ticker: str, pos: dict, cfg: dict, live: bool = False) -> dic
         "lots": lot_stats,
         "zone_alerts": pos.setdefault("ZONE_ALERTS", {"hit": [], "imminent": []}),
     })
-    # 실시간 표시 오버레이 — 장중 라이브 가격을 표시 필드에만 반영 (알림 필드는 종가 기준 유지)
+    # 실시간 표시 오버레이 — 장중 라이브 가격을 표시 필드에만 반영 (알림 판정은 종가 기준 유지)
     if live:
         live_price = _get_live_price(ticker)
         if live_price is not None and live_price > 0:
+            st["close_as_of"] = as_of   # 확정 종가 세션 날짜 보존 (라이브 중 as_of 는 시각으로 덮어씀)
             st["price"] = live_price
             st["live"] = True
             st["as_of"] = datetime.now(NY_TZ).strftime("%m-%d %H:%M")
             # 전고가 대비 하락률/전일 대비 등락률도 라이브 가격 기준으로 표시 (표시 전용)
             st["live_dd_pct"] = (live_price - ath) / ath * 100.0
-            if prior_close and prior_close > 0:
-                st["day_change_pct"] = (live_price - prior_close) / prior_close * 100.0
+            # '전일 종가'는 **라이브 세션의 직전 세션** = 엔진이 잡은 확정 종가(price)다.
+            # 수정 전에는 get_prior_close 가 그 앞 세션을 돌려줘 한 세션 더 낡은 값과 비교했다
+            # (09-21 라이브 $76.35 를 09-17 종가 $71.38 과 비교해 ▲7.0% 로 표기 — 2026-09-22)
+            if price and price > 0:
+                st["prior_close"] = float(price)
+                st["prior_close_date"] = as_of
+                st["day_change_pct"] = (live_price - float(price)) / float(price) * 100.0
     return st
 
 
@@ -869,6 +887,16 @@ def _lot_chip(lot: dict, gap_pct: float = 5.0) -> str:
     return "⏳ 대기"
 
 
+def _display_dd(st: dict) -> float:
+    """화면/브리핑에 쓰는 ATH 대비 하락률 — 라이브 표시 중이면 라이브 가격 기준.
+
+    알림 판정(`dd_pct`·래더 hit)은 확정 종가 기준 그대로 둔다. 표시와 판정의 기준이
+    다르므로 표시용 숫자는 이 함수 하나로 모아 앱·콘솔·브리핑이 서로 모순되지 않게 한다
+    (2026-09-22: 라이브 $76.35 옆에 종가 기준 -17.5% 가 찍혀 같은 화면에서 값이 어긋났다).
+    """
+    return float(st.get("live_dd_pct", st["dd_pct"])) if st.get("live") else float(st["dd_pct"])
+
+
 def _ladder_summary(st: dict) -> str:
     """래더 요약 — 도달 구간 + 다음 구간 (브리핑용)."""
     if st.get("error"):
@@ -880,7 +908,7 @@ def _ladder_summary(st: dict) -> str:
     if hit:
         parts.append("🟢 " + " · ".join(hit))
     if nxt:
-        remain = nxt["pct"] - abs(st["dd_pct"])
+        remain = nxt["pct"] - abs(_display_dd(st))
         parts.append(f"다음 ⏳ -{nxt['pct']:.0f}% (남은 {max(remain, 0):.1f}%p)")
     if not parts:
         parts.append("모든 구간 대기")
@@ -921,7 +949,7 @@ def build_briefing_text(statuses: list[dict], cfg: dict) -> str:
         if hit_open:
             buy_txt = f"🟢 -{hit_open[-1]['pct']:.0f}% 매수 구간 도달"
         elif nxt_zone:
-            remain = nxt_zone["pct"] - abs(st["dd_pct"])
+            remain = nxt_zone["pct"] - abs(_display_dd(st))
             if 0 <= remain <= gap:
                 buy_txt = (f"📡 -{nxt_zone['pct']:.0f}% 매수 구간 임박 "
                            f"(남은 {remain:.1f}%p)")
@@ -929,7 +957,7 @@ def build_briefing_text(statuses: list[dict], cfg: dict) -> str:
         block = [
             f"**{st['ticker']}** · {sell_txt}",
             f"- 현재가 ${st['price']:.2f} ({src_txt})",
-            f"- ATH ${st['ath']:.2f} ({st['ath_date']}) → 하락 **{st['dd_pct']:+.1f}%**",
+            f"- ATH ${st['ath']:.2f} ({st['ath_date']}) → 하락 **{_display_dd(st):+.1f}%**",
         ]
         if buy_txt:
             block.append(f"- {buy_txt}")
@@ -1393,7 +1421,18 @@ def _lvl_row(lvl: dict, next_fill: float | None = None) -> str:
     )
 
 
-def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny: str) -> str:
+def _close_date(as_of: object) -> str | None:
+    """가격 기준 세션 날짜(MM-DD)면 그대로, 아니면 None.
+
+    get_prev_close 의 as_of 는 성공 시 확정 종가 날짜('09-18')지만, info 폴백은 'N/A',
+    라이브 오버레이 후에는 시각('%m-%d %H:%M')이 들어온다 — 화면에 '종가 날짜'로 쓰면
+    안 되는 값을 걸러내기 위한 검사 (2026-09-22).
+    """
+    d = str(as_of or "")
+    return d if len(d) == 5 and d[2] == "-" and d[:2].isdigit() and d[3:].isdigit() else None
+
+
+def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str) -> str:
     """스마트폰용 자체 완결 HTML 대시보드 생성 (외부 리소스 없음)."""
     cards = []
     # 매도 도달 티커 수 — 개인 포지션도 포함한다 (2026-09-12). 대시보드는 사용자 전용이라 감출
@@ -1405,6 +1444,17 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
     buy_cnt = sum(1 for s in statuses for l in (s.get("lots") or [])
                   if not s.get("error") and l.get("buy_price"))
     any_live = any(s.get("live") for s in statuses if not s.get("error"))
+    # 가격 기준 줄 — 생성 시각이 아니라 **표시 중인 가격의 세션**을 적는다 (2026-09-22).
+    # 수정 전에는 생성 시각(NY 현재시각)을 넣어, 09-18 종가를 보여주면서도
+    # '종가 기준 2026-09-21 20:0x' 처럼 종가 날짜가 아닌 값이 찍혔다 (라이브면 장중 시각).
+    if any_live:
+        live_as_of = next((s["as_of"] for s in statuses if s.get("live") and not s.get("error")), "")
+        basis_txt = f"실시간(15분 지연) 기준 {live_as_of} (미국 ET)"
+    else:
+        close_dates = sorted({d for d in (_close_date(s.get("as_of")) for s in statuses
+                                          if not s.get("error")) if d})
+        basis_txt = (f"종가 기준 {close_dates[-1]} (미국 ET)" if close_dates
+                     else "종가 기준 (미국 ET · 날짜 미확인)")
     pages_url = (cfg.get("PAGES_URL") or "").strip()
     live_link = (
         f'<span class="pages">· <a href="{pages_url}" target="_blank" rel="noopener">🌐 라이브 열기</a></span>'
@@ -1443,7 +1493,7 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
             continue
 
         # 전고가 대비 하락률 — 장중엔 라이브 가격 기준으로 표시 (표시 전용, 알림 판정은 종가 기준)
-        dd_pct_disp = st.get("live_dd_pct", st["dd_pct"])
+        dd_pct_disp = _display_dd(st)
         dd_cls = "up" if dd_pct_disp > 0 else ("down" if dd_pct_disp < 0 else "flat")
         dd_sign = "🆕 +" if dd_pct_disp > 0 else ("▼ " if dd_pct_disp < 0 else "")
 
@@ -1459,11 +1509,13 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
         # 현재 종가는 바로 위 큰 가격(36px)에 이미 표시되므로 메타 줄에서 반복하지 않는다
         # ('종가 $X (date)' 중복 제거). 전일 종가 조회 실패 시에만 현재 종가+날짜로 폴백.
         if st.get("live"):
-            # 장중 실시간 줄에도 전일 종가 값을 함께 표시 — 비교 기준이 보이도록 (2026-08-12)
+            # 장중 실시간 줄에도 전일 종가 값을 함께 표시 — 비교 기준이 보이도록 (2026-08-12).
+            # 전일 종가는 라이브 세션의 직전 세션(엔진 확정 종가)이므로 그 날짜도 함께 적는다 (2026-09-22)
             pc = st.get("prior_close")
             if pc and pc > 0:
+                pcd = _close_date(st.get("prior_close_date")) or ""
                 meta_src = (f'🟢 실시간 ${st["price"]:,.2f} ({st["as_of"]}) · '
-                            f'전일 종가 ${pc:,.2f}')
+                            f'전일 종가 ${pc:,.2f}' + (f' ({pcd})' if pcd else ''))
             else:
                 meta_src = f'🟢 실시간 ${st["price"]:,.2f} ({st["as_of"]})'
         else:
@@ -1589,7 +1641,7 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
 <body>
 <header>
   <h1>📈 스윙 투자 알리미</h1>
-  <div class="sub">업데이트 {updated_at} · {'실시간(15분 지연) 기준' if any_live else '종가 기준'} {as_of_ny} (미국){live_link}</div>
+  <div class="sub">업데이트 {updated_at} · {basis_txt}{live_link}</div>
   <div class="chips">
     {push_btn}
     <span class="chip {'red' if sell_cnt else 'gray'}" id="sell-alarm-cnt">🚨 매도 알람 {sell_cnt}</span>
@@ -1607,11 +1659,11 @@ def render_dashboard(statuses: list[dict], cfg: dict, updated_at: str, as_of_ny:
 
 
 def write_dashboard(statuses: list[dict], cfg: dict, path: str) -> None:
-    now_ny = datetime.now(NY_TZ)
+    # 갱신 시각은 KST 로 명시한다 — 러너(Actions)의 로컬 시각은 UTC 라 표기가 없으면
+    # 폰에서 몇 시 기준인지 알 수 없었다 (2026-09-22)
     html = render_dashboard(
         statuses, cfg,
-        updated_at=datetime.now().strftime("%Y-%m-%d %H:%M"),
-        as_of_ny=now_ny.strftime("%Y-%m-%d %H:%M"),
+        updated_at=datetime.now(KST_TZ).strftime("%Y-%m-%d %H:%M KST"),
     )
     # 원자적 쓰기(임시 파일 → rename) — 스크립트가 쓰기 중 중단돼도 잘린 HTML이
     # 남지 않아, 봇이 배포용으로 복사하는 /tmp 사본이 깨질 일이 없다.
@@ -1701,11 +1753,9 @@ class _DashboardHandler(BaseHTTPRequestHandler):
             self._json({"updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                         "positions": statuses})
             return
-        now_ny = datetime.now(NY_TZ)
         html = render_dashboard(
             statuses, cfg,
-            updated_at=datetime.now().strftime("%Y-%m-%d %H:%M"),
-            as_of_ny=now_ny.strftime("%Y-%m-%d %H:%M"),
+            updated_at=datetime.now(KST_TZ).strftime("%Y-%m-%d %H:%M KST"),
         )
         self._html(html.encode("utf-8"))
 
@@ -1754,7 +1804,7 @@ def run_serve(port: int) -> None:
 def print_console(statuses: list[dict], cfg: dict) -> None:
     gap = float(cfg.get("IMMINENT_GAP_PCT", 5))
     target_pct = float(cfg.get("SWING_TARGET_PCT", 10))
-    print(f"\n📊 스윙 투자 알리미 — {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    print(f"\n📊 스윙 투자 알리미 — {datetime.now(KST_TZ).strftime('%Y-%m-%d %H:%M KST')}")
     print("=" * 60)
     for st in statuses:
         if st.get("error"):
@@ -1762,7 +1812,7 @@ def print_console(statuses: list[dict], cfg: dict) -> None:
             continue
         src = " · 실시간" if st.get("live") else ""
         print(f"[{st['ticker']}] 현재 ${st['price']:,.2f} ({st['as_of']}{src})")
-        print(f"   ATH ${st['ath']:,.2f} ({st['ath_date']}) → 하락 {st['dd_pct']:+.1f}%")
+        print(f"   ATH ${st['ath']:,.2f} ({st['ath_date']}) → 하락 {_display_dd(st):+.1f}%")
         lots = st.get("lots") or []
         if st.get("personal"):
             if lots:

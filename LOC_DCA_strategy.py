@@ -269,6 +269,34 @@ def _most_recent_trading_day(today: date) -> date:
     return candidate
 
 
+def _intraday_last_close(ticker: str, min_date: date) -> tuple[float, date] | None:
+    """분봉에서 가장 최근 **정규장** 종가와 그 세션 날짜를 찾는다 (일봉 확정 지연 폴백).
+
+    yfinance 일봉은 세션 종료 후에도 마지막 행의 Close 가 NaN(미확정)이거나 아예 없어서
+    `dropna()` 하면 하루 낡은 종가가 '최신 확정 종가'로 반환된다 — 그 상태로 LOC 매수가/스윙
+    래더가 계산되면 가격 기준 자체가 틀어진다 (2026-09-22: 09-21 일봉 Close=NaN → 09-18 종가
+    $72.64 를 현재가로 사용, 실제 09-21 종가는 ~$78.92. 당시 폴백이던 info.previousClose 도
+    같은 낡은 값이라 구제되지 않았다). 1분봉은 prepost=False 라 정규장 봉만 오므로
+    애프터마켓 체결가가 섞이지 않는다.
+
+    반환: (종가, 세션 날짜) — min_date 보다 낡거나 조회 실패면 None.
+    """
+    try:
+        hist = yf.Ticker(ticker).history(period="5d", interval="1m")
+    except Exception:  # noqa: BLE001
+        return None
+    if hist.empty or "Close" not in hist:
+        return None
+    closes = hist["Close"].dropna()
+    if closes.empty:
+        return None
+    idx = closes.index[-1]
+    last_date: date = idx.date() if isinstance(idx, pd.Timestamp) else pd.Timestamp(idx).date()  # type: ignore[arg-type]
+    if last_date < min_date:
+        return None
+    return float(closes.iloc[-1]), last_date
+
+
 def get_prev_close(ticker: str) -> tuple[float | None, str]:
     """
     Reliable FINAL-close lookup using yfinance (with 3 retries).
@@ -377,6 +405,17 @@ def get_prev_close(ticker: str) -> tuple[float | None, str]:
         # exceptions / truly empty responses).
         if attempt < 3:
             time.sleep(2.0)
+
+    # ── 분봉 폴백 ──────────────────────────────────────────────
+    # 일봉이 아직 확정되지 않아(마지막 봉 Close=NaN/미수록) 위 루프가 스테일로 끝나면,
+    # 정규장 분봉의 마지막 종가를 그 세션의 확정 종가로 사용한다. info.previousClose 는
+    # 이 경우 **같은 낡은 값**을 돌려주므로 반드시 info 폴백보다 먼저 시도한다 (2026-09-22).
+    intraday = _intraday_last_close(ticker, expected_latest_date)
+    if intraday is not None:
+        id_close, id_date = intraday
+        id_str = id_date.strftime("%m-%d")
+        print(f"⚠️ {ticker} 일봉 미확정 — 정규장 분봉 종가 사용: ${id_close:.2f} ({id_str})")
+        return id_close, id_str
 
     # Info fallback — "previousClose"/"regularMarketPreviousClose" are
     # official final closes, so they're tried first. "currentPrice" and
