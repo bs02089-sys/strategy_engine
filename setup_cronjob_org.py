@@ -33,12 +33,14 @@ cron-job.org 콘솔에서 수동 삭제 필요.
   python setup_cronjob_org.py --test-dispatch  # 테스트 dispatch 1회 발사
   python setup_cronjob_org.py --update-pat # 크론잡에 저장된 GITHUB_PAT를 새 토큰으로 갱신
   python setup_cronjob_org.py --update-schedule  # 크론잡 폴링 간격 갱신 (POLL_MINUTES/UTC_HOURS 반영)
+     (두 --update-* 모드는 기존 잡을 재사용하므로 알림 설정이 꺼져 있으면 함께 켠다)
 
 스윙 알리미 잡 (기본값):
   python setup_cronjob_org.py               # swing-monitor 디스패치 잡 생성
 
 생성되는 잡은 실패/자동 비활성화 알림(onFailure~1회 / onDisable)이 기본으로 켜진다 —
 이게 꺼져 있으면 PAT 만료 등으로 401이 쌓여 잡이 조용히 멈춰도 알 수 없다 (2026-09-22).
+기존 잡을 재사용하는 --update-pat / --update-schedule 도 켜져 있지 않으면 함께 켠다.
 """
 import base64
 import copy
@@ -169,6 +171,24 @@ def _build_job_payload(cfg: dict) -> dict:
             "notification": copy.deepcopy(DEFAULT_NOTIFICATION),
         }
     }
+
+
+def _ensure_notification(job_body: dict) -> bool:
+    """기존 잡의 알림 설정을 보강한다 (in-place). 변경했으면 True.
+
+    생성 경로(_build_job_payload)는 새로 만드는 잡에만 적용되므로, 이미 있는 잡을
+    재사용하는 --update-pat / --update-schedule 에서도 켜 둔다 — 꺼진 채로 두면
+    401 누적 등으로 잡이 조용히 멈춰도 알 수 없다 (2026-09-22, 하루 넘게 죽어 있었다).
+    onFailureCount 는 사용자가 콘솔에서 바꿨을 수 있으니 없을 때만 기본값을 넣는다.
+    """
+    notification = job_body.setdefault("notification", {})
+    notification.setdefault("onFailureCount", DEFAULT_NOTIFICATION["onFailureCount"])
+    changed = False
+    for key in ("onFailure", "onDisable"):
+        if notification.get(key) is not True:
+            notification[key] = True
+            changed = True
+    return changed
 
 
 def _redact_secrets(payload: dict) -> dict:
@@ -386,10 +406,13 @@ def main() -> None:
         # jobDetails에는 응답 전용(읽기 전용) 필드가 포함되어 있으므로
         # PATCH 전에 제거 — 포함된 채 보내면 cron-job.org가 400으로 거부 가능
         _strip_readonly_fields(job_body)
+        notification_fixed = _ensure_notification(job_body)
         headers = job_body.setdefault("extendedData", {}).setdefault("headers", {})
         headers["Authorization"] = f"Bearer {pat}"
         update_job(cronjob_key, job_id, job_body)
         print(f"✅ 크론잡(jobId={job_id})의 GITHUB_PAT를 새 토큰으로 갱신했습니다.")
+        if notification_fixed:
+            print("   ℹ️ 실패/자동 비활성화 알림도 함께 켰습니다 (onFailure/onDisable).")
         print("   테스트: python setup_cronjob_org.py --test-dispatch")
         return
 
@@ -417,9 +440,12 @@ def main() -> None:
         if not job_body:
             raise SystemExit("❌ 크론잡 상세 조회 결과가 비어 있습니다 — 갱신을 중단합니다.")
         _strip_readonly_fields(job_body)
+        notification_fixed = _ensure_notification(job_body)
         job_body["schedule"] = schedule
         update_job(cronjob_key, job_id, job_body)
         print(f"✅ 크론잡(jobId={job_id})의 스케줄을 갱신했습니다: {job_desc}")
+        if notification_fixed:
+            print("   ℹ️ 실패/자동 비활성화 알림도 함께 켰습니다 (onFailure/onDisable).")
         print("   테스트: python3 setup_cronjob_org.py --test-dispatch")
         return
 
