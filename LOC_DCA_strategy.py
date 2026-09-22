@@ -1000,6 +1000,7 @@ def _resolve_discord() -> tuple[str, str]:
 def load_data(ticker: str, end: date | None = None) -> pd.DataFrame:
     """티커 종가 조회 (LOC는 마감가 체결 — Low 불필요). end 미지정 시 오늘까지(실시간 신호용);
     백테스트는 TEST_END(고정 검증 윈도우)를 명시적으로 전달해 재현성을 유지한다."""
+    live_mode = end is None   # 실시간 신호 모드 — 미확정 마지막 봉 보정 대상 (백테스트는 제외)
     if end is None:
         # NY(거래일) 기준 날짜 — GHA 러너(UTC)와의 날짜 불일치 방지
         end = datetime.now(ZoneInfo("America/New_York")).date()
@@ -1014,6 +1015,19 @@ def load_data(ticker: str, end: date | None = None) -> pd.DataFrame:
         df.index = df.index.tz_localize(None)
     df = df[~df.index.duplicated(keep="last")].sort_index()
     df = df[(df.index >= pd.Timestamp(TEST_START)) & (df.index <= pd.Timestamp(end))]
+    # ⚠️ yfinance 일봉은 세션 직후 마지막 봉 Close 가 NaN(미확정) 이라 dropna 로 한 세션 낡은
+    # 종가가 '최신'이 된다 — 실시간 신호 모드에선 공용 분봉 폴백으로 더 새로운 확정 종가를 찾아
+    # 마지막 행으로 붙인다 (스윙·브리핑과 같은 규칙, 2026-09-22). 백테스트는 end 고정
+    # 재현성을 지키기 위해 건드리지 않는다. (분봉은 미조정이지만 최근 세션이라 배당 조정 계수
+    # 차이는 무시 가능 — LOC 브리핑의 get_prev_close(미조정)와 같은 계열이다.)
+    if live_mode and not df.empty:
+        newer = _intraday_last_close(ticker, df.index[-1].date() + timedelta(days=1))
+        if newer is not None:
+            fresh_close, fresh_date = newer
+            df.loc[pd.Timestamp(fresh_date)] = fresh_close
+            df = df.sort_index()
+            print(f"   ⚠️ {ticker} 일봉 미확정 — 정규장 분봉 종가 사용: ${fresh_close:.2f} "
+                  f"({fresh_date.strftime('%m-%d')})")
     return df
 
 
