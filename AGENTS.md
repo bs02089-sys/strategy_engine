@@ -77,6 +77,26 @@ Not lazy about: input validation at trust boundaries, error handling that preven
   종가 기준 유지** — `detect_alerts`는 `close_price`를 사용하며, 실시간 값으로 알림
   시점을 흔들지 말 것. `swing-monitor` 디스패치도 대시보드를 재생성·gh-pages 재배포하므로
   스마트폰 앱이 장중 갱신된다 (배포 가드: 대시보드 생성 실패 시 배포 생략).
+  📐 **표시 기준도 라이브 세션으로 통일 (2026-09-22)**: 라이브 표시 중에는 가격뿐 아니라
+  **하락률·남은 %p·전일 종가 비교 기준**도 라이브 세션에 맞춘다 — 하락률은 `_display_dd()`
+  (라이브면 라이브 가격 기준, 아니면 `dd_pct`) 하나를 앱·콘솔·Discord 브리핑이 함께 쓰고,
+  '전일 종가'는 `get_prior_close()`(확정 종가의 앞 세션)가 아니라 **라이브 세션의 직전 세션 =
+  엔진 확정 종가**를 쓴다 (오버레이가 `prior_close`/`prior_close_date` 를 교체). 수정 전에는
+  라이브 `$76.35` 옆에 종가 기준 `-17.5%`·`전일 종가 $71.38(09-17)` 이 찍혀 같은 화면이 스스로
+  모순됐다. 대시보드 헤더는 `업데이트 … KST` + 표시 가격의 **종가 날짜**(`st['as_of']`,
+  `_close_date()` 로 MM-DD 만 통과)를 적는다 — 생성 시각을 '종가 기준' 옆에 쓰지 말 것.
+  ⚠️ 위 문단과 마찬가지로 **알림 판정은 종가 기준** 이다 (표시만 라이브) — `_display_dd` 를
+  `detect_alerts`/래더 `hit`/매도 판정에 쓰지 말 것.
+  🕒 **확정 종가 조회 — 일봉 미확정 시 분봉 폴백 (2026-09-22, LOC·스윙 공용 함수)**:
+  `get_prev_close()` 는 yfinance 일봉이 아직 확정되지 않았을 때(마지막 봉 Close=NaN/미수록)
+  마지막 **유효** 종가를 쓰면 하루 낡은 값을 '최신 종가'로 돌려준다 — 09-21 일봉 Close=NaN 으로
+  09-18 종가 $72.64 를 현재가로 읽어 하락률과 LOC 매수가 기준이 어긋났다 (실제 09-21 종가 $78.92).
+  이때 `info.previousClose` 는 **같은 낡은 값**이라 구제되지 않으므로, `_intraday_last_close()`
+  (정규장 1분봉 마지막 종가 — prepost=False 라 애프터마켓 미포함)를 info 폴백보다 **먼저**
+  시도한다 (휴장일 오탐 시엔 None → 기존 info 폴백 유지). 스윙의 `get_prior_close()` 도 같은
+  함정이 있다 — `dropna()` 로 as_of 세션 행을 지우면 '전일 종가'가 한 세션 더 밀리므로
+  (09-21 기준 09-17 $71.38), 날짜 검색은 dropna 전 이력으로 하고 직전 종가는 as_of **앞쪽**
+  유효 종가에서 고른다. 두 함수 모두 LOC 브리핑(매수가 기준)과 공용이라 되돌리면 주문 가격까지 어긋난다.
   🔄 **사이클 자동 리셋 (2026-08-11)**: LOTS의 전 계좌가 매도 목표(`SWING_TARGET_PCT` — 현재 +25%)에 도달하면
   수동 `--reset` 없이 알림 상태(ZONE_ALERTS/SELL 플래그/ATH_CYCLE_BASE)를 자동 초기화한다
   (`auto_cycle_reset()` — `CYCLE_RESET_DONE` 플래그로 중복 방지, 매도 미도달 상태가 되면 자동
@@ -141,6 +161,9 @@ Not lazy about: input validation at trust boundaries, error handling that preven
   전고점 표시 = 원시 고가(High, 미조정)·전체 이력 기준 — 전고점 계산은 스윙 알리미와
   **공용 함수** `LOC_DCA_strategy.get_all_time_high` 하나만 쓴다 (2026-09-12 수정·중복 제거;
   기존 '252일 종가 최고'는 차트의 실제 전고점보다 낮게 표시됨. 매수 판정(종가 기준)은 그대로).
+  전일 종가(매수가 기준)도 **공용 함수** `LOC_DCA_strategy.get_prev_close` 하나만 쓴다 — 일봉이 미확정이면
+  정규장 분봉 종가로 폴백해 하루 낡은 종가를 쓰지 않는다 (2026-09-22, 위 스윙 항목 참조 —
+  이 폴백을 걷어내면 LOC 매수가가 실제 전일 종가 기준으로 계산되지 않는다).
   5분할 채택 근거:
   `loc_vs_swing_backtest.py --sweep-splits` (2026-09-12 재측정 — 가격 계열 원시 종가/고가로 통일) —
   LOC 추천 국면(강세장)에서 분할 수가 적을수록
