@@ -346,5 +346,12 @@ Not lazy about: input validation at trust boundaries, error handling that preven
   검증 사례 참고). **예외 — 테스트를 추가하는 때**: 알림 판정(`detect_alerts`/`build_ladder`) 등에서
   실제 버그가 재발하면 그 함수만 `unittest` 로 고정(회귀 테스트), 또는 계산 규칙 변경 시 변경 함수부터
   테스트 작성 후 수정.
+- **가격 기준 회귀 테스트 (2026-09-22)**: 2026-09-22 에 난 가격 기준 버그(일봉 미확정 분봉 폴백 ·
+  `get_prior_close` dropna 함정 · `--signal` 낙은 세션 · 라이브 표시 기준 · 헤더 종가 날짜 ·
+  알림 판정 종가 기준)는 `test_price_basis.py` 에 고정해 두었다 —
+  `python3 -m unittest -q test_price_basis` (네트워크 0회, yfinance 는 mock, 0.01초).
+  가격 조회(`get_prev_close`/`get_prior_close`/`load_data`)나 표시 기준(`_display_dd`/`_close_date`),
+  알림 판정을 건드렸으면 이 테스트를 먼저 통과시킬 것 (수정 전 코드에선 8/11 이 실패해 실제 회귀를 잡는다 —
+  2026-09-22 확인). JS 게이트(`npm run typecheck`)와 별개로 동작하며 워크플로우에는 걸려 있지 않다.
 - 커밋 메시지: `type: 한글 요약 — 상세` 형식 (예: `refactor: ...`, `feat: ...`, `docs: ...`).
 - 언어: 사용자 소통·문서는 한국어, 코드 식별자는 영어.
