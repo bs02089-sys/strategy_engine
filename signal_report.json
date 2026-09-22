@@ -1,48 +1,56 @@
 {
-  "timestamp": "2026-09-19T01:00:06.761718",
-  "total_score": 4,
+  "timestamp": "2026-09-22T01:27:41.224586",
+  "total_score": 5,
+  "degraded_signals": [],
   "signals": [
     {
       "name": "Yield Curve Inversion",
       "score": 0,
-      "detail": "Normal (+0.25%p) (+0)",
-      "group": "leading"
+      "detail": "Normal (+0.20%p) (+0)",
+      "group": "leading",
+      "data_ok": true
     },
     {
       "name": "Market Breadth",
-      "score": 0,
-      "detail": "Market breadth stable (+0) | Market balance maintained (RSP/SPY ratio +nan%) (+0)",
-      "group": "confirm"
+      "score": 1,
+      "detail": "Market breadth stable (+0) | Concentration risk high (RSP/SPY ratio -4.0%) (+1)",
+      "group": "confirm",
+      "data_ok": true
     },
     {
       "name": "Credit Spread",
       "score": 0,
-      "detail": "HY stable (2.70%) | IG stable (0.78%)",
-      "group": "confirm"
+      "detail": "HY stable (2.68%) | IG stable (0.77%)",
+      "group": "confirm",
+      "data_ok": true
     },
     {
       "name": "Fed Policy Cycle",
       "score": 2,
       "detail": "High risk zone: 3m since most recent cut (2026-05)",
-      "group": "leading"
+      "group": "leading",
+      "data_ok": true
     },
     {
       "name": "Valuation Overheat",
       "score": 2,
-      "detail": "CAPE 40.94 (Critical) (+2)",
-      "group": "leading"
+      "detail": "CAPE 41.6 (Critical) (+2)",
+      "group": "leading",
+      "data_ok": true
     },
     {
       "name": "Leading Indicators",
       "score": 0,
-      "detail": "LEI stable (+0) | Sahm Rule normal (-0.07%p) (+0)",
-      "group": "confirm"
+      "detail": "경제활동 확장 (동행지수 YoY +1.9%) (+0) | Sahm Rule normal (-0.07%p) (+0)",
+      "group": "confirm",
+      "data_ok": true
     },
     {
       "name": "Momentum Strategy",
       "score": 0,
-      "detail": "SPX momentum healthy (12.5%) (+0) | Growth sectors lead (+nan% gap) (+0)",
-      "group": "confirm"
+      "detail": "SPX momentum healthy (13.2%) (+0) | Growth sectors lead (+3.5% gap) (+0)",
+      "group": "confirm",
+      "data_ok": true
     }
   ]
 }
