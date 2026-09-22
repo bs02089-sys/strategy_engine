@@ -685,6 +685,45 @@ export JOB_TITLE="Swing alerter realtime monitor"
 python3 setup_cronjob_org.py   # CRONJOB_ORG_API_KEY/GITHUB_PAT/GITHUB_OWNER/GITHUB_REPO 필요
 ```
 
+#### 🔧 폴링·가격 점검 절차 (2026-09-22 사고 대응)
+
+대시보드가 이상할 때(또는 주 1회) 아래 한 줄로 잡 상태를 확인합니다 — **읽기 전용**:
+
+```bash
+python3 setup_cronjob_org.py --list
+# [8235195] Swing alerter realtime monitor  enabled=True → …/dispatches
+#     마지막 실행: … | 상태: 성공(OK) | 소요: 123ms
+#     다음 실행: …                      ← 스케줄: UTC 13–21시 평일 = KST 22:00–06:50
+```
+
+| 증상 | 원인 | 조치 |
+|------|------|------|
+| 대시보드가 어제 화면에 멈춤 · 갱신 시각이 낡음 | 잡이 **꺼져 있음**(`enabled=False`) — 반복 실패 후 cron-job.org가 자동 비활성화 | ① `--list` 확인 → ② `--update-pat` → ③ 잡 **ON** (아래) |
+| `상태: 실패(HTTP 오류 4xx/5xx)` | 크론잡에 저장된 PAT가 무효(401). 로컬 `.env`의 PAT는 멀쩡한 경우가 많음 | 위와 동일. 교체 후 `--test-dispatch` 로 왕복 확인 |
+| `종가 기준` 날짜가 하루 낡음 · `날짜 미확인` | yfinance 일봉이 아직 미확정(마지막 봉 Close=NaN) | 정상이면 `⚠️ 일봉 미확정 — 정규장 분봉 종가 사용` 로그와 함께 **최신 세션**이 찍힘. 이 로그 없이 낡으면 분봉 폴백이 제거된 것 |
+| LOC 매수가·`--signal`이 낡은 종가 기준 | 같은 폴백이 공용 함수(`get_prev_close`/`load_data`)에서 사라짐 | `python3 -m unittest -q test_price_basis` 로 고정 확인 (11개, 네트워크 0회) |
+
+```bash
+# ② 낡은 PAT 교체 (+ 알림 설정이 꺼져 있으면 자동 보강)
+python3 setup_cronjob_org.py --update-pat
+
+# ③ 재활성화 — 잡 설정은 그대로 두고 enabled 만 켠다 (콘솔에서 켜도 동일)
+python3 - <<'PY'
+import setup_cronjob_org as s
+key, jid = s._env("CRONJOB_ORG_API_KEY"), 8235195
+job = s.get_job(key, jid); s._strip_readonly_fields(job); job["enabled"] = True
+s.update_job(key, jid, job)
+PY
+```
+
+> **2026-09-22 실제 사고 기록** — 크론잡에 저장된 PAT가 낡아 401이 쌓였고 cron-job.org가 잡을
+> 자동 비활성화했는데, 알림(`onFailure`/`onDisable`)이 꺼져 있어 **메일 한 통 없이 하루 넘게
+> 폴링이 죽어** 대시보드가 어젯밤 수동 실행 스냅샷($76.35 / 09-21 10:12)에 멈춰 있었습니다.
+> 핸드폰만 보면 “장이 조용한 날”과 구분되지 않으니, **갱신 시각이 낡았을 때는 항상 `--list`부터**
+> 확인하세요. 재활성화 후에도 화면이 하루 낡아 보인 건 별개 원인이었습니다 — 일봉이 미확정이라
+> 엔진이 그 전날 종가를 “현재가”로 썼고($72.64 vs 실제 $78.92), 정규장 분봉 폴백으로 해결했습니다.
+> 이제 잡을 새로 만들거나 PAT/스케줄을 갱신할 때 알림이 꺼져 있으면 자동으로 켜집니다.
+
 ### 모바일 대시보드 GitHub Pages 배포 (스마트폰 어디서나 접속)
 
 `swing_alerter.yml` 이 **매 실행마다**(일일 브리핑 · 장중 `swing-monitor` 디스패치 · 수동)
@@ -759,6 +798,9 @@ python3 setup_cronjob_org.py   # CRONJOB_ORG_API_KEY/GITHUB_PAT/GITHUB_OWNER/GIT
 - GitHub Actions `schedule` 크론의 best-effort 지연을 우회하는 정확한 N분 알람
 - `repository_dispatch`(event_type: `swing-monitor`)로 스윙 알리미 워크플로우 즉시 실행
 - 설정 자동화: `setup_cronjob_org.py` — 상세: [스윙 실시간 알림](#실시간-알림-cron-joborg)
+- ⚠️ 잡은 **조용히 멈출 수 있습니다**(PAT 만료로 401 누적 → 자동 비활성화). 점검·복구 절차는
+  위 링크 섹션의 **'🔧 폴링·가격 점검 절차'** 참고 — `--list` → `--update-pat` → 잡 ON.
+  실패·자동 비활성화 알림은 잡 생성/PAT 갱신/스케줄 갱신 시 기본으로 켜집니다.
 - ⚠️ 기존 ATH DCA 실시간 잡("ATH DCA realtime monitor")은 **cron-job.org 콘솔에서 수동 삭제 필요** (2026-08-16 — `--ath-monitor` 삭제)
 
 ---
