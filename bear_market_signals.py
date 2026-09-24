@@ -26,11 +26,14 @@ Regime Assessment:
 
 Dependencies:
     pip install yfinance pandas requests
+    (선택) 브라우저 우회 경로를 쓰려면: pip install "scrapling[fetchers]"
+           + python -m patchright install chromium — 없으면 ② 단계를 건너뛰고 사유를 리포트에 남긴다
 
 Data Sources:
   - FRED    : Direct download via fredgraph.csv
   - yfinance: S&P500, Sector ETFs, NYSE A-D Line (^NYAD)
-  - multpl.com: Shiller CAPE (Direct regex parsing, with local cache fallback)
+  - multpl.com: Shiller CAPE — ① requests → ② StealthyFetcher(Cloudflare 우회) → ③ 캐시 폴백.
+    어느 단계로 내려갔는지(차단·실패 사유)가 리포트에 그대로 남는다 (2026-09-24)
 """
 
 import json
@@ -328,6 +331,91 @@ def signal_fed_cycle() -> SignalResult:
                         group="leading", data_ok=data_ok)
 
 
+# ─────────────────────────────────────────────
+# CAPE 수집 — 차단 감지 + 3단계 폴백 (requests → 브라우저 우회 → 캐시)
+# ─────────────────────────────────────────────
+# multpl.com 조회는 **200 이라고 성공이 아니다.** Cloudflare 챌린지는 해결에 실패해도 예외를
+# 던지지 않고 챌린지 페이지(200)를 그대로 돌려주므로, 상태코드만 보면 실패를 값으로 읽게 된다.
+# 그래서 값을 파싱하기 전에 차단을 먼저 판정하고, 캐시로 폴백할 때는 그 **사유를 리포트에 남긴다**
+# — 조용히 폴백하면 낡은 CAPE 가 '정상(+0)' 점수로 계속 쓰인다 (2026-09-20 33일 동결 사고와 같은 유형).
+# detect_block 은 scrapling-project/main.py 에서 fixture 6건(차단 4 · 정상 2)으로 검증한 판정을
+# 그대로 옮긴 순수 함수다 — 네트워크 없이 같은 fixture 로 재검증할 수 있다.
+BLOCKED_STATUS_CODES = frozenset({401, 403, 407, 429, 444, 500, 502, 503, 504})
+CHALLENGE_MARKERS = (
+    "cType: '",                             # Turnstile/Interstitial 챌린지 스크립트
+    "challenges.cloudflare.com/turnstile",  # 본문에 직접 박힌 Turnstile 위젯
+    "Just a moment",                        # 인터스티셜 제목
+)
+# ⚠️ '__cf_chl' 은 마커로 쓰지 않는다 — 성공한 페이지(200)에도 들어 있어 정상 응답을 차단으로 오탐한다
+CAPE_URL = "https://www.multpl.com/shiller-pe/table/by-month"
+CAPE_SANE_RANGE = (5.0, 100.0)   # Shiller CAPE 실측 범위 — 밖이면 파싱 오류로 보고 무효 처리
+
+
+def detect_block(status: int, html: str) -> Optional[str]:
+    """차단/챌린지 페이지로 보이면 이유를, 아니면 None 을 돌려준다 (순수 함수)."""
+    if status in BLOCKED_STATUS_CODES:
+        return f"HTTP {status}"
+    for marker in CHALLENGE_MARKERS:
+        if marker in html:
+            return f"Cloudflare 챌린지 페이지 (본문에 {marker!r})"
+    return None
+
+
+def _parse_cape(html: str) -> Optional[float]:
+    """페이지 본문에서 CAPE 값 추출. 못 찾거나 상식 범위 밖이면 None (다른 숫자 오파싱 방지)."""
+    m = re.search(r'Current Shiller PE Ratio is ([\d.]+)', html)
+    if not m:
+        return None
+    value = float(m.group(1))
+    return value if CAPE_SANE_RANGE[0] < value < CAPE_SANE_RANGE[1] else None
+
+
+def fetch_cape_via_requests() -> tuple[Optional[float], Optional[str]]:
+    """1차(브라우저 없음, 빠름): requests 로 조회 → (값 또는 None, 실패 사유)."""
+    try:
+        response = requests.get(CAPE_URL, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+    except Exception as exc:
+        return None, f"요청 실패 ({type(exc).__name__})"
+    blocked = detect_block(response.status_code, response.text)
+    if blocked:
+        return None, f"차단 ({blocked})"
+    if not response.ok:
+        return None, f"HTTP {response.status_code}"
+    value = _parse_cape(response.text)
+    if value is None:
+        return None, "값 파싱 실패 (페이지 개편 의심)"
+    return value, None
+
+
+def fetch_cape_via_browser() -> tuple[Optional[float], Optional[str]]:
+    """2차(브라우저): StealthyFetcher 로 차단을 우회해 재시도 → (값 또는 None, 실패 사유).
+
+    scrapling 은 **선택 의존성**이라 지연 임포트한다 — 미설치면 그 사실을 사유로 돌려주고
+    캐시 폴백으로 내려간다 (스크립트가 죽지 않게).
+    """
+    try:
+        from scrapling.fetchers import StealthyFetcher   # 브라우저 스택 필요
+    except ImportError:
+        return None, "scrapling 미설치 (우회 생략)"
+    try:
+        page = StealthyFetcher.fetch(
+            CAPE_URL,
+            headless=True,
+            network_idle=True,
+            solve_cloudflare=True,   # Turnstile/Interstitial 자동 해결
+            timeout=90_000,          # Cloudflare 해결에는 60초 이상 권장 (밀리초)
+        )
+    except Exception as exc:
+        return None, f"브라우저 실패 ({type(exc).__name__})"
+    blocked = detect_block(page.status, page.html_content)
+    if blocked:
+        return None, f"차단 ({blocked})"
+    value = _parse_cape(page.html_content)
+    if value is None:
+        return None, "값 파싱 실패 (페이지 개편 의심)"
+    return value, None
+
+
 def _save_cape_cache(cape: float) -> None:
     """성공적으로 조회된 CAPE 값을 캐시 파일에 원자적(atomic)으로 저장"""
     try:
@@ -352,35 +440,37 @@ def _load_cape_cache() -> Optional[tuple[float, int]]:
 
 
 def signal_valuation() -> SignalResult:
-    """Analyzes Shiller CAPE & EPS. (max 2점)"""
+    """Analyzes Shiller CAPE & EPS. (max 2점)
+
+    수집은 3단계 — ① requests → ② StealthyFetcher(차단 우회) → ③ 캐시 폴백.
+    ②·③ 로 내려가면 그 **사유가 detail 에 그대로 남는다** (조용한 폴백 금지, 2026-09-24) —
+    이전에는 조회 실패 이유가 사라지고 "캐시 사용" 한 줄만 남아, 차단인지 개편인지 구분할 수 없었다.
+    """
     score_total, notes, data_ok = 0, [], True
     cape = None
     cache_age_days = None
 
-    # 1차 시도: multpl.com 실시간 조회
-    try:
-        cape_url = "https://www.multpl.com/shiller-pe/table/by-month"
-        response = requests.get(cape_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
-        response.raise_for_status()
-        # 페이지 내 "Current Shiller PE Ratio is X.XX" 텍스트에서 CAPE 값 추출 (meta description에 포함)
-        m = re.search(r'Current Shiller PE Ratio is ([\d.]+)', response.text)
-        if not m:
-            raise ValueError("CAPE not found")
+    attempts: list[tuple[str, str]] = []
+    for label, fetcher in (("requests", fetch_cape_via_requests), ("브라우저", fetch_cape_via_browser)):
+        value, reason = fetcher()
+        if value is not None:
+            cape = value
+            if attempts:
+                notes.append(f"🚫 1차 조회 실패 ({attempts[0][1]}) → 브라우저 우회로 조회 성공")
+            _save_cape_cache(cape)  # 성공 시 캐시 저장
+            break
+        attempts.append((label, reason))
 
-        cape = float(m.group(1))
-        _save_cape_cache(cape)  # 성공 시 캐시 저장
-    except Exception:
-        pass
-
-    # 2차: 실시간 실패 → 캐시 사용
+    # 3차: 두 경로 모두 실패 → 캐시 (사유와 캐시 나이를 함께 남긴다)
     if cape is None:
+        reasons = " / ".join(f"{label}: {reason}" for label, reason in attempts)
         cached = _load_cape_cache()
-        if cached is not None:
-            cape, cache_age_days = cached
-        else:
-            notes.append(get_error_message(Exception("No data from multpl.com or cache"), "Valuation"))
+        if cached is None:
+            notes.append(f"🚫 실시간 CAPE 조회 실패 ({reasons}) — 캐시도 없음")
             return SignalResult("Valuation Overheat", False, 0, " | ".join(notes),
                                 group="leading", data_ok=False)
+        cape, cache_age_days = cached
+        notes.append(f"🚫 실시간 CAPE 조회 실패 ({reasons}) → {cache_age_days}일 전 캐시로 대체")
 
     # CAPE 값 평가 — 결측이면 'Normal(+0)' 로 위장하지 않는다 (캐시 파일은 외부 입력, 2026-09-20)
     if not math.isfinite(cape):
@@ -388,7 +478,7 @@ def signal_valuation() -> SignalResult:
         return SignalResult("Valuation Overheat", False, 0, " | ".join(notes),
                             group="leading", data_ok=False)
 
-    source_tag = f" (cached, {cache_age_days}d old)" if cache_age_days is not None else ""
+    source_tag = " (cached)" if cache_age_days is not None else ""   # 나이는 위 🚫 줄에 이미 적혀 있다
     if cape >= 35:
         score_total += 2
         notes.append(f"CAPE {cape} (Critical){source_tag} (+2)")
@@ -402,11 +492,9 @@ def signal_valuation() -> SignalResult:
         if cache_age_days > CAPE_CACHE_MAX_AGE_DAYS:
             data_ok = False      # 신선도 기준 초과 = 값이 낡아 판정 근거로 쓸 수 없음 (2026-09-20)
             notes.append(
-                f"⚠️ 실시간 조회 실패, {cache_age_days}일 전 캐시 데이터 사용 "
-                f"(신선도 기준 {CAPE_CACHE_MAX_AGE_DAYS}일 초과 — 값이 낡았을 수 있음)"
+                f"⚠️ 캐시 신선도 초과 ({cache_age_days}일 > 기준 {CAPE_CACHE_MAX_AGE_DAYS}일) "
+                f"— 값이 낡아 판정 근거로 쓸 수 없음 (판정 불가로 집계)"
             )
-        else:
-            notes.append(f"⚠️ 실시간 조회 실패, {cache_age_days}일 전 캐시 데이터 사용")
 
     return SignalResult("Valuation Overheat", score_total >= 1, score_total, " | ".join(notes),
                         group="leading", data_ok=data_ok)

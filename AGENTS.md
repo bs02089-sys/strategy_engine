@@ -217,6 +217,15 @@ Not lazy about: input validation at trust boundaries, error handling that preven
   (미완성 마지막 행 = NaN 제거). 수정 전에는 `.iloc[-1]` 이 NaN 을 집어 모든 비교(<, >)가 False 가 되고
   '정상(+0)' 으로 위장됐다 — Market Breadth(RSP/SPY)·Momentum(섹터 슬라이스)이 `+nan%` 로 +0 보고,
   최근 16회 리포트 중 14회 발생(국면이 confirm 0 → '고점 + 강세장 지속(LOC 유리)' 쪽으로 기울어 있었다).
+  🧹 **CAPE 수집 = 차단 판정 + 3단계 폴백 (2026-09-24)**: multpl.com 조회는 **200 이라고 성공이 아니다**
+  (Cloudflare 챌린지는 예외를 안 던지고 200 챌린지 페이지를 그대로 돌려준다) — `detect_block`(상태코드 +
+  본문 마커, ⚠️ `__cf_chl` 은 정상 페이지에도 있어 마커로 쓰면 오탐) + 값 범위 가드(5~100) 후
+  ① requests → ② StealthyFetcher(우회) → ③ 캐시 폴백, **내려갈 때마다 사유를 detail 에 남긴다**
+  (조용한 폴백 금지 — 캐시 신선도 7일 초과면 `data_ok=False`). ②는 **선택 의존성**이고 **미설치가
+  의도된 결정**이다: multpl 은 현재 차단 중이 아니며(2026-09-24 실측 41.28), 진짜 위험(낡은 값의 조용한
+  사용)은 ①③ 만으로 이미 막혔다. 설치 비용은 엔진 venv 의 `curl_cffi` 범프(yfinance HTTP 계층,
+  scrapling[fetchers] 는 >=0.16.1 요구 — requirements 는 0.16.0 고정) + CI 런당 ~2분 → **리포트에 실제
+  🚫 차단 문구가 뜨면 그때** `pip install "scrapling[fetchers]"` + `patchright install chromium` 으로 ②를 살린다.
   🧩 **결측 = 판정 불가 분리 (2026-09-20 전수 점검 후 추가)**: 점수 0 은 '정상'과 '판정 불가'가
   같은 값이라, `SignalResult.data_ok` 플래그로 둘을 구분한다 — `except` 분기와 결측 가드
   (`_require_finite()` = 결측이면 예외 / 인라인 `math.isfinite` 검사 = '판정 불가' 문구)가
