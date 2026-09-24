@@ -18,7 +18,15 @@ jobs:
       - uses: actions/checkout@v4
       - name: Sync with latest remote (start from newest state)
         # 체크아웃 직후 최신 원격 상태로 rebase — 스테일 상태 기준 변경 방지
-        run: git pull --rebase
+        # ⚠️ 실패를 그대로 두면 단계 판정·푸시가 통째로 skipped 된다 (2026-09-23 러너 TLS 실패
+        # 'server certificate verification failed. CAfile: none' 로 알림 런이 즉사).
+        # ① 기본 pull → ② 시스템 CA 번들 명시 재시도 → ③ 그래도 실패하면 경고만 남기고 진행
+        run: |
+          if git pull --rebase; then exit 0; fi
+          sleep 3
+          CA=/etc/ssl/certs/ca-certificates.crt
+          if [ -f "$CA" ] && git -c http.sslCAInfo="$CA" pull --rebase; then exit 0; fi
+          echo "::warning::원격 동기화 실패 — 체크아웃(최신 커밋) 상태로 계속 진행합니다"
       - uses: actions/setup-python@v5
         with: {python-version: '3.14'}
       - run: pip install -r requirements.txt
@@ -44,7 +52,17 @@ jobs:
           git config --global user.email "bot@tracker.com"
           # 상태 파일만 커밋 (로그는 저장하지 않음)
           git add -f market_state.json
-          git commit -m "Auto-update stage state" || echo "No changes"
-          # -X theirs: 충돌 시 원격 버전 유지 — 봇 상태는 다음 실행에서 재생성
-          git pull --rebase -X theirs
-          git push
+          git commit -m "Auto-update stage state" || echo "No changes"          # -X theirs: 충돌 시 원격 버전 유지 — 봇 상태는 다음 실행에서 재생성
+          # 상태 push 는 일시 네트워크/TLS 실패를 3회까지 재시도해 흡수한다 — 최종 실패는
+          # 스텝 실패로 노출(2026-09-23 러너 TLS 실패 대응).
+          # push 실패 시 인증서 검증 실패(CAfile: none) 대비 시스템 CA 번들 명시 재시도 포함.
+          CA=/etc/ssl/certs/ca-certificates.crt
+          ok=false
+          for i in 1 2 3; do
+            git pull --rebase -X theirs || true
+            if git push; then ok=true; break; fi
+            if [ -f "$CA" ] && git -c http.sslCAInfo="$CA" push; then ok=true; break; fi
+            echo "::warning::market_state push 실패 (시도 $i/3) — 3초 후 재시도"
+            sleep 3
+          done
+          $ok || { echo "::error::market_state push 3회 실패 — 이번 회차 상태가 저장되지 않았습니다"; exit 1; }

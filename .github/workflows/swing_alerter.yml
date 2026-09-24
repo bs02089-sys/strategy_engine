@@ -40,7 +40,18 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Sync with latest remote (start from newest state)
-        run: git pull --rebase
+        # 이 스텝이 죽으면 브리핑·푸시·배포가 통째로 skipped 되어 알림이 조용히 멈춘다 —
+        # 2026-09-23 러너의 TLS 실패(server certificate verification failed. CAfile: none)로
+        # 10분 폴링 런이 이 스텝에서 즉시 종료됐다 (같은 날 gh-pages 배포 스텝도 1건 실패).
+        # ① 기본 pull → ② 시스템 CA 번들 명시 재시도 → ③ 그래도 실패하면 경고만 남기고
+        # 진행 (체크아웃 자체가 최신 커밋이라 대개 무해하고, 종료 단계의
+        # pull --rebase -X theirs 가 정합한다).
+        run: |
+          if git pull --rebase; then exit 0; fi
+          sleep 3
+          CA=/etc/ssl/certs/ca-certificates.crt
+          if [ -f "$CA" ] && git -c http.sslCAInfo="$CA" pull --rebase; then exit 0; fi
+          echo "::warning::원격 동기화 실패 — 체크아웃(최신 커밋) 상태로 계속 진행합니다"
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -105,15 +116,29 @@ jobs:
           git commit -m "update: swing-state $(date +'%Y-%m-%d')" || echo "No changes to commit"
           # -X theirs: 안전망 — 상태가 별도 파일(swing_state.json)에 있어 사용자 설정과
           # 충돌할 일이 없지만, 만에 하나를 대비해 원격(사람) 버전을 유지한다.
-          # || true: 일시적 실패(네트워크 등) 시에도 push는 계속 시도해 갱신 유실을 방지
-          git pull --rebase -X theirs || true
-          git push
+          # 상태 push 는 일시 네트워크/TLS 실패를 3회까지 재시도해 흡수하고, 최종 실패는
+          # 스텝 실패로 노출한다 — 상태가 저장되지 않으면 다음 실행이 같은 알림을 다시 보낸다
+          # (2026-09-23 러너 TLS 실패 대응, gh-pages 배포 스텝과 같은 방식).
+          # push 실패 시 인증서 검증 실패(CAfile: none) 대비 시스템 CA 번들 명시 재시도 포함.
+          CA=/etc/ssl/certs/ca-certificates.crt
+          ok=false
+          for i in 1 2 3; do
+            git pull --rebase -X theirs || true
+            if git push; then ok=true; break; fi
+            if [ -f "$CA" ] && git -c http.sslCAInfo="$CA" push; then ok=true; break; fi
+            echo "::warning::swing_state push 실패 (시도 $i/3) — 3초 후 재시도"
+            sleep 3
+          done
+          $ok || { echo "::error::swing_state push 3회 실패 — 이번 회차 상태가 저장되지 않았습니다"; exit 1; }
 
       - name: Deploy Dashboard to GitHub Pages (gh-pages branch)
         # 일일/수동/장중 디스패치 모두 재배포 — 장중 실시간 가격을 스마트폰 앱에서 보려면
         # 디스패치마다 신선한 대시보드를 gh-pages 에 올려야 한다 (2026-08-11)
         if: always()
-        # set -e: push 실패 시 스텝이 조용히 성공 처리되지 않도록 즉시 실패시킴
+        # set -e 유지: 재시도까지 다 실패하면 스텝을 실패시켜 대시보드 갱신 누락이
+        # 조용히 성공 처리되지 않게 한다. 다만 네트워크/TLS 일시 실패(fetch·push)는
+        # 재시도로 흡수 — 2026-09-23 러너 TLS 실패로 이 스텝이 배포 없이 죽어 폰 화면이
+        # 갱신되지 않았다 (같은 날 알림 런 2건 중 이 스텝이 1건).
         run: |
           set -e
           # 대시보드 생성이 실패한 실행에선 배포를 건너뛴다 — 이전 gh-pages 유지
@@ -128,10 +153,30 @@ jobs:
           cp sw.js /tmp/sw.js
           cp OneSignalSDKWorker.js /tmp/OneSignalSDKWorker.js
 
-          # 기존 gh-pages 가 있으면 그 위에, 없으면 main 기준 빈 브랜치로 생성
-          git fetch origin gh-pages:refs/remotes/origin/gh-pages 2>/dev/null || true
+          # 러너 인증서 검증 실패(CAfile: none) 대비 — 아래 재시도들이 함께 쓴다
+          CA=/etc/ssl/certs/ca-certificates.crt
+
+          # 기존 gh-pages 가 있으면 그 위에, 없으면 main 기준 빈 브랜치로 생성.
+          # 최초 배포에서는 원격에 gh-pages 가 없어 fetch 가 실패하는 게 정상이므로,
+          # 먼저 존재 여부를 확인해 '없음'과 '네트워크 실패'를 구분한다.
+          remote_has_gh_pages=false
+          if git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then
+            remote_has_gh_pages=true
+            for i in 1 2 3; do
+              if git fetch origin gh-pages:refs/remotes/origin/gh-pages; then break; fi
+              echo "::warning::gh-pages fetch 실패 (시도 $i/3) — 3초 후 재시도"
+              sleep 3
+            done
+          fi
+
           if git rev-parse --verify origin/gh-pages >/dev/null 2>&1; then
             git checkout -B gh-pages origin/gh-pages
+          elif $remote_has_gh_pages; then
+            # 원격에는 있는데 fetch 가 실패한 경우 — 고아 브랜치로 갈아치우면
+            # gh-pages 이력이 통째로 사라지므로 이번 회차 배포는 건너뛴다
+            # (이전 대시보드 유지, 다음 폴링에서 재배포)
+            echo "::warning::gh-pages 조회 실패 — 배포 생략 (이전 대시보드 유지)"
+            exit 0
           else
             git checkout --orphan gh-pages
             git rm -rf --quiet . 2>/dev/null || true
@@ -151,6 +196,14 @@ jobs:
             echo "변경 없음 — 배포 생략"
           else
             git commit -m "deploy: swing dashboard $(date +'%Y-%m-%d')"
-            git push origin gh-pages --force
+            # 푸시도 일시 실패가 있으므로 3회까지 재시도, 최종 실패는 스텝 실패로 노출
+            pushed=false
+            for i in 1 2 3; do
+              if git push origin gh-pages --force; then pushed=true; break; fi
+              if [ -f "$CA" ] && git -c http.sslCAInfo="$CA" push origin gh-pages --force; then pushed=true; break; fi
+              echo "::warning::gh-pages push 실패 (시도 $i/3) — 3초 후 재시도"
+              sleep 3
+            done
+            $pushed || { echo "::error::gh-pages push 3회 실패 — 대시보드 배포 누락"; exit 1; }
           fi
           git checkout main || true
