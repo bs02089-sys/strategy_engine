@@ -18,6 +18,17 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(levelname)s | %(
 
 STAGE5_RESET_DAYS = 30
 
+# 하단 래더 1단계 진입 조건 + 무효화 (2026-09-29 재설계 — 근거는 MarketBottomTracker 참고)
+BOTTOM_DRAWDOWN_PCT = 0.10      # 6개월 고점 대비 낙폭
+BOTTOM_RSI_MAX = 35             # RSI(14) 과매도
+BOTTOM_EXPIRY_STAGES = (1, 2)   # 3단계는 제외 — 만료시키면 4단계(20일 고점 돌파)를 못 기다린다
+BOTTOM_EXPIRY_BARS = 30
+
+# 상단 래더 무효화 (2026-09-29 — 근거는 MarketTopTracker 참고)
+TOP_EXPIRY_STAGES = (4,)
+TOP_EXPIRY_BARS = 120           # 4단계(분산) 체류 상한 — 평균 8~15개월·최장 2.4년을 약 6개월로 제한
+# ⚠️ 데이터 창이 6개월(약 126봉)이라 만료값이 126 이상이면 아무 일도 하지 않는다.
+
 
 # ====================== 기술적 지표 ======================
 def calculate_rsi(close: pd.Series, period: int = 14) -> pd.Series:
@@ -50,9 +61,35 @@ def calculate_bollinger_upper(close: pd.Series, period: int = 20, num_std: float
 class MarketStageTracker:
     MIN_ROWS = 80
 
-    def __init__(self, stage: int = 0, stage5_entered_date: Optional[str] = None):
+    def __init__(self, stage: int = 0, stage5_entered_date: Optional[str] = None, stage_entered_date: Optional[str] = None):
         self.stage = stage
         self.stage5_entered_date = stage5_entered_date
+        # 현재 단계(1~5) 진입일 — 리포트에 '언제부터 이 단계인지'를 표시하기 위한 값.
+        # 단계는 되돌아가지 않으므로 몇 주 전 이벤트인지 날짜 없이는 알 수 없어 오해를 샀다 (2026-09-29).
+        # ponytail: 5단계에선 stage5_entered_date 와 같은 값이지만, 그쪽은 리셋 판정 전용이라 건드리지 않는다.
+        self.stage_entered_date = stage_entered_date
+
+    def _expire_if_stale(self, df: pd.DataFrame, stages: tuple, max_bars: int, label: str) -> bool:
+        """지정 단계가 max_bars 봉 동안 다음 단계로 못 가면 0으로 리셋 (2026-09-29).
+
+        단계가 올라갈 때마다 기산일이 갱신되므로, "현재 단계에서 N봉 무진전"이 만료 조건이다.
+        기산일은 이미 저장되는 stage_entered_date 를 그대로 쓴다(별도 필드 불필요, 멱등 —
+        같은 날 여러 번 실행해도 같은 봉 수가 나온다).
+        """
+        if self.stage not in stages:
+            return False
+        if self.stage_entered_date is None:
+            self.stage_entered_date = self._get_last_date(df)   # 날짜 없는 구버전 상태 → 지금부터 기산
+            return False
+        idx = pd.to_datetime(df.index, errors="coerce")
+        elapsed = int((idx > pd.Timestamp(self.stage_entered_date)).sum())
+        if elapsed >= max_bars:
+            self.stage = 0
+            self.stage_entered_date = None
+            self.stage5_entered_date = None
+            logging.info(f"🔄 {label} 무진전 만료 → 0 리셋 ({elapsed}봉 경과)")
+            return True
+        return False
 
     def _prepare_df(self, df: pd.DataFrame) -> Optional[pd.DataFrame]:
         required_cols = {'close', 'volume'}
@@ -99,6 +136,7 @@ class MarketStageTracker:
         if elapsed >= STAGE5_RESET_DAYS:
             self.stage = 0
             self.stage5_entered_date = None
+            self.stage_entered_date = None
             logging.info(f"🔄 Stage 5 → 0 리셋 ({elapsed}일 경과)")
             return True
         return False
@@ -107,15 +145,20 @@ class MarketStageTracker:
 class MarketBottomTracker(MarketStageTracker):
     STAGE_NAMES = {0: "초기 상태", 1: "매도세 소진", 2: "재테스트", 3: "트랩", 4: "추세 전환", 5: "🔥 최종 매수 신호"}
 
-    def __init__(self, stage: int = 0, stage5_entered_date: Optional[str] = None, exhaustion_threshold: float = 0.10):
-        super().__init__(stage, stage5_entered_date)
-        self.exhaustion_threshold = exhaustion_threshold
-
     def _is_exhaustion(self, df: pd.DataFrame) -> bool:
-        last5 = df['close'].tail(5)
-        change = last5.iloc[-1] - last5.iloc[0]
-        range_ratio = (last5.max() - last5.min()) / last5.mean()
-        return bool(change <= 0 and range_ratio <= self.exhaustion_threshold)
+        """1단계 진입 = 6개월 고점 대비 깊은 낙폭 + 과매도 RSI (2026-09-29 재설계).
+
+        구 구현(최근 5봉 순하락 + 좁은 변동폭, 임계 TQQQ 0.16)은 발동률 37%·필터가
+        사실상 무효였고, 래칫(만료 없음)까지 겹쳐 TQQQ 이력의 97%가 1단계 이상이었다.
+        백테스트(16.5년, 6개월 창): 발동률 4.8% · 발동일 이후 20일 +10.11% (+6.06pp vs 기준).
+        ⚠️ 근거는 지수/지수 레버리지 ETF — 개별주(NVDA·AAPL)에서는 기대초과가 음수였다.
+        """
+        close = df['close']
+        drawdown = close.iloc[-1] / close.max() - 1   # 창(6개월) 고점 대비 — _is_retest 와 같은 창 기준
+        rsi = calculate_rsi(close).dropna()
+        if len(rsi) == 0:
+            return False
+        return bool(drawdown <= -BOTTOM_DRAWDOWN_PCT and rsi.iloc[-1] < BOTTOM_RSI_MAX)
 
     def _is_retest(self, df: pd.DataFrame) -> bool:
         prior_low = df['close'].iloc[:-1].min()
@@ -151,15 +194,19 @@ class MarketBottomTracker(MarketStageTracker):
             return self.stage
         if self.stage == 5 and self._check_stage5_reset(clean_df):
             return self.stage
+        if self._expire_if_stale(clean_df, BOTTOM_EXPIRY_STAGES, BOTTOM_EXPIRY_BARS, "하단 1~2단계"):
+            return self.stage
 
         logic = {0: self._is_exhaustion, 1: self._is_retest, 2: self._is_trap, 3: self._is_shift}
         if self.stage in logic and logic[self.stage](clean_df):
             self.stage += 1
+            self.stage_entered_date = self._get_last_date(clean_df)
             if self.stage == 5:
-                self.stage5_entered_date = self._get_last_date(clean_df)
+                self.stage5_entered_date = self.stage_entered_date
         elif self.stage == 4 and self._is_buy_signal(clean_df):
             self.stage = 5
-            self.stage5_entered_date = self._get_last_date(clean_df)
+            self.stage_entered_date = self._get_last_date(clean_df)
+            self.stage5_entered_date = self.stage_entered_date
         return self.stage
 
 
@@ -213,16 +260,39 @@ class MarketTopTracker(MarketStageTracker):
             return self.stage
         if self.stage == 5 and self._check_stage5_reset(clean_df):
             return self.stage
+        if self._expire_if_stale(clean_df, TOP_EXPIRY_STAGES, TOP_EXPIRY_BARS, "상단 4단계"):
+            return self.stage
 
         logic = {0: self._is_overheat, 1: self._is_dead_cross, 2: self._is_band_trap, 3: self._is_distribution}
         if self.stage in logic and logic[self.stage](clean_df):
             self.stage += 1
+            self.stage_entered_date = self._get_last_date(clean_df)
             if self.stage == 5:
-                self.stage5_entered_date = self._get_last_date(clean_df)
+                self.stage5_entered_date = self.stage_entered_date
         elif self.stage == 4 and self._is_sell_signal(clean_df):
             self.stage = 5
-            self.stage5_entered_date = self._get_last_date(clean_df)
+            self.stage_entered_date = self._get_last_date(clean_df)
+            self.stage5_entered_date = self.stage_entered_date
         return self.stage
+
+
+def _stage_entry_note(stage: int, entered: Optional[str]) -> str:
+    """단계 진입일 표시 문자열 (2026-09-29 추가).
+
+    단계는 오르기만 해서(만료는 5단계 30일·하단 1~2단계 30봉뿐), 날짜가 없으면 '1단계'가
+    오늘 발생한 신호인지 몇 주 전 신호인지 구분할 수 없다 — 리포트 오해의 원인.
+    """
+    if stage == 0:
+        return ""
+    if not entered:
+        return " · 진입일 미기록"
+    try:
+        entered_date = datetime.strptime(str(entered), "%Y-%m-%d").date()
+    except ValueError:
+        return f" · 진입 {entered}"
+    elapsed = (datetime.now().date() - entered_date).days
+    days = f", {elapsed}일 전" if elapsed > 0 else ""
+    return f" · {entered} 진입{days}"
 
 
 # ====================== 메인 트래커 ======================
@@ -253,15 +323,15 @@ class DiscordMarketTracker:
 
         for ticker in self.tickers:
             saved = state.get(ticker, {}) if isinstance(state, dict) else {}
-            exh_threshold = 0.16 if ticker == "TQQQ" else 0.10
             self.bottom_trackers[ticker] = MarketBottomTracker(
                 stage=saved.get("bottom", 0),
                 stage5_entered_date=saved.get("bottom_stage5_date"),
-                exhaustion_threshold=exh_threshold,
+                stage_entered_date=saved.get("bottom_stage_entered_date"),
             )
             self.top_trackers[ticker] = MarketTopTracker(
                 stage=saved.get("top", 0),
                 stage5_entered_date=saved.get("top_stage5_date"),
+                stage_entered_date=saved.get("top_stage_entered_date"),
             )
 
     def _save_state(self):
@@ -269,8 +339,10 @@ class DiscordMarketTracker:
             ticker: {
                 "bottom": self.bottom_trackers[ticker].stage,
                 "bottom_stage5_date": self.bottom_trackers[ticker].stage5_entered_date,
+                "bottom_stage_entered_date": self.bottom_trackers[ticker].stage_entered_date,
                 "top": self.top_trackers[ticker].stage,
                 "top_stage5_date": self.top_trackers[ticker].stage5_entered_date,
+                "top_stage_entered_date": self.top_trackers[ticker].stage_entered_date,
             }
             for ticker in self.tickers
         }
@@ -331,10 +403,12 @@ class DiscordMarketTracker:
 
             bottom_name = MarketBottomTracker.STAGE_NAMES.get(bottom_stage, "알 수 없음")
             top_name = MarketTopTracker.STAGE_NAMES.get(top_stage, "알 수 없음")
+            bottom_note = _stage_entry_note(bottom_stage, self.bottom_trackers[ticker].stage_entered_date)
+            top_note = _stage_entry_note(top_stage, self.top_trackers[ticker].stage_entered_date)
 
             lines.append(f"• **{ticker}**")
-            lines.append(f"   ㄴ 바닥: {bottom_stage}단계 ({bottom_name})")
-            lines.append(f"   ㄴ 천장: {top_stage}단계 ({top_name})")
+            lines.append(f"   ㄴ 바닥: {bottom_stage}단계 ({bottom_name}{bottom_note})")
+            lines.append(f"   ㄴ 천장: {top_stage}단계 ({top_name}{top_note})")
 
             if bottom_stage == 5:
                 lines.append("   **🔥 강력 매수 추천!** (최종 매수 신호 발생)")
