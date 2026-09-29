@@ -50,8 +50,6 @@ english_study/progress.json
 !LOC_DCA_strategy.py
 !sigma_DCA_garch_v1.py
 !news_agent.py
-!MarketStage_config.json
-!market_state.json
 !portfolio_config.json
 !portfolio_config_DCA_garch.json
 !requirements.txt

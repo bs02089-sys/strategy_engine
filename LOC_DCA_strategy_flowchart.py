@@ -35,7 +35,6 @@
 
 🔗 연동 시스템:
   - bear_market_signals.py → signal_report.json (시장 리스크 점수 — 참고용)
-  - MarketStageSystem.py → market_state.json (바닥 단계 — 매수 트리거로 미사용)
   - yfinance → 종가/변동성 데이터 (15분 지연)
 """
 
@@ -237,9 +236,8 @@ LOC_DCA_strategy.py (직접 실행)
  │   └── LAST_MONTHLY_PING
  ⚠️ 체결 추적/분할 예산은 봇이 저장하지 않음 (사용자 엑셀이 단일 소스 — 2026-08-16)
 
- portfolio_config.json  (읽기 전용, MarketStageSystem.py가 공유 — 키 목록만 사용)
+ portfolio_config.json  (읽기 전용 — 키 목록만 사용)
 
- market_state.json  (읽기 전용, MarketStageSystem.py가 작성 — DCA 트리거로 미사용)
  signal_report.json  (읽기 전용, bear_market_signals.py가 작성 — 리스크 점수)
  sigma_history.csv  (쓰기 전용, Sigma 업데이트 로그)
 
@@ -329,9 +327,6 @@ jobs:
 📄 .github/workflows/bear_market_signals.yml (Bear Market Signals Engine)
   - cron '0 23 * * 1-5' (23:00 UTC) — signal_report.json 갱신
 
-📄 .github/workflows/market_stage_tracker.yml (Market Stage Tracker)
-  - cron '14 23 * * 1-5' (23:14 UTC) — market_state.json 갱신 (DCA 미사용)
-
 📄 .github/workflows/swing_alerter.yml (스윙 알리미)
   - cron '0 0 * * 1-5' (00:00 UTC) + repository_dispatch(swing-monitor)
   - setup_cronjob_org.py는 이제 스윙 전용 (ATH DCA 실시간 모니터 삭제 — 2026-08-16)
@@ -339,8 +334,7 @@ jobs:
 
 📌 워크플로우 실행 순서 (23:00~23:30 UTC, 월~금):
   1. 23:00 UTC — bear_market_signals.yml   (시장 리스크 평가)
-  2. 23:14 UTC — market_stage_tracker.yml   (시장 단계 추적 — DCA와 독립)
-  3. 23:30 UTC — loc_dca_strategy.yml       (통합 브리핑 1건 — LOC 5분할 신호 포함)
+  2. 23:30 UTC — loc_dca_strategy.yml       (통합 브리핑 1건 — LOC 5분할 신호 포함)
 
 
 📌 실행 로그 예시 (GitHub Actions Console):
@@ -374,12 +368,10 @@ jobs:
 ├── 📄 LOC_DCA_strategy_flowchart.py    ★ 본 문서
 ├── 📄 setup_cronjob_org.py              cron-job.org 실시간 알림 설정 자동화 (스윙 전용)
 ├── 📄 swing_alerter.py                  스윙 투자 알리미 (별도 전략 — LOC와 무관)
-├── 📄 MarketStageSystem.py              시장 단계 트래커 (독립 — DCA 미사용)
 ├── 📄 bear_market_signals.py            약세장 신호 분석
 │
 ├── 📄 portfolio_config.json             ★ 포트폴리오 설정 (핵심 설정 파일)
 ├── 📄 STRATEGY_RULES.md                 전략 규칙 (순수 LOC 5분할)
-├── 📄 market_state.json                 시장 상태 저장 (자동 생성)
 ├── 📄 signal_report.json                신호 리포트 (자동 생성)
 ├── 📄 sigma_history.csv                 Sigma 변경 이력 (런타임 자동 생성 — 추적 제외)
 │
@@ -390,7 +382,6 @@ jobs:
 └── 📁 .github/workflows/
     ├── loc_dca_strategy.yml           ★ 브리핑 + LOC 5분할 신호 (23:30 UTC)
     ├── bear_market_signals.yml         신호 분석 자동 실행 (23:00 UTC)
-    ├── market_stage_tracker.yml         시장 단계 추적 자동 실행 (23:14 UTC)
     └── swing_alerter.yml               스윙 알리미 (00:00 UTC + 실시간 dispatch)
 
 (2026-08-16 삭제: DUAL_MODE_SUMMARY.md · TRIGGER_OPTIMIZATION_SUMMARY.md ·

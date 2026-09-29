@@ -5,8 +5,6 @@
 > ⚠️ **2026-08-16 단일 논리 재구성**: 이동평균선(MA 레짐 필터/MA 정렬) · RSI+거래량 ·
 > ATH 하락분할 DCA(비상 모드) · STAGE5 · 회복 재진입 · 실시간 모니터(`--ath-monitor`)를
 > **전부 삭제**하고, **순수 LOC 지정가 5분할 매수** 하나로 통일했습니다. (상세: [STRATEGY_RULES.md](STRATEGY_RULES.md))
-> (범위: **`LOC_DCA_strategy.py` 내부 한정** — `MarketStageSystem.py` 의 하단/상단 5단계 트래커(STAGE5 포함)는
-> 별개 기능으로 계속 운영 중이므로 이 문장을 근거로 지우지 말 것, 2026-09-20)
 > 2026-08-17 — 분할 수 20→**5로 전환** (백테스트 `--sweep-splits` 결론: 강세장=LOC 추천 국면에서 5~10분할이 평균 수익률 최고)
 
 ---
@@ -125,7 +123,7 @@
 | **onesignal.d.ts** | OneSignal 웹 푸시 SDK 전역 타입 스텁 (대시보드 JS 검사용) |
 | **check_dashboard_js.py** | 대시보드 인라인 JS 추출 — `swing_alerter.py`의 `<script>` 블록을 `.typecheck/`로 분리 |
 | **package.json** | `npm run typecheck` 스크립트 (typescript 의존성) |
-| **MarketStageSystem.py** | 독립적인 시장 단계 시스템 — 바닥 단계 감지 |
+| ~~MarketStageSystem.py · market_state.json · market_stage_tracker.yml~~ | (제거됨 — 판정 결과가 매수/매도 트리거로 미사용, 2026-09-29) |
 | **bear_market_signals.py** | 약세장 신호 분석 시스템 |
 | **portfolio_config.json** | 📌 **포트폴리오 설정** — 포지션, Sigma, LOC 분할 파라미터 |
 | ~~TRIGGER_OPTIMIZATION_SUMMARY.md~~ | (제거됨 — ATH_DCA 전략 삭제, 2026-08-16) |
@@ -134,7 +132,6 @@
 | ~~dollar_alerter.py · dollar_config.json · dollar_personal.json · dollar_state.json · dollar_dashboard.html · dollar_split_backtest.py~~ | (제거됨 — 달러 알리미 삭제, 2026-08-31 · cron-job.org `dollar-monitor` 잡은 콘솔에서 수동 삭제) |
 | ~~MarketStage_config.json~~ | (제거됨 — portfolio_config.json으로 통합) |
 | **sigma_history.csv** | Sigma 갱신 이력 (런타임 자동 생성 — 추적 제외) |
-| **market_state.json** | 시장 단계 상태 정보 (자동 생성) |
 | **signal_report.json** | 시장 리스크 점수 (자동 생성) |
 | **requirements.txt** | Python 의존성 패키지 목록 |
 | **pyrightconfig.json** | Python 타입 검사 설정 (VSCode Pylance) |
@@ -313,12 +310,6 @@ python3 LOC_DCA_strategy_flowchart.py
 |--------|------------|------|
 | 예약 실행 | 매일 23:00 (월~금) | 시장 리스크 평가 |
 
-### `market_stage_tracker.yml` — 시장 단계 추적
-
-| 트리거 | 시간 (UTC) | 설명 |
-|--------|------------|------|
-| 예약 실행 | 매일 23:14 (월~금) | 바닥 단계 추적 |
-
 ### `swing_alerter.yml` — 스윙 투자 알리미
 
 | 트리거 | 시간 (UTC) | 설명 |
@@ -377,7 +368,7 @@ python3 LOC_DCA_strategy_flowchart.py
 
 ### TypeScript strict 검사 게이트 (모든 워크플로우 공통)
 
-모든 봇 워크플로우(`swing_alerter.yml`/`loc_dca_strategy.yml`/`bear_market_signals.yml`/`market_stage_tracker.yml`)는
+모든 봇 워크플로우(`swing_alerter.yml`/`loc_dca_strategy.yml`/`bear_market_signals.yml`)는
 봇 실행 전에 **JS 수정 검사 게이트**를 통과해야 합니다 (2026-08-14):
 
 ```bash
@@ -784,23 +775,6 @@ PY
 ---
 
 ## 🔗 연동 시스템
-
-### MarketStageSystem.py (독립 실행)
-- `portfolio_config.json`의 `POSITIONS` 키에서 티커 목록을 읽어 시장 바닥 단계(0~5) 감지
-- `LOC_DCA_strategy`와 **설정 파일 공유** (`resolve_discord_config()` 공유)
-- 감지된 바닥 단계는 `market_state.json`에 기록 — **DCA 엔진의 매수 트리거로는 사용하지 않음** (2026-08-16 이후)
-- 리포트는 각 단계의 **진입일 + 경과일**을 함께 표시 — 단계는 오르기만 해서,
-  "1단계"가 며칠 전 신호인지 날짜 없이는 알 수 없다 (2026-09-29 추가)
-- **1단계(매도세 소진) = 6개월 고점 대비 낙폭 ≤ -10% + RSI(14) < 35** (2026-09-29 재설계) —
-  구 조건(5봉 순하락 + 좁은 변동폭)은 발동률 37%라 라벨이 무의미했고, 래칫까지 겹쳐 TQQQ 이력의
-  97%가 1단계 이상이었다. **1~2단계는 30봉 무진전 시 자동 만료**(3단계는 만료 제외 — 걸면 래더가
-  완주하지 못함). 백테스트 발동률 4.8%·발동일 이후 20일 +10.11%(+6.06pp) → 1단계 이상 점유가
-  TQQQ 97.4%→**43.6%** 로 정상화(QQQ 49.3%·SPY 37.3%).
-  ⚠️ 근거는 **지수/지수 레버리지 ETF 한정**(개별주는 기대초과가 음수) — 상세 근거는 AGENTS.md 참고
-- **천장(상단)은 처방이 반대** (2026-09-29) — 1단계 조건은 **그대로 두고**, 4단계(분산) 체류에만
-  120봉(≈6개월) 만료를 걸었다. 후보 조건(고점+과매수)은 모멘텀 자산에서 부호가 뒤집혀(SOXL +6.92pp)
-  교체 불가, 4단계는 평균 8~15개월·최장 888일을 흡수해 점유 60.9%→**40.5%** 로 축소.
-  천장 신호는 수익률이 아니라 **'이후 최대낙폭'** 에서 우위가 나온다(매도가 아니라 리스크 확대 신호)
 
 ### bear_market_signals.py (독립 실행)
 - 약세장 신호를 분석하여 `signal_report.json`에 리스크 점수 기록
