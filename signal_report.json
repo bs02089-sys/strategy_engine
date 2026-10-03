@@ -1,26 +1,26 @@
 {
-  "timestamp": "2026-10-02T02:01:59.623264",
+  "timestamp": "2026-10-03T01:45:35.414042",
   "total_score": 5,
   "degraded_signals": [],
   "signals": [
     {
       "name": "Yield Curve Inversion",
       "score": 0,
-      "detail": "Normal (+0.46%p) (+0)",
+      "detail": "Normal (+0.45%p) (+0)",
       "group": "leading",
       "data_ok": true
     },
     {
       "name": "Market Breadth",
       "score": 1,
-      "detail": "Market breadth stable (+0) | Concentration risk high (RSP/SPY ratio -3.8%) (+1)",
+      "detail": "Market breadth stable (+0) | Concentration risk high (RSP/SPY ratio -4.0%) (+1)",
       "group": "confirm",
       "data_ok": true
     },
     {
       "name": "Credit Spread",
       "score": 0,
-      "detail": "HY stable (3.12%) | IG stable (0.84%)",
+      "detail": "HY stable (3.24%) | IG stable (0.86%)",
       "group": "confirm",
       "data_ok": true
     },
@@ -34,21 +34,21 @@
     {
       "name": "Valuation Overheat",
       "score": 2,
-      "detail": "CAPE 41.07 (Critical) (+2)",
+      "detail": "CAPE 41.38 (Critical) (+2)",
       "group": "leading",
       "data_ok": true
     },
     {
       "name": "Leading Indicators",
       "score": 0,
-      "detail": "경제활동 확장 (동행지수 YoY +1.9%) (+0) | Sahm Rule normal (-0.07%p) (+0)",
+      "detail": "경제활동 확장 (동행지수 YoY +1.9%) (+0) | Sahm Rule normal (0.00%p) (+0)",
       "group": "confirm",
       "data_ok": true
     },
     {
       "name": "Momentum Strategy",
       "score": 0,
-      "detail": "SPX momentum healthy (13.3%) (+0) | Growth sectors lead (+6.2% gap) (+0)",
+      "detail": "SPX momentum healthy (14.3%) (+0) | Growth sectors lead (+7.4% gap) (+0)",
       "group": "confirm",
       "data_ok": true
     }
