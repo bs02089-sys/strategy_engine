@@ -273,8 +273,8 @@ def _intraday_last_close(ticker: str, min_date: date) -> tuple[float, date] | No
     """분봉에서 가장 최근 **정규장** 종가와 그 세션 날짜를 찾는다 (일봉 확정 지연 폴백).
 
     yfinance 일봉은 세션 종료 후에도 마지막 행의 Close 가 NaN(미확정)이거나 아예 없어서
-    `dropna()` 하면 하루 낡은 종가가 '최신 확정 종가'로 반환된다 — 그 상태로 LOC 매수가/스윙
-    래더가 계산되면 가격 기준 자체가 틀어진다 (2026-09-22: 09-21 일봉 Close=NaN → 09-18 종가
+    `dropna()` 하면 하루 낡은 종가가 '최신 확정 종가'로 반환된다 — 그 상태로 LOC 매수가가
+    계산되면 가격 기준 자체가 틀어진다 (2026-09-22: 09-21 일봉 Close=NaN → 09-18 종가
     $72.64 를 현재가로 사용, 실제 09-21 종가는 ~$78.92. 당시 폴백이던 info.previousClose 도
     같은 낡은 값이라 구제되지 않았다). 1분봉은 prepost=False 라 정규장 봉만 오므로
     애프터마켓 체결가가 섞이지 않는다.
@@ -444,8 +444,7 @@ def get_all_time_high(ticker: str, max_retries: int = 3) -> tuple[float | None, 
     """
     역대 최고가(전고점/ATH) 조회 — 원시 고가(High, 미조정)·전체 이력 기준 (공용).
 
-    LOC 브리핑의 '전고점 대비 하락률'과 스윙 알리미의 MDD 래더 기준가가 이 함수 하나를
-    함께 쓴다 (Google Finance '=GOOGLEFINANCE(TICKER, "high52")' 와 일치). 실제 거래에서
+    LOC 브리핑의 '전고점 대비 하락률'이 이 함수 하나를 쓴다 (Google Finance '=GOOGLEFINANCE(TICKER, "high52")' 와 일치). 실제 거래에서
     도달한 장중 고가를 쓰므로 종가·배당 조정값을 쓰면 차트의 전고점보다 낮게 나온다
     (예: TQQQ 2026-06-03 장중 고가 $88.09 vs. 종가 최고 $87.22/06-02, 배당 조정 종가
     최고 $87.02 — 2026-09-12 통합).
@@ -565,7 +564,7 @@ def _signal_group(name: str) -> str:
 def get_market_regime(filepath="signal_report.json") -> dict | None:
     """signal_report.json 기반 시장 국면 판정 — bear_market_signals.assess_regime 규칙 재사용.
 
-    브리핑/신호에 'LOC_DCA vs 스윙 중 유리한 매수 조건'을 함께 표시한다 (2026-08-17).
+    브리핑/신호에 시장 국면(강세/약세)과 LOC 투입 시 주의 여부를 함께 표시한다.
     리포트가 없거나 파싱 실패 시 None (블록 생략).
     """
     try:
@@ -791,11 +790,10 @@ def _build_briefing_lines(now_ny: datetime, cfg: dict) -> list[str]:
 
     market_score = get_market_score()
     lines.append(f"📊 **Market Risk Score:** {market_score} / 14")
-    # 국면 판정 — LOC_DCA vs 스윙 중 유리한 매수 조건 (bear_market_signals 규칙 재사용)
+    # 국면 판정 — 강세/약세 국면과 LOC 투입 주의 (bear_market_signals 규칙 재사용)
     regime = get_market_regime()
     if regime:
-        fav_text = f"{regime['favorite']} 매수 조건 유리" if regime['favorite'] != '선택' else f"{regime['favorite']} — 두 전략 모두 가능"
-        lines.append(f"🎯 **[국면 판정] {regime['regime']} → {fav_text}**")
+        lines.append(f"🎯 **[국면 판정] {regime['regime']}**")
         lines.append(f"• 선행(고점 경고) {regime['leading']}/6 · 확인(하락 진행) {regime['confirm']}/8")
     lines.append("─" * 40)
 
@@ -1017,7 +1015,7 @@ def load_data(ticker: str, end: date | None = None) -> pd.DataFrame:
     df = df[(df.index >= pd.Timestamp(TEST_START)) & (df.index <= pd.Timestamp(end))]
     # ⚠️ yfinance 일봉은 세션 직후 마지막 봉 Close 가 NaN(미확정) 이라 dropna 로 한 세션 낡은
     # 종가가 '최신'이 된다 — 실시간 신호 모드에선 공용 분봉 폴백으로 더 새로운 확정 종가를 찾아
-    # 마지막 행으로 붙인다 (스윙·브리핑과 같은 규칙, 2026-09-22). 백테스트는 end 고정
+    # 마지막 행으로 붙인다 (브리핑과 같은 규칙, 2026-09-22). 백테스트는 end 고정
     # 재현성을 지키기 위해 건드리지 않는다. (분봉은 미조정이지만 최근 세션이라 배당 조정 계수
     # 차이는 무시 가능 — LOC 브리핑의 get_prev_close(미조정)와 같은 계열이다.)
     if live_mode and not df.empty:

@@ -99,7 +99,7 @@
 │  ┌────────────────────────────────────────────────────────────────────────┐ │
 │  │  제목: "🌙 U.S. Market LOC Portfolio Briefing (YYYY-MM-DD HH:MM EST)" │ │
 │  │  ├─ 📊 Market Risk Score: X / 14 (from signal_report.json)             │ │
-│  │  ├─ 🎯 [국면 판정] … → LOC_DCA/스윙 유리 (2026-08-17 추가)            │ │
+│  │  ├─ 🎯 [국면 판정] … → 강세/약세 · LOC 투입 주의 (2026-08-17 추가)      │ │
 │  │  │     선행(고점 경고) a/6 · 확인(하락 진행) b/8                     │ │
 │  │  └─ ─── 40 ───                                                        │ │
 │  │                                                                        │ │
@@ -305,10 +305,6 @@ jobs:
       - uses: actions/setup-python@v5
         with: {python-version: '3.14'}
       - run: pip install -r requirements.txt
-      - name: TypeScript strict typecheck
-        run: |
-          npm ci --silent
-          npm run typecheck
       - name: Run Daily Briefing (통합 메시지 — LOC 5분할 신호 포함)
         run: |
           set -o pipefail
@@ -327,11 +323,6 @@ jobs:
 📄 .github/workflows/bear_market_signals.yml (Bear Market Signals Engine)
   - cron '0 23 * * 1-5' (23:00 UTC) — signal_report.json 갱신
 
-📄 .github/workflows/swing_alerter.yml (스윙 알리미)
-  - cron '0 0 * * 1-5' (00:00 UTC) + repository_dispatch(swing-monitor)
-  - setup_cronjob_org.py는 이제 스윙 전용 (ATH DCA 실시간 모니터 삭제 — 2026-08-16)
-
-
 📌 워크플로우 실행 순서 (23:00~23:30 UTC, 월~금):
   1. 23:00 UTC — bear_market_signals.yml   (시장 리스크 평가)
   2. 23:30 UTC — loc_dca_strategy.yml       (통합 브리핑 1건 — LOC 5분할 신호 포함)
@@ -349,7 +340,7 @@ jobs:
 
   🌙 U.S. Market LOC Portfolio Briefing (2026-08-14 19:30 EDT)
   📊 Market Risk Score: 6 / 14
-  🎯 [국면 판정] 고점 + 강세장 지속 → LOC_DCA 매수 조건 유리
+  🎯 [국면 판정] 고점 + 강세장 지속
   • 선행(고점 경고) 6/6 · 확인(하락 진행) 0/8
   ────────────────────────────────────────
 
@@ -366,8 +357,6 @@ jobs:
 │
 ├── 📄 LOC_DCA_strategy.py              ★ 완결판 (실전 엔진 — 순수 LOC 5분할 + 백테스트 + 신호)
 ├── 📄 LOC_DCA_strategy_flowchart.py    ★ 본 문서
-├── 📄 setup_cronjob_org.py              cron-job.org 실시간 알림 설정 자동화 (스윙 전용)
-├── 📄 swing_alerter.py                  스윙 투자 알리미 (별도 전략 — LOC와 무관)
 ├── 📄 bear_market_signals.py            약세장 신호 분석
 │
 ├── 📄 portfolio_config.json             ★ 포트폴리오 설정 (핵심 설정 파일)
@@ -381,8 +370,7 @@ jobs:
 │
 └── 📁 .github/workflows/
     ├── loc_dca_strategy.yml           ★ 브리핑 + LOC 5분할 신호 (23:30 UTC)
-    ├── bear_market_signals.yml         신호 분석 자동 실행 (23:00 UTC)
-    └── swing_alerter.yml               스윙 알리미 (00:00 UTC + 실시간 dispatch)
+    └── bear_market_signals.yml         신호 분석 자동 실행 (23:00 UTC)
 
 (2026-08-16 삭제: DUAL_MODE_SUMMARY.md · TRIGGER_OPTIMIZATION_SUMMARY.md ·
  REALTIME_ALERT_SETUP.md — 듀얼 모드/ATH_DCA 전략 삭제로 함께 제거)

@@ -16,8 +16,8 @@ System Overview:
   7. Momentum Strategy Signal  - SPX 200-day return & Sector rotation
 
 Regime Assessment:
-  Total Risk Score(0~14)를 시장 국면 판정에 사용해 'LOC_DCA / 스윙 중 유리한 매수 조건'을
-  함께 출력한다. 7개 시그널을 두 그룹으로 나눈다:
+  Total Risk Score(0~14)를 시장 국면 판정에 사용해 강세/약세 국면과 LOC 투입 시
+  주의 여부를 함께 출력한다. 7개 시그널을 두 그룹으로 나눈다:
     - 선행 그룹 (고점 경고, 0~6): Yield Curve · Fed Policy · Valuation(CAPE)
     - 확인 그룹 (하락 진행, 0~8): Breadth · Credit Spread · Leading Ind. · Momentum
   판정 규칙의 상세 내용은 `assess_regime()`의 docstring을 참고 (단일 출처로 관리,
@@ -600,11 +600,11 @@ def assess_regime(results: list) -> dict:
         → '하락이 실제 진행 중인지'를 확인한다
 
     판정 규칙:
-      - 확인 0점 + 선행 ≥4 → '고점 + 강세장 지속' → LOC_DCA 유리 (2017-06 유형, 전환 모니터링)
-      - 확인 0점 + 선행 <4 → '안정적 강세장'   → LOC_DCA 유리
-      - 확인 1점 (관심·미세 조짐) → '고점 + 약세 조짐 관찰' → LOC_DCA/스윙 선택 (전환 아님)
-      - 확인 2~4점 (하락 진행 조짐) → '고점 + 하락 전환' → 스윙 유리
-      - 확인 5점 이상 (하락 진행 다수) → '하락 진행' → 스윙 유리 (2021-08 유형)
+      - 확인 0점 + 선행 ≥4 → '고점 + 강세장 지속' → LOC 즉시 투입 유리 (2017-06 유형, 전환 모니터링)
+      - 확인 0점 + 선행 <4 → '안정적 강세장'   → LOC 즉시 투입 유리
+      - 확인 1점 (관심·미세 조짐) → '고점 + 약세 조짐 관찰' → 관찰 (전환 아님)
+      - 확인 2~4점 (하락 진행 조짐) → '고점 + 하락 전환' → LOC 주의 (분할 소진 위험)
+      - 확인 5점 이상 (하락 진행 다수) → '하락 진행' → LOC 주의 (2021-08 유형)
 
     ⭐ data_ok=False (데이터 결측/실패) 신호도 점수는 0 이라 '정상'과 구분되지 않는다 — 그래서
        판정 note 에 결측 신호 개수를 덧붙여 '낙관 쪽으로 기울었을 수 있음'을 함께 알린다 (2026-09-20).
@@ -620,28 +620,24 @@ def assess_regime(results: list) -> dict:
         else:
             regime = "안정적 강세장"
             note = "고점 경고·하락 진행 모두 없음 — LOC 즉시 투입이 유리"
-        favorite = "LOC_DCA"
     elif confirm == 1:
-        # 확인 1점은 미세 조짐 — 전략 전환 근거로 불충분
+        # 확인 1점은 미세 조짐 — 전환 근거로 불충분
         regime = "고점 + 약세 조짐 관찰"
-        favorite = "선택"
-        note = ("확인 그룹에서 미세 약세 신호 1개 발동 — 전략 전환 근거로는 불충분, "
-                "추가 발동 시 스윙 전환 여부 결정")
+        note = ("확인 그룹에서 미세 약세 신호 1개 발동 — 전환 근거로는 불충분, "
+                "추가 발동 시 하락 진행 여부 판단")
     elif confirm <= 4:
         regime = "고점 + 하락 전환"
-        favorite = "스윙"
         note = ("하락 진행 신호 발동 — LOC는 고점 부근에서 분할을 소진할 위험, "
-                "스윙의 ATH 하락 구간 매수가 유리해짐")
+                "투입 속도를 점검")
     else:
         regime = "하락 진행"
-        favorite = "스윙"
-        note = "하락 진행 신호 다수 — 스윙의 ATH 하락 구간 매수가 유리 (2021-08 유형)"
+        note = "하락 진행 신호 다수 — LOC 분할 소진 위험 (2021-08 유형)"
     if degraded:
         # 점수 0 은 '정상'과 '판정 불가'가 같은 값 — 결측이 있으면 국면이 낙관 쪽으로 기울므로 함께 알린다
         note += (f" ⚠️ 데이터 결측/실패로 판정 불가인 신호 {len(degraded)}개"
                  f"({', '.join(degraded)}) — 점수가 과소집계됐을 수 있다.")
     return {"leading": leading, "confirm": confirm, "regime": regime,
-            "favorite": favorite, "note": note, "degraded": degraded}
+            "note": note, "degraded": degraded}
 
 
 def print_report(results: list):
@@ -660,8 +656,7 @@ def print_report(results: list):
 
     # ── 국면 판정 (판정 규칙은 assess_regime()의 docstring 참고) ──
     reg = assess_regime(results)
-    fav_text = f"{reg['favorite']} 매수 조건 유리" if reg['favorite'] != '선택' else f"{reg['favorite']} — 두 전략 모두 가능"
-    print(f"\n [국면 판정] {reg['regime']} → {fav_text}")
+    print(f"\n [국면 판정] {reg['regime']}")
     print(f"  선행(고점 경고) {reg['leading']}/6 : Yield Curve · Fed Policy · Valuation(CAPE)")
     print(f"  확인(하락 진행) {reg['confirm']}/8 : Breadth · Credit Spread · Leading Ind. · Momentum")
     print(f"  → {reg['note']}")
