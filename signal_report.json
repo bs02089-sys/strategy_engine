@@ -1,26 +1,26 @@
 {
-  "timestamp": "2026-10-07T02:08:28.155862",
+  "timestamp": "2026-10-08T02:34:19.651794",
   "total_score": 5,
   "degraded_signals": [],
   "signals": [
     {
       "name": "Yield Curve Inversion",
       "score": 0,
-      "detail": "Normal (+0.48%p) (+0)",
+      "detail": "Normal (+0.51%p) (+0)",
       "group": "leading",
       "data_ok": true
     },
     {
       "name": "Market Breadth",
       "score": 1,
-      "detail": "Market breadth stable (+0) | Concentration risk high (RSP/SPY ratio -3.1%) (+1)",
+      "detail": "Market breadth stable (+0) | Concentration risk high (RSP/SPY ratio -3.5%) (+1)",
       "group": "confirm",
       "data_ok": true
     },
     {
       "name": "Credit Spread",
       "score": 0,
-      "detail": "HY stable (3.12%) | IG stable (0.84%)",
+      "detail": "HY stable (3.03%) | IG stable (0.83%)",
       "group": "confirm",
       "data_ok": true
     },
@@ -34,7 +34,7 @@
     {
       "name": "Valuation Overheat",
       "score": 2,
-      "detail": "CAPE 41.9 (Critical) (+2)",
+      "detail": "CAPE 41.8 (Critical) (+2)",
       "group": "leading",
       "data_ok": true
     },
@@ -48,7 +48,7 @@
     {
       "name": "Momentum Strategy",
       "score": 0,
-      "detail": "SPX momentum healthy (17.3%) (+0) | Growth sectors lead (+5.6% gap) (+0)",
+      "detail": "SPX momentum healthy (16.1%) (+0) | Growth sectors lead (+4.4% gap) (+0)",
       "group": "confirm",
       "data_ok": true
     }
