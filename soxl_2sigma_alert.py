@@ -86,8 +86,8 @@ def check_signal():
     latest_return = extract_scalar(latest['Return'])
     latest_sigma2 = extract_scalar(latest['Sigma2'])
 
-    # 2시그마 하락 기준 LOC 매수 목표가 계산
-    target_loc_price = prev_close * (1.0 - latest_sigma2)
+    # 2시그마 하락 기준 LOC 매수 목표가 계산 (당일 종가 기준 -2σ 만큼 하락한 가격)
+    target_loc_price = latest_close * (1.0 - latest_sigma2)
     is_buy_signal = latest_return < -latest_sigma2
 
     # 콘솔 출력
