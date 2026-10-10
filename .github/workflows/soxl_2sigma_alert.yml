@@ -9,6 +9,11 @@ on:
 jobs:
   check-signal:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+      DISCORD_USER_ID: ${{ secrets.DISCORD_USER_ID }}
 
     steps:
       - name: Checkout repository
