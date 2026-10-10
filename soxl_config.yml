@@ -1,0 +1,6 @@
+# SOXL 2σ 알림 설정 파일
+
+ticker: SOXL                # 종목 코드
+lookback_days: 60           # 데이터 조회 기간 (일)
+rolling_window: 20          # 롤링 기간
+sigma_multiplier: 2.0       # 시그마 배수 (1.5, 2.0 등)
