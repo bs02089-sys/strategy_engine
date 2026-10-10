@@ -68,10 +68,21 @@ def check_signal():
     df['Sigma2'] = df['Vol_20'] * SIGMA_MULTIPLIER
 
     latest = df.dropna().iloc[-1]
-    prev_close = df['Close'].iloc[-2]
-    latest_close = float(latest['Close'].iloc[0] if hasattr(latest['Close'], 'iloc') else latest['Close'])
-    latest_return = float(latest['Return'])
-    latest_sigma2 = float(latest['Sigma2'])
+    prev_close = float(df['Close'].iloc[-2].iloc[0] if hasattr(df['Close'].iloc[-2], 'iloc') else df['Close'].iloc[-2])
+
+    # Series 형태나 이중 인덱스일 경우를 대비해 안전하게 단일 값 추출
+    latest = df.dropna().iloc[-1]
+    prev_close = float(df['Close'].iloc[-2].iloc[0] if hasattr(df['Close'].iloc[-2], 'iloc') else df['Close'].iloc[-2])
+
+    # Series 형태나 이중 인덱스일 경우를 대비해 안전하게 단일 값 추출
+    latest_close_val = latest['Close']
+    latest_close = float(latest_close_val.iloc[0] if hasattr(latest_close_val, 'iloc') else latest_close_val)
+
+    latest_return_val = latest['Return']
+    latest_return = float(latest_return_val.iloc[0] if hasattr(latest_return_val, 'iloc') else latest_return_val)
+
+    latest_sigma2_val = latest['Sigma2']
+    latest_sigma2 = float(latest_sigma2_val.iloc[0] if hasattr(latest_sigma2_val, 'iloc') else latest_sigma2_val)
 
     is_buy_signal = latest_return < -latest_sigma2
 
