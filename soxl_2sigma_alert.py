@@ -86,9 +86,12 @@ def check_signal():
     latest_return = extract_scalar(latest['Return'])
     latest_sigma2 = extract_scalar(latest['Sigma2'])
 
-    # 2시그마 하락 기준 LOC 매수 목표가 계산 (당일 종가 기준 -2σ 만큼 하락한 가격)
+    # 당일 종가 기준 2시그마 하락 LOC 매수 목표가 계산
     target_loc_price = latest_close * (1.0 - latest_sigma2)
     is_buy_signal = latest_return < -latest_sigma2
+
+    # 2σ 자체의 퍼센트 수치
+    sigma_pct = latest_sigma2 * 100
 
     # 콘솔 출력
     print("=" * 55)
@@ -97,29 +100,30 @@ def check_signal():
     print(f"전일 종가      : ${prev_close:.2f}")
     print(f"당일 종가      : ${latest_close:.2f}")
     print(f"당일 수익률    : {latest_return*100:.2f}%")
-    print(f"20일 롤링 2σ   : {latest_sigma2*100:.2f}%")
+    print(f"20일 롤링 2σ   : {sigma_pct:.2f}% (배율: {SIGMA_MULTIPLIER})")
     print(f"🎯 2σ LOC 목표가: ${target_loc_price:.2f}")
     print(f"매수 신호      : {'✅ 발생!' if is_buy_signal else '❌ 없음'}")
     print("=" * 55)
 
-    # 디스코드 메시지 구성 (모바일 가독성을 위해 평문 기반으로 작성)
+    # 디스코드 메시지 구성 (2σ 기준값 및 당일 종가 기준 목표가 포함)
+    date_str = latest.name.strftime('%Y-%m-%d') if hasattr(latest.name, 'strftime') else datetime.now().strftime('%Y-%m-%d')
+    
     if is_buy_signal:
         message = (
             f"[SOXL 2σ 매수 신호 발생]\n"
-            f"날짜: {latest.name.strftime('%Y-%m-%d') if hasattr(latest.name, 'strftime') else datetime.now().strftime('%Y-%m-%d')}\n"
-            f"전일 종가: ${prev_close:.2f}\n"
+            f"날짜: {date_str}\n"
             f"당일 종가: ${latest_close:.2f} ({latest_return*100:.2f}%)\n"
-            f"임계값: {latest_sigma2*100:.2f}%\n"
-            f"2σ LOC 목표가: ${target_loc_price:.2f}\n"
+            f"2σ 기준값: {sigma_pct:.2f}% (20일 롤링 {SIGMA_MULTIPLIER}배)\n"
+            f"🎯 2σ LOC 목표가: ${target_loc_price:.2f}\n"
             f"상태: 매수 조건 충족!"
         )
     else:
         message = (
             f"[SOXL 장마감 및 LOC 목표가 안내]\n"
-            f"날짜: {datetime.now().strftime('%Y-%m-%d')}\n"
-            f"전일 종가: ${prev_close:.2f}\n"
+            f"날짜: {date_str}\n"
             f"당일 종가: ${latest_close:.2f} ({latest_return*100:.2f}%)\n"
-            f"2σ LOC 목표가: ${target_loc_price:.2f}\n"
+            f"2σ 기준값: {sigma_pct:.2f}% (20일 롤링 {SIGMA_MULTIPLIER}배)\n"
+            f"🎯 2σ LOC 목표가: ${target_loc_price:.2f}\n"
             f"상태: 일반 장세 (참고용)"
         )
 
