@@ -252,5 +252,14 @@ Not lazy about: input validation at trust boundaries, error handling that preven
   `python3 -m unittest -q test_price_basis` (네트워크 0회, yfinance 는 mock, 0.01초).
   가격 조회(`get_prev_close`/`load_data`)를 건드렸으면 이 테스트를 먼저 통과시킬 것
   (수정 전 코드에선 실제 회귀를 잡는다 — 2026-09-22 확인). 워크플로우에는 걸려 있지 않다.
+- ⚠️ **`.loc[Hashable]` 함정 — 전고점 조회는 `.max()` (2026-10-10)**: `get_all_time_high` 의
+  `float(highs.loc[peak_idx])` 는 **실행은 되지만 Pylance 가 오류로 표시**한다 — `idxmax()` 의
+  반환형이 `Hashable` 인데 `.loc` 키 오버로드는 스칼라를 받지 않는다 (`No overloads for
+  "__getitem__" match the provided arguments (reportCallIssue)`). 지금은 `float(highs.max())` 로
+  최댓값을 얻는다 — `loc[idxmax()]` 와 같은 값이고 동률일 때 첫 위치 선택도 동일하다.
+  ⚠️ `.loc[peak_idx]` 로 되돌리지 말 것 (되돌리면 그 줄에 Pylance 오류가 부활한다 — 코드 주석에도
+  같은 경고가 있다). 이 오류는 **도구(타입 스텁 유무)에 따라 보이거나 안 보인다**: 스텁이 잡히는
+  환경에선 파일 전체에서 그 줄 하나만 오류로 뜨고, 프로젝트 `pyrightconfig.json` 설정만으로는
+  `pyright` 가 0 errors 를 낸다 — "pyright 통과" 만으로 이 줄이 안전하다고 판단하지 말 것.
 - 커밋 메시지: `type: 한글 요약 — 상세` 형식 (예: `refactor: ...`, `feat: ...`, `docs: ...`).
 - 언어: 사용자 소통·문서는 한국어, 코드 식별자는 영어.

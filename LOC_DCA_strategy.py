@@ -461,8 +461,12 @@ def get_all_time_high(ticker: str, max_retries: int = 3) -> tuple[float | None, 
                 highs = hist["Close"].dropna()
                 if highs.empty:
                     raise ValueError("No high/close data.")
+            # ⚠️ 타입 검사기(Pylance)가 여기서 오류를 낸다면 `.loc[peak_idx]` 로 되돌리지 말 것 —
+            # idxmax() 의 반환형은 Hashable 이고 .loc 의 키 타입은 스칼라를 받지 않는다
+            # (pandas-stubs: __getitem__ 오버로드 불일치). 최댓값만은 .max() 로 얻는다 —
+            # idxmax() 와 같은 값이다 (동률일 때 첫 위치 선택도 동일).
             peak_idx = highs.idxmax()
-            peak_price = float(highs.loc[peak_idx])
+            peak_price = float(highs.max())
             peak_date_str = peak_idx.date().strftime("%Y-%m-%d") if isinstance(peak_idx, pd.Timestamp) else str(peak_idx)
             return peak_price, peak_date_str
         except Exception as e:  # noqa: BLE001
