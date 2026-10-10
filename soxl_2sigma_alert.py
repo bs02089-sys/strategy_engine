@@ -21,12 +21,7 @@ config = load_config()
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
 
 if not DISCORD_WEBHOOK_URL:
-    raise ValueError(
-        "환경변수 DISCORD_WEBHOOK_URL이 설정되지 않았습니다.\n"
-        "설정 방법 예시:\n"
-        "  Windows: set DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...\n"
-        "  Mac/Linux: export DISCORD_WEBHOOK_URL='https://discord.com/api/webhooks/...'"
-    )
+    raise ValueError("환경변수 DISCORD_WEBHOOK_URL이 설정되지 않았습니다.")
 
 # config.yml에서 가져오거나 기본값 사용
 TICKER = config.get("ticker", "SOXL")
@@ -46,6 +41,14 @@ def send_discord_message(content: str):
             print(f"❌ 디스코드 전송 실패: {response.status_code} - {response.text}")
     except Exception as e:
         print(f"❌ 디스코드 전송 중 오류: {e}")
+
+def extract_scalar(val):
+    """Pandas Series나 복합 구조에서 안전하게 스칼라(숫자) 값 추출"""
+    if hasattr(val, "iloc"):
+        return float(val.iloc[0])
+    if hasattr(val, "item"):
+        return float(val.item())
+    return float(val)
 
 def check_signal():
     end_date = datetime.now()
@@ -67,24 +70,27 @@ def check_signal():
     df['Vol_20'] = df['Return'].rolling(window=ROLLING_WINDOW).std()
     df['Sigma2'] = df['Vol_20'] * SIGMA_MULTIPLIER
 
-    latest = df.dropna().iloc[-1]
-    prev_close = float(df['Close'].iloc[-2].iloc[0] if hasattr(df['Close'].iloc[-2], 'iloc') else df['Close'].iloc[-2])
+    clean_df = df.dropna()
+    if clean_df.empty:
+        print("❌ 유효한 계산 데이터가 부족합니다.")
+        return
 
-    # Series 형태나 이중 인덱스일 경우를 대비해 안전하게 단일 값 추출
-    latest_close_val = latest['Close']
-    latest_close = float(latest_close_val.iloc[0] if hasattr(latest_close_val, 'iloc') else latest_close_val)
+    latest = clean_df.iloc[-1]
+    
+    # 전일 종가 안전 추출
+    prev_close_raw = df['Close'].iloc[-2]
+    prev_close = extract_scalar(prev_close_raw)
 
-    latest_return_val = latest['Return']
-    latest_return = float(latest_return_val.iloc[0] if hasattr(latest_return_val, 'iloc') else latest_return_val)
+    # 당일 지표 안전 추출
+    latest_close = extract_scalar(latest['Close'])
+    latest_return = extract_scalar(latest['Return'])
+    latest_sigma2 = extract_scalar(latest['Sigma2'])
 
-    latest_sigma2_val = latest['Sigma2']
-    latest_sigma2 = float(latest_sigma2_val.iloc[0] if hasattr(latest_sigma2_val, 'iloc') else latest_sigma2_val)
-
-    # 2시그마 하락 기준 매수 목표가 계산 (전일 종가 기준 -2σ 만큼 하락한 가격)
+    # 2시그마 하락 기준 LOC 매수 목표가 계산
     target_loc_price = prev_close * (1.0 - latest_sigma2)
-
     is_buy_signal = latest_return < -latest_sigma2
 
+    # 콘솔 출력
     print("=" * 55)
     print(f"체크 시간      : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"종목           : {TICKER}")
@@ -96,16 +102,27 @@ def check_signal():
     print(f"매수 신호      : {'✅ 발생!' if is_buy_signal else '❌ 없음'}")
     print("=" * 55)
 
-    # 항상 2시그마 목표가를 포함하여 디스코드 메시지 전송 (신호 발생 여부와 무관하게 잠들기 전 확인용)
-    message = (
-        f"📊 **{TICKER} 장마감 분석 및 LOC 목표가 안내**\n\n"
-        f"**날짜**: {latest.name.strftime('%Y-%m-%d')}\n"
-        f"**전일 종가**: ${prev_close:.2f}\n"
-        f"**당일 종가**: ${latest_close:.2f} ({latest_return*100:.2f}%)\n"
-        f"**20일 롤링 {SIGMA_MULTIPLIER}σ 임계값**: {latest_sigma2*100:.2f}%\n"
-        f"🎯 **금일 2σ LOC 매수가**: **${target_loc_price:.2f}**\n\n"
-        f"상태: {'🚨 **매수 조건 충족!**' if is_buy_signal else 'ℹ️ **일반 장세 (참고용 목표가)**'}"
-    )
+    # 디스코드 메시지 구성 (모바일 가독성을 위해 평문 기반으로 작성)
+    if is_buy_signal:
+        message = (
+            f"[SOXL 2σ 매수 신호 발생]\n"
+            f"날짜: {latest.name.strftime('%Y-%m-%d') if hasattr(latest.name, 'strftime') else datetime.now().strftime('%Y-%m-%d')}\n"
+            f"전일 종가: ${prev_close:.2f}\n"
+            f"당일 종가: ${latest_close:.2f} ({latest_return*100:.2f}%)\n"
+            f"임계값: {latest_sigma2*100:.2f}%\n"
+            f"2σ LOC 목표가: ${target_loc_price:.2f}\n"
+            f"상태: 매수 조건 충족!"
+        )
+    else:
+        message = (
+            f"[SOXL 장마감 및 LOC 목표가 안내]\n"
+            f"날짜: {datetime.now().strftime('%Y-%m-%d')}\n"
+            f"전일 종가: ${prev_close:.2f}\n"
+            f"당일 종가: ${latest_close:.2f} ({latest_return*100:.2f}%)\n"
+            f"2σ LOC 목표가: ${target_loc_price:.2f}\n"
+            f"상태: 일반 장세 (참고용)"
+        )
+
     send_discord_message(message)
 
 if __name__ == "__main__":
