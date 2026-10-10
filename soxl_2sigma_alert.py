@@ -69,7 +69,7 @@ def check_signal():
 
     latest = df.dropna().iloc[-1]
     prev_close = df['Close'].iloc[-2]
-    latest_close = float(latest['Close'])
+    latest_close = float(latest['Close'].iloc[0] if hasattr(latest['Close'], 'iloc') else latest['Close'])
     latest_return = float(latest['Return'])
     latest_sigma2 = float(latest['Sigma2'])
 
