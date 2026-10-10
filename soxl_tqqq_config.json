@@ -1,5 +1,5 @@
 {
-  "ticker": "SOXL",
+  "tickers": ["SOXL", "TQQQ"],
   "lookback_days": 60,
   "rolling_window": 20,
   "sigma_multiplier": 2.0
