@@ -71,10 +71,6 @@ def check_signal():
     prev_close = float(df['Close'].iloc[-2].iloc[0] if hasattr(df['Close'].iloc[-2], 'iloc') else df['Close'].iloc[-2])
 
     # Series 형태나 이중 인덱스일 경우를 대비해 안전하게 단일 값 추출
-    latest = df.dropna().iloc[-1]
-    prev_close = float(df['Close'].iloc[-2].iloc[0] if hasattr(df['Close'].iloc[-2], 'iloc') else df['Close'].iloc[-2])
-
-    # Series 형태나 이중 인덱스일 경우를 대비해 안전하게 단일 값 추출
     latest_close_val = latest['Close']
     latest_close = float(latest_close_val.iloc[0] if hasattr(latest_close_val, 'iloc') else latest_close_val)
 
@@ -83,6 +79,9 @@ def check_signal():
 
     latest_sigma2_val = latest['Sigma2']
     latest_sigma2 = float(latest_sigma2_val.iloc[0] if hasattr(latest_sigma2_val, 'iloc') else latest_sigma2_val)
+
+    # 2시그마 하락 기준 매수 목표가 계산 (전일 종가 기준 -2σ 만큼 하락한 가격)
+    target_loc_price = prev_close * (1.0 - latest_sigma2)
 
     is_buy_signal = latest_return < -latest_sigma2
 
@@ -93,22 +92,21 @@ def check_signal():
     print(f"당일 종가      : ${latest_close:.2f}")
     print(f"당일 수익률    : {latest_return*100:.2f}%")
     print(f"20일 롤링 2σ   : {latest_sigma2*100:.2f}%")
+    print(f"🎯 2σ LOC 목표가: ${target_loc_price:.2f}")
     print(f"매수 신호      : {'✅ 발생!' if is_buy_signal else '❌ 없음'}")
     print("=" * 55)
 
-    if is_buy_signal:
-        message = (
-            f"🚨 **{TICKER} 20일 롤링 {SIGMA_MULTIPLIER}σ 매수 신호 발생!** 🚨\n\n"
-            f"**날짜**: {latest.name.strftime('%Y-%m-%d')}\n"
-            f"**종가**: ${latest_close:.2f}\n"
-            f"**하락률**: {latest_return*100:.2f}%\n"
-            f"**{SIGMA_MULTIPLIER}σ 임계값**: {latest_sigma2*100:.2f}%\n"
-            f"**전일 종가**: ${prev_close:.2f}\n\n"
-            f"→ 전일 종가 대비 **{abs(latest_return)*100:.2f}%** 하락하여 매수 조건 충족!"
-        )
-        send_discord_message(message)
-    else:
-        print("오늘은 매수 신호가 없습니다.")
+    # 항상 2시그마 목표가를 포함하여 디스코드 메시지 전송 (신호 발생 여부와 무관하게 잠들기 전 확인용)
+    message = (
+        f"📊 **{TICKER} 장마감 분석 및 LOC 목표가 안내**\n\n"
+        f"**날짜**: {latest.name.strftime('%Y-%m-%d')}\n"
+        f"**전일 종가**: ${prev_close:.2f}\n"
+        f"**당일 종가**: ${latest_close:.2f} ({latest_return*100:.2f}%)\n"
+        f"**20일 롤링 {SIGMA_MULTIPLIER}σ 임계값**: {latest_sigma2*100:.2f}%\n"
+        f"🎯 **금일 2σ LOC 매수가**: **${target_loc_price:.2f}**\n\n"
+        f"상태: {'🚨 **매수 조건 충족!**' if is_buy_signal else 'ℹ️ **일반 장세 (참고용 목표가)**'}"
+    )
+    send_discord_message(message)
 
 if __name__ == "__main__":
     check_signal()
