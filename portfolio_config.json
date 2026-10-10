@@ -7,6 +7,7 @@
             "LOOKBACK_DAYS": 252,
             "ENTRY_MULTIPLIER": 1.43,
             "VOL_METHOD": "EWMA",
+            
             "EWMA_LAMBDA": 0.94,
             "DAILY_SIGMA": 0.043,
             "LAST_SIGMA_UPDATE": "2026-08-15",
