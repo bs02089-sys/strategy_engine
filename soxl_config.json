@@ -1,0 +1,6 @@
+{
+  "ticker": "SOXL",
+  "lookback_days": 60,
+  "rolling_window": 20,
+  "sigma_multiplier": 2.0
+}
