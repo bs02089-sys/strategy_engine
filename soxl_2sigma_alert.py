@@ -1,18 +1,20 @@
 import os
 import yfinance as yf
+import os
+import yfinance as yf
 import pandas as pd
 import numpy as np
 import requests
-import yaml
+import json 
 from datetime import datetime, timedelta
 from pathlib import Path
 
 # ==================== 설정 불러오기 ====================
 def load_config():
-    config_path = Path(__file__).parent / "config.yml"
+    config_path = Path(__file__).parent / "soxl_config.json"
     if config_path.exists():
         with open(config_path, "r", encoding="utf-8") as f:
-            return yaml.safe_load(f)
+            return json.load(f)
     return {}
 
 config = load_config()
@@ -23,8 +25,11 @@ DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
 if not DISCORD_WEBHOOK_URL:
     raise ValueError("환경변수 DISCORD_WEBHOOK_URL이 설정되지 않았습니다.")
 
-# config.yml에서 가져오거나 기본값 사용
-TICKER = config.get("ticker", "SOXL")
+# soxl_config.json에서 티커 읽어오기 (기본값 문자열 제거 및 예외 처리 추가)
+TICKER = config.get("ticker")
+if not TICKER:
+    raise ValueError("설정 파일(soxl_config.json)에 'ticker' 항목이 설정되지 않았습니다.")
+
 LOOKBACK_DAYS = config.get("lookback_days", 60)
 ROLLING_WINDOW = config.get("rolling_window", 20)
 SIGMA_MULTIPLIER = config.get("sigma_multiplier", 2.0)
