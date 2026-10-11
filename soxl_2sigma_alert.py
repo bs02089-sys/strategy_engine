@@ -49,6 +49,22 @@ def send_discord_message(content: str):
     except Exception as e:
         print(f"❌ 디스코드 전송 중 오류: {e}")
 
+def frequency_note(ticker: str) -> str:
+    """최근 1년 발동 실적 + 장기 중앙값 한 줄 (연간 예산을 몇 회로 나눌지의 분모).
+
+    계산은 `soxl_tqqq_2sigma_count.frequency_stats` 공용 함수에서만 한다 (σ·판정 정의 단일 소스).
+    통계는 부가 기능이라 실패해도 2σ 알림은 그대로 나가야 한다.
+    """
+    try:
+        from soxl_tqqq_2sigma_count import frequency_stats
+        s = frequency_stats(ticker, ROLLING_WINDOW, SIGMA_MULTIPLIER)
+    except Exception as e:
+        print(f"⚠️ [{ticker}] 발동 빈도 계산 실패(알림은 계속): {e}")
+        return ""
+    return (f"📊 예상 발동: 연 {s['median']:g}회(장기 중앙값) · 최근 1년 실제 {s['recent']}회 "
+            f"→ 연간 예산 ÷ {s['median']:g}")
+
+
 def extract_scalar(val):
     """Pandas Series나 복합 구조에서 안전하게 스칼라(숫자) 값 추출"""
     if hasattr(val, "iloc"):
@@ -117,24 +133,16 @@ def check_signals():
         # 디스코드 메시지 구성
         date_str = latest.name.strftime('%Y-%m-%d') if hasattr(latest.name, 'strftime') else datetime.now().strftime('%Y-%m-%d')
         
-        if is_buy_signal:
-            message = (
-                f"[{ticker} 2σ 매수 신호 발생]\n"
-                f"날짜: {date_str}\n"
-                f"당일 종가: ${latest_close:.2f} ({latest_return*100:.2f}%)\n"
-                f"2σ 기준값: {sigma_pct:.2f}% (20일 롤링 {SIGMA_MULTIPLIER}배)\n"
-                f"🎯 2σ LOC 목표가: ${target_loc_price:.2f}\n"
-                f"상태: 매수 조건 충족!"
-            )
-        else:
-            message = (
-                f"[{ticker} 장마감 및 LOC 목표가 안내]\n"
-                f"날짜: {date_str}\n"
-                f"당일 종가: ${latest_close:.2f} ({latest_return*100:.2f}%)\n"
-                f"2σ 기준값: {sigma_pct:.2f}% (20일 롤링 {SIGMA_MULTIPLIER}배)\n"
-                f"🎯 2σ LOC 목표가: ${target_loc_price:.2f}\n"
-                f"상태: 일반 장세 (참고용)"
-            )
+        # 신호 여부에 따라 헤더·상태만 다르다 (빈 줄은 filter(None, ...) 로 제거)
+        message = "\n".join(filter(None, [
+            f"[{ticker} 2σ 매수 신호 발생]" if is_buy_signal else f"[{ticker} 장마감 및 LOC 목표가 안내]",
+            f"날짜: {date_str}",
+            f"당일 종가: ${latest_close:.2f} ({latest_return*100:.2f}%)",
+            f"2σ 기준값: {sigma_pct:.2f}% (20일 롤링 {SIGMA_MULTIPLIER}배)",
+            f"🎯 2σ LOC 목표가: ${target_loc_price:.2f}",
+            frequency_note(ticker),
+            "상태: 매수 조건 충족!" if is_buy_signal else "상태: 일반 장세 (참고용)",
+        ]))
 
         send_discord_message(message)
 

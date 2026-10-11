@@ -669,7 +669,7 @@ def save_report_to_json(results: list, filename="signal_report.json"):
         "total_score": sum(r.score for r in results),
         "degraded_signals": [r.name for r in results if not r.data_ok],   # 판정 불가 신호 (2026-09-20)
         "signals": [{"name": r.name, "score": r.score, "detail": r.detail,
-                      "group": r.group, "data_ok": r.data_ok} for r in results]   # group·data_ok: LOC 브리핑이 국면 판정 재현용
+                      "group": r.group, "data_ok": r.data_ok} for r in results]   # group·data_ok: 리포트만으로 국면 판정을 재현하기 위한 필드
     }
     report_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), filename)
     atomic_write_json(report_path, data)

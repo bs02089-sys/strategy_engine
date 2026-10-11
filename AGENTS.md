@@ -31,37 +31,17 @@ Not lazy about: input validation at trust boundaries, error handling that preven
 ## 프로젝트 컨벤션 (strategy_engine)
 
 ### 현재 아키텍처
-- **단일 파일 엔진**: `LOC_DCA_strategy.py` — 실전 브리핑 + 백테스트(`--backtest`) + 신호(`--signal`)를 모두 담당.
-- **설정 단일 소스**: `portfolio_config.json` (포지션/시그마/LOC 분할 상태). 설정값은 코드에 하드코딩하지 않고 여기에서 읽는다.
-- **현재 전략 규칙 (2026-08-16 단일 논리 재구성 · 2026-08-17 20→5분할 전환)**: **순수 LOC 지정가 5분할 DCA**
-  하나만 사용한다 — LOC 매수가 = 전일 종가 × (1 − σ × ENTRY_MULTIPLIER), 사용자가 정규장에서 이 가격으로
-  LOC 지정가 주문 (마감가 체결 — 장 마감가 ≤ 지정가일 때만 체결, 판정은 종가 기준,
-  2026-08-17 수정 · 차수당 $10,000 코드 상수 × 최대 5차, 분할 수는 `LOC_DCA` 블록 설정 —
-  백테스트 기본값용, 예산은 사용자 엑셀 단일 소스 — config에 BUY_AMOUNT 없음, 2026-08-17).
-  전고점 표시 = 원시 고가(High, 미조정)·전체 이력 기준 — 전고점 계산은
-  **공용 함수** `LOC_DCA_strategy.get_all_time_high` 하나만 쓴다 (2026-09-12 수정·중복 제거;
-  기존 '252일 종가 최고'는 차트의 실제 전고점보다 낮게 표시됨. 매수 판정(종가 기준)은 그대로).
-  전일 종가(매수가 기준)도 **공용 함수** `LOC_DCA_strategy.get_prev_close` 하나만 쓴다 — 일봉이 미확정이면
-  정규장 분봉 종가로 폴백해 하루 낡은 종가를 쓰지 않는다 (2026-09-22 —
-  이 폴백을 걷어내면 LOC 매수가가 실제 전일 종가 기준으로 계산되지 않는다). `--signal` 의
-  `load_data()` 도 실시간 모드(`end` 미지정)에서 같은 폴백으로 마지막 확정 종가 행을 붙인다 —
-  수정 전에는 기준일이 09-18·LOC $66.99 로 하루 낡았다(실제 09-21·$68.17). 백테스트는 `end` 고정
-  재현성을 지키기 위해 제외한다 (10년 결과 +1317.0%/MDD -81.7% 재현 확인).
-  5분할 채택 근거:
-  `loc_sweep_backtest.py` (2026-09-12 재측정 — 가격 계열 원시 종가로 통일) —
-  LOC 추천 국면(강세장)에서 분할 수가 적을수록
-  평균 수익률이 높고(1분할 +404% > 5분할 +389% > 20분할 +298%), MDD는 분할 수와 무관(1~10분할 -75.8% 동일),
-  실용 균형 5~10분할 중 5분할은 평균·크래시 윈도우 모두 5~10 구간 내 최고. 20분할은 고점에서 4개월 만에
-  소진되는 약점이 드러나 폐기 (하락장 최적은 52분할이지 20분할이 아님). ⚠️ **체결 추적은 봇이 하지 않는다
-  (2026-08-16)**: 체결 여부는 증권앱 확인 + **엑셀 컬러 표시**로 관리하며, 분할 예산/회차는 엑셀이
-  단일 소스 — 브리핑은 LOC 매수가 하나만 제공한다 (자동 카운터는 실제 주문 여부를 모르므로 폐기).
-  **매도 규칙 없음** — 순수 적립 전용.
-  🔻 **주문 채널 = LS증권 (2026-09-12 기록)**: LOC 주문은 **LS증권**에서 TQQQ **LOC(장마감 지정가)**로
-  접수한다 — 마감가 ≤ 지정가일 때 종가 체결이라 엔진 판정과 같은 규칙이고, 일반 지정가로 걸면 장중
-  터치로 체결돼 판정(종가 기준)과 어긋난다. 봇은 주문을 넣지 않는다 — 알림·가격만 제공. 운영 루틴은 README
-  'LOC 5분할 운영 루틴 (LS증권)' 참고.
-  ⚠️ 위 삭제는 **`LOC_DCA_strategy.py` 내부 로직 한정**이다 — MA 레짐 필터·RSI+볼륨·ATH_DCA 비상 모드·
-  STAGE5·회복 재진입·실시간 모니터(`--ath-monitor`)는 전부 삭제(아래 제거 목록).
+- **2σ LOC 도구**: `soxl_2sigma_alert.py` (알림) + `soxl_tqqq_2sigma_count.py` (빈도 집계) —
+  설정 단일 소스 `soxl_tqqq_config.json` (`tickers` · `lookback_days`(다운로드 창) · `rolling_window`(σ 창) ·
+  `sigma_multiplier` · `count_years`(집계 창)). 지표 정의는 **`soxl_tqqq_2sigma_count._hits()` 하나만** 쓴다:
+  σ = 최근 `rolling_window`(20)거래일 일간 수익률 표준편차, LOC 목표가 = 당일 종가 × (1 − 배수 × σ),
+  발동(체결) = 당일 종가 ≤ 전일 종가 × (1 − 배수 × 전일까지의 σ) — LOC 지정가는 마감가 ≤ 지정가일 때
+  종가 체결이라 판정 규칙이 같다. ⚠️ `lookback_days` 는 **다운로드 기간일 뿐**이라 늘려도 판정이 달라지지
+  않는다 (σ 는 최근 20거래일만 사용 — 2026-10-11 실측 확인). 발동 빈도·장기 중앙값은
+  `frequency_stats()` 공용 함수로 알림 메시지에 매 실행 시 자동 갱신된다 (분모 = 연간 예산 ÷ 중앙값,
+  2026-10-11 실측 SOXL 10 · TQQQ 11 — 하루 0.3% 확률로 ±1 변동이라 사실상 고정).
+  주문 채널 = **LS증권 LOC(장마감 지정가)** — 일반 지정가로 걸면 장중 터치 체결로 판정과 어긋난다.
+  봇은 주문을 넣지 않는다 (알림·가격만 제공).
 - **약세 조기경보**: `bear_market_signals.py` (리포트 `signal_report.json` · CAPE 캐시 `cape_cache.json` ·
   WF `bear_market_signals.yml`(리포트와 함께 `cape_cache.json` 도 커밋 — 러너가 일회성이라 커밋해야
   폴백 캐시가 낡지 않는다), 평일 23:00 UTC) — 7개 지표를 **선행 그룹(고점 경고, 0~6점)** 과
@@ -99,8 +79,8 @@ Not lazy about: input validation at trust boundaries, error handling that preven
   (`_require_finite()` = 결측이면 예외 / 인라인 `math.isfinite` 검사 = '판정 불가' 문구)가
   `data_ok=False` 를 세우고, `assess_regime()` 이 note 에 결측 신호 개수와
   「점수 과소집계 가능」 경고를 덧붙인다(점수 0 이 낙관 쪽이라 결측은 LOC 유리 방향으로 편향된다).
-  리포트는 콘솔·`signal_report.json`(`data_ok`·`degraded_signals`)·LOC 브리핑(`get_market_regime`)까지
-  같은 값을 전달한다 — 구버전 리포트는 `data_ok` 기본 True 로 호환.
+  리포트는 콘솔·`signal_report.json`(`data_ok`·`degraded_signals`)까지 같은 값을 전달한다 —
+  구버전 리포트는 `data_ok` 기본 True 로 호환.
   ⚠️ **검증된 범위 (2026-09-20)**: 결측 가드 총 **9곳** — `_require_finite()` 6곳(금리 커브 ·
   Breadth DD · 스프레드 · 경제활동(USPHCI) · Sahm · 모멘텀 200D) + 인라인 유한성 검사 3곳(CAPE ·
   Breadth 비율 · 모멘텀 섹터). FRED(`fred_series`)·yfinance(`validate_yf_data`) 상류에서 결측이
@@ -108,7 +88,7 @@ Not lazy about: input validation at trust boundaries, error handling that preven
   경제활동/Sahm·Breadth·모멘텀의 `data_ok=False` 를 확인했다.
   새 신호를 추가하면 **같은 가드를 먼저 달고** 결측 주입으로 `data_ok=False` 를 확인할 것
   (상류 dropna 에만 의존 금지 — 그 보호가 빠지면 같은 버그가 그대로 재발한다).
-- **신호 시스템**: 브리핑의 ▶ 실행 액션 라인은 신호이며 실제 체결은 사용자 수동 매매 — 엔진은 주문을 자동 실행하지 않는다.
+- **신호 시스템**: 알림의 `🎯 2σ LOC 목표가` 는 신호이며 실제 체결은 사용자 수동 매매 — 봇은 주문을 자동 실행하지 않는다.
 
 ### 제거된 기능 — 재도입 금지
 - **전고점 50% 청산 (peak sell)**: 2026-08-03 제거. 백테스트 전용으로만 존재했고 실전 엔진에서는 실행되지 않았다.
@@ -178,9 +158,8 @@ Not lazy about: input validation at trust boundaries, error handling that preven
   `check_dashboard_js.py` · `tsconfig.json`/`tsconfig.dashboard.json` · `package.json`)과 cron-job.org
   swing-monitor 전용 `setup_cronjob_org.py` 도 함께 제거 — **이제 TypeScript/npm 검사 게이트가 없다.**
   ⚠️ **cron-job.org 콘솔의 원격 잡("Swing alerter realtime monitor")은 코드 삭제만으로 사라지지 않으므로
-  수동 삭제 필요** (달러/FVG/ATH DCA 잡과 동일 케이스). `LOC_DCA_strategy.get_all_time_high`/`get_prev_close`
-  는 LOC 전용으로 남으므로 건드리지 말 것. `bear_market_signals` 의 'LOC vs 스윙' 추천 문구도 함께
-  제거(LOC 단일 전략 기준 note 로 정리). 다시 추가하거나 문서에 언급하지 말 것.
+  수동 삭제 필요** (달러/FVG/ATH DCA 잡과 동일 케이스). `bear_market_signals` 의 'LOC vs 스윙' 추천 문구도
+  함께 제거(LOC 단일 전략 기준 note 로 정리 — LOC DCA 엔진 자체는 2026-10-11 삭제, 아래 항목). 다시 추가하거나 문서에 언급하지 말 것.
 
 - **후지모토 시게루 '1:2:6 매매법' 기계적 검증 (2026-09-20 실험 후 제거)**: 유튜브 영상 전략
   검증용 임시 도구 `fujimoto_126_backtest.py` (커밋 없이 삭제 — git 이력에 없음).
@@ -233,33 +212,47 @@ Not lazy about: input validation at trust boundaries, error handling that preven
   .github/workflows/market_stage_tracker.yml` (파일 4개를 함께 되돌려야 워크플로우가 죽지 않는다).
   다시 추가하거나 문서에 언급하지 말 것.
 
+- **LOC DCA 엔진 (`LOC_DCA_strategy.py` 계열)**: 2026-10-11 제거. 순수 LOC 5분할 DCA 엔진(실전 브리핑 +
+  백테스트 `--backtest` + 신호 `--signal`) · 플로우차트 `LOC_DCA_strategy_flowchart.py` ·
+  설정 `portfolio_config.json`(포지션/σ/LOC 분할 상태) · 규칙 문서 `STRATEGY_RULES.md` ·
+  회귀 테스트 `test_price_basis.py` · 워크플로우 `.github/workflows/loc_dca_strategy.yml`(평일
+  23:30 UTC) · 런타임 로그 `sigma_history.csv` 를 삭제하고 문서(README/AGENTS/.gitignore) 잔재도 정리함.
+  대체 = **2σ LOC 도구**(`soxl_2sigma_alert.py` + `soxl_tqqq_2sigma_count.py`) — 종목은 TQQQ 단일에서
+  SOXL·TQQQ 2종목으로 넓어졌고, 승수는 σ×1.43(252일 EWMA)에서 **20일 롤링 σ×2.0** 으로 바뀌었다.
+  ⚠️ **워크플로우를 함께 지워야 한다** — 스크립트만 지우면 평일 23:30 UTC 런이 매번 실패한다
+  (market_stage 와 동일 케이스). cron-job.org 원격 잡은 없었다(순수 GHA schedule).
+  💡 삭제 시점까지의 결론(재검토 참고 — 재도입 근거 아님): 5분할 채택 근거(`loc_sweep_backtest.py`
+  2026-09-12 재측정 — 강세장에서 분할이 적을수록 유리: 1분할 +404% > 5분할 +389% > 20분할 +298%,
+  MDD 는 1~10분할 동일 -75.8%) · 10년 백테스트 +1317.0%/MDD -81.7% · 도달 빈도 σ×1.43 ≈ 연 22회 ·
+  주문 채널 = LS증권 LOC(마감가 ≤ 지정가일 때 종가 체결).
+  복원: `git log --diff-filter=D -- LOC_DCA_strategy.py` 로 삭제 커밋을 찾고
+  `git checkout <삭제 커밋>^ -- LOC_DCA_strategy.py LOC_DCA_strategy_flowchart.py portfolio_config.json
+  STRATEGY_RULES.md test_price_basis.py sigma_history.csv .github/workflows/loc_dca_strategy.yml`
+  (파일 7개를 함께 되돌려야 워크플로우가 죽지 않는다).
+  다시 추가하거나 문서에 언급하지 말 것.
+
 ### 문서 규율
-- `STRATEGY_RULES.md`는 **순수 규칙만** — 백테스트 근거·성과 수치·미사용 기능 노트를 넣지 않는다.
-- 기능/로직 제거 시 모든 문서(README · 플로우차트 · 요약 문서)에서 함께 정리한다.
-- `LOC_DCA_strategy_flowchart.py`는 플로우차트 문서. (설계/분석 문서 DUAL_MODE_SUMMARY.md·TRIGGER_OPTIMIZATION_SUMMARY.md는
-  2026-08-16 듀얼 모드/ATH_DCA 삭제로 함께 제거됨 — 재생성 금지)
+- 기능/로직 제거 시 모든 문서(README · AGENTS · 요약 문서)에서 함께 정리한다 — 삭제된 파일을 가리키는
+  링크·설정 예시·실행 명령을 남기지 않는다.
+- 설계/분석 문서(DUAL_MODE_SUMMARY.md·TRIGGER_OPTIMIZATION_SUMMARY.md)는 2026-08-16 듀얼 모드/ATH_DCA
+  삭제로 함께 제거됨 — 재생성 금지.
 
 ### 검증 & 커밋
-- 변경 후 `python3 -m py_compile <file>.py` 로 문법 확인, 가능하면 실제 실행(`--signal` / `--backtest`)으로 동작 확인.
+- 변경 후 `python3 -m py_compile <file>.py` 로 문법 확인, 가능하면 실제 실행으로 동작 확인
+  (예: `python3 soxl_2sigma_alert.py`, `python3 soxl_tqqq_2sigma_count.py 5`).
   버그 검토는 코드 리뷰로 수행.
 - **테스트 전략 (2026-08-14 검토 결론)**: pytest/Zod 등 테스트·스키마 라이브러리를
   설치하지 않는다 (YAGNI). 이유: ① 계산은 Python 단일이므로 `py_compile` + 실제 실행 검증으로 충분하고,
   ② mock 기반 단위 검증이 필요하면 표준 라이브러리 `unittest.mock` 으로 충분하다 (설치 0건).
   **예외 — 테스트를 추가하는 때**: 국면 판정·가격 조회 등에서 실제 버그가 재발하면 그 함수만
   `unittest` 로 고정(회귀 테스트), 또는 계산 규칙 변경 시 변경 함수부터 테스트 작성 후 수정.
-- **가격 기준 회귀 테스트 (2026-09-22)**: 2026-09-22 에 난 가격 기준 버그(일봉 미확정 분봉 폴백 ·
-  `--signal` 낡은 세션)는 `test_price_basis.py` 에 고정해 두었다 —
-  `python3 -m unittest -q test_price_basis` (네트워크 0회, yfinance 는 mock, 0.01초).
-  가격 조회(`get_prev_close`/`load_data`)를 건드렸으면 이 테스트를 먼저 통과시킬 것
-  (수정 전 코드에선 실제 회귀를 잡는다 — 2026-09-22 확인). 워크플로우에는 걸려 있지 않다.
-- ⚠️ **`.loc[Hashable]` 함정 — 전고점 조회는 `.max()` (2026-10-10)**: `get_all_time_high` 의
-  `float(highs.loc[peak_idx])` 는 **실행은 되지만 Pylance 가 오류로 표시**한다 — `idxmax()` 의
-  반환형이 `Hashable` 인데 `.loc` 키 오버로드는 스칼라를 받지 않는다 (`No overloads for
-  "__getitem__" match the provided arguments (reportCallIssue)`). 지금은 `float(highs.max())` 로
-  최댓값을 얻는다 — `loc[idxmax()]` 와 같은 값이고 동률일 때 첫 위치 선택도 동일하다.
-  ⚠️ `.loc[peak_idx]` 로 되돌리지 말 것 (되돌리면 그 줄에 Pylance 오류가 부활한다 — 코드 주석에도
-  같은 경고가 있다). 이 오류는 **도구(타입 스텁 유무)에 따라 보이거나 안 보인다**: 스텁이 잡히는
-  환경에선 파일 전체에서 그 줄 하나만 오류로 뜨고, 프로젝트 `pyrightconfig.json` 설정만으로는
-  `pyright` 가 0 errors 를 낸다 — "pyright 통과" 만으로 이 줄이 안전하다고 판단하지 말 것.
+- ⚠️ **pandas 타입 스텁 함정 (2026-10-11 갱신)** — 실행은 되지만 Pylance 가 오류로 표시하는 패턴:
+  ① `Index[bool Series]` 인덱싱 → `.items()` 순회로 바꾼다(예: `[d.strftime(...) for d, h in hit.items() if h]`),
+  ② `Index` 순회·`Index.min()/max()` 결과에 `.strftime()` → `str(d)[:10]` 또는 f-string 포맷
+  (`f"{x:%Y-%m-%d}"`) 으로 바꾼다(원소 타입이 `Hashable`·넓은 유니온으로 잡힌다 — `pd.Timestamp()` 도
+  유니온을 다 받지는 못한다). ⚠️ 이 오류는 **도구(스텁 유무)에 따라 보이거나 안 보인다**:
+  프로젝트 `pyrightconfig.json` 이 `reportAttributeAccessIssue`·`reportArgumentType` 등을 `"none"` 으로
+  꺼 두었으므로 **"pyright 통과" 만으로 안전하다고 판단하지 말 것** — 설정 없이
+  `npx pyright@latest <file>.py` 로 한 번 더 돌려 확인한다.
 - 커밋 메시지: `type: 한글 요약 — 상세` 형식 (예: `refactor: ...`, `feat: ...`, `docs: ...`).
 - 언어: 사용자 소통·문서는 한국어, 코드 식별자는 영어.

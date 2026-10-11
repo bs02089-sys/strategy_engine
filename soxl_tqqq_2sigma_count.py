@@ -1,4 +1,4 @@
-"""SOXL / TQQQ 롤링 2σ 매수 신호 빈도 집계 — 자금 배분 계획용.
+"""SOXL / TQQQ 롤링 2σ 매수 신호 빈도 집계 — 연간 체결 횟수 파악용.
 
 설정은 `soxl_tqqq_config.json` 공용 (알림 스크립트 `soxl_2sigma_alert.py` 와 같은 파일).
 - σ 창: `rolling_window`(거래일) × `sigma_multiplier` — 지표 정의는 이것뿐.
@@ -10,23 +10,30 @@
 - 알림 판정: 당일 수익률 < −(당일까지의 σ × 배수) → `soxl_2sigma_alert.py` 가 매일 찍는 신호.
 - 체결(LOC): 당일 종가 ≤ 전일 종가 × (1 − 배수 × 전일까지의 σ) → 주문을 미리 걸어둘 때 실제로 체결되는 날.
 
+`frequency_stats()` 는 알림 스크립트가 import 해 쓰는 공용 계산이다 — 연간 예상 발동 횟수(장기
+중앙값)와 최근 1년 실적을 돌려준다. 나눗셈(연간 예산 ÷ 발동 횟수)의 분모가 이 값이다.
+
 롤링 창이 채워지지 않는 첫 ~20거래일은 σ 가 없어 집계에서 빠진다(집계 구간을 함께 출력).
 
 사용법: `python3 soxl_tqqq_2sigma_count.py [집계 년수]` — 인자를 주면 설정값을 덮어쓴다
 (예: `... 5` 로 장기 연환산 빈도 확인 — 1년 표본은 사건이 3~8회뿐이라 흔들린다).
 
-ponytail: 조회·집계만 하는 단발 도구 — 알림/워크플로우에 연결하지 않는다.
+ponytail: 조회·집계만 하는 도구 — 알림/워크플로우에 연결하지 않는다(알림은 이걸 import 해서 쓴다).
 """
 
 import json
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
+from statistics import median
 
 import yfinance as yf
 
 ALERT_BASIS = "알림 판정 (당일 σ 포함)"
-FILL_BASIS = "체결 기준 (전일까지 σ · 룩어헤드 없음)"  # 자금 배분 비중은 이 기준으로 계산
+FILL_BASIS = "체결 기준 (전일까지 σ · 룩어헤드 없음)"  # 주문을 미리 걸어둘 때 실제 체결되는 날
+
+STATS_DAYS = 365 * 16  # 장기 중앙값용 기간 — SOXL/TQQQ 상장(2010-02) 이후 전체를 덮는 최소 길이
+YEAR_ROWS = 252  # 1년 = 252거래일
 
 
 def load_config() -> dict:
@@ -37,9 +44,8 @@ def load_config() -> dict:
         return json.load(f)
 
 
-def count_signals(ticker: str, days: int, window: int, multiplier: float) -> dict:
-    end = datetime.now()
-    start = end - timedelta(days=days)
+def load_closes(ticker: str, start: datetime, end: datetime):
+    """다운로드 결과에서 종가 Series 추출 (multi_level_index=False 로 단일 컬럼 고정)."""
     df = yf.download(
         ticker,
         start=start.strftime("%Y-%m-%d"),
@@ -49,34 +55,82 @@ def count_signals(ticker: str, days: int, window: int, multiplier: float) -> dic
     )
     if df is None or df.empty:
         raise RuntimeError(f"[{ticker}] 데이터를 가져오지 못했습니다.")
+    return df["Close"].dropna()
 
-    close = df["Close"].dropna()
+
+def _hits(close, window: int, multiplier: float, prev_sigma: bool):
+    """발동 마스크 — σ·판정 정의의 단일 소스. prev_sigma=True 면 체결 기준(전일까지의 σ)."""
     ret = close.pct_change()
     sigma = ret.rolling(window).std()
+    ref = sigma.shift(1) if prev_sigma else sigma
+    return (ret < -ref * multiplier) & ref.notna()
 
-    variants = {ALERT_BASIS: sigma, FILL_BASIS: sigma.shift(1)}
-    signals = {}
-    for label, sig in variants.items():
-        hit = (ret < -sig * multiplier) & sig.notna()
-        # ponytail: index[bool Series] 대신 items() 순회 — 부울 인덱싱은 타입 스텁에서 오류로 뜬다
-        signals[label] = [d.strftime("%Y-%m-%d") for d, h in hit.items() if h]
 
-    covered = sigma.dropna()  # 롤링 창이 채워진 구간 (앞 ~20거래일 제외)
-    if covered.empty:
-        raise RuntimeError(f"[{ticker}] 롤링 {window}일 σ 계산에 필요한 데이터가 부족합니다.")
+def signal_dates(close, window: int, multiplier: float, prev_sigma: bool) -> list[str]:
+    """발동일 목록(ISO 날짜 문자열). prev_sigma=True → 체결 기준."""
+    hits = _hits(close, window, multiplier, prev_sigma)
+    # ponytail: index[bool Series] 대신 items() 순회 — 부울 인덱싱은 타입 스텁에서 오류로 뜬다
+    return [d.strftime("%Y-%m-%d") for d, h in hits.items() if h]
+
+
+def frequency_stats(ticker: str, window: int, multiplier: float) -> dict:
+    """연간 예상 발동 횟수(장기 중앙값) + 최근 1년 실적 — 알림 스크립트 공용 계산."""
+    end = datetime.now()
+    close = load_closes(ticker, end - timedelta(days=STATS_DAYS), end)
+    hits = signal_dates(close, window, multiplier, prev_sigma=True)
+
+    # 날짜 사전순 = 시간순이라 문자열 비교만으로 창 계산이 된다
+    # (Index 위치 인덱싱을 피하려고 ISO 문자열로 다룬다 — 타입 스텁 이슈 회피)
+    # ponytail: 날짜 라벨은 str()[:10] 로 뽑는다 — .strftime() 은 스텁상 라벨 타입이
+    # Hashable 로 잡혀 편집기에서 오류로 뜨고, ISO 문자열 앞 10자가 곪 날짜다
+    index_dates = [str(d)[:10] for d, _ in close.items()]
+    position = {d: i for i, d in enumerate(index_dates)}
+    hit_pos = sorted(position[d] for d in hits)
+
+    # 1년(252거래일) 롤링 창마다 발동 횟수 → 그 중앙값을 분모로 쓴다
+    counts = [sum(1 for p in hit_pos if i - YEAR_ROWS <= p <= i)
+              for i in range(YEAR_ROWS, len(index_dates))]
+    if not counts:
+        raise RuntimeError(f"[{ticker}] 중앙값 계산에 필요한 이력이 부족합니다.")
+
+    recent_cut = (end - timedelta(days=365)).strftime("%Y-%m-%d")
     return {
         "ticker": ticker,
-        "rows": len(close),
-        # ponytail: .strftime() 대신 f-string 포맷 — Index.min()/max() 는 스텁상 넓은 유니온이라
-        # 속성 호출이 편집기에서 오류로 뜨고, 포맷 지정은 어떤 타입에도 통과한다
-        "covered": (f"{covered.index.min():%Y-%m-%d}", f"{close.index.max():%Y-%m-%d}"),
-        "covered_days": len(covered),
-        "avg_sigma_pct": float(covered.mean() * 100),
-        "signals": signals,
+        "median": median(counts),
+        "mean": sum(counts) / len(counts),
+        "windows": len(counts),
+        "recent": sum(1 for d in hits if d >= recent_cut),
+        "history": (index_dates[0], index_dates[-1]),
     }
 
 
-def print_ticker(r: dict, years: float, window: int, multiplier: float) -> None:
+def count_signals(ticker: str, days: int, window: int, multiplier: float) -> dict:
+    end = datetime.now()
+    close = load_closes(ticker, end - timedelta(days=days), end)
+
+    sigma = close.pct_change().rolling(window).std()
+    covered = sigma.dropna()  # 롤링 창이 채워진 구간 (앞 ~20거래일 제외)
+    if covered.empty:
+        raise RuntimeError(f"[{ticker}] 롤링 {window}일 σ 계산에 필요한 데이터가 부족합니다.")
+
+    # ponytail: 날짜 라벨은 str()[:10] 로 뽑는다 — .strftime() 은 스텁상 라벨 타입이
+    # Hashable 로 잡혀 편집기에서 오류로 뜨고, ISO 문자열 앞 10자가 곪 날짜다
+    index_dates = [str(d)[:10] for d, _ in close.items()]
+    first_covered = next(d for d, ok in zip(index_dates, sigma.notna()) if ok)
+    return {
+        "ticker": ticker,
+        "rows": len(close),
+        "covered": (first_covered, index_dates[-1]),
+        "covered_days": len(covered),
+        "avg_sigma_pct": float(covered.mean() * 100),
+        "signals": {
+            ALERT_BASIS: signal_dates(close, window, multiplier, prev_sigma=False),
+            FILL_BASIS: signal_dates(close, window, multiplier, prev_sigma=True),
+        },
+    }
+
+
+def print_ticker(r: dict, years: float, window: int, multiplier: float, stats: dict | None) -> None:
     print("=" * 62)
     print(f"[{r['ticker']}] {r['rows']}거래일 수신 · 집계 구간 {r['covered'][0]} ~ {r['covered'][1]}")
     print(f"평균 {window}일 롤링 σ: {r['avg_sigma_pct']:.2f}% "
@@ -87,28 +141,11 @@ def print_ticker(r: dict, years: float, window: int, multiplier: float) -> None:
               f"→ 연 {len(dates) / years:.1f}회")
         for d in dates:
             print(f"      - {d}")
+    if stats:
+        print(f"  · 장기({stats['history'][0]}~) 1년 발동 중앙값: {stats['median']:g}회 "
+              f"(평균 {stats['mean']:.1f}회, 1년 창 {stats['windows']}개) · 최근 1년 실제 {stats['recent']}회"
+              f"  ← 연간 예산 ÷ {stats['median']:g}")
     print("=" * 62 + "\n")
-
-
-def print_allocation(results: list[dict], years: float) -> None:
-    counts = {r["ticker"]: len(r["signals"][FILL_BASIS]) for r in results}
-    total = sum(counts.values())
-    print("── 자금 배분 참고 (체결 기준 = 전일 σ 로 미리 걸어둔 LOC) ──")
-    if total == 0:
-        print("  발동 0회 — 비중을 정할 근거가 없다 (count_years 를 늘려 재실행)\n")
-        return
-
-    # 차수당 금액이 같다면 필요한 예산은 발동 횟수에 비례한다
-    for ticker, n in counts.items():
-        print(f"  {ticker}: 연 {n / years:.1f}회 → 비중 {n / total * 100:.0f}%")
-    lowest = min(counts.values())
-    print("  비율 " + " : ".join(f"{t} {n / lowest:.1f}" for t, n in counts.items()))
-
-    common = set.intersection(*(set(r["signals"][FILL_BASIS]) for r in results))
-    if common:
-        print(f"  ⚠️ 같은 날 동시 발동 {len(common)}일 ({', '.join(sorted(common))}) — "
-              "그날은 주문이 겹치므로 종목별 예산을 따로 잡거나 우선순위를 정해야 한다")
-    print(f"  ※ 과거 {years:g}년 빈도는 미래 보장이 아니다 — count_years 를 바꿔 민감도를 확인할 것\n")
 
 
 def main() -> None:
@@ -124,18 +161,18 @@ def main() -> None:
           f"· 실행 {datetime.now():%Y-%m-%d %H:%M:%S}")
     print(f"      (설정 lookback_days={config.get('lookback_days', 60)} 는 알림용 다운로드 창 — 여기선 미사용)\n")
 
-    results = []
     for ticker in tickers:
         try:
             r = count_signals(ticker, days, window, multiplier)
         except RuntimeError as e:
             print(f"❌ {e}\n")
             continue
-        results.append(r)
-        print_ticker(r, years, window, multiplier)
-
-    if len(results) > 1:
-        print_allocation(results, years)
+        try:
+            stats = frequency_stats(ticker, window, multiplier)
+        except RuntimeError as e:
+            print(f"⚠️ {e} — 중앙값 생략\n")
+            stats = None
+        print_ticker(r, years, window, multiplier, stats)
 
 
 if __name__ == "__main__":

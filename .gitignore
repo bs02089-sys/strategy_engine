@@ -30,9 +30,6 @@ config_safe_backup.json
 *.log.tmp
 *.cache
 
-# Sigma 갱신 이력 (런타임 자동 생성 — 추적 제외)
-sigma_history.csv
-
 # 영어 공부 개인 진척 (study.py 가 자동 생성 — 개인 데이터라 추적하지 않는다)
 english_study/progress.json
 
@@ -41,10 +38,8 @@ english_study/progress.json
 !.gitignore
 
 # 핵심 소스 파일
-!LOC_DCA_strategy.py
 !sigma_DCA_garch_v1.py
 !news_agent.py
-!portfolio_config.json
 !portfolio_config_DCA_garch.json
 !requirements.txt
 !README.md
