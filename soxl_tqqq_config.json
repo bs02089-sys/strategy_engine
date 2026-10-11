@@ -1,6 +1,8 @@
 {
+  "_NOTE": "SOXL/TQQQ 2σ 도구 공용 설정. ⚠️ 'lookback' 이름이 도구마다 다른 뜻이므로 혼동 금지 — ① lookback_days = 알림 스크립트(soxl_2sigma_alert.py)가 yfinance 에서 **받아오는 기간**(달력일). 60일 ≈ 40거래일이라 σ 창(rolling_window=20 거래일)에 2배 버퍼가 생겨 충분하다 — 신호 판정에는 영향이 없고(σ 는 최근 20거래일만 사용), 늘려도 결과가 달라지지 않는다. ② rolling_window = σ 계산 창(거래일) — 실제 지표 정의는 이것뿐이다. ③ count_years = 신호 빈도 집계 창(년, soxl_tqqq_2sigma_count.py) — 향후 1년 거래 횟수 추정용. ④ 별개로 portfolio_config.json 의 LOOKBACK_DAYS=252 는 실전 엔진(LOC_DCA_strategy.py)의 σ 계산 창(거래일·EWMA)이다 — 2σ 도구와 지표 정의가 다르므로 횟수를 직접 비교하지 말 것. (JSON 주석 불가로 _NOTE 메타 키 사용)",
   "tickers": ["SOXL", "TQQQ"],
   "lookback_days": 60,
   "rolling_window": 20,
-  "sigma_multiplier": 2.0
+  "sigma_multiplier": 2.0,
+  "count_years": 1
 }
