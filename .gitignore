@@ -16,9 +16,8 @@ venv/
 .venv*.bak/
 .idea/
 
-# 로그 파일 무시 패턴 (단, GARCH 실험 로그는 명시적으로 예외 처리)
+# 로그 파일 무시 패턴
 *_log.txt
-!sigma_DCA_garch_log.txt
 
 # 환경설정 파일 및 보안
 .env
@@ -38,9 +37,7 @@ english_study/progress.json
 !.gitignore
 
 # 핵심 소스 파일
-!sigma_DCA_garch_v1.py
 !news_agent.py
-!portfolio_config_DCA_garch.json
 !requirements.txt
 !README.md
 
