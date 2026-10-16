@@ -2,8 +2,8 @@ name: SOXL 2σ Alert
 
 on:
   schedule:
-    # 미국 장 마감 후 실행 (한국 시간 기준 오전 6시 30분 = UTC 21:30)
-    - cron: '30 21 * * 1-5'   # 월~금
+    # 미국 장 마감 후 실행 (한국 시간 기준 오전 7시 30분 = UTC 22:30)
+    - cron: '30 22 * * 1-5'   # 월~금
   workflow_dispatch:           # 수동 실행도 가능
 
 jobs:
