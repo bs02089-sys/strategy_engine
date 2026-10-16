@@ -102,16 +102,16 @@ def check_signals():
 
         latest = clean_df.iloc[-1]
         
-        # 전일 종가 안전 추출
+        # 기준 세션의 하루 전(직전 세션) 종가 안전 추출
         prev_close_raw = df['Close'].iloc[-2]
         prev_close = extract_scalar(prev_close_raw)
 
-        # 당일 지표 안전 추출
+        # 기준 세션(마지막으로 마감된 세션) 지표 안전 추출
         latest_close = extract_scalar(latest['Close'])
         latest_return = extract_scalar(latest['Return'])
         latest_sigma2 = extract_scalar(latest['Sigma2'])
 
-        # 당일 종가 기준 2시그마 하락 LOC 매수 목표가 계산
+        # 기준 세션 종가 × (1 − 2σ) → 다음 세션에 걸 LOC 매수 목표가
         target_loc_price = latest_close * (1.0 - latest_sigma2)
         is_buy_signal = latest_return < -latest_sigma2
 
@@ -122,24 +122,26 @@ def check_signals():
         print("=" * 55)
         print(f"체크 시간      : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         print(f"종목           : {ticker}")
-        print(f"전일 종가      : ${prev_close:.2f}")
-        print(f"당일 종가      : ${latest_close:.2f}")
-        print(f"당일 수익률    : {latest_return*100:.2f}%")
+        print(f"직전 세션 종가 : ${prev_close:.2f}")
+        print(f"기준 세션 종가 : ${latest_close:.2f}")
+        print(f"기준 세션 수익률: {latest_return*100:.2f}%")
         print(f"20일 롤링 2σ   : {sigma_pct:.2f}% (배율: {SIGMA_MULTIPLIER})")
-        print(f"🎯 2σ LOC 목표가: ${target_loc_price:.2f}")
+        print(f"🎯 다음 세션 LOC 목표가: ${target_loc_price:.2f}")
         print(f"매수 신호      : {'✅ 발생!' if is_buy_signal else '❌ 없음'}")
         print("=" * 55)
 
         # 디스코드 메시지 구성
         date_str = latest.name.strftime('%Y-%m-%d') if hasattr(latest.name, 'strftime') else datetime.now().strftime('%Y-%m-%d')
         
+        # 용어는 '주문 기준' 프레임으로 쓴다 — 여기서 '전일 종가' 는 알림 직전에 마감된 세션(기준
+        # 세션)의 종가이고, 목표가는 그 다음 세션에 걸 주문 가격이다(σ·수익률도 같은 기준 세션 값).
         # 신호 여부에 따라 헤더·상태만 다르다 (빈 줄은 filter(None, ...) 로 제거)
         message = "\n".join(filter(None, [
             f"[{ticker} 2σ 매수 신호 발생]" if is_buy_signal else f"[{ticker} 장마감 및 LOC 목표가 안내]",
-            f"날짜: {date_str}",
-            f"당일 종가: ${latest_close:.2f} ({latest_return*100:.2f}%)",
+            f"기준 세션: {date_str} 마감",
+            f"전일 종가: ${latest_close:.2f} ({latest_return*100:.2f}%)",
             f"2σ 기준값: {sigma_pct:.2f}% (20일 롤링 {SIGMA_MULTIPLIER}배)",
-            f"🎯 2σ LOC 목표가: ${target_loc_price:.2f}",
+            f"🎯 다음 세션 LOC 목표가: ${target_loc_price:.2f}",
             frequency_note(ticker),
             "상태: 매수 조건 충족!" if is_buy_signal else "상태: 일반 장세 (참고용)",
         ]))
