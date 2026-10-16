@@ -7,6 +7,8 @@ import json
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from soxl_tqqq_2sigma_count import download_end  # 다운로드 창 끝(마지막 마감 세션) 공용 정의
+
 # ==================== 설정 불러오기 ====================
 def load_config():
     config_path = Path(__file__).parent / "soxl_tqqq_config.json"
@@ -74,8 +76,7 @@ def extract_scalar(val):
     return float(val)
 
 def check_signals():
-    end_date = datetime.now()
-    start_date = end_date - timedelta(days=LOOKBACK_DAYS)
+    start_date = datetime.now() - timedelta(days=LOOKBACK_DAYS)
 
     # 설정된 모든 종목을 순회하며 체크
     for ticker in TICKERS: # type: ignore
@@ -83,7 +84,7 @@ def check_signals():
         df = yf.download(
             ticker,
             start=start_date.strftime("%Y-%m-%d"),
-            end=end_date.strftime("%Y-%m-%d"),
+            end=download_end(),  # 시계(UTC/KST) 대신 ET 마지막 마감 세션 기준 — CI·로컬 동일
             progress=False
         )
 

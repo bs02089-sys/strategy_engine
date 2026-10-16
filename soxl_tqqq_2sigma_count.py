@@ -15,6 +15,10 @@
 
 롤링 창이 채워지지 않는 첫 ~20거래일은 σ 가 없어 집계에서 빠진다(집계 구간을 함께 출력).
 
+다운로드 창의 끝은 `download_end()` — **마지막으로 마감된 미국 세션**이다. `datetime.now()` 를 그대로
+쓰면 러너 시계(UTC)와 로컬 시계(KST)에 따라 다른 세션이 잘리거나 진행 중인 봉이 섞인다.
+`_hits()` 와 `download_end()` 가 이 모듈의 공용 정의다 — 알림 스크립트가 import 해 쓴다.
+
 사용법: `python3 soxl_tqqq_2sigma_count.py [집계 년수]` — 인자를 주면 설정값을 덮어쓴다
 (예: `... 5` 로 장기 연환산 빈도 확인 — 1년 표본은 사건이 3~8회뿐이라 흔들린다).
 
@@ -23,9 +27,10 @@ ponytail: 조회·집계만 하는 도구 — 알림/워크플로우에 연결�
 
 import json
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 from statistics import median
+from zoneinfo import ZoneInfo
 
 import yfinance as yf
 
@@ -44,12 +49,30 @@ def load_config() -> dict:
         return json.load(f)
 
 
-def load_closes(ticker: str, start: datetime, end: datetime):
-    """다운로드 결과에서 종가 Series 추출 (multi_level_index=False 로 단일 컬럼 고정)."""
+def download_end() -> str:
+    """yfinance `end`(**배타적**) 인자용 날짜 — **마지막으로 마감된 미국 세션 + 1일**.
+
+    ⚠️ `datetime.now()` 를 그대로 쓰면 한 세션이 어긋난다 (2026-10-16 수정 — CI 만 한 세션 낡았다):
+    ① GHA 러너는 UTC 라 22:30 UTC(=18:30 ET, 마감 후) 실행 시 UTC 날짜가 **그날 마감된 세션**과
+       같아지고, `end` 가 배타적이라 그 세션이 잘려 직전 세션 값이 나온다 (로컬 KST 실행과 하루 차),
+    ② KST 로컬 실행은 반대로 장중(11:00 ET 이후)에 **진행 중인 부분 봉**을 마감가로 집는다.
+    ET 정규장 마감(16:00) 을 기준으로 '마지막 마감 세션'을 정하면 두 경로가 같은 세션을 쓴다.
+    휴장일·주말이면 그 이전 거래일 봉이 그대로 마지막 행이 된다.
+    """
+    et = datetime.now(timezone.utc).astimezone(ZoneInfo("America/New_York"))
+    last_session = et.date() if et.time() >= time(16, 0) else et.date() - timedelta(days=1)
+    return (last_session + timedelta(days=1)).strftime("%Y-%m-%d")
+
+
+def load_closes(ticker: str, start: datetime):
+    """다운로드 결과에서 종가 Series 추출 (multi_level_index=False 로 단일 컬럼 고정).
+
+    창 끝은 늘 `download_end()`(마지막 마감 세션) — 호출마다 같은 규칙을 쓴다.
+    """
     df = yf.download(
         ticker,
         start=start.strftime("%Y-%m-%d"),
-        end=end.strftime("%Y-%m-%d"),
+        end=download_end(),
         progress=False,
         multi_level_index=False,  # 단일 종목 → df["Close"] 가 항상 Series (컬럼 구조 변동 차단)
     )
@@ -75,8 +98,8 @@ def signal_dates(close, window: int, multiplier: float, prev_sigma: bool) -> lis
 
 def frequency_stats(ticker: str, window: int, multiplier: float) -> dict:
     """연간 예상 발동 횟수(장기 중앙값) + 최근 1년 실적 — 알림 스크립트 공용 계산."""
-    end = datetime.now()
-    close = load_closes(ticker, end - timedelta(days=STATS_DAYS), end)
+    now = datetime.now()
+    close = load_closes(ticker, now - timedelta(days=STATS_DAYS))
     hits = signal_dates(close, window, multiplier, prev_sigma=True)
 
     # 날짜 사전순 = 시간순이라 문자열 비교만으로 창 계산이 된다
@@ -93,7 +116,7 @@ def frequency_stats(ticker: str, window: int, multiplier: float) -> dict:
     if not counts:
         raise RuntimeError(f"[{ticker}] 중앙값 계산에 필요한 이력이 부족합니다.")
 
-    recent_cut = (end - timedelta(days=365)).strftime("%Y-%m-%d")
+    recent_cut = (now - timedelta(days=365)).strftime("%Y-%m-%d")
     return {
         "ticker": ticker,
         "median": median(counts),
@@ -105,8 +128,7 @@ def frequency_stats(ticker: str, window: int, multiplier: float) -> dict:
 
 
 def count_signals(ticker: str, days: int, window: int, multiplier: float) -> dict:
-    end = datetime.now()
-    close = load_closes(ticker, end - timedelta(days=days), end)
+    close = load_closes(ticker, datetime.now() - timedelta(days=days))
 
     sigma = close.pct_change().rolling(window).std()
     covered = sigma.dropna()  # 롤링 창이 채워진 구간 (앞 ~20거래일 제외)
