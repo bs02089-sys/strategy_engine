@@ -22,6 +22,7 @@ from soxl_tqqq_2sigma_count import (
     download_daily,
     expected_session,
     frequency_stats,
+    is_trading_day_today,
     iso,
     load_settings,
     signal_frame,
@@ -276,8 +277,14 @@ if __name__ == "__main__":
                         help="재시도 횟수(결측 재판정 · 전송 재전송). 기본 0 = 재시도 없음 (CI 는 1시간 간격 2회)")
     parser.add_argument("--ping", action="store_true",
                         help="수신 경로 점검용 메시지 1건만 전송 (매월 1일 CI. 시세 조회 없음)")
+    parser.add_argument("--skip-non-trading-day", action="store_true",
+                        help="오늘(ET)이 미국 증시 휴장일이면 알림 없이 종료 (CI 스케줄 실행용. "
+                             "수동 실행엔 쓰지 않는다 — 휴장 캘린더가 없으면 건너뛰지 않고 그대로 진행)")
     args = parser.parse_args()
     if args.ping:
         send_ping()
+    elif args.skip_non_trading_day and is_trading_day_today() is False:
+        # 휴장일엔 새 세션이 없어 어제와 같은 알림이 반복된다 — 조용히 끝낸다(정상 종료)
+        print("ℹ️ 오늘은 미국 증시 휴장일 — 알림 없이 종료")
     else:
         check_signals(args.retry_wait, args.retry_attempts)
