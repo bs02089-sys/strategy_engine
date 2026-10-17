@@ -9,6 +9,7 @@
 - `download_daily()` — yfinance 다운로드 (예외를 RuntimeError 로 통일, 옵션 명시)
 - `signal_frame()` — Return · σ · 두 가지 발동 마스크 계산 (σ·판정 정의는 여기 한 곳)
 - `expected_session()` — 지금 기준으로 있어야 할 마지막 마감 세션 (봉 지연 검출용)
+- `is_trading_day_today()` — 오늘(ET)이 NYSE 거래일인지 (휴장일 중복 알림 방지용, 캘린더 없으면 None)
 - `download_end()` — 다운로드 창의 끝 (마지막으로 마감된 미국 세션 + 1일)
 - `frequency_stats()` — 연간 예상 발동 횟수(장기 중앙값) + 최근 1년 실적
 
@@ -122,6 +123,21 @@ def expected_session() -> str | None:
     try:
         day = pd.Timestamp(_last_closed_et_date())
         return iso(_NYSE.date_to_session(day, direction="previous"))
+    except Exception:
+        return None
+
+
+def is_trading_day_today() -> bool | None:
+    """오늘(ET 날짜)이 NYSE 거래일인지. 휴장 캘린더가 없거나 판단에 실패하면 None.
+
+    알림 CI 가 휴장일에 같은 세션을 또 알리지 않도록 스케줄 실행에서만 쓴다. 판단이 불가(None)하면
+    호출부는 '알림을 보내는 쪽'으로 진행해야 한다 — 조용히 건너뛰어 알림을 놓치는 쪽이 더 나쁘다.
+    """
+    if _NYSE is None:
+        return None
+    try:
+        et_today = datetime.now(timezone.utc).astimezone(ZoneInfo("America/New_York")).date()
+        return bool(_NYSE.is_session(pd.Timestamp(et_today)))
     except Exception:
         return None
 
