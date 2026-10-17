@@ -235,10 +235,13 @@ def check_signals(retry_wait: float = 0.0, retry_attempts: int = 0) -> None:
         is_last = attempt == retry_attempts
         retry_queue: list[Job] = []
         for job in queue:
-            is_resend = job.message is not None  # 루프 진입 시점에 메시지가 있으면 이전 전송이 실패한 것
-            if not is_resend:  # 첫 실행·결측 재시도분 — 판정부터
-                job.message, job.reason, job.known = evaluate(job.ticker)
-                if job.message is None:  # 결측 — 재판정 대상
+            # 지역 변수에 담아 쓴다 — 속성(job.message)은 str | None 으로 남아 편집기가 None 가능성을 지적한다
+            message = job.message
+            is_resend = message is not None  # 루프 진입 시점에 메시지가 있으면 이전 전송이 실패한 것
+            if message is None:  # 첫 실행·결측 재시도분 — 판정부터
+                message, job.reason, job.known = evaluate(job.ticker)
+                job.message = message
+                if message is None:  # 결측 — 재판정 대상
                     if not is_last:
                         print(f"⏳ [{job.ticker}] {job.reason} — {wait_label} 뒤 재시도 "
                               f"({attempt + 1}/{retry_attempts})")
@@ -246,8 +249,8 @@ def check_signals(retry_wait: float = 0.0, retry_attempts: int = 0) -> None:
                     elif not send_missing_notice(job.ticker, job.reason, job.known, attempt):
                         undelivered.append(job.ticker)
                     continue
-            # 재전송에는 표시를 붙인다 — 타임아웃 뒤 실제로는 도착했을 수 있어 중복 주문을 막는다
-            if send_discord_message(job.message + RESEND_NOTE if is_resend else job.message):
+            # 여기부터 message 는 항상 str. 재전송에는 표시를 붙인다 — 타임아웃 뒤 실제로는 도착했을 수 있어 중복 주문을 막는다
+            if send_discord_message(message + RESEND_NOTE if is_resend else message):
                 continue
             if not is_last:
                 print(f"⏳ [{job.ticker}] 전송 실패 — {wait_label} 뒤 재전송 ({attempt + 1}/{retry_attempts})")
