@@ -96,18 +96,22 @@ def extract_scalar(val):
         return float(val.item())
     return float(val)
 
-def send_missing_notice(ticker: str, reason: str, known: str, retries: int = 0) -> None:
+def send_missing_notice(ticker: str, reason: str, known: str, retries: int = 0) -> bool:
     """판정 불가 안내 — 사유와 마지막 확정 세션을 남겨 직전 알림 목표가 재사용을 막는다."""
     tail = f"재시도 {retries}회 후에도 미해결" if retries else "재시도 없음"
-    send_discord_message("\n".join([
+    return send_discord_message("\n".join([
         f"[{ticker} 2σ 알림 생략 — 판정 불가]",
         f"사유: {reason}",
         f"마지막 확정 세션: {known}",
         f"🎯 다음 세션 LOC 목표가: 계산 보류 — 직전 목표가 재사용 금지 ({tail})",
     ]))
 
-def check_ticker(ticker: str, start_date: datetime) -> tuple[str, str] | None:
-    """종목 1회 판정 — 정상이면 알림까지 보내고 None, 판정 불가면 (사유, 마지막 확정 세션) 반환."""
+def evaluate(ticker: str, start_date: datetime) -> tuple[str | None, str, str]:
+    """종목 1회 판정 → (알림 메시지, 판정 불가 사유, 마지막 확정 세션).
+
+    정상이면 (메시지, "", ""), 판정 불가면 (None, 사유, 마지막 확정 세션). **전송은 호출부가 한다** —
+    결측(데이터)과 전송 실패를 같은 재시도 루프에서 다루려면 메시지를 만들어 두고 재전송할 수 있어야 한다.
+    """
     print(f"\n📡 [{ticker}] 데이터 불러오는 중...")
     df = yf.download(
         ticker,
@@ -118,7 +122,7 @@ def check_ticker(ticker: str, start_date: datetime) -> tuple[str, str] | None:
 
     if df is None or df.empty:  # yfinance 는 실패 시 None 을 돌려줄 수 있다
         print(f"❌ [{ticker}] 데이터를 가져오지 못했습니다.")
-        return (f"{ticker} 데이터 수신 실패 (yfinance)", "없음")
+        return (None, f"{ticker} 데이터 수신 실패 (yfinance)", "없음")
 
     df['Return'] = df['Close'].pct_change()
     df['Vol_20'] = df['Return'].rolling(window=ROLLING_WINDOW).std()
@@ -144,7 +148,7 @@ def check_ticker(ticker: str, start_date: datetime) -> tuple[str, str] | None:
         known_str = (f"${extract_scalar(known.iloc[-1]):.2f} (세션 {str(known.index[-1])[:10]})"
                      if len(known) else "없음")
         print(f"⚠️ [{ticker}] 판정 불가 — {reason}")
-        return (reason, known_str)
+        return (None, reason, known_str)
 
     latest = clean_df.iloc[-1]
 
@@ -191,43 +195,62 @@ def check_ticker(ticker: str, start_date: datetime) -> tuple[str, str] | None:
         "상태: 매수 조건 충족!" if is_buy_signal else "상태: 일반 장세 (참고용)",
     ]))
 
-    send_discord_message(message)
-    return None
+    return (message, "", "")
 
 def check_signals(retry_wait: float = 0.0, retry_attempts: int = 0) -> None:
-    """모든 종목을 판정하고, 결측으로 생략된 종목은 retry_wait 초 뒤 다시 시도한다.
+    """모든 종목을 판정·전송하고, **결측이거나 전송이 실패한** 종목은 retry_wait 초 뒤 다시 시도한다.
 
     재시도는 **같은 프로세스에서 다시 받아온다** — yfinance 의 가격 히스토리 경로
     (`YfData.get_raw_json`)는 응답 캐시를 쓰지 않아 매번 새 요청이 나간다(2026-10-17 확인).
-    이미 알림을 보낸 종목은 재시도 목록에서 빠지므로 같은 세션이 두 번 알림되지 않고,
-    끝까지 실패한 종목만 마지막에 판정 불가 안내를 한 번 보낸다.
+    - 결측 재시도: 그 종목을 다시 받아 재판정한다.
+    - 전송 실패 재시도: **이미 만든 메시지를 그대로 다시 보낸다** — 재다운로드·재판정이 없어 같은
+      세션이 두 번 알림되지 않는다(전송만 실패한 경우 값이 바뀌지 않는다).
+    끝까지 실패한 종목만 판정 불가 안내를 한 번 받고, 알림을 끝내 전달하지 못했으면 종료코드 1 로
+    올려 워크플로우 실패(= GitHub 알림 메일)가 수신 경로의 2차 신호가 된다.
     """
     start_date = datetime.now() - timedelta(days=LOOKBACK_DAYS)
     wait_label = f"{retry_wait / 60:.0f}분" if retry_wait >= 60 else f"{retry_wait:g}초"
-    queue = list(TICKERS)  # type: ignore
+    # 작업 큐: (종목, 보낼 메시지, 판정 불가 사유, 마지막 확정 세션) — 전송 실패 시 메시지를 재사용한다
+    queue: list[tuple[str, str | None, str, str]] = [(str(t), None, "", "") for t in TICKERS]
+    undelivered: list[str] = []  # 재시도를 다 쓰고도 전달되지 않은 종목
 
     for attempt in range(retry_attempts + 1):
-        retry_queue: list[str] = []
-        for ticker in queue:
-            problem = check_ticker(ticker, start_date)
-            if problem is None:  # 정상 — 알림 전송 완료
+        retry_queue: list[tuple[str, str | None, str, str]] = []
+        for ticker, message, reason, known in queue:
+            if message is None:  # 첫 실행·결측 재시도분 — 판정부터
+                message, reason, known = evaluate(ticker, start_date)
+                if message is None:  # 결측 — 재판정 대상
+                    if attempt < retry_attempts:
+                        print(f"⏳ [{ticker}] {reason} — {wait_label} 뒤 재시도 ({attempt + 1}/{retry_attempts})")
+                        retry_queue.append((ticker, None, reason, known))
+                    elif not send_missing_notice(ticker, reason, known, attempt):
+                        undelivered.append(ticker)
+                    continue
+            # 전송 재시도에는 표시를 붙인다 — 타임아웃 뒤 실제로는 도착했을 수 있어 중복 주문을 막는다
+            text = message if attempt == 0 else message + "\n🔁 전송 재시도 (이전 전송 실패분 — 중복 수신 시 주문 중복 주의)"
+            if send_discord_message(text):
                 continue
             if attempt < retry_attempts:
-                print(f"⏳ [{ticker}] {problem[0]} — {wait_label} 뒤 재시도 ({attempt + 1}/{retry_attempts})")
-                retry_queue.append(ticker)
+                print(f"⏳ [{ticker}] 전송 실패 — {wait_label} 뒤 재전송 ({attempt + 1}/{retry_attempts})")
+                retry_queue.append((ticker, message, reason, known))
             else:
-                send_missing_notice(ticker, problem[0], problem[1], attempt)
+                print(f"❌ [{ticker}] 알림 전송 {attempt + 1}회 실패 — 전달되지 않았다")
+                undelivered.append(ticker)
         queue = retry_queue
         if not queue:
-            return
+            break
         time.sleep(retry_wait)
+
+    if undelivered:
+        # 수신 경로가 죽었는데 조용한 성공으로 끝내지 않는다 — 워크플로우 실패가 2차 신호다
+        raise SystemExit(f"❌ 전송 실패: {', '.join(undelivered)} — 웹훅이 무효화됐을 수 있습니다")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="SOXL/TQQQ 롤링 2σ LOC 알림")
     parser.add_argument("--retry-wait", type=float, default=0.0,
-                        help="결측 시 재시도 간격(초). 기본 0 = 대기 없음")
+                        help="결측·전송 실패 시 재시도 간격(초). 기본 0 = 대기 없음")
     parser.add_argument("--retry-attempts", type=int, default=0,
-                        help="재시도 횟수. 기본 0 = 재시도 없음 (CI 는 1시간 간격 2회)")
+                        help="재시도 횟수(결측 재판정 · 전송 재전송). 기본 0 = 재시도 없음 (CI 는 1시간 간격 2회)")
     parser.add_argument("--ping", action="store_true",
                         help="수신 경로 점검용 메시지 1건만 전송 (매월 1일 CI. 시세 조회 없음)")
     args = parser.parse_args()
