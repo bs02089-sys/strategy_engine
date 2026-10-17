@@ -28,13 +28,11 @@ if not DISCORD_WEBHOOK_URL:
     raise ValueError("환경변수 DISCORD_WEBHOOK_URL이 설정되지 않았습니다.")
 
 # soxl_tqqq_config.json에서 종목 설정 불러오기 (단일/복수 모두 호환)
-TICKERS = config.get("tickers")
-if not TICKERS:
-    single_ticker = config.get("ticker")
-    if single_ticker:
-        TICKERS = [single_ticker]
-    else:
-        raise ValueError("설정 파일(soxl_config.json)에 'ticker' 또는 'tickers'가 설정되지 않았습니다.")
+# 타입을 list[str] 로 고정한다 — config 는 Any 라 그대로 두면 `Any | None` 으로 잡혀 순회가 오류로 뜼다
+_configured = config.get("tickers") or ([config["ticker"]] if config.get("ticker") else [])
+if not _configured:
+    raise ValueError("설정 파일(soxl_config.json)에 'ticker' 또는 'tickers'가 설정되지 않았습니다.")
+TICKERS: list[str] = [str(t) for t in _configured]
 
 LOOKBACK_DAYS = config.get("lookback_days", 60)
 ROLLING_WINDOW = config.get("rolling_window", 20)
