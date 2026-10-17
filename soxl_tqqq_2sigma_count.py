@@ -26,6 +26,7 @@ ponytail: 조회·집계만 하는 도구 — 알림/워크플로우에 연결�
 """
 
 import json
+import math
 import sys
 from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
@@ -39,6 +40,7 @@ FILL_BASIS = "체결 기준 (전일까지 σ · 룩어헤드 없음)"  # 주문�
 
 STATS_DAYS = 365 * 16  # 장기 중앙값용 기간 — SOXL/TQQQ 상장(2010-02) 이후 전체를 덮는 최소 길이
 YEAR_ROWS = 252  # 1년 = 252거래일
+_WARNED: set[str] = set()  # 결측 경고는 종목당 1회만 (한 실행에서 같은 다운로드를 여러 번 한다)
 
 
 def load_config() -> dict:
@@ -78,7 +80,14 @@ def load_closes(ticker: str, start: datetime):
     )
     if df is None or df.empty:
         raise RuntimeError(f"[{ticker}] 데이터를 가져오지 못했습니다.")
-    return df["Close"].dropna()
+    close = df["Close"].dropna()
+    # ⚠️ 마지막 봉의 종가가 결측이면 dropna 가 조용히 지운다 — 집계 구간이 왜 하루 낡았는지 남긴다
+    # (2026-10-17 실측: 야후가 10-16 일봉을 Open/High/Low/Volume 만 주고 Close 는 NaN 으로 반환).
+    if len(close) and ticker not in _WARNED and math.isnan(float(df["Close"].iloc[-1])):
+        _WARNED.add(ticker)
+        print(f"⚠️ [{ticker}] 마지막 봉({str(df.index[-1])[:10]}) 종가 결측 — 제외하고 계산 "
+              f"(확정 세션: {str(close.index[-1])[:10]})")
+    return close
 
 
 def _hits(close, window: int, multiplier: float, prev_sigma: bool):
