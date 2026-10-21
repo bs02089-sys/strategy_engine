@@ -1,12 +1,12 @@
 {
-  "timestamp": "2026-10-20T01:36:22.745259",
+  "timestamp": "2026-10-21T01:19:42.236236",
   "total_score": 5,
   "degraded_signals": [],
   "signals": [
     {
       "name": "Yield Curve Inversion",
       "score": 0,
-      "detail": "Normal (+0.38%p) (+0)",
+      "detail": "Normal (+0.33%p) (+0)",
       "group": "leading",
       "data_ok": true
     },
@@ -20,7 +20,7 @@
     {
       "name": "Credit Spread",
       "score": 0,
-      "detail": "HY stable (3.31%) | IG stable (0.85%)",
+      "detail": "HY stable (3.29%) | IG stable (0.87%)",
       "group": "confirm",
       "data_ok": true
     },
@@ -34,7 +34,7 @@
     {
       "name": "Valuation Overheat",
       "score": 2,
-      "detail": "CAPE 40.72 (Critical) (+2)",
+      "detail": "CAPE 40.86 (Critical) (+2)",
       "group": "leading",
       "data_ok": true
     },
