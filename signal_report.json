@@ -1,12 +1,12 @@
 {
-  "timestamp": "2026-10-27T01:50:39.067938",
+  "timestamp": "2026-10-28T02:01:39.315496",
   "total_score": 5,
   "degraded_signals": [],
   "signals": [
     {
       "name": "Yield Curve Inversion",
       "score": 0,
-      "detail": "Normal (+0.32%p) (+0)",
+      "detail": "Normal (+0.29%p) (+0)",
       "group": "leading",
       "data_ok": true
     },
@@ -20,7 +20,7 @@
     {
       "name": "Credit Spread",
       "score": 0,
-      "detail": "HY stable (3.38%) | IG stable (0.91%)",
+      "detail": "HY stable (3.30%) | IG stable (0.90%)",
       "group": "confirm",
       "data_ok": true
     },
@@ -34,7 +34,7 @@
     {
       "name": "Valuation Overheat",
       "score": 2,
-      "detail": "CAPE 40.66 (Critical) (+2)",
+      "detail": "CAPE 40.89 (Critical) (+2)",
       "group": "leading",
       "data_ok": true
     },
@@ -48,7 +48,7 @@
     {
       "name": "Momentum Strategy",
       "score": 1,
-      "detail": "SPX momentum healthy (11.9%) (+0) | Defensive sectors outperform growth (+7.5% gap) (+1)",
+      "detail": "SPX momentum healthy (11.8%) (+0) | Defensive sectors outperform growth (+4.9% gap) (+1)",
       "group": "confirm",
       "data_ok": true
     }
