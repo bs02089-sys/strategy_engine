@@ -1,33 +1,33 @@
 {
-  "timestamp": "2026-10-31T02:02:27.169198",
+  "timestamp": "2026-11-03T03:51:08.513820",
   "total_score": 5,
   "degraded_signals": [],
   "signals": [
     {
       "name": "Yield Curve Inversion",
       "score": 0,
-      "detail": "Normal (+0.38%p) (+0)",
+      "detail": "Normal (+0.32%p) (+0)",
       "group": "leading",
       "data_ok": true
     },
     {
       "name": "Market Breadth",
       "score": 0,
-      "detail": "Market breadth stable (+0) | Market balance maintained (RSP/SPY ratio +6.0%) (+0)",
+      "detail": "Market breadth stable (+0) | Market balance maintained (RSP/SPY ratio +7.3%) (+0)",
       "group": "confirm",
       "data_ok": true
     },
     {
       "name": "Credit Spread",
       "score": 0,
-      "detail": "HY stable (3.26%) | IG stable (0.89%)",
+      "detail": "HY stable (3.44%) | IG stable (0.94%)",
       "group": "confirm",
       "data_ok": true
     },
     {
       "name": "Fed Policy Cycle",
       "score": 2,
-      "detail": "High risk zone: 4m since most recent cut (2026-05)",
+      "detail": "High risk zone: 5m since most recent cut (2026-05)",
       "group": "leading",
       "data_ok": true
     },
@@ -48,7 +48,7 @@
     {
       "name": "Momentum Strategy",
       "score": 1,
-      "detail": "SPX momentum healthy (10.3%) (+0) | Defensive sectors outperform growth (+12.3% gap) (+1)",
+      "detail": "SPX momentum healthy (9.5%) (+0) | Defensive sectors outperform growth (+13.9% gap) (+1)",
       "group": "confirm",
       "data_ok": true
     }
