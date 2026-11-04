@@ -1,12 +1,12 @@
 {
-  "timestamp": "2026-11-03T03:51:08.513820",
+  "timestamp": "2026-11-04T02:55:29.955741",
   "total_score": 5,
   "degraded_signals": [],
   "signals": [
     {
       "name": "Yield Curve Inversion",
       "score": 0,
-      "detail": "Normal (+0.32%p) (+0)",
+      "detail": "Normal (+0.34%p) (+0)",
       "group": "leading",
       "data_ok": true
     },
@@ -20,7 +20,7 @@
     {
       "name": "Credit Spread",
       "score": 0,
-      "detail": "HY stable (3.44%) | IG stable (0.94%)",
+      "detail": "HY stable (3.43%) | IG stable (0.94%)",
       "group": "confirm",
       "data_ok": true
     },
@@ -48,7 +48,7 @@
     {
       "name": "Momentum Strategy",
       "score": 1,
-      "detail": "SPX momentum healthy (9.5%) (+0) | Defensive sectors outperform growth (+13.9% gap) (+1)",
+      "detail": "SPX momentum healthy (9.9%) (+0) | Defensive sectors outperform growth (+12.4% gap) (+1)",
       "group": "confirm",
       "data_ok": true
     }
