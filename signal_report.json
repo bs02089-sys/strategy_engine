@@ -1,26 +1,26 @@
 {
-  "timestamp": "2026-11-04T02:55:29.955741",
+  "timestamp": "2026-11-05T03:13:22.950433",
   "total_score": 5,
   "degraded_signals": [],
   "signals": [
     {
       "name": "Yield Curve Inversion",
       "score": 0,
-      "detail": "Normal (+0.34%p) (+0)",
+      "detail": "Normal (+0.32%p) (+0)",
       "group": "leading",
       "data_ok": true
     },
     {
       "name": "Market Breadth",
       "score": 0,
-      "detail": "Market breadth stable (+0) | Market balance maintained (RSP/SPY ratio +7.3%) (+0)",
+      "detail": "Market breadth stable (+0) | Market balance maintained (RSP/SPY ratio +6.4%) (+0)",
       "group": "confirm",
       "data_ok": true
     },
     {
       "name": "Credit Spread",
       "score": 0,
-      "detail": "HY stable (3.43%) | IG stable (0.94%)",
+      "detail": "HY stable (3.40%) | IG stable (0.93%)",
       "group": "confirm",
       "data_ok": true
     },
@@ -48,7 +48,7 @@
     {
       "name": "Momentum Strategy",
       "score": 1,
-      "detail": "SPX momentum healthy (9.9%) (+0) | Defensive sectors outperform growth (+12.4% gap) (+1)",
+      "detail": "SPX momentum healthy (14.1%) (+0) | Defensive sectors outperform growth (+12.2% gap) (+1)",
       "group": "confirm",
       "data_ok": true
     }
