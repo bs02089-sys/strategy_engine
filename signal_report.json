@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-11-11T02:33:32.427432",
+  "timestamp": "2026-11-12T03:38:18.659625",
   "total_score": 5,
   "degraded_signals": [],
   "signals": [
@@ -13,7 +13,7 @@
     {
       "name": "Market Breadth",
       "score": 0,
-      "detail": "Market breadth stable (+0) | Market balance maintained (RSP/SPY ratio +6.9%) (+0)",
+      "detail": "Market breadth stable (+0) | Market balance maintained (RSP/SPY ratio +5.2%) (+0)",
       "group": "confirm",
       "data_ok": true
     },
@@ -34,7 +34,7 @@
     {
       "name": "Valuation Overheat",
       "score": 2,
-      "detail": "CAPE 39.7 (Critical) (+2)",
+      "detail": "CAPE 40.24 (Critical) (+2)",
       "group": "leading",
       "data_ok": true
     },
@@ -48,7 +48,7 @@
     {
       "name": "Momentum Strategy",
       "score": 1,
-      "detail": "SPX momentum healthy (9.1%) (+0) | Defensive sectors outperform growth (+10.6% gap) (+1)",
+      "detail": "SPX momentum healthy (10.1%) (+0) | Defensive sectors outperform growth (+10.0% gap) (+1)",
       "group": "confirm",
       "data_ok": true
     }
