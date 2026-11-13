@@ -1,26 +1,28 @@
 {
-  "timestamp": "2026-11-12T03:38:18.659625",
+  "timestamp": "2026-11-13T03:10:17.678631",
   "total_score": 5,
-  "degraded_signals": [],
+  "degraded_signals": [
+    "Market Breadth"
+  ],
   "signals": [
     {
       "name": "Yield Curve Inversion",
       "score": 0,
-      "detail": "Normal (+0.25%p) (+0)",
+      "detail": "Normal (+0.24%p) (+0)",
       "group": "leading",
       "data_ok": true
     },
     {
       "name": "Market Breadth",
       "score": 0,
-      "detail": "Market breadth stable (+0) | Market balance maintained (RSP/SPY ratio +5.2%) (+0)",
+      "detail": "Market Breadth data sync error (ValueError: yfinance returned only incomplete rows (all NaN))",
       "group": "confirm",
-      "data_ok": true
+      "data_ok": false
     },
     {
       "name": "Credit Spread",
       "score": 0,
-      "detail": "HY stable (3.34%) | IG stable (0.91%)",
+      "detail": "HY stable (3.30%) | IG stable (0.90%)",
       "group": "confirm",
       "data_ok": true
     },
@@ -34,7 +36,7 @@
     {
       "name": "Valuation Overheat",
       "score": 2,
-      "detail": "CAPE 40.24 (Critical) (+2)",
+      "detail": "CAPE 40.09 (Critical) (+2)",
       "group": "leading",
       "data_ok": true
     },
@@ -48,7 +50,7 @@
     {
       "name": "Momentum Strategy",
       "score": 1,
-      "detail": "SPX momentum healthy (10.1%) (+0) | Defensive sectors outperform growth (+10.0% gap) (+1)",
+      "detail": "SPX momentum healthy (9.7%) (+0) | Defensive sectors outperform growth (+6.6% gap) (+1)",
       "group": "confirm",
       "data_ok": true
     }
