@@ -2,7 +2,7 @@
 
 SOXL/TQQQ 롤링 시그마 기반 매수·매도 목표가 알림
 - 매수: 롤링 WINDOW일 MULT σ LOC (센트 내림)
-- 매도: 롤링 WINDOW일 1.5σ 지정가 (반올림)
+- 매도: 롤링 WINDOW일 2σ 지정가 (반올림)
 - 마지막 확정 세션을 기준으로 다음 세션 목표가를 계산하여 디스코드로 전송
 
 설정·σ 계산·데이터 다운로드는 soxl_tqqq_2sigma_count.py를 공용으로 사용한다.
@@ -43,7 +43,7 @@ _settings = load_settings()
 TICKERS = _settings.tickers
 WINDOW = _settings.window
 MULT = _settings.multiplier          # 매수 배수 (기본 2.0)
-SELL_MULT = 1.5                      # 매도 배수
+SELL_MULT = 2.0                      # 매도 배수
 SIG = f"{MULT:g}σ"                   # 매수 라벨
 SELL_SIG = f"{SELL_MULT:g}σ"         # 매도 라벨
 
@@ -172,7 +172,7 @@ def evaluate(ticker: str) -> tuple[str | None, str, str]:
     is_buy_signal = bool(last["fill_hit"])
     target_buy = floor_cent(latest_close * (1.0 - next_threshold_buy))
 
-    # 매도 (1.5σ + Limit)
+    # 매도 (2σ + Limit)
     next_threshold_sell = float(last["sigma"]) * SELL_MULT
     target_sell = round_cent(latest_close * (1.0 + next_threshold_sell))
 
