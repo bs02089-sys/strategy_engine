@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-11-26T04:42:55.857977",
+  "timestamp": "2026-11-27T04:48:26.954170",
   "total_score": 5,
   "degraded_signals": [],
   "signals": [
@@ -34,7 +34,7 @@
     {
       "name": "Valuation Overheat",
       "score": 2,
-      "detail": "🚫 실시간 CAPE 조회 실패 (requests: 요청 실패 (ConnectionError) / 브라우저: scrapling 미설치 (우회 생략)) → 5일 전 캐시로 대체 | CAPE 36.44 (Critical) (cached) (+2)",
+      "detail": "🚫 실시간 CAPE 조회 실패 (requests: 요청 실패 (ConnectionError) / 브라우저: scrapling 미설치 (우회 생략)) → 6일 전 캐시로 대체 | CAPE 36.44 (Critical) (cached) (+2)",
       "group": "leading",
       "data_ok": true
     },
