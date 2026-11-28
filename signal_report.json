@@ -1,26 +1,28 @@
 {
-  "timestamp": "2026-11-27T04:48:26.954170",
+  "timestamp": "2026-11-28T04:33:34.595922",
   "total_score": 5,
-  "degraded_signals": [],
+  "degraded_signals": [
+    "Market Breadth"
+  ],
   "signals": [
     {
       "name": "Yield Curve Inversion",
       "score": 0,
-      "detail": "Normal (+0.24%p) (+0)",
+      "detail": "Normal (+0.25%p) (+0)",
       "group": "leading",
       "data_ok": true
     },
     {
       "name": "Market Breadth",
       "score": 0,
-      "detail": "Market breadth stable (+0) | Market balance maintained (RSP/SPY ratio +5.2%) (+0)",
+      "detail": "Market Breadth data sync error (ValueError: yfinance returned only incomplete rows (all NaN))",
       "group": "confirm",
-      "data_ok": true
+      "data_ok": false
     },
     {
       "name": "Credit Spread",
       "score": 0,
-      "detail": "HY stable (3.72%) | IG stable (0.98%)",
+      "detail": "HY stable (3.77%) | IG stable (0.99%)",
       "group": "confirm",
       "data_ok": true
     },
@@ -34,7 +36,7 @@
     {
       "name": "Valuation Overheat",
       "score": 2,
-      "detail": "🚫 실시간 CAPE 조회 실패 (requests: 요청 실패 (ConnectionError) / 브라우저: scrapling 미설치 (우회 생략)) → 6일 전 캐시로 대체 | CAPE 36.44 (Critical) (cached) (+2)",
+      "detail": "🚫 실시간 CAPE 조회 실패 (requests: 요청 실패 (ConnectionError) / 브라우저: scrapling 미설치 (우회 생략)) → 7일 전 캐시로 대체 | CAPE 36.44 (Critical) (cached) (+2)",
       "group": "leading",
       "data_ok": true
     },
@@ -48,7 +50,7 @@
     {
       "name": "Momentum Strategy",
       "score": 1,
-      "detail": "SPX momentum healthy (4.4%) (+0) | Defensive sectors outperform growth (+11.4% gap) (+1)",
+      "detail": "SPX momentum healthy (6.1%) (+0) | Defensive sectors outperform growth (+10.1% gap) (+1)",
       "group": "confirm",
       "data_ok": true
     }
